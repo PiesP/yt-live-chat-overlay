@@ -15,9 +15,11 @@ import type { ChatEvent } from '@chat/message-parser';
 interface BufferedReplayMessage {
   message: ChatMessage;
   offsetMs: number;
+  estimatedBytes: number;
 }
 
 const MAX_BUFFERED_REPLAY_MESSAGES = 3000;
+const MAX_BUFFERED_REPLAY_BYTES = 8 * 1024 * 1024;
 // H2: Widened from 300ms to 2000ms. The original 300ms tolerance dropped
 // messages after any frame hitch during replay playback, causing visible
 // chat gaps. At 2s, messages slightly behind position are still forwarded
@@ -28,10 +30,27 @@ export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
   private bufferOffset = 0;
   private seenIds = new Set<string>();
+  private activeEstimatedBytes = 0;
 
   /** True when the buffer has no unconsumed messages. */
   get isEmpty(): boolean {
-    return this.buffer.length - this.bufferOffset <= 0;
+    return this.messageCount <= 0;
+  }
+
+  /** Number of unconsumed messages retained by the replay buffer. */
+  get messageCount(): number {
+    return this.buffer.length - this.bufferOffset;
+  }
+
+  /** Conservative estimate used to bound retained replay data. */
+  get estimatedByteSize(): number {
+    return this.activeEstimatedBytes;
+  }
+
+  /** Amount of replay timeline currently buffered ahead of playback. */
+  aheadHorizonMs(currentOffsetMs: number): number {
+    const latest = this.buffer.at(-1);
+    return latest ? Math.max(0, latest.offsetMs - currentOffsetMs) : 0;
   }
 
   /**
@@ -57,9 +76,11 @@ export class ReplayBuffer {
       }
     }
 
-    this.buffer.splice(lo, 0, { message, offsetMs });
+    const estimatedBytes = estimateMessageBytes(message);
+    this.buffer.splice(lo, 0, { message, offsetMs, estimatedBytes });
+    this.activeEstimatedBytes += estimatedBytes;
     if (message.id) this.seenIds.add(message.id);
-    this.trim(MAX_BUFFERED_REPLAY_MESSAGES);
+    this.trimToCapacity();
   }
 
   /**
@@ -70,6 +91,8 @@ export class ReplayBuffer {
    */
   appendEvents(events: ChatEvent[], minimumOffsetMs = 0): number {
     let highestOffsetMs = -1;
+    const incoming: BufferedReplayMessage[] = [];
+    const incomingIds = new Set<string>();
 
     for (const event of events) {
       const offsetMs = event.message.videoOffsetMs ?? event.offsetMs;
@@ -78,8 +101,47 @@ export class ReplayBuffer {
       highestOffsetMs = Math.max(highestOffsetMs, offsetMs);
 
       if (offsetMs < minimumOffsetMs) continue;
-      this.insert(event.message, offsetMs);
+      const id = event.message.id;
+      if (id && (this.seenIds.has(id) || incomingIds.has(id))) continue;
+      if (id) incomingIds.add(id);
+      incoming.push({
+        message: event.message,
+        offsetMs,
+        estimatedBytes: estimateMessageBytes(event.message),
+      });
     }
+
+    if (incoming.length === 0) return highestOffsetMs;
+
+    // Continuation pages are usually monotonic, while overlapping pages may
+    // contain a short earlier prefix. Sort once and merge the page with the
+    // active suffix instead of splicing every event into the middle.
+    incoming.sort((left, right) => left.offsetMs - right.offsetMs);
+    const active = this.buffer.slice(this.bufferOffset);
+    const merged: BufferedReplayMessage[] = [];
+    let activeIndex = 0;
+    let incomingIndex = 0;
+    while (activeIndex < active.length && incomingIndex < incoming.length) {
+      const activeItem = active[activeIndex];
+      const incomingItem = incoming[incomingIndex];
+      if (!activeItem || !incomingItem) break;
+      if (activeItem.offsetMs <= incomingItem.offsetMs) {
+        merged.push(activeItem);
+        activeIndex += 1;
+      } else {
+        merged.push(incomingItem);
+        incomingIndex += 1;
+      }
+    }
+    merged.push(...active.slice(activeIndex), ...incoming.slice(incomingIndex));
+
+    this.buffer = merged;
+    this.bufferOffset = 0;
+    for (const item of incoming) {
+      this.activeEstimatedBytes += item.estimatedBytes;
+      if (item.message.id) this.seenIds.add(item.message.id);
+    }
+    this.trimToCapacity();
 
     return highestOffsetMs;
   }
@@ -92,11 +154,11 @@ export class ReplayBuffer {
    * Messages still in the future stay in the buffer.
    */
   flushUpTo(currentOffsetMs: number, maxBatch: number): ChatMessage[] {
-    if (this.buffer.length - this.bufferOffset <= 0) return [];
+    if (this.messageCount <= 0) return [];
 
     const batch: ChatMessage[] = [];
 
-    while (this.buffer.length - this.bufferOffset > 0 && batch.length < maxBatch) {
+    while (this.messageCount > 0 && batch.length < maxBatch) {
       const next = this.buffer[this.bufferOffset];
       if (!next) break;
 
@@ -105,6 +167,7 @@ export class ReplayBuffer {
 
       // Advance offset instead of shift()
       this.bufferOffset++;
+      this.activeEstimatedBytes -= next.estimatedBytes;
 
       // The message has left the active buffer whether it is emitted or
       // dropped as too late. Allow overlapping continuation chains to
@@ -131,6 +194,7 @@ export class ReplayBuffer {
     this.buffer = [];
     this.bufferOffset = 0;
     this.seenIds.clear();
+    this.activeEstimatedBytes = 0;
   }
 
   /**
@@ -160,6 +224,7 @@ export class ReplayBuffer {
       }
       messages.push(item.message);
       drainEnd = i + 1;
+      this.activeEstimatedBytes -= item.estimatedBytes;
     }
 
     if (messages.length === 0) return [];
@@ -197,30 +262,27 @@ export class ReplayBuffer {
     this.buffer = [];
     this.bufferOffset = 0;
     this.seenIds.clear();
+    this.activeEstimatedBytes = 0;
     return messages;
   }
 
   /**
-   * Trim the buffer to `maxSize` by removing oldest entries.
-   * Oldest messages are from the past — they won't be needed again.
+   * Enforce hard count and byte bounds by dropping the farthest-future data.
+   * The fetch scheduler stops at lower soft limits, leaving room for one
+   * ordinary continuation page. A page can overflow those soft limits, but
+   * never these hard bounds. Keeping the earliest entries protects messages
+   * closest to the current playback position.
    */
-  private trim(maxSize: number): void {
-    const effectiveLength = this.buffer.length - this.bufferOffset;
-    if (effectiveLength <= maxSize) return;
-
-    const overflow = effectiveLength - maxSize;
-    const trimEnd = this.bufferOffset + overflow;
-
-    // Remove only the IDs that leave the active range. Rebuilding the full
-    // set here makes every over-capacity insertion O(maxSize) during long
-    // hidden-tab sessions.
-    for (let i = this.bufferOffset; i < trimEnd; i++) {
-      const id = this.buffer[i]?.message.id;
-      if (id) this.seenIds.delete(id);
+  private trimToCapacity(): void {
+    while (
+      this.messageCount > MAX_BUFFERED_REPLAY_MESSAGES ||
+      this.activeEstimatedBytes > MAX_BUFFERED_REPLAY_BYTES
+    ) {
+      const removed = this.buffer.pop();
+      if (!removed) break;
+      this.activeEstimatedBytes -= removed.estimatedBytes;
+      if (removed.message.id) this.seenIds.delete(removed.message.id);
     }
-    this.bufferOffset = trimEnd;
-
-    this.compactConsumedPrefix(500);
   }
 
   /** Release consumed entries while preserving the active sorted suffix. */
@@ -229,4 +291,28 @@ export class ReplayBuffer {
     this.buffer = this.buffer.slice(this.bufferOffset);
     this.bufferOffset = 0;
   }
+}
+
+function estimateMessageBytes(message: ChatMessage): number {
+  return 128 + estimateValueBytes(message, new WeakSet<object>(), 0);
+}
+
+function estimateValueBytes(value: unknown, seen: WeakSet<object>, depth: number): number {
+  if (value == null) return 4;
+  if (typeof value === 'string') return value.length * 2;
+  if (typeof value === 'number' || typeof value === 'bigint') return 8;
+  if (typeof value === 'boolean') return 4;
+  if (typeof value !== 'object' || depth >= 8) return 16;
+  if (seen.has(value)) return 0;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + estimateValueBytes(item, seen, depth + 1), 16);
+  }
+
+  let bytes = 32;
+  for (const [key, item] of Object.entries(value)) {
+    bytes += key.length * 2 + estimateValueBytes(item, seen, depth + 1);
+  }
+  return bytes;
 }

@@ -2,9 +2,22 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { ReplayChatSource } from '@chat/source-replay';
+import type { ChatMessage } from '@app-types';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+
+function makeReplayMessage(id: string, offsetMs: number): ChatMessage {
+  return {
+    id,
+    text: id,
+    content: [{ type: 'text', content: id }],
+    kind: 'text',
+    authorType: 'normal',
+    timestamp: offsetMs,
+    videoOffsetMs: offsetMs,
+  };
+}
 
 /**
  * Tests for ReplayChatSource seek+prefetch behavior.
@@ -82,6 +95,222 @@ describe('ReplayChatSource', () => {
 
     expect(internals.shouldPrefetch(1249)).toBe(false);
     expect(internals.shouldPrefetch(1250)).toBe(true);
+  });
+
+  it('uses high and low time watermarks before resuming replay prefetch', () => {
+    const internals = source as unknown as {
+      prefetchContinuation: InnertubeContinuationData | null;
+      replayBuffer: {
+        clear: () => void;
+        insert: (message: ChatMessage, offsetMs: number) => void;
+      };
+      shouldPrefetch: (
+        now: number,
+        signal: AbortSignal | undefined,
+        playback: { offsetMs: number; paused: boolean }
+      ) => boolean;
+    };
+    internals.prefetchContinuation = { continuation: 'next' };
+    internals.replayBuffer.insert(makeReplayMessage('far', 30_000), 30_000);
+
+    expect(internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false })).toBe(false);
+
+    internals.replayBuffer.clear();
+    internals.replayBuffer.insert(makeReplayMessage('middle', 20_000), 20_000);
+    expect(internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false })).toBe(false);
+
+    internals.replayBuffer.clear();
+    internals.replayBuffer.insert(makeReplayMessage('near', 12_000), 12_000);
+    expect(internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false })).toBe(true);
+  });
+
+  it('bounds replay prefetch by message count and estimated bytes', () => {
+    const internals = source as unknown as {
+      prefetchContinuation: InnertubeContinuationData | null;
+      replayBuffer: {
+        clear: () => void;
+        insert: (message: ChatMessage, offsetMs: number) => void;
+      };
+      shouldPrefetch: (
+        now: number,
+        signal: AbortSignal | undefined,
+        playback: { offsetMs: number; paused: boolean }
+      ) => boolean;
+    };
+    internals.prefetchContinuation = { continuation: 'next' };
+    for (let index = 0; index < 2000; index++) {
+      internals.replayBuffer.insert(makeReplayMessage(`count-${index}`, 1000), 1000);
+    }
+    expect(internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false })).toBe(false);
+
+    internals.replayBuffer.clear();
+    const large = makeReplayMessage('large', 1000);
+    large.text = 'x'.repeat(1_600_000);
+    large.content = [{ type: 'text', content: large.text }];
+    internals.replayBuffer.insert(large, 1000);
+    expect(internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false })).toBe(false);
+  });
+
+  it('keeps mandatory player polling eligible after optional prefetch reaches its page cap', async () => {
+    const internals = source as unknown as {
+      replayMode: 'playerSeek' | null;
+      prefetchContinuation: InnertubeContinuationData | null;
+      prefetchPagesFetched: number;
+      cooperativeLoopGeneration: number;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      pollPlayerSeekReplay: () => Promise<boolean>;
+      runNetworkCycle: (generation: number) => Promise<void>;
+    };
+    internals.replayMode = 'playerSeek';
+    internals.prefetchContinuation = { continuation: 'next' };
+    internals.prefetchPagesFetched = DEFAULT_SETTINGS.replayPrefetchPages;
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 5000,
+      paused: false,
+    });
+    const poll = vi.spyOn(internals, 'pollPlayerSeekReplay').mockResolvedValue(true);
+
+    await internals.runNetworkCycle(internals.cooperativeLoopGeneration);
+
+    expect(poll).toHaveBeenCalledOnce();
+  });
+
+  it('keeps flushing buffered messages while a replay request is delayed', async () => {
+    vi.useFakeTimers();
+    const received: ChatMessage[] = [];
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      replayBuffer: {
+        insert: (message: ChatMessage, offsetMs: number) => void;
+      };
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      startCooperativeLoop: () => void;
+    };
+    internals.callback = (messages) => {
+      received.push(...(Array.isArray(messages) ? messages : [messages]));
+    };
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'seek' };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 1000,
+      paused: false,
+    });
+    vi.spyOn(internals, 'requestReplayPayload').mockReturnValue(new Promise(() => {}));
+    for (let index = 0; index < 10; index++) {
+      internals.replayBuffer.insert(makeReplayMessage(`buffered-${index}`, 1000), 1000);
+    }
+
+    internals.startCooperativeLoop();
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(received.map((message) => message.id)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `buffered-${index}`)
+    );
+    source.stop();
+  });
+
+  it('does not begin another replay request after playback pauses during delayed I/O', async () => {
+    vi.useFakeTimers();
+    let resolveRequest!: (payload: LiveChatPayload) => void;
+    let playback = { offsetMs: 1000, paused: false };
+    const internals = source as unknown as {
+      callback: (() => void) | null;
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      requestReplayPayload: () => Promise<LiveChatPayload | null>;
+      startCooperativeLoop: () => void;
+    };
+    internals.callback = () => {};
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'seek' };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockImplementation(() => playback);
+    const requestReplayPayload = vi
+      .spyOn(internals, 'requestReplayPayload')
+      .mockImplementationOnce(
+        () =>
+          new Promise<LiveChatPayload>((resolve) => {
+            resolveRequest = resolve;
+          })
+      )
+      .mockResolvedValue(null);
+
+    internals.startCooperativeLoop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requestReplayPayload).toHaveBeenCalledOnce();
+
+    playback = { offsetMs: 1000, paused: true };
+    source.setPauseReason('video', true);
+    resolveRequest({
+      actions: [],
+      continuations: [{ playerSeekContinuationData: { continuation: 'prefetch' } }],
+    });
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(requestReplayPayload).toHaveBeenCalledOnce();
+    source.stop();
+  });
+
+  it('serializes a seek request behind replay I/O already in flight', async () => {
+    vi.useFakeTimers();
+    const requestSignals: AbortSignal[] = [];
+    let resolveSeekRequest!: (payload: LiveChatPayload) => void;
+    let activeRequests = 0;
+    let maximumActiveRequests = 0;
+    const internals = source as unknown as {
+      callback: (() => void) | null;
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      requestPayload: (...args: unknown[]) => Promise<LiveChatPayload>;
+      handleSeeked: (offsetMs: number) => void;
+      startCooperativeLoop: () => void;
+    };
+    internals.callback = () => {};
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'seek' };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 1000,
+      paused: false,
+    });
+    const requestPayload = vi.spyOn(internals, 'requestPayload').mockImplementation(
+      (_fetchFn, _continuation, ...fetchArgs) => {
+        const signal = fetchArgs.at(-1) as AbortSignal;
+        requestSignals.push(signal);
+        return new Promise<LiveChatPayload>((resolve, reject) => {
+          activeRequests += 1;
+          maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+          signal.addEventListener(
+            'abort',
+            () => {
+              activeRequests -= 1;
+              reject(new DOMException('Aborted', 'AbortError'));
+            },
+            { once: true }
+          );
+          if (requestSignals.length === 2) {
+            resolveSeekRequest = (payload) => {
+              activeRequests -= 1;
+              resolve(payload);
+            };
+          }
+        });
+      }
+    );
+
+    internals.startCooperativeLoop();
+    await vi.advanceTimersByTimeAsync(0);
+    internals.handleSeeked(5000);
+    await vi.waitFor(() => expect(requestPayload).toHaveBeenCalledTimes(2));
+
+    expect(maximumActiveRequests).toBe(1);
+    expect(requestSignals[0]?.aborted).toBe(true);
+    expect(requestSignals[1]?.aborted).toBe(false);
+    resolveSeekRequest({ actions: [], continuations: [] });
+    source.stop();
   });
 
   it('invalidates in-flight prefetch work when prefetch state resets', () => {

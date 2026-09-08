@@ -40,6 +40,15 @@ const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
 const REPLAY_PREFETCH_MIN_INTERVAL_MS = 250;
 const RAF_FLUSH_BATCH_SIZE = 5;
+const REPLAY_PREFETCH_TARGET_HORIZON_MS = 30_000;
+const REPLAY_PREFETCH_RESUME_HORIZON_MS = 12_000;
+// Stop one maximum-sized extracted page before ReplayBuffer's 3,000-message
+// hard limit. A larger-than-budget byte page is still trimmed at the buffer's
+// far-future edge because the endpoint does not expose byte-sized pagination.
+const REPLAY_PREFETCH_MAX_MESSAGES = 2000;
+const REPLAY_PREFETCH_RESUME_MESSAGES = 1000;
+const REPLAY_PREFETCH_MAX_BYTES = 6 * 1024 * 1024;
+const REPLAY_PREFETCH_RESUME_BYTES = 3 * 1024 * 1024;
 /** Maximum replay request duration before the cooperative loop can recover. */
 const REPLAY_FETCH_TIMEOUT_MS = 20_000;
 // replayPrefetchPages — read from this.getSettings()
@@ -68,14 +77,18 @@ export class ReplayChatSource extends ChatSource {
   private seekAbortController: AbortController | null = null;
   private seekGeneration = 0;
   private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
+  private displayLoopTimer: ReturnType<typeof setTimeout> | null = null;
   private cooperativeLoopRunning = false;
   private cooperativeLoopGeneration = 0;
+  private replayRequestQueue: Promise<void> | null = null;
+  private activeReplayRequestController: AbortController | null = null;
   private prefetchContinuation: InnertubeContinuationData | null = null;
   private prefetchPagesFetched = 0;
   private prefetchMode: ReplayMode | null = null;
   private prefetchBackoffUntil = 0;
   private prefetchNextAllowedAt = 0;
   private prefetchGeneration = 0;
+  private prefetchBudgetSuspended = false;
   /**
    * Drain all buffered replay messages regardless of their offset.
    *
@@ -126,16 +139,12 @@ export class ReplayChatSource extends ChatSource {
     this.resetReplayState();
   }
 
-  // ── Cooperative loop (unified flush + fetch + prefetch) ─────────────────
+  // ── Independent display and network schedulers ──────────────────────────
 
   /**
-   * Start a single cooperative tick loop that:
-   *   1. Flushes buffered replay messages at playback position
-   *   2. Fetches more replay pages when the buffer needs data
-   *   3. Prefetches continuation pages in the background
-   *
-   * Replaces the previous 3 independent schedulers (rAF flush, background
-   * fetch interval, async prefetch walk) with one setTimeout-driven loop.
+   * Start independent display and network schedulers. Display timing never
+   * awaits replay I/O, while the network scheduler starts at most one cycle at
+   * a time and requestReplayPayload serializes seek and background requests.
    */
   private startCooperativeLoop(signal?: AbortSignal): void {
     this.stopCooperativeLoop();
@@ -147,7 +156,32 @@ export class ReplayChatSource extends ChatSource {
     this.cooperativeLoopRunning = true;
     const gen = ++this.cooperativeLoopGeneration;
 
-    const tick = async (): Promise<void> => {
+    const displayTick = (): void => {
+      if (signal?.aborted || gen !== this.cooperativeLoopGeneration) {
+        this.displayLoopTimer = null;
+        return;
+      }
+
+      if (this.isPaused) {
+        this.markActivity();
+      }
+
+      const playback = this.getPlaybackSnapshot();
+      const isPlaying = playback && !playback.paused;
+      if (!this.isPaused && isPlaying) {
+        this.markActivity();
+        this.flushReplayBuffer(playback.offsetMs);
+      }
+
+      const videoPaused = playback?.paused ?? true;
+      const adaptiveDelay = !this.isPaused && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
+
+      if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
+        this.displayLoopTimer = setTimeout(displayTick, adaptiveDelay);
+      }
+    };
+
+    const networkTick = async (): Promise<void> => {
       if (signal?.aborted || gen !== this.cooperativeLoopGeneration) {
         this.cooperativeLoopRunning = false;
         this.cooperativeLoopTimer = null;
@@ -158,122 +192,153 @@ export class ReplayChatSource extends ChatSource {
         this.installSeekListeners(signal);
       }
 
-      // 1. Mark activity even while paused so the health watchdog doesn't
-      //    consider this session dead and restart it on unpause.
-      if (this.isPaused) {
-        this.markActivity();
-      }
-
-      const playback = this.getPlaybackSnapshot();
-      const isPlaying = playback && !playback.paused;
-      const mayFetchWhilePaused = !this.isPaused || this.isVisibilityOnlyPause();
-
-      // 2. Flush: emit messages whose video time has arrived.
-      //    Skip when visibility-paused (tab hidden) — messages accumulate
-      //    in the replay buffer and will be drained when the tab returns.
-      if (!this.isPaused && isPlaying) {
-        this.markActivity();
-        this.flushReplayBuffer(playback.offsetMs);
-      }
-
-      // 3. Fetch: continue fetching replay data when the video is playing,
-      //    even if the tab is hidden. This prevents data gaps during long
-      //    hidden intervals. When the video itself is paused, skip fetching
-      //    — there's no point collecting data that won't be consumed until
-      //    the user manually resumes.
-      if (isPlaying && mayFetchWhilePaused) {
-        let mainPollSucceeded = false;
-        try {
-          if (this.replayMode === 'playerSeek') {
-            mainPollSucceeded = await this.pollPlayerSeekReplay(playback, signal);
-          } else if (this.replayMode === 'continuation') {
-            mainPollSucceeded = await this.pollContinuationReplay(playback.offsetMs, signal);
-          }
-        } catch (error: unknown) {
-          if (!isAbortError(error)) {
-            log.debug('chat.replay.fetch-failed', { error: String(error) });
-          }
-        }
-
-        // stopCooperativeLoop() invalidates the generation while an async
-        // poll is in flight. Do not let its completion mutate prefetch state
-        // or the next replay session.
-        if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
-
-        // Seed prefetch only after a successful main poll. If the poll
-        // failed, the continuation wasn't advanced and prefetch would
-        // re-request the same stale continuation.
-        if (!this.prefetchMode && mainPollSucceeded) {
-          this.startPrefetch();
+      try {
+        await this.runNetworkCycle(gen, signal);
+      } catch (error: unknown) {
+        if (!isAbortError(error)) {
+          log.debug('chat.replay.fetch-failed', { error: String(error) });
         }
       }
-
-      // 4. Prefetch: walk the continuation chain, one page per tick
-      const now = Date.now();
-      const prefetchContinuation = this.prefetchContinuation;
-      if (prefetchContinuation && this.shouldPrefetch(now, signal)) {
-        const prefetchGeneration = this.prefetchGeneration;
-        this.prefetchNextAllowedAt = now + REPLAY_PREFETCH_MIN_INTERVAL_MS;
-        try {
-          const payload = await this.requestReplayPayload(prefetchContinuation, signal);
-          if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
-          if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
-            // A seek or session reset invalidated this request while it was in flight.
-          } else if (payload) {
-            const events = extractChatEvents(
-              payload.actions,
-              this.getSettings,
-              undefined,
-              this.isKnownReplacementTarget
-            );
-            this.replayBuffer.appendEvents(events, -1);
-            this.markActivity();
-            this.prefetchContinuation =
-              this.prefetchMode === 'playerSeek'
-                ? extractPlayerSeekContinuation(payload.continuations)
-                : extractReplayContinuation(payload.continuations);
-            this.prefetchPagesFetched += 1;
-          } else {
-            this.prefetchContinuation = null;
-          }
-        } catch (error: unknown) {
-          if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
-            // Ignore failures from an invalidated prefetch request.
-          } else if (isAbortError(error)) {
-            this.prefetchContinuation = null;
-          } else {
-            log.debug('chat.replay.prefetch-failed', { error: String(error) });
-            this.prefetchBackoffUntil = Date.now() + 5000;
-          }
-        }
-      }
-
-      // 5. Schedule next tick with adaptive delay
-      const hasPendingFlushes = !this.replayBuffer.isEmpty;
-      // When the video is paused or the tab is hidden, no flush occurs —
-      // a fast 16ms loop just wastes CPU. Use the background interval.
-      const videoPaused = playback?.paused ?? true;
-      const adaptiveDelay =
-        hasPendingFlushes && !this.isPaused && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
-        this.cooperativeLoopTimer = setTimeout(tick, adaptiveDelay);
+        const playback = this.getPlaybackSnapshot();
+        const delay = this.canFetchForPlayback(playback)
+          ? this.isVisibilityOnlyPause()
+            ? BACKGROUND_FETCH_INTERVAL_MS
+            : REPLAY_PREFETCH_MIN_INTERVAL_MS
+          : BACKGROUND_FETCH_INTERVAL_MS;
+        this.cooperativeLoopTimer = setTimeout(networkTick, delay);
       }
     };
 
-    // Fire first tick immediately (after next microtask).
-    // Note: scheduler.yield() could replace setTimeout(tick, 0) here if this were an async function.
-    this.cooperativeLoopTimer = setTimeout(tick, 0);
+    this.displayLoopTimer = setTimeout(displayTick, 0);
+    this.cooperativeLoopTimer = setTimeout(networkTick, 0);
   }
 
-  private shouldPrefetch(now: number, signal?: AbortSignal): boolean {
+  private async runNetworkCycle(gen: number, signal?: AbortSignal): Promise<void> {
+    const playback = this.getPlaybackSnapshot();
+    if (!this.canFetchForPlayback(playback) || !this.hasReplayFetchDemand(signal, playback)) {
+      return;
+    }
+
+    let mainPollSucceeded = false;
+    if (this.replayMode === 'playerSeek') {
+      mainPollSucceeded = await this.pollPlayerSeekReplay(playback, signal);
+    } else if (this.replayMode === 'continuation') {
+      mainPollSucceeded = await this.pollContinuationReplay(playback.offsetMs, signal);
+    }
+
+    if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+
+    // A pause or large playback jump may occur while the request is in flight.
+    // Re-read playback and resource demand before starting another request.
+    const currentPlayback = this.getPlaybackSnapshot();
+    if (
+      !this.canFetchForPlayback(currentPlayback) ||
+      !this.hasReplayFetchDemand(signal, currentPlayback)
+    ) {
+      return;
+    }
+
+    if (mainPollSucceeded) {
+      if (!this.prefetchMode && this.replayMode === 'playerSeek') {
+        this.startPrefetch();
+      }
+      return;
+    }
+
+    const prefetchContinuation = this.prefetchContinuation;
+    if (!prefetchContinuation || !this.shouldPrefetch(Date.now(), signal, currentPlayback)) return;
+
+    const prefetchGeneration = this.prefetchGeneration;
+    this.prefetchNextAllowedAt = Date.now() + REPLAY_PREFETCH_MIN_INTERVAL_MS;
+    try {
+      const payload = await this.requestReplayPayload(prefetchContinuation, signal);
+      if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+      if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) return;
+      if (!payload) {
+        this.prefetchContinuation = null;
+        return;
+      }
+
+      const latestPlayback = this.getPlaybackSnapshot();
+      const minimumOffsetMs = Math.max(
+        0,
+        (latestPlayback?.offsetMs ?? currentPlayback.offsetMs) - REPLAY_PREFETCH_WINDOW_MS
+      );
+      const events = extractChatEvents(
+        payload.actions,
+        this.getSettings,
+        undefined,
+        this.isKnownReplacementTarget
+      );
+      this.replayBuffer.appendEvents(events, minimumOffsetMs);
+      this.markActivity();
+      this.prefetchContinuation = extractPlayerSeekContinuation(payload.continuations);
+      this.prefetchPagesFetched += 1;
+    } catch (error: unknown) {
+      if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) return;
+      if (isAbortError(error)) {
+        this.prefetchContinuation = null;
+      } else {
+        log.debug('chat.replay.prefetch-failed', { error: String(error) });
+        this.prefetchBackoffUntil = Date.now() + REPLAY_FAILURE_BACKOFF_MS;
+      }
+    }
+  }
+
+  private canFetchForPlayback(playback: PlaybackSnapshot | null): playback is PlaybackSnapshot {
     return Boolean(
-      this.prefetchContinuation &&
-        this.prefetchPagesFetched < this.getSettings().replayPrefetchPages &&
-        !signal?.aborted &&
-        now >= this.prefetchBackoffUntil &&
-        now >= this.prefetchNextAllowedAt
+      playback && !playback.paused && (!this.isPaused || this.isVisibilityOnlyPause())
     );
+  }
+
+  private shouldPrefetch(
+    now: number,
+    signal?: AbortSignal,
+    playback = this.getPlaybackSnapshot()
+  ): boolean {
+    if (!this.prefetchContinuation) return false;
+    if (
+      !this.hasReplayFetchDemand(signal, playback) ||
+      this.prefetchPagesFetched >= this.getSettings().replayPrefetchPages ||
+      now < this.prefetchBackoffUntil ||
+      now < this.prefetchNextAllowedAt
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private hasReplayFetchDemand(
+    signal?: AbortSignal,
+    playback = this.getPlaybackSnapshot()
+  ): boolean {
+    if (signal?.aborted || playback?.paused || (this.isPaused && !this.isVisibilityOnlyPause())) {
+      return false;
+    }
+
+    const horizonMs = playback ? this.replayBuffer.aheadHorizonMs(playback.offsetMs) : 0;
+    const atHighWater =
+      horizonMs >= REPLAY_PREFETCH_TARGET_HORIZON_MS ||
+      this.replayBuffer.messageCount >= REPLAY_PREFETCH_MAX_MESSAGES ||
+      this.replayBuffer.estimatedByteSize >= REPLAY_PREFETCH_MAX_BYTES;
+    if (atHighWater) {
+      this.prefetchBudgetSuspended = true;
+      return false;
+    }
+
+    if (this.prefetchBudgetSuspended) {
+      const belowResumeWater =
+        horizonMs <= REPLAY_PREFETCH_RESUME_HORIZON_MS &&
+        this.replayBuffer.messageCount <= REPLAY_PREFETCH_RESUME_MESSAGES &&
+        this.replayBuffer.estimatedByteSize <= REPLAY_PREFETCH_RESUME_BYTES;
+      if (!belowResumeWater) return false;
+      this.prefetchBudgetSuspended = false;
+    }
+
+    return true;
   }
 
   private isPrefetchGenerationCurrent(generation: number): boolean {
@@ -283,6 +348,7 @@ export class ReplayChatSource extends ChatSource {
   private stopCooperativeLoop(): void {
     this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
+    this.displayLoopTimer = clearSafeTimeout(this.displayLoopTimer);
     this.cooperativeLoopRunning = false;
     this.clearSeekListener();
   }
@@ -305,6 +371,7 @@ export class ReplayChatSource extends ChatSource {
     this.prefetchMode = null;
     this.prefetchBackoffUntil = 0;
     this.prefetchNextAllowedAt = 0;
+    this.prefetchBudgetSuspended = false;
   }
 
   /**
@@ -313,12 +380,9 @@ export class ReplayChatSource extends ChatSource {
    */
   private startPrefetch(): void {
     this.stopPrefetch();
-    if (!this.replayMode) return;
+    if (this.replayMode !== 'playerSeek') return;
 
-    this.prefetchContinuation =
-      this.replayMode === 'playerSeek'
-        ? this.replayPlayerSeekContinuation
-        : this.replayContinuation;
+    this.prefetchContinuation = this.replayPlayerSeekContinuation;
     this.prefetchPagesFetched = 0;
     this.prefetchMode = this.replayMode;
     this.prefetchBackoffUntil = 0;
@@ -356,6 +420,12 @@ export class ReplayChatSource extends ChatSource {
 
     // Increment seek generation — cancels any in-flight seek from a prior seek.
     const gen = ++this.seekGeneration;
+
+    // End stale background I/O before queueing the seek request. The request
+    // queue still guarantees one active network operation at a time, while a
+    // normal fetch abort settles promptly instead of delaying seek recovery
+    // until the request timeout.
+    this.activeReplayRequestController?.abort();
 
     // Abort the previous seek's in-flight fetch (if any), then create a fresh
     // AbortController for this seek.  Compose with the session-level signal
@@ -399,11 +469,8 @@ export class ReplayChatSource extends ChatSource {
       void (async () => {
         try {
           if (gen !== this.seekGeneration) return;
-          const pollSuccess = await this.pollContinuationReplay(offsetMs, seekSignal, gen);
+          await this.pollContinuationReplay(offsetMs, seekSignal, gen);
           if (gen !== this.seekGeneration) return;
-          if (pollSuccess) {
-            this.startPrefetch();
-          }
         } catch (error: unknown) {
           if (!isAbortError(error)) {
             log.debug('chat.replay.continuation-failed', { error: String(error) });
@@ -429,6 +496,8 @@ export class ReplayChatSource extends ChatSource {
     this.replayConsecutiveFailures = 0;
     this.replayTotalFailuresSinceSuccess = 0;
     this.replayNextAllowedFetchAt = 0;
+    this.activeReplayRequestController?.abort();
+    this.activeReplayRequestController = null;
     this.replayBuffer.clear();
     this.seekAbortController?.abort();
     this.seekAbortController = null;
@@ -494,7 +563,11 @@ export class ReplayChatSource extends ChatSource {
       while (
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < this.getSettings().replayBatchLimit
+        batchesFetched < this.getSettings().replayBatchLimit &&
+        this.shouldPrefetch(Date.now(), signal, {
+          offsetMs: currentOffsetMs,
+          paused: false,
+        })
       ) {
         throwIfAborted(signal);
         const fetched = await this.fetchNextReplayFallbackBatch(
@@ -525,22 +598,57 @@ export class ReplayChatSource extends ChatSource {
 
   // ── API helpers ─────────────────────────────────────────────────────────
 
-  private requestReplayPayload(
+  private async requestReplayPayload(
     continuation: InnertubeContinuationData,
     signal?: AbortSignal,
     playerOffsetMs?: number
   ): Promise<LiveChatPayload | null> {
-    const timeoutSignal = AbortSignal.timeout(REPLAY_FETCH_TIMEOUT_MS);
-    const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    const previousRequest = this.replayRequestQueue;
+    let releaseRequest!: () => void;
+    const currentRequest = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    this.replayRequestQueue = previousRequest
+      ? previousRequest.then(
+          () => currentRequest,
+          () => currentRequest
+        )
+      : currentRequest;
 
-    return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, mergedSignal).catch(
-      (error: unknown) => {
+    try {
+      if (previousRequest) {
+        await previousRequest.catch(() => {});
+      }
+      throwIfAborted(signal);
+
+      const timeoutSignal = AbortSignal.timeout(REPLAY_FETCH_TIMEOUT_MS);
+      const requestController = new AbortController();
+      this.activeReplayRequestController = requestController;
+      const mergedSignal = AbortSignal.any(
+        signal
+          ? [signal, timeoutSignal, requestController.signal]
+          : [timeoutSignal, requestController.signal]
+      );
+      try {
+        return await this.requestPayload(
+          fetchReplayChat,
+          continuation,
+          playerOffsetMs,
+          mergedSignal
+        );
+      } catch (error: unknown) {
         if (isAbortError(error) && timeoutSignal.aborted && !signal?.aborted) {
           log.warn('chat.replay.fetch-timeout', { timeoutMs: REPLAY_FETCH_TIMEOUT_MS });
         }
         throw error;
+      } finally {
+        if (this.activeReplayRequestController === requestController) {
+          this.activeReplayRequestController = null;
+        }
       }
-    );
+    } finally {
+      releaseRequest();
+    }
   }
 
   /**
@@ -637,7 +745,6 @@ export class ReplayChatSource extends ChatSource {
       );
       this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
-
       this.replayConsecutiveFailures = 0;
       this.replayTotalFailuresSinceSuccess = 0;
       this.replayNextAllowedFetchAt = 0;
@@ -737,53 +844,13 @@ export class ReplayChatSource extends ChatSource {
       return false;
     }
 
+    if (!this.replayContinuation) return false;
+
+    // Fetch one sequential continuation page per network cycle. This keeps a
+    // slow or empty continuation chain from monopolizing the scheduler, and
+    // lets every subsequent cycle re-check pause and buffer demand.
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-    let batches = 0;
-    let keepAheadFetched = false;
-
-    // M4: Track last offset to detect stalled progress. If the offset doesn't
-    // advance after a fetch, the remaining pages have no messages — stop early
-    // instead of wastefully fetching up to replayBatchLimit empty pages.
-    let lastOffsetBeforeLoop = this.replayFallbackLastOffsetMs;
-
-    while (
-      this.replayContinuation &&
-      this.replayFallbackLastOffsetMs >= 0 &&
-      this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batches < this.getSettings().replayBatchLimit
-    ) {
-      throwIfAborted(signal);
-
-      const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
-      if (generation !== this.seekGeneration) {
-        return false;
-      }
-      if (!fetched) {
-        break;
-      }
-
-      // M4: If the offset didn't advance, no more messages are available ahead.
-      if (this.replayFallbackLastOffsetMs <= lastOffsetBeforeLoop) {
-        break;
-      }
-      lastOffsetBeforeLoop = this.replayFallbackLastOffsetMs;
-
-      batches += 1;
-    }
-
-    if (
-      this.replayContinuation &&
-      this.replayNextAllowedFetchAt <= Date.now() &&
-      this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS
-    ) {
-      keepAheadFetched = await this.fetchNextReplayFallbackBatch(
-        minimumOffsetMs,
-        signal,
-        generation
-      );
-    }
-
-    // Flush is handled by the rAF loop — no explicit flush call here.
-    return batches > 0 || keepAheadFetched;
+    throwIfAborted(signal);
+    return this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
   }
 }
