@@ -6,9 +6,9 @@
  *
  * The ISOLATED content script cannot assign to the MAIN world's `window`, and
  * MAIN-world code cannot access `chrome.*` APIs. It therefore places the
- * already-resolved worker URL on the external page-script element. This
- * module runs before `src/main.ts` and converts that attribute into the small
- * runtime bridge consumed by the platform adapters.
+ * packaged worker source on the external page-script element. This module
+ * runs before `src/main.ts` and creates a page-origin Blob URL so the native
+ * Worker can load it from the YouTube document.
  */
 
 import { createPageWorkerBlobUrl, retainWorkerBlobUrlForDocument } from './worker-source-loader';

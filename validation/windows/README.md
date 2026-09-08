@@ -54,8 +54,9 @@ python3 validation/windows/prepare-userscript-manager.py \
 
 The helper downloads the official Store CRX and verifies its pinned SHA-256 and
 version before extraction. This tests Tampermonkey loaded as an unpacked package,
-not the Chrome Web Store installation confirmation. It enables Allow User Scripts
-through Chrome's UI and imports the source-bound `.user.js` through Tampermonkey's
+not the Chrome Web Store installation confirmation. It enables Developer Mode
+and Allow User Scripts through Chrome's UI in the isolated profile and imports
+the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
 
 After committing a clean named checkout and running the repository gates:
@@ -76,9 +77,16 @@ python3 /home/piesp/projects/windows-acceptance/vmctl.py run \
 
 Use separate invocations/profiles so the extension and userscript cannot mask
 each other's behavior. Add repeatable `--live-url https://www.youtube.com/watch?v=...`
-arguments to inspect public watch pages after the deterministic fixture phase.
+arguments (up to three per run) to inspect public watch pages after the
+deterministic fixture phase. Select currently playable broadcasts or recordings
+with chat replay; old broadcast URLs may no longer be available.
 These observations never mock site responses or post chat. Inspect each live
 result separately: chat absence, consent/login, network failure, and renderer
-failure must not become a successful live-site rendering claim. Screenshots and
+failure rejects the run unless every requested page proves chat rendering.
+Screenshots and
 logs remain external and source-bound. Fixture persistence assertions reload the
 page through the actual installation rather than injecting saved settings.
+
+Run VM packaging and local E2E serially: both build into the same distribution
+directories, and production packaging replaces the development userscript that
+E2E requires.
