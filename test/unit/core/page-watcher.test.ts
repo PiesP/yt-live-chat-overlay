@@ -86,6 +86,38 @@ describe('PageWatcher.isValidPage', () => {
 });
 
 describe('PageWatcher history patching', () => {
+  it('preserves history navigation and notifies for patched methods', () => {
+    const originalUrl = location.href;
+    const originalState = history.state;
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    const watcher = new PageWatcher();
+    const onChange = vi.fn();
+    watcher.onChange(onChange);
+
+    try {
+      history.pushState({ navigation: 'push' }, '', '/watch?v=first');
+
+      expect(location.pathname).toBe('/watch');
+      expect(location.search).toBe('?v=first');
+      expect(history.state).toEqual({ navigation: 'push' });
+      expect(onChange).toHaveBeenCalledTimes(1);
+
+      history.replaceState({ navigation: 'replace' }, '', '/live/second');
+
+      expect(location.pathname).toBe('/live/second');
+      expect(location.search).toBe('');
+      expect(history.state).toEqual({ navigation: 'replace' });
+      expect(onChange).toHaveBeenCalledTimes(2);
+    } finally {
+      watcher.destroy();
+      originalReplaceState.call(history, originalState, '', originalUrl);
+    }
+
+    expect(history.pushState).toBe(originalPushState);
+    expect(history.replaceState).toBe(originalReplaceState);
+  });
+
   it('restores both history methods after destroy', () => {
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;

@@ -43,7 +43,6 @@ export interface LaneAllocatorOptions {
   headwayGapRatio: number;
   exitPaddingPx: number;
   scrollDurationMaxMs: number;
-  maxMessageAgeMs: number;
   /** Lane density factor: 1.0 = full-cell, < 1.0 = sub-cell mode.
    *  effectiveLaneHeight = laneHeight * laneDensityFactor. */
   laneDensityFactor: number;
