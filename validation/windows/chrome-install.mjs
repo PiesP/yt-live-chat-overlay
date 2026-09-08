@@ -117,7 +117,9 @@ export async function runChromeInstallation({
       result.userscriptManager = installed;
       result.installationMethod = 'real-manager-ui-import';
     }
-    result.fixture = await runFixture({ browser: context.browser(), root, output, installedContext: context });
+    result.fixture = await runFixture({ browser: context.browser(), root, output,
+      installedContext: context, installedExtensionId: extensionId,
+      expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
     for (const [index, url] of liveUrls.entries()) {
       result.live.push(await inspectLivePage(context, url, output, index));
     }

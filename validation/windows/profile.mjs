@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=windowsAcceptance';
@@ -130,6 +130,7 @@ async function configureThroughSettingsUi(page, installed) {
   await modal.locator('#tab-advanced').click();
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');
   if (await depthLayers.isChecked()) await depthLayers.uncheck();
+  if (installed) await modal.locator('input[name="showDebugOverlay"]').check();
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden', timeout: 5_000 });
 
@@ -146,7 +147,7 @@ async function configureThroughSettingsUi(page, installed) {
   });
 }
 
-export async function run({ browser, root, output, installedContext }) {
+export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer }) {
   assert(
     browser && typeof browser.newContext === 'function',
     'A launched Playwright browser is required',
@@ -187,6 +188,10 @@ export async function run({ browser, root, output, installedContext }) {
 
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
+      if (installedContext && url.protocol === 'chrome-extension:' && url.hostname === installedExtensionId) {
+        await route.continue();
+        return;
+      }
       if (
         url.hostname === 'www.youtube.com' &&
         url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')
@@ -336,6 +341,14 @@ export async function run({ browser, root, output, installedContext }) {
     assert(accessibleMessages.some((text) => text.includes('Super Chat')));
     assert(accessibleMessages.some((text) => text.includes('Membership')));
     assert(customEmojiAssetRequests > 0, 'The custom emoji asset was not requested');
+    let rendererStatus;
+    if (expectedRenderer) {
+      await page.waitForFunction((worker) => {
+        const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
+        return status.includes('Render:') && status.includes('Render: n/a') === worker;
+      }, expectedRenderer === 'worker');
+      rendererStatus = expectedRenderer;
+    }
 
     // Let scrolling messages enter the viewport, then use the product's pause
     // interaction so the two screenshots capture a stable visual state.
@@ -393,6 +406,7 @@ export async function run({ browser, root, output, installedContext }) {
         productionUserscriptInjected: !installedContext,
         installedApplicationDelivery: Boolean(installedContext),
         persistedAcrossReload: Boolean(installedContext),
+        renderer: rendererStatus,
         settingsUiInteraction: true,
         deterministicChatApi: true,
         chatApiRequests,
@@ -413,6 +427,12 @@ export async function run({ browser, root, output, installedContext }) {
         screenshots: ['yt-visual-canvas.png', 'yt-visual-page.png'],
       },
     };
+  } catch (error) {
+    await page?.screenshot({ path: join(output, 'fixture-error.png') }).catch(() => {});
+    await writeFile(join(output, 'fixture-error.json'), JSON.stringify({
+      pageErrors, consoleErrors, chatApiRequests, installedFixtureDelivered,
+    }, null, 2));
+    throw error;
   } finally {
     if (installedContext) await page?.close();
     else await context.close();
