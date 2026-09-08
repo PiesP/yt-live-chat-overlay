@@ -2,11 +2,11 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * ReplayChatSource — replay chat source with rAF-based exact-timing flush.
+ * ReplayChatSource — replay chat source with independent display and I/O timing.
  *
- * Separated from chat-source.ts. Uses a requestAnimationFrame loop for
- * frame-accurate message emission synchronized with video playback position.
- * API fetching runs in a decoupled background interval.
+ * Separated from chat-source.ts. A short setTimeout display loop synchronizes
+ * buffered emission with video playback without awaiting the independently
+ * scheduled, single-concurrency replay request loop.
  */
 
 import type { ChatMessage } from '@app-types';
@@ -564,7 +564,7 @@ export class ReplayChatSource extends ChatSource {
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
         batchesFetched < this.getSettings().replayBatchLimit &&
-        this.shouldPrefetch(Date.now(), signal, {
+        this.hasReplayFetchDemand(signal, {
           offsetMs: currentOffsetMs,
           paused: false,
         })

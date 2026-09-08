@@ -19,6 +19,27 @@ function makeReplayMessage(id: string, offsetMs: number): ChatMessage {
   };
 }
 
+function makeReplayAction(id: string, offsetMs: number): unknown {
+  return {
+    replayChatItemAction: {
+      videoOffsetTimeMsec: offsetMs,
+      actions: [
+        {
+          addChatItemAction: {
+            item: {
+              liveChatTextMessageRenderer: {
+                id,
+                authorName: { simpleText: 'Viewer' },
+                message: { runs: [{ text: id }] },
+              },
+            },
+          },
+        },
+      ],
+    },
+  };
+}
+
 /**
  * Tests for ReplayChatSource seek+prefetch behavior.
  *
@@ -559,6 +580,38 @@ describe('ReplayChatSource', () => {
     await expect(currentInitialization).resolves.toBe(true);
     expect(internals.replayMode).toBe('continuation');
     expect(internals.replayContinuation).toEqual({ continuation: 'current-next' });
+  });
+
+  it('follows initial continuations until the buffer reaches current playback', async () => {
+    const internals = source as unknown as {
+      bootstrap: ChatBootstrapData | null;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      initializeReplaySession: () => Promise<boolean>;
+    };
+    internals.bootstrap = {
+      initialContinuation: { continuation: 'initial' },
+      isReplay: true,
+    } as ChatBootstrapData;
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 20_000,
+      paused: false,
+    });
+    const requestReplayPayload = vi
+      .spyOn(internals, 'requestReplayPayload')
+      .mockResolvedValueOnce({
+        actions: [makeReplayAction('old', 0)],
+        continuations: [{ liveChatReplayContinuationData: { continuation: 'next' } }],
+      })
+      .mockResolvedValueOnce({
+        actions: [makeReplayAction('current', 16_000)],
+        continuations: [{ liveChatReplayContinuationData: { continuation: 'later' } }],
+      });
+
+    await expect(internals.initializeReplaySession()).resolves.toBe(true);
+
+    expect(requestReplayPayload).toHaveBeenCalledTimes(2);
+    expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['current']);
   });
 
   it('does not refetch an empty player-seek buffer until playback advances', () => {
