@@ -171,6 +171,16 @@ test.describe('Settings UI Visual', () => {
     await page.locator(`#${BUTTON_ID}`).click({ force: true });
 
     const preview = page.locator('.yt-chat-overlay-settings-font-preview');
+    await expect
+      .poll(() =>
+        preview.evaluate((element) => {
+          const stage = element.querySelector<HTMLElement>(
+            '.yt-chat-overlay-settings-font-preview-stage'
+          );
+          return Boolean(stage && stage.scrollHeight <= stage.clientHeight + 1);
+        })
+      )
+      .toBe(true);
     const state = await preview.evaluate((element) => {
       const stage = element.querySelector<HTMLElement>(
         '.yt-chat-overlay-settings-font-preview-stage'

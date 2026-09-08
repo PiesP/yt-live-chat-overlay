@@ -846,7 +846,7 @@ export const SETTINGS_UI_STYLES = `
         position: relative;
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: 0fr minmax(min-content, 1fr) 0fr;
+        grid-template-rows: minmax(0, 0fr) minmax(0, 1fr) minmax(0, 0fr);
         min-height: 144px;
         overflow: hidden;
         background: linear-gradient(135deg, ${uiColors.background}, ${uiColors.backgroundLight});

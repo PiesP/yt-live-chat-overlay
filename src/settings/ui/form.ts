@@ -391,6 +391,8 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 export class SettingsUiForm {
   private modal: HTMLDialogElement | null = null;
   private isUpdating = false;
+  private previewResizeObserver: ResizeObserver | null = null;
+  private previewLayoutFrame: number | null = null;
 
   // Track event listeners added to the modal so they can be removed before
   // re-adding on language change (which calls rebuildModalContent → setModal).
@@ -405,17 +407,89 @@ export class SettingsUiForm {
     // Remove old listeners before re-binding (handles language change re-attach).
     for (const fn of this._modalCleanupFns) fn();
     this._modalCleanupFns = [];
+    this.clearSettingsPreviewLayout();
 
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
       this.bindAriaInvalidSync(modal);
+      this.bindSettingsPreviewLayout(modal);
     }
     log.debug('Modal set', { attached: modal !== null });
   }
 
   destroy(): void {
-    this.modal = null;
+    this.setModal(null);
+  }
+
+  private bindSettingsPreviewLayout(modal: HTMLElement): void {
+    if (typeof ResizeObserver === 'function') {
+      const stage = modal.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      );
+      const text = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-text');
+      if (stage && text) {
+        this.previewResizeObserver = new ResizeObserver(() => {
+          this.scheduleSettingsPreviewLayout();
+        });
+        this.previewResizeObserver.observe(stage);
+        this.previewResizeObserver.observe(text);
+      }
+    }
+    this.scheduleSettingsPreviewLayout();
+  }
+
+  private clearSettingsPreviewLayout(): void {
+    this.previewResizeObserver?.disconnect();
+    this.previewResizeObserver = null;
+    if (this.previewLayoutFrame !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.previewLayoutFrame);
+    }
+    this.previewLayoutFrame = null;
+  }
+
+  private scheduleSettingsPreviewLayout(): void {
+    if (this.previewLayoutFrame !== null) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      this.updateSettingsPreviewLayout();
+      return;
+    }
+    this.previewLayoutFrame = requestAnimationFrame(() => {
+      this.previewLayoutFrame = null;
+      this.updateSettingsPreviewLayout();
+    });
+  }
+
+  private updateSettingsPreviewLayout(): void {
+    if (!this.modal) return;
+    const stage = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-stage'
+    );
+    const text = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-text'
+    );
+    if (!stage || !text || stage.getBoundingClientRect().width <= 0) return;
+
+    const availableFraction = Number(stage.dataset.previewAvailableFraction);
+    const minimumHeight = Number.parseFloat(getComputedStyle(stage).minBlockSize);
+    const textHeight = Math.max(text.scrollHeight, text.getBoundingClientRect().height);
+    if (
+      !Number.isFinite(availableFraction) ||
+      availableFraction <= 0 ||
+      !Number.isFinite(minimumHeight) ||
+      minimumHeight <= 0 ||
+      !Number.isFinite(textHeight) ||
+      textHeight <= 0
+    ) {
+      return;
+    }
+
+    // The middle grid row is exactly availableFraction of the stage. One extra
+    // pixel absorbs fractional track rounding without changing the shown value.
+    const requiredHeight = Math.max(minimumHeight, Math.ceil((textHeight + 1) / availableFraction));
+    const currentHeight = Number.parseFloat(stage.style.blockSize);
+    if (Number.isFinite(currentHeight) && Math.abs(currentHeight - requiredHeight) < 0.5) return;
+    stage.style.blockSize = `${requiredHeight}px`;
   }
 
   /**
@@ -1183,7 +1257,9 @@ export class SettingsUiForm {
       1
     );
     if (stage) {
-      stage.style.gridTemplateRows = `${settings.safeTop}fr minmax(min-content, ${availableFraction}fr) ${settings.safeBottom}fr`;
+      stage.dataset.previewAvailableFraction = String(availableFraction);
+      stage.style.gridTemplateRows = `minmax(0, ${settings.safeTop}fr) minmax(0, ${availableFraction}fr) minmax(0, ${settings.safeBottom}fr)`;
+      this.scheduleSettingsPreviewLayout();
     }
 
     const metrics = preview.querySelector<HTMLElement>('[data-preview-metrics]');

@@ -249,7 +249,10 @@ describe('SettingsUiForm', () => {
     const stage = preview?.querySelector<HTMLElement>(
       '.yt-chat-overlay-settings-font-preview-stage'
     );
-    expect(stage?.style.gridTemplateRows).toBe('0.15fr minmax(min-content, 0.65fr) 0.2fr');
+    expect(stage?.style.gridTemplateRows).toBe(
+      'minmax(0, 0.15fr) minmax(0, 0.65fr) minmax(0, 0.2fr)'
+    );
+    expect(stage?.dataset.previewAvailableFraction).toBe('0.65');
     expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
       'Text Opacity (%): 65%'
     );
@@ -272,6 +275,91 @@ describe('SettingsUiForm', () => {
 
     form.destroy();
     modal.remove();
+  });
+
+  it('grows the preview stage from measured text height and cleans up scheduled layout work', () => {
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    const cancelAnimationFrame = vi.fn((id: number) => animationFrames.delete(id));
+    let nextFrame = 0;
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrame;
+      animationFrames.set(id, callback);
+      return id;
+    });
+    const disconnect = vi.fn();
+    let resizeCallback: ResizeObserverCallback | undefined;
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {
+        disconnect();
+      }
+    }
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrame);
+    vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame);
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+
+    try {
+      const settings = makeDefaults({ fontSize: 50, safeTop: 0.25, safeBottom: 0.5 });
+      const form = new SettingsUiForm(() => settings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      document.body.appendChild(modal);
+      const stage = modal.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      )!;
+      const text = modal.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-text'
+      )!;
+      stage.style.minBlockSize = '144px';
+      let stageWidth = 0;
+      stage.getBoundingClientRect = () => ({
+        bottom: 0,
+        height: 144,
+        left: 0,
+        right: stageWidth,
+        top: 0,
+        width: stageWidth,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 260 });
+
+      form.setModal(modal);
+      form.populateForm(settings);
+      expect(animationFrames.size).toBe(1);
+      const firstFrame = animationFrames.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(firstFrame).toBeDefined();
+      animationFrames.delete(firstFrame![0]);
+      firstFrame![1](0);
+      expect(stage.style.blockSize).toBe('');
+
+      stageWidth = 280;
+      resizeCallback?.([], {} as ResizeObserver);
+      const visibleFrame = animationFrames.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(visibleFrame).toBeDefined();
+      animationFrames.delete(visibleFrame![0]);
+      visibleFrame![1](0);
+      expect(stage.style.blockSize).toBe('1044px');
+
+      resizeCallback?.([], {} as ResizeObserver);
+      expect(animationFrames.size).toBe(1);
+      form.destroy();
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(cancelAnimationFrame).toHaveBeenCalledOnce();
+      expect(animationFrames.size).toBe(0);
+      modal.remove();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('keeps an unsupported browser translation-off preference through an open form round trip', () => {
