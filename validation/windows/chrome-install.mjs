@@ -8,6 +8,19 @@ import { run as runFixture } from './profile.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 
+async function enableDeveloperMode(context) {
+  const page = await context.newPage();
+  try {
+    await page.goto('chrome://extensions/');
+    const toggle = page.locator('#devMode');
+    await toggle.waitFor({ state: 'visible' });
+    if (!(await toggle.evaluate((element) => element.checked))) await toggle.click();
+    assert(await toggle.evaluate((element) => element.checked), 'Developer mode is disabled');
+  } finally {
+    await page.close();
+  }
+}
+
 async function installUserscript(context, id, root, output) {
   const managerRoot = join(root, 'test-tools/userscript-manager');
   const managerManifest = JSON.parse(await readFile(join(managerRoot, 'manifest.json'), 'utf8'));
@@ -107,6 +120,7 @@ export async function runChromeInstallation({
       args: ['--enable-unsafe-extension-debugging'],
     });
     result.browserVersion = context.browser().version();
+    await enableDeveloperMode(context);
     cdp = await context.browser().newBrowserCDPSession();
     if (installation === 'extension') {
       ({ id: extensionId } = await cdp.send('Extensions.loadUnpacked', {
