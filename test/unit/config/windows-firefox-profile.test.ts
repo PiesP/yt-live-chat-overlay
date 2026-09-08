@@ -22,6 +22,7 @@ const {
   cleanupFirefoxResources,
   extensionInstallParameters,
   extensionUninstallParameters,
+  removeOwnedProfile,
 } = firefoxBidiModule;
 
 const temporaryDirectories: string[] = [];
@@ -350,5 +351,29 @@ describe('Windows Firefox installation profile', () => {
       )
     ).rejects.toThrow('Firefox resource cleanup failed');
     expect(removeProfile).not.toHaveBeenCalled();
+  });
+
+  it('passes a bounded Windows lock retry policy only for a task-owned profile', async () => {
+    const rmProfile = vi.fn(async () => {});
+    await removeOwnedProfile('/task', '/task/.firefox-install-profile-test', rmProfile);
+    expect(rmProfile).toHaveBeenCalledWith('/task/.firefox-install-profile-test', {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 200,
+    });
+
+    await expect(
+      removeOwnedProfile('/task', '/other/.firefox-install-profile-test', rmProfile)
+    ).rejects.toThrow(/outside the task root/u);
+    expect(rmProfile).toHaveBeenCalledOnce();
+
+    const locked = Object.assign(new Error('resource busy'), { code: 'EBUSY' });
+    const failingRemoval = vi.fn(async () => {
+      throw locked;
+    });
+    await expect(
+      removeOwnedProfile('/task', '/task/.firefox-install-profile-locked', failingRemoval)
+    ).rejects.toBe(locked);
   });
 });
