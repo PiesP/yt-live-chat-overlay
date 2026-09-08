@@ -85,6 +85,7 @@ function createSession(options: {
           return options.liveState ?? {
             renderer: 'worker',
             videoPaused: false,
+            videoReadyState: 4,
             canvasCount: 1,
             overlayCount: 1,
             pageScriptCount: 1,
@@ -250,6 +251,7 @@ describe('Windows Firefox installation profile', () => {
         renderer: 'worker',
         workerPolicyFallback: false,
         videoPaused: false,
+        videoReadyState: 4,
         screenshot: 'firefox-live-01.png',
         player: { paused: false, readyState: 4, inputMethod: 'native-pointer', playbackStarted: true },
         canvasCount: 1,
@@ -297,17 +299,20 @@ describe('Windows Firefox installation profile', () => {
     expect(calls.slice(-3)).toEqual(['stop-mock', 'uninstall', 'close']);
   });
 
-  it('fails a loaded live page without installed render readiness after recording it', async () => {
+  it.each([false, true])('fails missing render readiness or paused playback (paused=%s)', async (paused) => {
     const { output, root } = await createBundle();
     const { calls, session } = createSession({
       liveState: {
-        canvasCount: 0,
-        overlayCount: 0,
-        pageScriptCount: 0,
-        renderedMessageCount: 0,
-        settingsButtonCount: 0,
-        workerBridgeReady: false,
-        workerReady: false,
+        canvasCount: paused ? 1 : 0,
+        overlayCount: paused ? 1 : 0,
+        pageScriptCount: paused ? 1 : 0,
+        renderedMessageCount: paused ? 1 : 0,
+        settingsButtonCount: paused ? 1 : 0,
+        workerBridgeReady: paused,
+        workerReady: paused,
+        renderer: 'worker',
+        videoPaused: paused,
+        videoReadyState: 4,
       },
     });
 
@@ -330,7 +335,7 @@ describe('Windows Firefox installation profile', () => {
     expect(result.observations.live).toEqual([
       expect.objectContaining({
         loaded: true,
-        renderedMessageCount: 0,
+        renderedMessageCount: paused ? 1 : 0,
         status: 'unverified',
       }),
     ]);

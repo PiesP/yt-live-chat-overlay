@@ -31,17 +31,25 @@ async function fixture() {
 
 describe('installed Chrome acceptance outcomes', () => {
   it('requires an observed page-policy restriction before accepting extension main rendering', () => {
-    const { validateLiveRenderer } = liveRenderingModule;
-    expect(validateLiveRenderer('worker', 'extension', [])).toEqual({ renderer: 'worker', workerPolicyFallback: false });
-    expect(validateLiveRenderer('main', 'extension', [{ text: "This document requires 'TrustedScriptURL' assignment." }]))
+    const { validateLiveRenderer, countUnexpectedLiveErrors } = liveRenderingModule;
+    const blocked = { type: 'error', text: "This document requires 'TrustedScriptURL' assignment. The action has been blocked." };
+    expect(validateLiveRenderer('worker', 'extension', [], true)).toEqual({ renderer: 'worker', workerPolicyFallback: false });
+    expect(validateLiveRenderer('main', 'extension', [blocked], true))
       .toEqual({ renderer: 'main', workerPolicyFallback: true });
-    expect(() => validateLiveRenderer('main', 'extension', [])).toThrow();
-    expect(() => validateLiveRenderer('unknown', 'extension', [{ text: 'require-trusted-types-for' }])).toThrow();
+    expect(() => validateLiveRenderer('main', 'extension', [], true)).toThrow();
+    expect(() => validateLiveRenderer('main', 'extension', [blocked], false)).toThrow();
+    expect(() => validateLiveRenderer('main', 'extension', [{ ...blocked, type: 'info' }], true)).toThrow();
+    expect(() => validateLiveRenderer('unknown', 'extension', [blocked], true)).toThrow();
+    expect(countUnexpectedLiveErrors([blocked], true)).toBe(0);
+    expect(countUnexpectedLiveErrors([blocked], false)).toBe(1);
+    expect(countUnexpectedLiveErrors([blocked, { type: 'error', text: 'app crashed' }], true)).toBe(1);
   });
   it('rejects a loaded page that did not render the installed application', () => {
     expect(() => requireLiveSuccess([{ status: 'unverified', canvasAttached: false }])).toThrow();
     expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 0 }])).toThrow();
     expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1 }])).not.toThrow();
+    expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1, pageErrorTypes: ['TypeError'] }])).toThrow();
+    expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1, unexpectedConsoleErrors: 1 }])).toThrow();
   });
 
   it('accepts one exact browser process identity from the browser CDP session', () => {

@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, win32 } from 'node:path';
 import { run as runFixture } from './profile.mjs';
-import { validateLiveRenderer } from './live-rendering.mjs';
+import { countUnexpectedLiveErrors, validateLiveRenderer } from './live-rendering.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -167,9 +167,15 @@ async function inspectLivePage(context, url, output, index, installation) {
   page.setDefaultTimeout(10_000);
   const pageErrors = [];
   const workerDiagnostics = [];
+  const consoleErrors = [];
+  let consoleErrorOverflow = 0;
   page.on('pageerror', (error) => pageErrors.push(error.name));
   page.on('console', (message) => {
     const text = message.text();
+    if (message.type() === 'error') {
+      if (consoleErrors.length < 32) consoleErrors.push({ type: 'error', text: text.slice(0, 1000) });
+      else consoleErrorOverflow++;
+    }
     if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
       workerDiagnostics.push({ type: message.type(), text: text.slice(0, 1000) });
     }
@@ -216,7 +222,13 @@ async function inspectLivePage(context, url, output, index, installation) {
     observation.canvasAttached = await page.locator('#yt-live-chat-overlay canvas').count() === 1;
     const renderer = await page.locator('#yt-chat-overlay-debug').innerText();
     observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
-    Object.assign(observation, validateLiveRenderer(observation.renderer, installation, workerDiagnostics));
+    observation.installedBridgeReady = await page.evaluate(() => Boolean(
+      window.__ytExtensionBridge?.workerSupported === true &&
+      window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
+      window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
+    ));
+    Object.assign(observation, validateLiveRenderer(observation.renderer, installation,
+      workerDiagnostics, observation.installedBridgeReady));
     observation.status = 'passed';
     observation.phase = 'complete';
   } catch (error) {
@@ -226,7 +238,6 @@ async function inspectLivePage(context, url, output, index, installation) {
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
-    observation.pageErrorTypes = [...new Set(pageErrors)];
     observation.workerDiagnostics = workerDiagnostics;
     if (!page.isClosed()) {
       await page.screenshot({ path: join(output, screenshot) }).then(() => {
@@ -234,12 +245,16 @@ async function inspectLivePage(context, url, output, index, installation) {
       }, () => {});
     }
     await page.close();
+    observation.pageErrorTypes = [...new Set(pageErrors)];
+    observation.unexpectedConsoleErrors = consoleErrorOverflow +
+      countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback);
   }
   return observation;
 }
 
 export function requireLiveSuccess(observations) {
-  assert(observations.every((item) => item.status === 'passed' && item.canvasAttached && item.renderedMessages > 0),
+  assert(observations.every((item) => item.status === 'passed' && item.canvasAttached && item.renderedMessages > 0 &&
+    (item.pageErrorTypes?.length ?? 0) === 0 && (item.unexpectedConsoleErrors ?? 0) === 0),
     'One or more requested live pages did not prove installed application rendering');
 }
 
