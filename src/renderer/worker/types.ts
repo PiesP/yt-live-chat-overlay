@@ -14,6 +14,8 @@ import type { CardConfigWorker } from '@renderer/card-config';
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export interface WorkerConfig {
+  /** Monotonic main-thread translation configuration generation. */
+  translationGeneration: number;
   /** Pixels per second scroll speed (100–400). */
   speedPxPerSec: number;
   /** Font size in logical pixels. */
@@ -126,6 +128,22 @@ export interface WorkerConfig {
   preserveUserColor: boolean;
   /** Whether the renderer is in replay (VOD) mode. Disables anti-block throttling. */
   isReplayMode: boolean;
+}
+
+/** Immediate acknowledgement that an addMessages batch reached queue admission. */
+export interface WorkerBatchReceipt {
+  type: 'batchReceipt';
+  epoch: number;
+  batchSequence: number;
+  pendingQueueDepth: number;
+  admittedMessages: number;
+  minimumPendingPriority: number | null;
+}
+
+/** Fence acknowledgement for clearState. */
+export interface WorkerClearStateAck {
+  type: 'clearStateAck';
+  epoch: number;
 }
 
 export interface WorkerContentSegment {

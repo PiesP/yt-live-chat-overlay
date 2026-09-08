@@ -88,6 +88,7 @@ import {
   shiftLaneTimersShared,
 } from '@renderer/layout/lane-shared';
 import { computeMessageMotionPlan } from '@renderer/layout/message-schedule';
+import { resolveRequiredRenderAssets } from '@renderer/render-assets';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -119,6 +120,7 @@ import type {
 
 /** Keep Worker negative image state bounded like the main-thread emoji cache. */
 const FAILED_IMAGE_FETCH_CAP = 500;
+const PENDING_IMAGE_FETCH_CAP = 1_200;
 const FAILED_IMAGE_FETCH_EVICT_COUNT = 250;
 
 /** Sticker image cache — lazily initialized during worker init. */
@@ -468,6 +470,11 @@ export class WorkerRenderer {
   private totalRendered = 0;
   private totalDrops = 0;
   private processedBatchSequence = 0;
+  private currentEpoch = 0;
+  private readonly pendingTranslations = new Map<
+    string,
+    { translatedText: string | null; width: number; height: number; translationHeight: number }
+  >();
   private textBitmapCache!: ResizableByteLimitedCache<OffscreenCanvas>;
   private emojiCache!: ResizableByteLimitedCache<ImageBitmap>;
   private authorPhotoCache!: ResizableByteLimitedCache<ImageBitmap>;
@@ -477,6 +484,18 @@ export class WorkerRenderer {
   );
   private readonly messageById = new Map<string, WorkerMessage | ActiveMessage>();
   private fetching = new Set<string>();
+  private readonly imageFetchTasks = new Map<
+    string,
+    {
+      url: string;
+      cache: ResizableByteLimitedCache<ImageBitmap>;
+      started: boolean;
+      owners: Set<string> | null;
+      promise: Promise<void>;
+      resolve: () => void;
+    }
+  >();
+  private readonly uncacheableImageUrls = new Set<string>();
   /** URL → Date.now() timestamp for failed Worker self-fetches. */
   private readonly failedImageFetches = new Map<string, number>();
   private readonly fetchControllers = new Set<AbortController>();
@@ -575,6 +594,8 @@ export class WorkerRenderer {
             break;
           }
           case 'addMessages': {
+            const epoch = (data.epoch as number | undefined) ?? 0;
+            if (epoch !== this.currentEpoch) break;
             const msgs = data.messages as WorkerMessage[];
             const imageData = data.imageData as
               | Array<{ url: string; bitmap: ImageBitmap; target: string }>
@@ -597,18 +618,25 @@ export class WorkerRenderer {
                 }
               }
             }
-            for (const m of msgs) this.enqueueMessage(m);
+            let admittedMessages = 0;
+            for (const m of msgs) {
+              if (this.enqueueMessage(m)) admittedMessages++;
+            }
             if (typeof data.batchSequence === 'number') {
               this.processedBatchSequence = Math.max(
                 this.processedBatchSequence,
                 data.batchSequence
               );
             }
+            if (typeof data.batchSequence === 'number') {
+              this.postCapacityReceipt(admittedMessages);
+            }
             break;
           }
           case 'updateConfig':
             if (this.config) {
               const prevMode = this.config.danmakuMode;
+              const previousTranslationGeneration = this.config.translationGeneration;
               const nextConfig = data.config as Partial<WorkerConfig>;
               const geometryChanged =
                 (nextConfig.fontSize !== undefined &&
@@ -622,12 +650,49 @@ export class WorkerRenderer {
                 (nextConfig.safeTop !== undefined && nextConfig.safeTop !== this.config.safeTop) ||
                 (nextConfig.safeBottom !== undefined &&
                   nextConfig.safeBottom !== this.config.safeBottom);
+              const fontMetricsChanged =
+                (nextConfig.fontSize !== undefined &&
+                  nextConfig.fontSize !== this.config.fontSize) ||
+                (nextConfig.fontWeight !== undefined &&
+                  nextConfig.fontWeight !== this.config.fontWeight) ||
+                (nextConfig.fontFamily !== undefined &&
+                  nextConfig.fontFamily !== this.config.fontFamily);
+              const currentAuthorColors = this.config.authorColors;
+              const authorColorsChanged =
+                nextConfig.authorColors !== undefined &&
+                (Object.keys(nextConfig.authorColors).length !==
+                  Object.keys(currentAuthorColors).length ||
+                  Object.entries(nextConfig.authorColors).some(
+                    ([key, value]) => currentAuthorColors[key] !== value
+                  ));
+              const textBitmapStyleChanged =
+                fontMetricsChanged ||
+                (nextConfig.color !== undefined && nextConfig.color !== this.config.color) ||
+                authorColorsChanged ||
+                (nextConfig.outlineWidthPx !== undefined &&
+                  nextConfig.outlineWidthPx !== this.config.outlineWidthPx) ||
+                (nextConfig.outlineOpacity !== undefined &&
+                  nextConfig.outlineOpacity !== this.config.outlineOpacity) ||
+                (nextConfig.preserveUserColor !== undefined &&
+                  nextConfig.preserveUserColor !== this.config.preserveUserColor);
+              const imageCacheCapacityChanged =
+                (nextConfig.emojiCacheMb !== undefined &&
+                  nextConfig.emojiCacheMb !== this.config.emojiCacheMb) ||
+                (nextConfig.photoCacheMb !== undefined &&
+                  nextConfig.photoCacheMb !== this.config.photoCacheMb) ||
+                (nextConfig.stickerCacheMb !== undefined &&
+                  nextConfig.stickerCacheMb !== this.config.stickerCacheMb);
               Object.assign(this.config, nextConfig);
+              if (this.config.translationGeneration !== previousTranslationGeneration) {
+                this.pendingTranslations.clear();
+              }
               this.pruneFailedImageFetches();
               this.recomputeConfigDerived();
-              this.textMeasureCache.clear();
-              this.fontMetricsCache.clear();
-              this.textBitmapCache.clear();
+              if (fontMetricsChanged) {
+                this.textMeasureCache.clear();
+                this.fontMetricsCache.clear();
+              }
+              if (textBitmapStyleChanged) this.textBitmapCache.clear();
               // Preserve decoded image caches across ordinary settings
               // updates. Clearing them for opacity/translation/timing changes
               // makes visible emoji, avatars, and stickers disappear until a
@@ -642,6 +707,7 @@ export class WorkerRenderer {
               if (nextConfig && 'stickerCacheMb' in nextConfig) {
                 this.stickerCache.resize(getStickerCacheBytes(this.config.stickerCacheMb ?? 4));
               }
+              if (imageCacheCapacityChanged) this.uncacheableImageUrls.clear();
               if (nextConfig && 'textCacheMb' in nextConfig) {
                 this.textBitmapCache.resize((this.config.textCacheMb ?? 4) * 1_000_000);
               }
@@ -694,7 +760,7 @@ export class WorkerRenderer {
               this.isPaused = false;
               this.pauseStartTime = 0;
               if (this.animFrameId === null && !this.isDestroyed) {
-                this.startRenderLoop();
+                if (!this.isUserPaused) this.startRenderLoop();
               }
             } else {
               this.isPaused = shouldPause;
@@ -707,31 +773,30 @@ export class WorkerRenderer {
             const width = data.width as number;
             const height = data.height as number;
             const translationHeight = data.translationHeight as number;
+            const translationGeneration = (data.translationGeneration as number | undefined) ?? 0;
             const msg = this.messageById.get(msgId);
             if (
               msg &&
+              translationGeneration === (this.config?.translationGeneration ?? 0) &&
               (translatedText === null ||
                 !getRenderMessageResourceViolation({ ...msg, translatedText }))
             ) {
-              msg.translatedText = translatedText;
-              msg.translationHeight = translationHeight;
-              if ('laneArrayIndices' in msg) {
-                this.applyActiveMessageGeometry(msg, width, height);
-                if (translatedText) {
-                  msg.translatedContent = [{ type: 'text', content: translatedText }];
-                } else {
-                  delete msg.translatedContent;
-                }
-                this.reflowActiveMessages();
-              } else {
-                msg.width = width;
-                msg.height = height;
-              }
+              this.pendingTranslations.set(msgId, {
+                translatedText,
+                width,
+                height,
+                translationHeight,
+              });
             }
             break;
           }
-          case 'setUserPaused':
-            this.isUserPaused = (data.paused as boolean) ?? false;
+          case 'setUserPaused': {
+            const shouldPause = (data.paused as boolean) ?? false;
+            this.isUserPaused = shouldPause;
+            if (shouldPause && this.animFrameId !== null) {
+              cancelAnimationFrame(this.animFrameId);
+              this.animFrameId = null;
+            }
             // Restart render loop if unpausing while not otherwise paused
             if (!this.isUserPaused && !this.isPaused && !this.isDestroyed) {
               if (this.animFrameId === null) {
@@ -739,6 +804,7 @@ export class WorkerRenderer {
               }
             }
             break;
+          }
           case 'snapshotMessages':
             self.postMessage({
               type: 'messageSnapshot',
@@ -752,7 +818,7 @@ export class WorkerRenderer {
             this.handleDestroy();
             break;
           case 'clearState':
-            this.handleClearState();
+            this.handleClearState((data.epoch as number | undefined) ?? this.currentEpoch);
             break;
           case 'laneDensity':
             this.laneDensityFactor = (data as { factor: number }).factor;
@@ -842,8 +908,8 @@ export class WorkerRenderer {
     return bitmap.width * bitmap.height * 4;
   }
 
-  private enqueueMessage(msg: WorkerMessage): void {
-    if (msg.actionType === 'replace' && this.replaceMessage(msg)) return;
+  private enqueueMessage(msg: WorkerMessage): boolean {
+    if (msg.actionType === 'replace' && this.replaceMessage(msg)) return true;
 
     const maxSize = this.config?.queueMaxSize ?? 200;
     if (this.pendingQueue.length >= maxSize) {
@@ -863,10 +929,11 @@ export class WorkerRenderer {
         this.pendingQueue[minIdx] = msg;
         this.messageById.set(msg.id, msg);
         this.pendingQueueSortNeeded = true;
+        return true;
       } else {
         this.recordDrop(msg);
+        return false;
       }
-      return;
     }
     this.pendingQueue.push(msg);
     this.messageById.set(msg.id, msg);
@@ -874,6 +941,7 @@ export class WorkerRenderer {
     if (this.animFrameId === null && !this.isDestroyed) {
       this.startRenderLoop();
     }
+    return true;
   }
 
   private recordDrop(message: WorkerMessage): void {
@@ -885,6 +953,8 @@ export class WorkerRenderer {
   private replaceMessage(msg: WorkerMessage): boolean {
     const existing = this.messageById.get(msg.id);
     if (!existing) return false;
+    this.pendingTranslations.delete(msg.id);
+    this.releaseQueuedAssetsForOwner(msg.id);
 
     if (!('laneArrayIndices' in existing)) {
       const pendingIndex = this.pendingQueue.indexOf(existing);
@@ -954,9 +1024,10 @@ export class WorkerRenderer {
   }
 
   private startRenderLoop(): void {
-    if (this.animFrameId !== null) return;
+    if (this.animFrameId !== null || this.isPaused || this.isUserPaused || this.isDestroyed) return;
     const frame = (_t: number): void => {
-      if (this.isDestroyed) return;
+      this.animFrameId = null;
+      if (this.isDestroyed || this.isPaused || this.isUserPaused) return;
       this.renderFrame();
       if (this.activeMessages.length === 0 && this.pendingQueue.length === 0) {
         const now = performance.now();
@@ -966,7 +1037,6 @@ export class WorkerRenderer {
           // Publish the final empty state even when the regular stats cadence
           // has not elapsed, otherwise main-thread health state can stay stale.
           this.postStats(true);
-          this.animFrameId = null;
           this.idleSince = null;
           return;
         }
@@ -1007,13 +1077,40 @@ export class WorkerRenderer {
     self.postMessage(stats);
   }
 
+  /** Publish queue capacity immediately instead of waiting for periodic stats. */
+  private postCapacityReceipt(admittedMessages = 0): void {
+    if (this.processedBatchSequence < 1) return;
+    let minimumPendingPriority: number | null = null;
+    for (const pending of this.pendingQueue) {
+      minimumPendingPriority =
+        minimumPendingPriority === null
+          ? pending.priority
+          : Math.min(minimumPendingPriority, pending.priority);
+    }
+    self.postMessage({
+      type: 'batchReceipt',
+      epoch: this.currentEpoch,
+      batchSequence: this.processedBatchSequence,
+      pendingQueueDepth: this.pendingQueue.length,
+      admittedMessages,
+      minimumPendingPriority,
+    });
+  }
+
   private handleDestroy(): void {
     this.isDestroyed = true;
     this.fetchGeneration++;
     for (const controller of this.fetchControllers) controller.abort();
     this.fetchControllers.clear();
     this.fetching.clear();
+    for (const [url, task] of this.imageFetchTasks) {
+      if (task.started) continue;
+      task.resolve();
+      this.imageFetchTasks.delete(url);
+    }
+    this.uncacheableImageUrls.clear();
     this.failedImageFetches.clear();
+    this.pendingTranslations.clear();
     if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
@@ -1040,11 +1137,14 @@ export class WorkerRenderer {
    * Resets active messages, pending queue, and lane allocator while
    * preserving decoded-image and text-bitmap caches.
    */
-  private handleClearState(): void {
+  private handleClearState(epoch = this.currentEpoch): void {
+    this.clearQueuedOwnedAssets();
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.messageById.clear();
+    this.pendingTranslations.clear();
+    this.currentEpoch = epoch;
     resetBidiLayoutCaches();
     // Rebuild lane allocator from existing dimensions (numLanes/laneHeight
     // are preserved from the last initLanes/resize call).
@@ -1052,6 +1152,7 @@ export class WorkerRenderer {
     this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
     this.speedTierLanes.clear();
     this.collidedLanes.clear();
+    self.postMessage({ type: 'clearStateAck', epoch: this.currentEpoch });
     this.postStats(true);
   }
 
@@ -1374,16 +1475,16 @@ export class WorkerRenderer {
   }
 
   private prefetchMessageImages(msg: WorkerMessage): void {
-    if (msg.content) {
-      const emojiUrls: string[] = [];
-      for (const seg of msg.content) {
-        if (seg.type === 'emoji' && seg.emojiUrl) emojiUrls.push(seg.emojiUrl);
-      }
-      if (emojiUrls.length > 0) void this.prefetchImages(emojiUrls, this.emojiCache);
+    if (!this.config) return;
+    const assets = resolveRequiredRenderAssets(msg, this.config.showAuthor);
+    if (assets.emojiUrls.length > 0) {
+      void this.prefetchImages(assets.emojiUrls, this.emojiCache, msg.id);
     }
-    if (msg.authorPhotoUrl) void this.prefetchImages([msg.authorPhotoUrl], this.authorPhotoCache);
-    if (msg.superChatStickerUrl) {
-      void this.prefetchImages([msg.superChatStickerUrl], this.stickerCache);
+    if (assets.authorPhotoUrl) {
+      void this.prefetchImages([assets.authorPhotoUrl], this.authorPhotoCache, msg.id);
+    }
+    if (assets.stickerUrl) {
+      void this.prefetchImages([assets.stickerUrl], this.stickerCache, msg.id);
     }
   }
 
@@ -1406,6 +1507,8 @@ export class WorkerRenderer {
   private renderFrame(): void {
     if (!this.ctx || !this.canvas || !this.config || this.isPaused || this.isUserPaused) return;
 
+    this.applyPendingTranslations();
+
     // Detect OffscreenCanvas context loss (GPU driver reset, etc.).
     // Signal the main thread so it can fall back to main-thread rendering.
     // OffscreenCanvasRenderingContext2D.isContextLost() is available in
@@ -1424,6 +1527,7 @@ export class WorkerRenderer {
     const now = performance.now();
     const width = this.logicalWidth;
     const height = this.logicalHeight;
+    const pendingDepthBeforeDrain = this.pendingQueue.length;
     this.sortPendingQueueIfNeeded();
     // Anti-block gate: check if drainQueue should run
     let shouldDrain = true;
@@ -1467,6 +1571,7 @@ export class WorkerRenderer {
       WorkerRenderer.resetBatch(this.laneState, now);
       this.drainQueue(now, width, height);
     }
+    if (this.pendingQueue.length !== pendingDepthBeforeDrain) this.postCapacityReceipt();
     // ── Merged cleanup + pre-scan (single pass) ──────────────────────
     for (const bucket of this.farOpacityBuckets) bucket.length = 0;
     for (const bucket of this.midOpacityBuckets) bucket.length = 0;
@@ -1486,6 +1591,7 @@ export class WorkerRenderer {
       // Expired: remove via skip (don't write to writeIdx position)
       if (elapsed >= msg.duration) {
         this.messageById.delete(msg.id);
+        this.releaseQueuedAssetsForOwner(msg.id);
         this.expiredMessagesScratch.push(msg);
         continue;
       }
@@ -1780,6 +1886,38 @@ export class WorkerRenderer {
     }
   }
 
+  /** Apply only the latest translation per id and reflow once when geometry changes. */
+  private applyPendingTranslations(): void {
+    if (!this.config || this.pendingTranslations.size === 0) return;
+    const limit = Math.max(1, this.config.translationBatchSize);
+    let applied = 0;
+    let activeGeometryChanged = false;
+    for (const [id, translation] of this.pendingTranslations) {
+      if (applied >= limit) break;
+      this.pendingTranslations.delete(id);
+      applied++;
+      const message = this.messageById.get(id);
+      if (!message) continue;
+      const geometryChanged =
+        message.width !== translation.width || message.height !== translation.height;
+      message.translatedText = translation.translatedText;
+      message.translationHeight = translation.translationHeight;
+      if ('laneArrayIndices' in message) {
+        this.applyActiveMessageGeometry(message, translation.width, translation.height);
+        if (translation.translatedText) {
+          message.translatedContent = [{ type: 'text', content: translation.translatedText }];
+        } else {
+          delete message.translatedContent;
+        }
+        activeGeometryChanged = activeGeometryChanged || geometryChanged;
+      } else {
+        message.width = translation.width;
+        message.height = translation.height;
+      }
+    }
+    if (activeGeometryChanged) this.reflowActiveMessages();
+  }
+
   private checkCollision(
     placement: {
       laneIndex: number;
@@ -1985,70 +2123,141 @@ export class WorkerRenderer {
 
   private async prefetchImages(
     urls: string[],
-    cache: ResizableByteLimitedCache<ImageBitmap>
+    cache: ResizableByteLimitedCache<ImageBitmap>,
+    ownerId?: string
   ): Promise<void> {
     if (this.isDestroyed) return;
-    const generation = this.fetchGeneration;
-    const toFetch = [...new Set(urls)].filter(
-      (u) => !cache.has(u) && !this.fetching.has(u) && !this.isImageFetchFailed(u)
-    );
-    if (toFetch.length === 0) return;
-    const fetchLimit = this.config?.emojiFetchLimit ?? 8;
-    const availableSlots = Math.max(0, fetchLimit - this.fetchControllers.size);
-    if (availableSlots === 0) return;
-    let idx = 0;
-    const workers: Promise<void>[] = [];
-    for (let i = 0; i < Math.min(availableSlots, toFetch.length); i++) {
-      workers.push(
-        (async () => {
-          while (idx < toFetch.length) {
-            if (this.isDestroyed || generation !== this.fetchGeneration) break;
-            const url = toFetch[idx++];
-            if (url === undefined) break;
-            if (!isAllowedImageUrl(url)) {
-              this.fetching.delete(url);
-              continue;
-            }
-            this.fetching.add(url);
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            const controller = new AbortController();
-            this.fetchControllers.add(controller);
-            try {
-              timer = setTimeout(
-                () => controller.abort(),
-                this.config?.emojiFetchTimeoutMs ?? EMOJI_FETCH_TIMEOUT_DEFAULT_MS
-              );
-              const response = await fetch(url, { signal: controller.signal });
-              if (this.isPrefetchStale(generation, controller.signal)) continue;
-              if (!response.ok) {
-                this.recordFailedImageFetch(url);
-                continue;
-              }
-              const blob = await response.blob();
-              if (this.isPrefetchStale(generation, controller.signal)) continue;
-              const bitmap = await createImageBitmap(blob);
-              if (this.isPrefetchStale(generation, controller.signal)) {
-                bitmap.close();
-                continue;
-              }
-              cache.set(url, bitmap);
-              this.failedImageFetches.delete(url);
-            } catch {
-              // AbortController is also used for the configured timeout. Only
-              // teardown/generation aborts should avoid creating failure state.
-              if (!this.isDestroyed && generation === this.fetchGeneration) {
-                this.recordFailedImageFetch(url);
-              }
-            } finally {
-              clearTimeout(timer);
-              this.fetchControllers.delete(controller);
-              this.fetching.delete(url);
-            }
-          }
-        })()
-      );
+    const waitFor: Promise<void>[] = [];
+    for (const url of new Set(urls)) {
+      const taskKey = `${this.getImageCacheTarget(cache)}\u0000${url}`;
+      if (
+        cache.has(url) ||
+        this.isImageFetchFailed(url) ||
+        this.uncacheableImageUrls.has(taskKey)
+      ) {
+        continue;
+      }
+      const existing = this.imageFetchTasks.get(taskKey);
+      if (existing) {
+        if (ownerId && existing.owners) existing.owners.add(ownerId);
+        waitFor.push(existing.promise);
+        continue;
+      }
+      if (this.imageFetchTasks.size >= PENDING_IMAGE_FETCH_CAP) {
+        continue;
+      }
+      let resolveTask = (): void => {};
+      const promise = new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+      this.imageFetchTasks.set(taskKey, {
+        url,
+        cache,
+        started: false,
+        owners: ownerId ? new Set([ownerId]) : null,
+        promise,
+        resolve: resolveTask,
+      });
+      waitFor.push(promise);
     }
-    await Promise.all(workers);
+    this.pumpImageFetches();
+    await Promise.all(waitFor);
+  }
+
+  private pumpImageFetches(): void {
+    if (this.isDestroyed) return;
+    const fetchLimit = this.config?.emojiFetchLimit ?? 8;
+    for (const [taskKey, task] of this.imageFetchTasks) {
+      if (this.fetchControllers.size >= fetchLimit) break;
+      if (task.started) continue;
+      task.started = true;
+      this.fetching.add(taskKey);
+      void this.runImageFetch(taskKey, task);
+    }
+  }
+
+  private releaseQueuedAssetsForOwner(ownerId: string): void {
+    let removed = false;
+    for (const [taskKey, task] of this.imageFetchTasks) {
+      if (task.started || !task.owners) continue;
+      task.owners.delete(ownerId);
+      if (task.owners.size > 0) continue;
+      task.resolve();
+      this.imageFetchTasks.delete(taskKey);
+      removed = true;
+    }
+    if (removed) this.pumpImageFetches();
+  }
+
+  private clearQueuedOwnedAssets(): void {
+    for (const [taskKey, task] of this.imageFetchTasks) {
+      if (task.started || !task.owners) continue;
+      task.resolve();
+      this.imageFetchTasks.delete(taskKey);
+    }
+  }
+
+  private getImageCacheTarget(
+    cache: ResizableByteLimitedCache<ImageBitmap>
+  ): 'emoji' | 'author' | 'sticker' {
+    if (cache === this.authorPhotoCache) return 'author';
+    if (cache === this.stickerCache) return 'sticker';
+    return 'emoji';
+  }
+
+  private async runImageFetch(
+    taskKey: string,
+    task: {
+      url: string;
+      cache: ResizableByteLimitedCache<ImageBitmap>;
+      resolve: () => void;
+    }
+  ): Promise<void> {
+    const { url } = task;
+    const generation = this.fetchGeneration;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    this.fetchControllers.add(controller);
+    try {
+      if (!isAllowedImageUrl(url)) return;
+      timer = setTimeout(
+        () => controller.abort(),
+        this.config?.emojiFetchTimeoutMs ?? EMOJI_FETCH_TIMEOUT_DEFAULT_MS
+      );
+      const response = await fetch(url, { signal: controller.signal });
+      if (this.isPrefetchStale(generation, controller.signal)) return;
+      if (!response.ok) {
+        this.recordFailedImageFetch(url);
+        return;
+      }
+      const blob = await response.blob();
+      if (this.isPrefetchStale(generation, controller.signal)) return;
+      const bitmap = await createImageBitmap(blob);
+      if (this.isPrefetchStale(generation, controller.signal)) {
+        bitmap.close();
+        return;
+      }
+      if (!task.cache.set(url, bitmap)) {
+        this.uncacheableImageUrls.add(taskKey);
+        if (this.uncacheableImageUrls.size > FAILED_IMAGE_FETCH_CAP) {
+          const oldest = this.uncacheableImageUrls.values().next().value;
+          if (oldest !== undefined) this.uncacheableImageUrls.delete(oldest);
+        }
+      } else {
+        this.failedImageFetches.delete(url);
+      }
+    } catch {
+      if (!this.isDestroyed && generation === this.fetchGeneration) {
+        this.recordFailedImageFetch(url);
+      }
+    } finally {
+      clearTimeout(timer);
+      this.fetchControllers.delete(controller);
+      this.fetching.delete(taskKey);
+      this.imageFetchTasks.delete(taskKey);
+      task.resolve();
+      this.pumpImageFetches();
+    }
   }
 
   private recordFailedImageFetch(url: string): void {

@@ -33,7 +33,7 @@ vi.stubGlobal('OffscreenCanvasRenderingContext2D', class {});
 vi.stubGlobal('createImageBitmap', vi.fn(() => Promise.resolve({ close: vi.fn() })));
 
 let rAFId = 1;
-vi.stubGlobal('requestAnimationFrame', () => rAFId++);
+vi.stubGlobal('requestAnimationFrame', vi.fn(() => rAFId++));
 vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
 // PostMessage spy — attach to the actual self/window BEFORE module import
@@ -592,7 +592,9 @@ describe('Worker message protocol', () => {
           imageData: [{ url: 'https://yt3.ggpht.com/emoji', bitmap, target: 'emoji' }],
         })
       );
-      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { opacity: 0.5 } }));
+      renderer.handleMessage(
+        makeEvent({ type: 'updateConfig', config: { ...makeMinimalConfig(), opacity: 0.5 } })
+      );
 
       expect(internals.emojiCache.size).toBe(1);
     });
@@ -713,6 +715,123 @@ describe('Worker message protocol', () => {
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       renderer.handleMessage(makeEvent({ type: 'destroy' }));
       await Promise.all(prefetches);
+    });
+
+    it('drains queued visible assets once while preserving the global fetch limit', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 2 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        authorPhotoCache: unknown;
+        stickerCache: unknown;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const releases: Array<() => void> = [];
+      let active = 0;
+      let maxActive = 0;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            active++;
+            maxActive = Math.max(maxActive, active);
+            releases.push(() => {
+              active--;
+              resolve({ ok: true, blob: async () => new Blob(['image']) } as Response);
+            });
+          })
+      );
+      vi.mocked(createImageBitmap).mockImplementation(async () => ({
+        width: 1,
+        height: 1,
+        close: vi.fn(),
+      }) as unknown as ImageBitmap);
+      const emojiUrls = Array.from(
+        { length: 5 },
+        (_, index) => `https://yt3.ggpht.com/queued-emoji-${index}`
+      );
+      const authorUrl = 'https://yt3.ggpht.com/queued-paid-author';
+      const stickerUrl = 'https://yt3.ggpht.com/queued-paid-sticker';
+      const pending = [
+        internals.prefetchImages(emojiUrls, internals.emojiCache),
+        internals.prefetchImages([authorUrl], internals.authorPhotoCache),
+        internals.prefetchImages([stickerUrl], internals.stickerCache),
+      ];
+      await Promise.resolve();
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      while (fetchSpy.mock.calls.length < 7 || active > 0) {
+        const release = releases.shift();
+        if (release) release();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      await Promise.all(pending);
+
+      expect(maxActive).toBe(2);
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+        ...emojiUrls,
+        authorUrl,
+        stickerUrl,
+      ]);
+    });
+
+    it('does not refetch a decoded bitmap that cannot fit its owner cache', async () => {
+      const renderer = initializeRenderer({ emojiCacheMb: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/too-large-for-cache';
+      const bitmap = { width: 1_000, height: 1_000, close: vi.fn() };
+      vi.mocked(createImageBitmap).mockResolvedValue(bitmap as unknown as ImageBitmap);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        blob: async () => new Blob(['image']),
+      } as Response);
+
+      await internals.prefetchImages([url], internals.emojiCache);
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
+    it('discards obsolete queued asset owners before a fetch slot opens', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        prefetchImages: (urls: string[], cache: unknown, ownerId?: string) => Promise<void>;
+        releaseQueuedAssetsForOwner(ownerId: string): void;
+      };
+      const firstUrl = 'https://yt3.ggpht.com/slot-holder';
+      const obsoleteUrl = 'https://yt3.ggpht.com/obsolete-owner';
+      const liveUrl = 'https://yt3.ggpht.com/live-owner';
+      const releases: Array<() => void> = [];
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            releases.push(() =>
+              resolve({ ok: true, blob: async () => new Blob(['image']) } as Response)
+            );
+          })
+      );
+      vi.mocked(createImageBitmap).mockImplementation(async () => ({
+        width: 1, height: 1, close: vi.fn(),
+      }) as unknown as ImageBitmap);
+
+      const first = internals.prefetchImages([firstUrl], internals.emojiCache, 'first');
+      const obsolete = internals.prefetchImages([obsoleteUrl], internals.emojiCache, 'expired');
+      const live = internals.prefetchImages([liveUrl], internals.emojiCache, 'live');
+      await Promise.resolve();
+      internals.releaseQueuedAssetsForOwner('expired');
+      await obsolete;
+      releases.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([firstUrl, liveUrl]);
+      releases.shift()?.();
+      await Promise.all([first, live]);
     });
 
     it('bounds and cleans worker image failure state on config update and destroy', () => {
@@ -863,6 +982,146 @@ describe('Worker message protocol', () => {
         pendingMessageIds: ['pending-first', 'pending-second'],
         processedBatchSequence: 0,
       });
+    });
+
+    it('keeps only the latest translation per id and reflows once per bounded frame batch', () => {
+      const renderer = initializeRenderer({ translationBatchSize: 2, outlineWidthPx: 0 });
+      const messages = ['one', 'two', 'three'].map((id) => makeWorkerMessage({ id }));
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages }));
+      const internals = renderer as unknown as {
+        drainQueue(now: number, width: number, height: number): void;
+        applyPendingTranslations(): void;
+        reflowActiveMessages(): void;
+        messageById: Map<string, { translatedText?: string | null; width: number }>;
+        pendingTranslations: Map<string, unknown>;
+      };
+      internals.drainQueue(10_000, 640, 360);
+      const reflow = vi.fn();
+      internals.reflowActiveMessages = reflow;
+
+      renderer.handleMessage(
+        makeEvent({
+          type: 'updateTranslation', id: 'one', translatedText: 'stale',
+          width: 120, height: 20, translationHeight: 0, translationGeneration: 0,
+        })
+      );
+      renderer.handleMessage(
+        makeEvent({
+          type: 'updateTranslation', id: 'one', translatedText: 'latest',
+          width: 130, height: 20, translationHeight: 0, translationGeneration: 0,
+        })
+      );
+      for (const id of ['two', 'three']) {
+        renderer.handleMessage(
+          makeEvent({
+            type: 'updateTranslation', id, translatedText: `translated-${id}`,
+            width: 130, height: 20, translationHeight: 0, translationGeneration: 0,
+          })
+        );
+      }
+      expect(internals.pendingTranslations.size).toBe(3);
+
+      internals.applyPendingTranslations();
+      expect(internals.messageById.get('one')?.translatedText).toBe('latest');
+      expect(internals.messageById.get('two')?.translatedText).toBe('translated-two');
+      expect(internals.messageById.get('three')?.translatedText).toBeUndefined();
+      expect(reflow).toHaveBeenCalledOnce();
+
+      internals.applyPendingTranslations();
+      expect(internals.messageById.get('three')?.translatedText).toBe('translated-three');
+      expect(reflow).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops stale queued translations across replacement and config generations', () => {
+      const renderer = initializeRenderer({ translationGeneration: 0 });
+      const original = makeWorkerMessage({ id: 'stale-translation' });
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [original] }));
+      const internals = renderer as unknown as {
+        applyPendingTranslations(): void;
+        pendingTranslations: Map<string, unknown>;
+        messageById: Map<string, { text: string; translatedText?: string | null }>;
+      };
+      renderer.handleMessage(
+        makeEvent({
+          type: 'updateTranslation', id: original.id, translatedText: 'old target',
+          width: 120, height: 20, translationHeight: 0, translationGeneration: 0,
+        })
+      );
+      renderer.handleMessage(
+        makeEvent({ type: 'updateConfig', config: { translationGeneration: 1 } })
+      );
+      expect(internals.pendingTranslations.size).toBe(0);
+
+      renderer.handleMessage(
+        makeEvent({
+          type: 'updateTranslation', id: original.id, translatedText: 'wrong generation',
+          width: 120, height: 20, translationHeight: 0, translationGeneration: 0,
+        })
+      );
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [{ ...original, actionType: 'replace', text: 'replacement' }],
+        })
+      );
+      internals.applyPendingTranslations();
+      expect(internals.messageById.get(original.id)?.text).toBe('replacement');
+      expect(internals.messageById.get(original.id)?.translatedText).toBeUndefined();
+    });
+
+    it('stops user-paused animation frames and resumes only after every pause cause clears', () => {
+      const renderer = initializeRenderer();
+      const requestFrame = vi.mocked(requestAnimationFrame);
+      const cancelFrame = vi.mocked(cancelAnimationFrame);
+      const initialRequests = requestFrame.mock.calls.length;
+
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: true }));
+      expect(cancelFrame).toHaveBeenCalledOnce();
+      renderer.handleMessage(
+        makeEvent({ type: 'addMessages', messages: [makeWorkerMessage({ id: 'paused' })] })
+      );
+      expect(requestFrame).toHaveBeenCalledTimes(initialRequests);
+
+      renderer.handleMessage(makeEvent({ type: 'setPaused', paused: true }));
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: false }));
+      expect(requestFrame).toHaveBeenCalledTimes(initialRequests);
+      renderer.handleMessage(makeEvent({ type: 'setPaused', paused: false }));
+      expect(requestFrame).toHaveBeenCalledTimes(initialRequests + 1);
+    });
+
+    it('preserves text caches for timing changes and invalidates them for font changes', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        textMeasureCache: Map<string, number>;
+        fontMetricsCache: Map<string, { height: number }>;
+        textBitmapCache: {
+          set(key: string, value: OffscreenCanvas): boolean;
+          clear(): void;
+          size: number;
+        };
+      };
+      internals.textMeasureCache.clear();
+      internals.fontMetricsCache.clear();
+      internals.textBitmapCache.clear();
+      internals.textMeasureCache.set('measure', 10);
+      internals.fontMetricsCache.set('font', { height: 10 });
+      const bitmapCanvas = new MockOffscreenCanvas() as unknown as OffscreenCanvas;
+      Object.assign(bitmapCanvas, { width: 2, height: 2 });
+      internals.textBitmapCache.set('bitmap', bitmapCanvas);
+
+      renderer.handleMessage(
+        makeEvent({ type: 'updateConfig', config: { ...makeMinimalConfig(), opacity: 0.5 } })
+      );
+      expect(internals.textMeasureCache.size).toBe(1);
+      expect(internals.fontMetricsCache.size).toBe(1);
+      expect(internals.textBitmapCache.size).toBe(1);
+
+      renderer.handleMessage(
+        makeEvent({ type: 'updateConfig', config: { fontFamily: 'serif' } })
+      );
+      expect(internals.textMeasureCache.size).toBe(0);
+      expect(internals.fontMetricsCache.has('font')).toBe(false);
+      expect(internals.textBitmapCache.size).toBe(0);
     });
 
     it('does not throw for unknown message type', () => {

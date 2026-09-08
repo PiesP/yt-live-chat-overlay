@@ -38,13 +38,6 @@ function createMinimalDeps() {
       updateLaneUtilization: vi.fn(),
       tick: vi.fn(),
     } as any,
-    imageFetchManager: {
-      workerBitmapCache: {
-        take: vi.fn(),
-        delete: vi.fn(),
-        clear: vi.fn(),
-      },
-    } as any,
     estimateDimensions: vi.fn(() => ({ width: 100, height: 20 })),
     getMessagePriority: vi.fn(() => 0),
     getEffectiveSpeedPxPerSec: vi.fn(() => 100),
@@ -81,6 +74,7 @@ describe('RenderWorkerManager', () => {
         removeEventListener: vi.fn(),
       } as unknown as Worker;
       (manager as any).worker = worker;
+      manager.setActive(true);
 
       manager.updateSettings(DEFAULT_SETTINGS);
 
@@ -197,6 +191,7 @@ describe('RenderWorkerManager', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       } as unknown as Worker;
+      manager.setActive(true);
 
       expect(
         manager.sendToWorker(
@@ -212,7 +207,7 @@ describe('RenderWorkerManager', () => {
       ).toBe(true);
       await Promise.resolve();
       postMessage.mockClear();
-      (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
+      (manager as any).latestWorkerPendingDepth = deps.settings.queueMaxSize;
 
       manager.sendToWorker(
         {
@@ -244,7 +239,8 @@ describe('RenderWorkerManager', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       } as unknown as Worker;
-      (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
+      manager.setActive(true);
+      (manager as any).latestWorkerPendingDepth = deps.settings.queueMaxSize;
 
       expect(
         manager.sendToWorker(
@@ -266,70 +262,6 @@ describe('RenderWorkerManager', () => {
       expect((manager as any).sentMessages.has('fresh-replacement')).toBe(false);
     });
 
-    it('closes transferred bitmaps when the worker is destroyed before flush', async () => {
-      vi.useFakeTimers();
-      const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
-      deps.imageFetchManager.workerBitmapCache.take.mockReturnValue(bitmap);
-      deps.imageFetchManager.workerBitmapCache.clear = vi.fn();
-      const worker = {
-        postMessage: vi.fn(),
-        terminate: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      } as unknown as Worker;
-      (manager as any).worker = worker;
-
-      try {
-        manager.sendToWorker(
-          {
-            id: 'pending-1',
-            timestamp: Date.now(),
-            content: [{ type: 'emoji', emoji: { alt: ':wave:', url: 'https://example.com/wave' } }],
-            kind: 'chat',
-            authorType: 'normal',
-          } as any,
-          'pending-1'
-        );
-        manager.destroy();
-        await Promise.resolve();
-
-        expect(bitmap.close).toHaveBeenCalledOnce();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('disposes transferred bitmaps when batch postMessage fails', async () => {
-      const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
-      deps.imageFetchManager.workerBitmapCache.take.mockReturnValue(bitmap);
-      const postMessage = vi
-        .fn()
-        .mockImplementationOnce(() => {
-          throw new Error('worker is gone');
-        })
-        .mockImplementation(() => undefined);
-      (manager as any).worker = {
-        postMessage,
-        terminate: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      } as unknown as Worker;
-
-      manager.sendToWorker(
-        {
-          id: 'failed-1',
-          timestamp: Date.now(),
-          content: [{ type: 'emoji', emoji: { alt: ':wave:', url: 'https://example.com/wave' } }],
-          kind: 'chat',
-          authorType: 'normal',
-        } as any,
-        'failed-1'
-      );
-      await Promise.resolve();
-
-      expect(bitmap.close).toHaveBeenCalledOnce();
-      (manager as any).worker = null;
-    });
   });
 
   describe('queueDepth', () => {
@@ -363,6 +295,7 @@ describe('RenderWorkerManager', () => {
         }),
       } as unknown as Worker;
       (manager as any).worker = worker;
+      manager.setActive(true);
 
       manager.destroy();
       expect(vi.getTimerCount()).toBe(1);
@@ -370,12 +303,10 @@ describe('RenderWorkerManager', () => {
       listeners.get('message')?.({ data: { type: 'ack' } } as MessageEvent);
 
       expect(worker.terminate).toHaveBeenCalledOnce();
-      expect(deps.imageFetchManager.workerBitmapCache.clear).toHaveBeenCalledOnce();
       expect(vi.getTimerCount()).toBe(0);
 
       vi.advanceTimersByTime(500);
       expect(worker.terminate).toHaveBeenCalledOnce();
-      expect(deps.imageFetchManager.workerBitmapCache.clear).toHaveBeenCalledOnce();
       vi.useRealTimers();
     });
   });

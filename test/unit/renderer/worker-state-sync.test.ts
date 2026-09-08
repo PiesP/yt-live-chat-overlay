@@ -2,9 +2,12 @@
 // Copyright (c) 2026 PiesP
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import {
   isValidControlMessage,
+  isValidWorkerBatchReceipt,
+  isValidWorkerClearStateAck,
   isValidWorkerStatsMessage,
 } from '@renderer/worker/protocol-guards';
 import { WorkerRenderer } from '@renderer/worker/renderer';
@@ -143,15 +146,16 @@ function makeWorkerMessage(id: string, height = 20): WorkerMessage {
   };
 }
 
-function initializedRenderer(): WorkerRenderer {
+function initializedRenderer(
+  settings: OverlaySettings = { ...DEFAULT_SETTINGS, queueMaxSize: 50 }
+): WorkerRenderer {
   const renderer = new WorkerRenderer();
   renderer.handleMessage({
     data: {
       type: 'init',
       canvas: new TestOffscreenCanvas(),
       config: {
-        ...RenderWorkerManager.buildWorkerConfig(DEFAULT_SETTINGS),
-        queueMaxSize: 50,
+        ...RenderWorkerManager.buildWorkerConfig(settings),
       },
       width: 640,
       height: 360,
@@ -169,7 +173,11 @@ function latestStats(): WorkerStatsMessage | undefined {
     .at(-1);
 }
 
-function initializedManager() {
+function initializedManager(
+  settings: OverlaySettings = DEFAULT_SETTINGS,
+  getMessagePriority: (message: ChatMessage) => number = () => 0,
+  onMessageDispatched?: (message: ChatMessage, id: string) => void
+) {
   const observability = {
     onMessageDropped: vi.fn(),
     onMessagesDropped: vi.fn(),
@@ -181,18 +189,12 @@ function initializedManager() {
   };
   const onStats = vi.fn();
   const manager = new RenderWorkerManager({
-    settings: DEFAULT_SETTINGS,
+    settings,
     observability,
-    imageFetchManager: {
-      workerBitmapCache: {
-        take: vi.fn(),
-        delete: vi.fn(),
-        clear: vi.fn(),
-      },
-    },
     estimateDimensions: () => ({ width: 100, height: 20 }),
-    getMessagePriority: () => 0,
-    getEffectiveSpeedPxPerSec: () => DEFAULT_SETTINGS.speedPxPerSec,
+    getMessagePriority,
+    getEffectiveSpeedPxPerSec: () => settings.speedPxPerSec,
+    onMessageDispatched,
     onStats,
   } as unknown as ConstructorParameters<typeof RenderWorkerManager>[0]);
   const canvas = {
@@ -205,10 +207,21 @@ function initializedManager() {
     onDimensionsChanged: () => vi.fn(),
   };
 
-  expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as never, 'worker.js').started).toBe(true);
+  expect(manager.init(canvas, settings, overlay as never, 'worker.js').started).toBe(true);
   const worker = TestWorker.instances.at(-1);
   if (!worker) throw new Error('Worker was not created');
   return { manager, observability, onStats, worker };
+}
+
+function coupleWorker(managerWorker: TestWorker, renderer: WorkerRenderer): void {
+  managerWorker.postMessage.mockImplementation((message: unknown) => {
+    renderer.handleMessage({ data: message } as MessageEvent);
+  });
+  postMessage.mockImplementation((message: unknown) => managerWorker.emitMessage(message));
+}
+
+async function flushMicrotasks(turns = 4): Promise<void> {
+  for (let turn = 0; turn < turns; turn++) await Promise.resolve();
 }
 
 describe('Worker renderer state synchronization', () => {
@@ -230,6 +243,25 @@ describe('Worker renderer state synchronization', () => {
     ]) {
       expect(isValidWorkerStatsMessage(invalid)).toBe(false);
     }
+  });
+
+  it('accepts only bounded batch receipts and clear-state fence acknowledgements', () => {
+    const receipt = {
+      type: 'batchReceipt', epoch: 2, batchSequence: 7, pendingQueueDepth: 50,
+      admittedMessages: 1, minimumPendingPriority: 0,
+    };
+    expect(isValidWorkerBatchReceipt(receipt)).toBe(true);
+    for (const invalid of [
+      { ...receipt, epoch: -1 },
+      { ...receipt, batchSequence: 0 },
+      { ...receipt, pendingQueueDepth: 1_001 },
+      { ...receipt, admittedMessages: Number.NaN },
+      { ...receipt, minimumPendingPriority: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(isValidWorkerBatchReceipt(invalid)).toBe(false);
+    }
+    expect(isValidWorkerClearStateAck({ type: 'clearStateAck', epoch: 2 })).toBe(true);
+    expect(isValidWorkerClearStateAck({ type: 'clearStateAck', epoch: -1 })).toBe(false);
   });
 
   it('accepts only positive safe batch sequence watermarks', () => {
@@ -388,6 +420,174 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it('couples receipts to preserve paid priority without unbounded expensive work', async () => {
+    const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50, maxConcurrentMessages: 30 };
+    const estimateDimensions = vi.fn(() => ({ width: 100, height: 20 }));
+    const dispatched = vi.fn();
+    const { manager, worker } = initializedManager(
+      settings,
+      (message) => (message.kind === 'superchat' ? 100 : 0),
+      dispatched
+    );
+    (manager as unknown as { deps: { estimateDimensions: typeof estimateDimensions } }).deps.estimateDimensions =
+      estimateDimensions;
+    const renderer = initializedRenderer(settings);
+    coupleWorker(worker, renderer);
+    const makeIngress = (id: string, paid = false): ChatMessage => ({
+      id,
+      text: id,
+      content: [{ type: 'text', content: id }],
+      timestamp: 1,
+      kind: paid ? 'superchat' : 'text',
+      authorType: 'normal',
+      ...(paid ? { superChat: { amount: '$5', tier: 'blue' as const } } : {}),
+    });
+
+    for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`normal-${index}`));
+    await flushMicrotasks();
+    for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`paid-${index}`, true));
+    await flushMicrotasks(120);
+
+    const pending = (
+      renderer as unknown as { pendingQueue: Array<{ id: string; priority: number }> }
+    ).pendingQueue;
+    expect(pending).toHaveLength(50);
+    expect(pending.every((message) => message.priority === 100)).toBe(true);
+    expect(estimateDimensions).toHaveBeenCalledTimes(100);
+
+    for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`extra-${index}`, true));
+    await flushMicrotasks(60);
+    expect(estimateDimensions).toHaveBeenCalledTimes(100);
+    expect(dispatched).toHaveBeenCalledTimes(100);
+    expect(
+      worker.postMessage.mock.calls
+        .map(([message]) => message as { type?: string; messages?: unknown[] })
+        .filter((message) => message.type === 'addMessages')
+        .every((message) => (message.messages?.length ?? 0) <= 1_000)
+    ).toBe(true);
+    manager.destroy();
+    postMessage.mockImplementation(() => undefined);
+  });
+
+  it('coalesces a same-id replacement flood before dimensions and dispatch', async () => {
+    const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50 };
+    const estimateDimensions = vi.fn(() => ({ width: 100, height: 20 }));
+    const dispatched = vi.fn();
+    const { manager, worker } = initializedManager(settings, () => 0, dispatched);
+    (manager as unknown as { deps: { estimateDimensions: typeof estimateDimensions } }).deps.estimateDimensions =
+      estimateDimensions;
+    const renderer = initializedRenderer(settings);
+    coupleWorker(worker, renderer);
+    const original: ChatMessage = {
+      id: 'same-id',
+      text: 'original',
+      content: [{ type: 'text', content: 'original' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    manager.sendToWorker(original, original.id);
+    await flushMicrotasks();
+
+    for (let index = 0; index < 10_000; index++) {
+      manager.sendToWorker(
+        {
+          ...original,
+          actionType: 'replace',
+          text: `replacement-${index}`,
+          content: [{ type: 'text', content: `replacement-${index}` }],
+        },
+        original.id
+      );
+    }
+    await flushMicrotasks();
+
+    expect(estimateDimensions).toHaveBeenCalledTimes(2);
+    expect(dispatched).toHaveBeenCalledTimes(2);
+    expect(
+      (renderer as unknown as { pendingQueue: Array<{ text: string }> }).pendingQueue[0]?.text
+    ).toBe('replacement-9999');
+    manager.destroy();
+    postMessage.mockImplementation(() => undefined);
+  });
+
+  it('admits normal work after a frame drain publishes fresh capacity', async () => {
+    const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50, maxConcurrentMessages: 30 };
+    const { manager, worker } = initializedManager(settings);
+    const renderer = initializedRenderer(settings);
+    coupleWorker(worker, renderer);
+    const makeIngress = (id: string): ChatMessage => ({
+      id,
+      text: id,
+      content: [{ type: 'text', content: id }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    });
+    for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`queued-${index}`));
+    await flushMicrotasks();
+    expect(manager.sendToWorker(makeIngress('blocked'))).toBe(false);
+
+    scheduledAnimationFrames.shift()?.(performance.now());
+
+    expect(manager.sendToWorker(makeIngress('after-drain'))).toBe(true);
+    await flushMicrotasks();
+    expect(
+      (renderer as unknown as { messageById: Map<string, unknown> }).messageById.has('after-drain')
+    ).toBe(true);
+    manager.destroy();
+    postMessage.mockImplementation(() => undefined);
+  });
+
+  it('refreshes visible regular and SuperChat author assets when settings toggle', async () => {
+    const hiddenSettings: OverlaySettings = {
+      ...DEFAULT_SETTINGS,
+      queueMaxSize: 50,
+      showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false, superChat: false },
+    };
+    const { manager, worker } = initializedManager(
+      hiddenSettings,
+      (message) => (message.kind === 'superchat' ? 100 : 0)
+    );
+    const renderer = initializedRenderer(hiddenSettings);
+    coupleWorker(worker, renderer);
+    const prefetch = vi.fn(async (_urls: string[]) => undefined);
+    (renderer as unknown as { prefetchImages: typeof prefetch }).prefetchImages = prefetch;
+    const regular: ChatMessage = {
+      id: 'asset-regular', text: 'regular', content: [{ type: 'text', content: 'regular' }],
+      timestamp: 1, kind: 'text', authorType: 'normal', author: 'regular author',
+      authorPhotoUrl: 'https://yt3.ggpht.com/regular-author.png',
+    };
+    const paid: ChatMessage = {
+      id: 'asset-paid', text: 'paid', content: [{ type: 'text', content: 'paid' }],
+      timestamp: 1, kind: 'superchat', authorType: 'normal', author: 'paid author',
+      authorPhotoUrl: 'https://yt3.ggpht.com/paid-author.png',
+      superChat: { amount: '$5', tier: 'blue' },
+    };
+    manager.sendToWorker(regular, regular.id);
+    manager.sendToWorker(paid, paid.id);
+    await flushMicrotasks();
+    scheduledAnimationFrames.shift()?.(performance.now());
+    expect(prefetch).not.toHaveBeenCalled();
+
+    manager.updateSettings({
+      ...hiddenSettings,
+      showAuthor: { ...hiddenSettings.showAuthor, normal: true, superChat: true },
+    });
+    await flushMicrotasks();
+    expect(prefetch.mock.calls.map(([urls]) => urls)).toEqual([
+      [regular.authorPhotoUrl],
+      [paid.authorPhotoUrl],
+    ]);
+
+    prefetch.mockClear();
+    manager.updateSettings(hiddenSettings);
+    await flushMicrotasks();
+    expect(prefetch).not.toHaveBeenCalled();
+    manager.destroy();
+    postMessage.mockImplementation(() => undefined);
+  });
+
   it('preserves untracked replay semantics through serialization and backpressure', async () => {
     const { manager, observability, worker } = initializedManager();
     const replay = {
@@ -407,8 +607,9 @@ describe('Worker renderer state synchronization', () => {
       .find((message) => message.type === 'addMessages');
     expect(sentBatch?.messages?.[0]?.trackDrops).toBe(false);
 
-    (manager as unknown as { _queueDepth: number })._queueDepth =
-      DEFAULT_SETTINGS.queueMaxSize * 2 + 1;
+    (
+      manager as unknown as { latestWorkerPendingDepth: number }
+    ).latestWorkerPendingDepth = DEFAULT_SETTINGS.queueMaxSize;
     expect(manager.sendToWorker({ ...replay, id: 'replay-backpressure-2' }, undefined, false)).toBe(
       false
     );
@@ -428,6 +629,26 @@ describe('Worker renderer state synchronization', () => {
     const renderedCalls = observability.onMessagesRendered.mock.calls.length;
     worker.emitMessage({ ...validStats(), totalRendered: 100 });
     expect(observability.onMessagesRendered).toHaveBeenCalledTimes(renderedCalls);
+    worker.acknowledgeDestroy();
+  });
+
+  it('does not admit or reinject messages after fallback detaches Worker routing', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'detached-worker', text: 'detached', content: [{ type: 'text', content: 'detached' }],
+      timestamp: 1, kind: 'text', authorType: 'normal',
+    };
+    manager.sendToWorker(message, message.id);
+    await flushMicrotasks();
+    worker.postMessage.mockClear();
+    manager.setActive(false);
+
+    manager.updateSettings({ ...DEFAULT_SETTINGS, fontSize: DEFAULT_SETTINGS.fontSize + 2 });
+    expect(manager.sendToWorker({ ...message, id: 'late' }, 'late')).toBe(false);
+    await flushMicrotasks();
+
+    expect(worker.postMessage).not.toHaveBeenCalled();
+    manager.destroy();
     worker.acknowledgeDestroy();
   });
 
@@ -595,6 +816,144 @@ describe('Worker renderer state synchronization', () => {
       processedBatchSequence: 2,
     });
     await expect(secondSnapshot).resolves.toEqual([]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('keeps a receipted batch recoverable until stats or snapshot observes it', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'receipt-is-not-recovery-watermark',
+      text: 'recover me',
+      content: [{ type: 'text', content: 'recover me' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    manager.sendToWorker(message, message.id);
+    await flushMicrotasks();
+    worker.emitMessage({
+      type: 'batchReceipt',
+      epoch: 0,
+      batchSequence: 1,
+      pendingQueueDepth: 1,
+      admittedMessages: 1,
+      minimumPendingPriority: 0,
+    });
+
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message, trackDrops: true },
+    ]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('ignores pre-clear receipts and resets ownership only after the matching fence ack', async () => {
+    const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50 };
+    const { manager, worker } = initializedManager(settings);
+    const message: ChatMessage = {
+      id: 'before-clear',
+      text: 'before clear',
+      content: [{ type: 'text', content: 'before clear' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    manager.sendToWorker(message, message.id);
+    await flushMicrotasks();
+    worker.emitMessage({
+      type: 'batchReceipt',
+      epoch: 0,
+      batchSequence: 1,
+      pendingQueueDepth: 50,
+      admittedMessages: 1,
+      minimumPendingPriority: 0,
+    });
+    manager.clearState();
+    worker.emitMessage({
+      type: 'batchReceipt',
+      epoch: 0,
+      batchSequence: 1,
+      pendingQueueDepth: 50,
+      admittedMessages: 1,
+      minimumPendingPriority: 0,
+    });
+
+    expect(manager.queueDepth).toBe(50);
+    expect(manager.isCurrentMessage(message.id!, message)).toBe(true);
+    worker.emitMessage({ type: 'clearStateAck', epoch: 1 });
+    expect(manager.queueDepth).toBe(0);
+    expect(manager.isCurrentMessage(message.id!, message)).toBe(false);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('recovers bounded deferred paid ingress without dispatching it during fallback', async () => {
+    const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50 };
+    const { manager, worker } = initializedManager(
+      settings,
+      (message) => (message.kind === 'superchat' ? 100 : 0)
+    );
+    const seed: ChatMessage = {
+      id: 'admission-seed', text: 'seed', content: [{ type: 'text', content: 'seed' }],
+      timestamp: 1, kind: 'text', authorType: 'normal',
+    };
+    manager.sendToWorker(seed, seed.id);
+    await flushMicrotasks();
+    worker.emitMessage({
+      type: 'stats', activeMessages: 0, pendingQueueDepth: 0,
+      totalRendered: 1, totalDrops: 0, processedBatchSequence: 1,
+      laneUtilization: 0, activeMessageIds: [], pendingMessageIds: [],
+    });
+    worker.postMessage.mockClear();
+    worker.emitMessage({
+      type: 'batchReceipt',
+      epoch: 0,
+      batchSequence: 1,
+      pendingQueueDepth: 50,
+      admittedMessages: 0,
+      minimumPendingPriority: 100,
+    });
+    const paid: ChatMessage = {
+      id: 'deferred-paid',
+      text: 'paid',
+      content: [{ type: 'text', content: 'paid' }],
+      timestamp: 1,
+      kind: 'superchat',
+      authorType: 'normal',
+      superChat: { amount: '$5', tier: 'blue' },
+    };
+    expect(manager.sendToWorker(paid, paid.id)).toBe(true);
+    manager.setActive(false);
+
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message: paid, trackDrops: true },
+    ]);
+    expect(
+      worker.postMessage.mock.calls.filter(
+        ([message]) => (message as { type?: string }).type === 'addMessages'
+      )
+    ).toHaveLength(0);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('does not resurrect pre-clear ownership if the Worker fails before the fence ack', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'cleared-before-ack',
+      text: 'cleared',
+      content: [{ type: 'text', content: 'cleared' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    manager.sendToWorker(message, message.id);
+    await flushMicrotasks();
+    manager.clearState();
+    manager.setActive(false);
+
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });

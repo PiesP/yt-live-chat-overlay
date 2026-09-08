@@ -15,9 +15,15 @@ import {
 } from '@chat/render-resource-limits';
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
-import type { WorkerErrorMessage, WorkerMessageSnapshot, WorkerStatsMessage } from './types';
+import type {
+  WorkerBatchReceipt,
+  WorkerClearStateAck,
+  WorkerErrorMessage,
+  WorkerMessageSnapshot,
+  WorkerStatsMessage,
+} from './types';
 
-const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
+export const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
 const MAX_STATS_MESSAGE_IDS =
   resolveLimits('queueMaxSize').max + resolveLimits('maxConcurrentMessages').max;
 const SUPPORTED_LANE_DENSITY_FACTORS = new Set([0.5, 0.75, 1]);
@@ -88,6 +94,12 @@ function isSafeConfig(value: unknown): value is Record<string, unknown> {
     const limits = resolveLimits(key);
     if (configValue < limits.min || configValue > limits.max) return false;
   }
+  if (
+    hasOwn(value, 'translationGeneration') &&
+    !isNonNegativeSafeInteger(value.translationGeneration)
+  ) {
+    return false;
+  }
 
   return true;
 }
@@ -113,6 +125,25 @@ export function isValidWorkerStatsMessage(value: unknown): value is WorkerStatsM
 /** Validate a fatal error reported by the renderer Worker. */
 export function isValidWorkerErrorMessage(value: unknown): value is WorkerErrorMessage {
   return isRecord(value) && value.type === 'error' && typeof value.error === 'string';
+}
+
+export function isValidWorkerBatchReceipt(value: unknown): value is WorkerBatchReceipt {
+  return (
+    isRecord(value) &&
+    value.type === 'batchReceipt' &&
+    isNonNegativeSafeInteger(value.epoch) &&
+    isNonNegativeSafeInteger(value.batchSequence) &&
+    value.batchSequence >= 1 &&
+    isNonNegativeSafeInteger(value.pendingQueueDepth) &&
+    value.pendingQueueDepth <= MAX_ADD_MESSAGES_PER_BATCH &&
+    isNonNegativeSafeInteger(value.admittedMessages) &&
+    value.admittedMessages <= MAX_ADD_MESSAGES_PER_BATCH &&
+    (value.minimumPendingPriority === null || isFiniteNumber(value.minimumPendingPriority))
+  );
+}
+
+export function isValidWorkerClearStateAck(value: unknown): value is WorkerClearStateAck {
+  return isRecord(value) && value.type === 'clearStateAck' && isNonNegativeSafeInteger(value.epoch);
 }
 
 /** Validate a requested Worker message snapshot and its processing watermark. */
@@ -174,12 +205,14 @@ export function isValidControlMessage(value: unknown): boolean {
             !('violation' in inspectBoundedRenderText(value.translatedText, 'translatedText')))) &&
         isPositiveFiniteNumber(value.width) &&
         isPositiveFiniteNumber(value.height) &&
-        isFiniteNonNegative(value.translationHeight)
+        isFiniteNonNegative(value.translationHeight) &&
+        (!hasOwn(value, 'translationGeneration') ||
+          isNonNegativeSafeInteger(value.translationGeneration))
       );
     case 'laneDensity':
       return typeof value.factor === 'number' && SUPPORTED_LANE_DENSITY_FACTORS.has(value.factor);
     case 'clearState':
-      return true;
+      return !hasOwn(value, 'epoch') || isNonNegativeSafeInteger(value.epoch);
     case 'snapshotMessages':
       return (
         typeof value.requestId === 'number' &&
@@ -212,6 +245,7 @@ function validateAddMessages(data: Record<string, unknown>): boolean {
   ) {
     return false;
   }
+  if (hasOwn(data, 'epoch') && !isNonNegativeSafeInteger(data.epoch)) return false;
 
   // Shallow-check each message's required fields without deeply parsing content.
   // Full validation is done per-message in the renderer

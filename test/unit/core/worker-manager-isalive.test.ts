@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { RenderWorkerManager } from '@renderer/worker/manager';
-import type { ImageFetchManager } from '@media/image-fetch-manager';
 import type { OverlaySettings } from '@app-types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
@@ -53,11 +52,6 @@ describe('RenderWorkerManager isAlive after destroy', () => {
       estimateDimensions: () => ({ width: 100, height: 20 }),
       getMessagePriority: () => 50,
       getEffectiveSpeedPxPerSec: () => 100,
-      imageFetchManager: {
-        workerBitmapCache: {
-          clear: vi.fn(),
-        },
-      } as unknown as ImageFetchManager,
       observability: {
         onMessageDropped: vi.fn(),
         onMessagesDropped: vi.fn(),
