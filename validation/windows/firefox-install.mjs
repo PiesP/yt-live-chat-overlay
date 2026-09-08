@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { countUnexpectedLiveErrors, validateLiveRenderer } from './live-rendering.mjs';
+import { countUnexpectedLiveErrors, isYouTubeHostError, redactDiagnosticText, validateLiveRenderer } from './live-rendering.mjs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
 import { launchFirefoxBidi } from './firefox-bidi.mjs';
@@ -493,6 +493,8 @@ async function runLivePhase(session, liveEntries, output) {
         screenshot,
         workerReady,
         status: 'passed',
+        hostErrorCount: session.pageLogs.filter(isYouTubeHostError).length,
+        unexpectedErrorCount: 0,
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
       });
@@ -533,7 +535,7 @@ async function runLivePhase(session, liveEntries, output) {
         failure: describeFailure(error),
         diagnostics: session.pageLogs.filter(({ level, text }) =>
           level === 'error' || /worker/i.test(text)).slice(0, 20)
-          .map(({ level, text }) => ({ level, text: text.slice(0, 1000) })),
+          .map(({ level, text }) => ({ level, text: redactDiagnosticText(text) })),
       });
     }
   }

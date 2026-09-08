@@ -91,6 +91,9 @@ Installed-extension fixtures require a running Worker. Public-page observations
 also accept the application's main-thread fallback when the page reports a
 Trusted Types restriction; the result records `workerPolicyFallback` explicitly.
 Both paths must render real chat into the attached Canvas overlay.
+Known native YouTube media, ad-pixel, and site-module network errors are counted
+separately from unexpected application errors. Signed URL query strings are
+removed from retained diagnostics.
 
 Run VM packaging and local E2E serially: both build into the same distribution
 directories, and production packaging replaces the development userscript that

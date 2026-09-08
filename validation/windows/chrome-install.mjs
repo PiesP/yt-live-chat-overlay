@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { run as runFixture } from './profile.mjs';
-import { countUnexpectedLiveErrors, validateLiveRenderer } from './live-rendering.mjs';
+import { countUnexpectedLiveErrors, isYouTubeHostError, redactDiagnosticText, validateLiveRenderer } from './live-rendering.mjs';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
@@ -144,7 +144,7 @@ async function inspectLivePage(context, url, output, index, installation) {
       else consoleErrorOverflow++;
     }
     if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
-      workerDiagnostics.push({ type: message.type(), text: text.slice(0, 1000) });
+      workerDiagnostics.push({ type: message.type(), text: redactDiagnosticText(text) });
     }
   });
   const observation = { url, status: 'not-run', mocked: false };
@@ -215,6 +215,7 @@ async function inspectLivePage(context, url, output, index, installation) {
     observation.pageErrorTypes = [...new Set(pageErrors)];
     observation.unexpectedConsoleErrors = consoleErrorOverflow +
       countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback);
+    observation.hostConsoleErrors = consoleErrors.filter(isYouTubeHostError).length;
   }
   return observation;
 }

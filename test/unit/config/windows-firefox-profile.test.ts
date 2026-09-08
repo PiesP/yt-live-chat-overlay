@@ -250,6 +250,8 @@ describe('Windows Firefox installation profile', () => {
       {
         renderer: 'worker',
         workerPolicyFallback: false,
+        hostErrorCount: 0,
+        unexpectedErrorCount: 0,
         videoPaused: false,
         videoReadyState: 4,
         screenshot: 'firefox-live-01.png',

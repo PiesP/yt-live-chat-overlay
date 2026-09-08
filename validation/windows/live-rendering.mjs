@@ -12,7 +12,30 @@ export function isTrustedTypesWorkerBlock(entry) {
 
 export function countUnexpectedLiveErrors(entries, workerPolicyFallback) {
   return entries.filter((entry) => (entry.level ?? entry.type) === 'error' &&
-    !(workerPolicyFallback && isTrustedTypesWorkerBlock(entry))).length;
+    !(workerPolicyFallback && isTrustedTypesWorkerBlock(entry)) && !isYouTubeHostError(entry)).length;
+}
+
+/** These native YouTube media, ad, and site-module requests are outside the overlay. */
+export function isYouTubeHostError(entry) {
+  if ((entry.level ?? entry.type) !== 'error') return false;
+  const text = entry.text;
+  if (/^Failed to load .https:\/\/www\.youtube\.com\/s\/_\/ytmainappweb\/_\/js\//.test(text) &&
+    text.endsWith('A ServiceWorker intercepted the request and encountered an unexpected error.')) return true;
+  if (!text.startsWith('Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ')) return false;
+  const match = text.match(/https:\/\/[^\s‘’"<>]+/);
+  if (!match) return false;
+  try {
+    const url = new URL(match[0]);
+    return (url.hostname.endsWith('.googlevideo.com') && url.pathname === '/videoplayback') ||
+      (url.hostname === 'googleads.g.doubleclick.net' && url.pathname.startsWith('/pagead/viewthroughconversion/'));
+  } catch { return false; }
+}
+
+export function redactDiagnosticText(text) {
+  return text.replace(/https?:\/\/[^\s‘’"<>]+/g, (value) => {
+    try { const url = new URL(value); url.search = ''; url.hash = ''; return url.href; }
+    catch { return value; }
+  }).slice(0, 1000);
 }
 
 export function validateLiveRenderer(renderer, installation, diagnostics, bridgeReady = false) {
