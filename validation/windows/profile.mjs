@@ -150,6 +150,9 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await modal.waitFor({ state: 'visible', timeout: 5_000 });
   assert.equal(await modal.getAttribute('aria-modal'), 'true');
+  await modal.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
   assert.equal(
     await page.evaluate(() => document.activeElement?.id),
     'tab-comments',
@@ -191,6 +194,8 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
       webkitMaskImage: paneStyle.getPropertyValue('-webkit-mask-image'),
     };
   });
+  await writeFile(join(output, 'yt-settings-default-geometry.json'), JSON.stringify(defaultPreviewState, null, 2));
+  await modal.screenshot({ path: join(output, 'yt-settings-basic.png'), animations: 'disabled' });
   assert(defaultPreviewState.modalWidth >= 399 && defaultPreviewState.modalWidth <= 401,
     `Unexpected compact settings width: ${defaultPreviewState.modalWidth}`);
   assert(defaultPreviewState.modalHeight >= 570 && defaultPreviewState.modalHeight <= 592,
@@ -202,7 +207,6 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   assert(defaultPreviewState.controlsVisible, 'A primary settings control starts clipped');
   assert(defaultPreviewState.sampleInsidePane, 'The default opacity sample starts clipped');
   assert(defaultPreviewState.sampleInsideStage, 'The default sample overflows its preview stage');
-  await modal.screenshot({ path: join(output, 'yt-settings-basic.png'), animations: 'disabled' });
 
   const disclosure = modal.locator('.yt-chat-overlay-settings-disclosure');
   assert.equal(await disclosure.getAttribute('open'), null, 'Fine tuning must start collapsed');
