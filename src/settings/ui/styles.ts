@@ -1006,12 +1006,19 @@ export const SETTINGS_UI_STYLES = `
          preview text's real font size. The stage still grows from measured
          text height, so larger fonts and translations remain scrollable. */
       @media (max-height: 800px) {
+        dialog.yt-chat-overlay-settings-modal[open] {
+          gap: ${spacing.sm}px;
+        }
         .yt-chat-overlay-settings-pane,
         .yt-chat-overlay-settings-section {
-          gap: ${spacing.sm}px;
+          gap: ${spacing.xs}px;
         }
         .yt-chat-overlay-settings-font-preview-stage {
           min-height: 112px;
+        }
+        .yt-chat-overlay-settings-font-preview-text {
+          padding-block: ${spacing.xs}px;
+          padding-inline: ${spacing.md}px;
         }
       }
       @media (max-height: 640px) {

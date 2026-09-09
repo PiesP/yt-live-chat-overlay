@@ -132,9 +132,16 @@ test.describe('Settings UI Visual', () => {
         ),
         maskImage: style.maskImage,
         opacity: getComputedStyle(text).opacity,
+        paneBottom: paneRect.bottom,
+        paneClientHeight: element.clientHeight,
         paneScrollTop: element.scrollTop,
+        paneScrollHeight: element.scrollHeight,
         sampleInsidePane: containsVertically(paneRect, textRect),
         sampleInsideStage: containsVertically(stageRect, textRect),
+        stageBottom: stageRect.bottom,
+        stageTop: stageRect.top,
+        textBottom: textRect.bottom,
+        textTop: textRect.top,
         webkitMaskImage: style.getPropertyValue('-webkit-mask-image'),
       };
     });
