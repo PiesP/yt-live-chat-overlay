@@ -91,8 +91,9 @@ test.describe('Settings UI Visual', () => {
     expect(box!.height).toBeGreaterThan(180);
   });
 
-  test('keeps default controls and the opacity sample visible at 401x592', async ({ page }) => {
-    await page.setViewportSize({ width: 401, height: 592 });
+  for (const viewport of [{ width: 401, height: 592 }, { width: 1280, height: 720 }]) {
+  test(`keeps default controls and the opacity sample visible at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
     await openSettingsModal(page);
 
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
@@ -163,6 +164,8 @@ test.describe('Settings UI Visual', () => {
     await page.keyboard.press('Enter');
     await expect(modal.locator('.yt-chat-overlay-settings-disclosure')).toHaveAttribute('open', '');
   });
+
+  }
 
   test('keeps frequent controls prominent and previews normalized fine-tuning values', async ({
     page,

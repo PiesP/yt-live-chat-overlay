@@ -449,7 +449,7 @@ describe('SettingsUiForm', () => {
       /@media \(max-height: 640px\)[\s\S]*?dialog\.yt-chat-overlay-settings-modal\[open\]\s*\{[^}]*max-height:\s*calc\(100dvh - 16px\)/s
     );
     expect(SETTINGS_UI_STYLES).toMatch(
-      /@media \(max-height: 640px\)[\s\S]*?\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*min-height:\s*112px/s
+      /@media \(max-height: 800px\)[\s\S]*?\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*min-height:\s*112px/s
     );
     expect(SETTINGS_UI_STYLES).toContain(
       '.yt-chat-overlay-settings-capability[data-supported="false"]'
