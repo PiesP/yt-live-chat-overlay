@@ -150,6 +150,58 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await modal.waitFor({ state: 'visible', timeout: 5_000 });
   assert.equal(await modal.getAttribute('aria-modal'), 'true');
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.id),
+    'tab-comments',
+    'The keyboard-opened dialog did not focus the active tab',
+  );
+  const defaultPreviewState = await modal.evaluate((element) => {
+    const pane = element.querySelector('#pane-comments');
+    const stage = pane?.querySelector('.yt-chat-overlay-settings-font-preview-stage');
+    const text = pane?.querySelector('.yt-chat-overlay-settings-font-preview-text');
+    const requiredControls = [
+      'input[name="enabled"]',
+      'select[name="danmakuMode"]',
+      'input[name="fontSize"]',
+      'input[name="speedPxPerSec"]',
+      'input[name="opacity-slider"]',
+      'input[name="opacity"]',
+    ].map((selector) => pane?.querySelector(selector));
+    if (!(pane instanceof HTMLElement) || !(stage instanceof HTMLElement) ||
+        !(text instanceof HTMLElement) || requiredControls.some((control) => !control)) {
+      throw new Error('Primary settings preview DOM is incomplete');
+    }
+    const modalRect = element.getBoundingClientRect();
+    const paneRect = pane.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const textRect = text.getBoundingClientRect();
+    const containsVertically = (outer, inner) =>
+      inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+    const paneStyle = getComputedStyle(pane);
+    return {
+      controlsVisible: requiredControls.every((control) =>
+        containsVertically(paneRect, control.getBoundingClientRect())),
+      maskImage: paneStyle.maskImage,
+      modalHeight: modalRect.height,
+      modalWidth: modalRect.width,
+      opacity: getComputedStyle(text).opacity,
+      paneScrollTop: pane.scrollTop,
+      sampleInsidePane: containsVertically(paneRect, textRect),
+      sampleInsideStage: containsVertically(stageRect, textRect),
+      webkitMaskImage: paneStyle.getPropertyValue('-webkit-mask-image'),
+    };
+  });
+  assert(defaultPreviewState.modalWidth >= 399 && defaultPreviewState.modalWidth <= 401,
+    `Unexpected compact settings width: ${defaultPreviewState.modalWidth}`);
+  assert(defaultPreviewState.modalHeight >= 570 && defaultPreviewState.modalHeight <= 592,
+    `Unexpected compact settings height: ${defaultPreviewState.modalHeight}`);
+  assert.equal(defaultPreviewState.maskImage, 'none');
+  assert.equal(defaultPreviewState.webkitMaskImage, 'none');
+  assert.equal(defaultPreviewState.opacity, '1');
+  assert.equal(defaultPreviewState.paneScrollTop, 0);
+  assert(defaultPreviewState.controlsVisible, 'A primary settings control starts clipped');
+  assert(defaultPreviewState.sampleInsidePane, 'The default opacity sample starts clipped');
+  assert(defaultPreviewState.sampleInsideStage, 'The default sample overflows its preview stage');
   await modal.screenshot({ path: join(output, 'yt-settings-basic.png'), animations: 'disabled' });
 
   const disclosure = modal.locator('.yt-chat-overlay-settings-disclosure');
@@ -160,7 +212,21 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
     'Font size must remain in the primary settings area',
   );
   const disclosureSummary = disclosure.locator('summary');
-  await disclosureSummary.focus();
+  for (const selector of [
+    'input[name="enabled"]',
+    'select[name="danmakuMode"]',
+    'input[name="fontSize"]',
+    'input[name="speedPxPerSec"]',
+    'input[name="opacity-slider"]',
+    'input[name="opacity"]',
+    '.yt-chat-overlay-settings-disclosure > summary',
+  ]) {
+    await page.keyboard.press('Tab');
+    assert(
+      await page.evaluate((expected) => document.activeElement?.matches(expected), selector),
+      `Keyboard order did not reach ${selector}`,
+    );
+  }
   await page.keyboard.press('Enter');
   assert.equal(await disclosure.getAttribute('open'), '', 'Fine tuning did not open from keyboard');
   await assertForcedColorsDisclosure(page, disclosureSummary);
@@ -238,6 +304,58 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   await modal.screenshot({ path: join(output, 'yt-settings-preview.png'), animations: 'disabled' });
 
   await modal.locator('#tab-translation').click();
+  await modal.locator('select[name="language"]').selectOption('es');
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('#yt-chat-overlay-settings-backdrop');
+    const language = dialog?.querySelector('select[name="language"]');
+    return dialog?.getAttribute('lang') === 'es' && language?.value === 'es';
+  });
+  await modal.locator('#tab-comments').click();
+  const localizedFontSize = modal.locator('input[name="fontSize"]');
+  await localizedFontSize.fill('50');
+  await localizedFontSize.blur();
+  const localizedText = modal.locator('.yt-chat-overlay-settings-font-preview-text');
+  await page.waitForFunction(() => {
+    const text = document.querySelector('.yt-chat-overlay-settings-font-preview-text');
+    return text?.textContent === 'Mensaje de chat de ejemplo' &&
+      getComputedStyle(text).fontSize === '50px';
+  });
+  await localizedText.scrollIntoViewIfNeeded();
+  const localizedPreviewState = await modal.locator('#pane-comments').evaluate((pane) => {
+    const stage = pane.querySelector('.yt-chat-overlay-settings-font-preview-stage');
+    const text = pane.querySelector('.yt-chat-overlay-settings-font-preview-text');
+    if (!(stage instanceof HTMLElement) || !(text instanceof HTMLElement)) {
+      throw new Error('Localized settings preview DOM is incomplete');
+    }
+    const paneRect = pane.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const textRect = text.getBoundingClientRect();
+    return {
+      fontSize: getComputedStyle(text).fontSize,
+      maskImage: getComputedStyle(pane).maskImage,
+      message: text.textContent,
+      paneCanScroll: pane.scrollHeight > pane.clientHeight + 1,
+      paneScrollTop: pane.scrollTop,
+      sampleInsidePane: textRect.top >= paneRect.top - 1 && textRect.bottom <= paneRect.bottom + 1,
+      sampleInsideStage:
+        textRect.top >= stageRect.top - 1 && textRect.bottom <= stageRect.bottom + 1,
+    };
+  });
+  assert.equal(localizedPreviewState.fontSize, '50px');
+  assert.equal(localizedPreviewState.maskImage, 'none');
+  assert.equal(localizedPreviewState.message, 'Mensaje de chat de ejemplo');
+  assert(localizedPreviewState.paneCanScroll, 'Large localized settings cannot scroll');
+  assert(localizedPreviewState.paneScrollTop > 0, 'Localized preview was not reachable by scrolling');
+  assert(localizedPreviewState.sampleInsidePane, 'Localized preview text remains clipped after scrolling');
+  assert(localizedPreviewState.sampleInsideStage, 'Localized preview text overflows its stage');
+
+  await localizedFontSize.fill('36');
+  await localizedFontSize.blur();
+  await modal.locator('#tab-translation').click();
+  await modal.locator('select[name="language"]').selectOption('auto');
+  await page.waitForFunction(() =>
+    document.querySelector('select[name="language"]')?.value === 'auto');
+
   const capability = modal.locator('.yt-chat-overlay-settings-capability');
   assert.match(await capability.getAttribute('data-supported'), /^(?:true|false)$/u);
   assert.equal(await capability.getAttribute('role'), 'note');
@@ -256,23 +374,25 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden', timeout: 5_000 });
 
-  if (installed) return;
-  await page.waitForFunction(() => {
-    const handle = window.__ytChatOverlay;
-    const settings = handle?.getSettings?.();
-    return (
-      settings?.fontSize === 36 &&
-      settings?.opacity === 0.65 &&
-      settings?.safeTop === 0.2 &&
-      settings?.safeBottom === 0.1 &&
-      settings?.outline?.enabled === true &&
-      settings?.outline?.widthPx === 3 &&
-      settings?.outline?.opacity === 0.6 &&
-      settings?.danmakuMode === 'scroll' &&
-      settings?.depthLayersEnabled === false &&
-      settings?.topBottomDurationMs === 30_000
-    );
-  });
+  if (!installed) {
+    await page.waitForFunction(() => {
+      const handle = window.__ytChatOverlay;
+      const settings = handle?.getSettings?.();
+      return (
+        settings?.fontSize === 36 &&
+        settings?.opacity === 0.65 &&
+        settings?.safeTop === 0.2 &&
+        settings?.safeBottom === 0.1 &&
+        settings?.outline?.enabled === true &&
+        settings?.outline?.widthPx === 3 &&
+        settings?.outline?.opacity === 0.6 &&
+        settings?.danmakuMode === 'scroll' &&
+        settings?.depthLayersEnabled === false &&
+        settings?.topBottomDurationMs === 30_000
+      );
+    });
+  }
+  return { defaultPreviewState, localizedPreviewState };
 }
 
 async function verifyIsolatedPaidCardInk(page, output) {
@@ -558,7 +678,12 @@ export async function run({ browser, root, output, installedContext, installedEx
       return Boolean(handle && typeof handle.getSettings === 'function');
     });
 
-    await configureThroughSettingsUi(page, Boolean(installedContext), output, Boolean(expectedRenderer));
+    const settingsUiState = await configureThroughSettingsUi(
+      page,
+      Boolean(installedContext),
+      output,
+      Boolean(expectedRenderer),
+    );
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
@@ -715,6 +840,10 @@ export async function run({ browser, root, output, installedContext, installedEx
         renderer: rendererStatus,
         settingsUiInteraction: true,
         settingsDisclosureKeyboardInteraction: true,
+        settingsKeyboardOrder: true,
+        settingsLargeLocalizedPreviewScrollable: true,
+        settingsPaneUnmasked: true,
+        settingsPreviewDefaultVisible: true,
         settingsPreviewState: true,
         translationCapabilitySeparatedFromPreference: true,
         settingsOpenMethod: 'keyboard',
@@ -735,6 +864,7 @@ export async function run({ browser, root, output, installedContext, installedEx
       observations: {
         browserVersion: browser.version(),
         canvas: canvasBox,
+        settingsUi: settingsUiState,
         fixtureContent: ['Korean', 'Japanese', 'RTL', 'emoji', 'Super Chat', 'membership'],
         screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png', ...(paidCardInkContainment ? ['yt-paid-card-ink.png'] : [])],
         backgroundObservationMs,

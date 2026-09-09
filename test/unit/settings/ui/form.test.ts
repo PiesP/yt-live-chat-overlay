@@ -425,7 +425,7 @@ describe('SettingsUiForm', () => {
     }
   });
 
-  it('styles the disclosure, preview masks, metrics, and capability states inside the modal', () => {
+  it('styles the disclosure, unmasked preview, metrics, and capability states inside the modal', () => {
     expect(SETTINGS_UI_STYLES).toMatch(
       /\.yt-chat-overlay-settings-disclosure\s*\{[^}]*border:/s
     );
@@ -443,6 +443,13 @@ describe('SettingsUiForm', () => {
     );
     expect(SETTINGS_UI_STYLES).toMatch(
       /\.yt-chat-overlay-settings-font-preview-metrics\s*\{[^}]*font-size:/s
+    );
+    expect(SETTINGS_UI_STYLES).not.toContain('mask-image:');
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(max-height: 640px\)[\s\S]*?dialog\.yt-chat-overlay-settings-modal\[open\]\s*\{[^}]*max-height:\s*calc\(100dvh - 16px\)/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(max-height: 640px\)[\s\S]*?\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*min-height:\s*112px/s
     );
     expect(SETTINGS_UI_STYLES).toContain(
       '.yt-chat-overlay-settings-capability[data-supported="false"]'
@@ -464,7 +471,13 @@ describe('SettingsUiForm', () => {
       /\.yt-chat-overlay-settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/s
     );
     expect(SETTINGS_UI_STYLES).toMatch(
-      /\.yt-chat-overlay-settings-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s
+      /\.yt-chat-overlay-settings-tab\s*\{[^}]*flex:\s*1 0 auto;[^}]*white-space:\s*nowrap/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-actions\s*\{[^}]*flex-wrap:\s*wrap/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-actions button\s*\{[^}]*flex:\s*1 0 auto;[^}]*white-space:\s*nowrap/s
     );
     form.destroy();
   });

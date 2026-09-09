@@ -272,6 +272,7 @@ export const SETTINGS_UI_STYLES = `
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
       }
       dialog.yt-chat-overlay-settings-modal[open] {
+        box-sizing: border-box;
         border: none;
         padding: ${spacing.lg}px;
         margin: auto;
@@ -371,8 +372,6 @@ export const SETTINGS_UI_STYLES = `
         scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
         content-visibility: auto;
         contain-intrinsic-size: 300px;
-        mask-image: linear-gradient(to bottom, black 94%, transparent 100%);
-        -webkit-mask-image: linear-gradient(to bottom, black 94%, transparent 100%);
         padding-bottom: calc(${spacing.lg}px * 2);
       }
       .yt-chat-overlay-settings-pane::-webkit-scrollbar {
@@ -837,7 +836,6 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColors.background};
         border: 1px solid ${uiColors.border};
         border-radius: ${borderRadius.sm};
-        margin-bottom: ${spacing.md}px;
         display: flex;
         flex-direction: column;
         flex: none;
@@ -1004,21 +1002,45 @@ export const SETTINGS_UI_STYLES = `
         align-items: flex-start;
       }
 
-      /* Reflow translated controls instead of truncating their labels. */
+      /* Use the available height on compact viewports while preserving the
+         preview text's real font size. The stage still grows from measured
+         text height, so larger fonts and translations remain scrollable. */
+      @media (max-height: 640px) {
+        dialog.yt-chat-overlay-settings-modal[open] {
+          max-height: calc(100dvh - 16px);
+          padding: ${spacing.md}px;
+          gap: ${spacing.sm}px;
+        }
+        .yt-chat-overlay-settings-pane {
+          gap: ${spacing.sm}px;
+          padding-bottom: ${spacing.lg}px;
+        }
+        .yt-chat-overlay-settings-font-preview-stage {
+          min-height: 112px;
+        }
+        .yt-chat-overlay-settings-actions-wrapper {
+          padding-top: ${spacing.xs}px;
+        }
+      }
+
+      /* Reflow translated controls only when their intrinsic widths require
+         it, instead of reserving two rows on every narrow viewport. */
       @media (max-width: 480px) {
         .yt-chat-overlay-settings-tabs {
           flex-wrap: wrap;
         }
         .yt-chat-overlay-settings-tab {
-          flex: 1 1 50%;
-          min-width: 0;
+          flex: 1 0 auto;
+          min-width: min-content;
+          white-space: nowrap;
         }
         .yt-chat-overlay-settings-actions {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          flex-wrap: wrap;
         }
         .yt-chat-overlay-settings-actions button {
-          inline-size: 100%;
+          flex: 1 0 auto;
+          inline-size: auto;
+          white-space: nowrap;
         }
       }
 
