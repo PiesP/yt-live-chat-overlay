@@ -282,26 +282,32 @@ describe('Worker renderer state synchronization', () => {
   });
 
   it('reports actual placements and live lane utilization', () => {
-    const renderer = initializedRenderer();
-    renderer.handleMessage({
-      data: {
-        type: 'addMessages',
-        messages: [makeWorkerMessage('rendered')],
-        batchSequence: 7,
-      },
-    } as MessageEvent);
+    // Keep the measurement inside the lane reservation regardless of runner load.
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(10_000);
+    try {
+      const renderer = initializedRenderer();
+      renderer.handleMessage({
+        data: {
+          type: 'addMessages',
+          messages: [makeWorkerMessage('rendered')],
+          batchSequence: 7,
+        },
+      } as MessageEvent);
 
-    const internals = renderer as unknown as { renderFrame(): void };
-    for (let frame = 0; frame < 60; frame++) internals.renderFrame();
+      const internals = renderer as unknown as { renderFrame(): void };
+      for (let frame = 0; frame < 60; frame++) internals.renderFrame();
 
-    expect(latestStats()).toMatchObject({
-      totalRendered: 1,
-      totalDrops: 0,
-      processedBatchSequence: 7,
-      activeMessages: 1,
-      pendingQueueDepth: 0,
-    });
-    expect(latestStats()?.laneUtilization).toBeGreaterThan(0);
+      expect(latestStats()).toMatchObject({
+        totalRendered: 1,
+        totalDrops: 0,
+        processedBatchSequence: 7,
+        activeMessages: 1,
+        pendingQueueDepth: 0,
+      });
+      expect(latestStats()?.laneUtilization).toBeGreaterThan(0);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('counts every message permanently discarded by queue overflow', () => {
