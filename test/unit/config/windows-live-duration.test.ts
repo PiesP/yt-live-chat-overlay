@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as durationModule from '../../../validation/windows/live-duration.mjs';
@@ -31,8 +34,9 @@ describe('public duration observation contract', () => {
       duration_seconds: 1200,
     })).toEqual({ mode: 'duration', duration_seconds: 1200 });
 
+    expect(installProfileModule.validateLiveObservation()).toBeNull();
+
     for (const invalid of [
-      undefined,
       { mode: 'duration', duration_seconds: 60 },
       { mode: 'short', duration_seconds: 1200 },
       { mode: 'duration', duration_seconds: 1200, preflight_seconds: 300 },
@@ -174,7 +178,10 @@ describe('public duration observation contract', () => {
 });
 
 describe('natural Chrome ownership boundaries', () => {
-  it('uses only direct child termination before browser identity exists', async () => {
+  it('retains the owned profile when only direct child exit can be established', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'yt-natural-cleanup-'));
+    const profile = join(root, 'chrome-install-unidentified');
+    await mkdir(profile);
     const child = {
       exitCode: null,
       signalCode: null,
@@ -183,17 +190,103 @@ describe('natural Chrome ownership boundaries', () => {
     const waitForChildExit = vi.fn()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
-    const browserCdp = { send: vi.fn() };
+    try {
+      const result = await naturalChromeModule.cleanupFailedNaturalChrome({
+        child,
+        childState: { spawnError: null },
+        browserProcessIdentity: null,
+        profile,
+        root,
+      }, {
+        stopChild: (ownedChild: unknown, state: unknown, cdp: unknown) =>
+          naturalChromeModule.stopUnidentifiedChild(ownedChild, state, cdp, {
+            waitForChildExit,
+          }),
+      });
 
-    await expect(naturalChromeModule.stopUnidentifiedChild(
-      child,
-      { spawnError: null },
-      null,
-      { waitForChildExit }
-    )).resolves.toEqual({ exited: true, errors: [] });
+      expect(child.kill).toHaveBeenCalledOnce();
+      expect(result.cleanup).toMatchObject({
+        directChildExited: true,
+        processIdentityCaptured: false,
+        processTreeExited: false,
+        profilePreserved: true,
+        profileRemovalFailed: false,
+        profileRemoved: false,
+      });
+      expect(result.errors).toHaveLength(1);
+      await expect(stat(profile)).resolves.toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
-    expect(child.kill).toHaveBeenCalledOnce();
-    expect(browserCdp.send).not.toHaveBeenCalled();
+  it('terminates an identity-checked process tree before removing its profile', async () => {
+    const ordering: string[] = [];
+    const identity = {
+      processId: 42,
+      creationDate: '20260912120000.000000+000',
+      commandLine: 'chrome.exe --user-data-dir=C:\\owned-profile',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      profile: 'c:\\owned-profile',
+    };
+    const result = await naturalChromeModule.cleanupFailedNaturalChrome({
+      child: { pid: 42 },
+      childState: { spawnError: null },
+      browserProcessIdentity: identity,
+      profile: 'C:\\owned-profile',
+      root: 'C:\\',
+    }, {
+      terminateProcessTree: vi.fn(async (value: unknown) => {
+        expect(value).toBe(identity);
+        ordering.push('terminate-tree');
+      }),
+      removeProfile: vi.fn(async () => {
+        ordering.push('remove-profile');
+      }),
+    });
+
+    expect(ordering).toEqual(['terminate-tree', 'remove-profile']);
+    expect(result).toEqual({
+      cleanup: {
+        directChildExited: false,
+        processIdentityCaptured: true,
+        processTreeExited: true,
+        profilePreserved: false,
+        profileRemovalFailed: false,
+        profileRemoved: true,
+      },
+      errors: [],
+    });
+  });
+
+  it('removes the profile when asynchronous spawn failure proves no PID existed', async () => {
+    const ordering: string[] = [];
+    const spawnError = new Error('spawn failed');
+    const result = await naturalChromeModule.cleanupFailedNaturalChrome({
+      child: { pid: undefined },
+      childState: { spawnError },
+      browserProcessIdentity: null,
+      profile: 'C:\\owned-profile',
+      root: 'C:\\',
+    }, {
+      stopChild: vi.fn(async () => {
+        ordering.push('confirm-no-process');
+        return { exited: true, errors: [] };
+      }),
+      removeProfile: vi.fn(async () => {
+        ordering.push('remove-profile');
+      }),
+    });
+
+    expect(ordering).toEqual(['confirm-no-process', 'remove-profile']);
+    expect(result.cleanup).toMatchObject({
+      processIdentityCaptured: false,
+      processTreeExited: true,
+      profilePreserved: false,
+      profileRemovalFailed: false,
+      profileRemoved: true,
+    });
+    expect(result.errors).toEqual([]);
   });
 
   it('always launches the owned natural browser muted on loopback DevTools', () => {

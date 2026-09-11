@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { runChromeInstallation } from './chrome-install.mjs';
 import { runFirefoxInstallation } from './firefox-install.mjs';
 
-export function validateLiveObservation(value) {
+export function validateLiveObservation(value = null) {
   assert(value === null || (value && typeof value === 'object'),
     'Invalid live observation option');
   if (value === null) return null;

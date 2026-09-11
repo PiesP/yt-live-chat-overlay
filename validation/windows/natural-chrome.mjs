@@ -3,20 +3,21 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   cleanupChromeInstallation,
   readOwnedBrowserProcessId,
   removeOwnedChromeProfile,
 } from './chrome-install.mjs';
-import { captureOwnedChromeProcess } from './chrome-process.mjs';
+import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
 
 const VIEWPORT = { width: 1280, height: 720 };
 const DEVTOOLS_WAIT_MS = 30_000;
 const CHILD_EXIT_MS = 8_000;
 const STDERR_LIMIT_BYTES = 64 * 1024;
 const PROTOCOL_TIMEOUT_MS = 15_000;
+const IDENTITY_WAIT_MS = 8_000;
 
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 
@@ -193,6 +194,97 @@ export async function stopUnidentifiedChild(
   return { exited, errors };
 }
 
+export async function captureSpawnedChromeIdentity(
+  child,
+  childState,
+  profile,
+  executablePath,
+  {
+    captureProcess = captureOwnedChromeProcess,
+    sleep = delay,
+    timeoutMs = IDENTITY_WAIT_MS,
+  } = {}
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  do {
+    if (childState.spawnError) throw childState.spawnError;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error('Owned Chrome exited before its process identity was captured');
+    }
+    if (Number.isSafeInteger(child.pid) && child.pid > 0) {
+      try {
+        const identity = await captureProcess(child.pid, profile);
+        assert.equal(
+          identity.executablePath.toLowerCase(),
+          executablePath.toLowerCase(),
+          'Spawned Chrome executable did not match the discovered installation'
+        );
+        return identity;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    await sleep(Math.min(100, Math.max(1, deadline - Date.now())));
+  } while (Date.now() < deadline);
+  throw new Error('Timed out capturing the spawned Chrome process identity', {
+    cause: lastError,
+  });
+}
+
+export async function cleanupFailedNaturalChrome(
+  { child, childState, browserProcessIdentity, profile, root },
+  {
+    removeProfile = removeOwnedChromeProfile,
+    stopChild = stopUnidentifiedChild,
+    terminateProcessTree = terminateOwnedChromeProcess,
+  } = {}
+) {
+  const errors = [];
+  const cleanup = {
+    directChildExited: false,
+    processIdentityCaptured: Boolean(browserProcessIdentity),
+    processTreeExited: false,
+    profilePreserved: false,
+    profileRemovalFailed: false,
+    profileRemoved: false,
+  };
+  if (browserProcessIdentity) {
+    try {
+      await terminateProcessTree(browserProcessIdentity);
+      cleanup.processTreeExited = true;
+    } catch (error) {
+      errors.push(error);
+    }
+  } else {
+    const stopped = await stopChild(child, childState, null);
+    cleanup.directChildExited = stopped.exited;
+    errors.push(...stopped.errors);
+    const spawnFailedWithoutPid = Boolean(childState.spawnError) &&
+      !Number.isSafeInteger(child.pid);
+    if (spawnFailedWithoutPid && stopped.exited && stopped.errors.length === 0) {
+      cleanup.processTreeExited = true;
+    } else {
+      cleanup.profilePreserved = true;
+      errors.push(new Error(
+        'Chrome process-tree exit could not be proven without a captured identity; profile preserved'
+      ));
+    }
+  }
+  if (cleanup.processTreeExited) {
+    try {
+      await removeProfile(root, profile);
+      cleanup.profileRemoved = true;
+    } catch (error) {
+      errors.push(error);
+      cleanup.profileRemovalFailed = true;
+    }
+  } else {
+    cleanup.profilePreserved = true;
+  }
+  return { cleanup, errors };
+}
+
 /**
  * Spawn a task-owned Chrome process and attach without Playwright launch defaults.
  * This is required for the browser's native visible-hidden-visible tab lifecycle.
@@ -234,8 +326,16 @@ export async function launchOwnedNaturalChrome({
   let browserCdp;
   let browserProcessId;
   let browserProcessIdentity;
-  let cdpMatchedSpawn = false;
   try {
+    await checkpoint('natural-launch:process-identity', 'before');
+    browserProcessIdentity = await captureSpawnedChromeIdentity(
+      child,
+      childState,
+      profile,
+      discovered.executablePath
+    );
+    browserProcessId = browserProcessIdentity.processId;
+    await checkpoint('natural-launch:process-identity', 'after');
     await checkpoint('natural-launch:devtools-endpoint', 'before');
     const endpoint = await readDevToolsEndpoint(profile, child, childState);
     await checkpoint('natural-launch:connect', 'before');
@@ -251,16 +351,20 @@ export async function launchOwnedNaturalChrome({
     context.setDefaultTimeout(15_000);
     context.setDefaultNavigationTimeout(45_000);
     browserCdp = await browser.newBrowserCDPSession();
-    browserProcessId = readOwnedBrowserProcessId(
+    const cdpBrowserProcessId = readOwnedBrowserProcessId(
       await browserCdp.send('SystemInfo.getProcessInfo')
     );
     assert.equal(
-      browserProcessId,
+      cdpBrowserProcessId,
       child.pid,
       'Owned Chrome CDP browser process did not match the spawned process'
     );
-    cdpMatchedSpawn = true;
-    browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
+    const currentIdentity = await captureOwnedChromeProcess(cdpBrowserProcessId, profile);
+    assert.deepEqual(
+      currentIdentity,
+      browserProcessIdentity,
+      'Owned Chrome process identity changed between spawn and CDP verification'
+    );
     const cleanupCdp = {
       send: (method, parameters) => boundedProtocolOperation(
         () => browserCdp.send(method, parameters),
@@ -295,18 +399,26 @@ export async function launchOwnedNaturalChrome({
       },
     };
   } catch (error) {
-    const stopped = await stopUnidentifiedChild(
+    const { cleanup, errors: cleanupErrors } = await cleanupFailedNaturalChrome({
       child,
       childState,
-      cdpMatchedSpawn ? browserCdp : null
-    );
-    const cleanupErrors = [...stopped.errors];
-    if (stopped.exited) {
-      try {
-        await removeOwnedChromeProfile(root, profile);
-      } catch (cleanupError) {
-        cleanupErrors.push(cleanupError);
-      }
+      browserProcessIdentity,
+      profile,
+      root,
+    });
+    try {
+      await writeFile(join(output, 'natural-chrome-launch-result.json'), JSON.stringify({
+        schemaVersion: 1,
+        kind: 'natural-chrome-launch',
+        status: 'failed',
+        errorType: error instanceof Error ? error.name : typeof error,
+        cleanup: {
+          ...cleanup,
+          errorCount: cleanupErrors.length,
+        },
+      }, null, 2));
+    } catch (evidenceError) {
+      cleanupErrors.push(evidenceError);
     }
     if (cleanupErrors.length > 0) {
       throw new AggregateError(
