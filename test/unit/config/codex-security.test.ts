@@ -101,9 +101,14 @@ describe('Codex Security CLI supply-chain controls', () => {
     const cliPackage = JSON.parse(readFileSync(cliPackagePath, 'utf8')) as CliPackage;
     const cliLock = JSON.parse(readFileSync(cliLockPath, 'utf8')) as CliLock;
 
-    expect(cliPackage.overrides).toEqual({ 'fast-uri': '3.1.6', fflate: '0.8.3' });
+    expect(cliPackage.overrides).toEqual({
+      'fast-uri': '3.1.6',
+      fflate: '0.8.3',
+      '@openai/codex-security@0.1.26': { 'smol-toml': '1.7.1' },
+    });
     expect(cliLock.packages['node_modules/fast-uri']?.version).toBe('3.1.6');
     expect(cliLock.packages['node_modules/fflate']?.version).toBe('0.8.3');
+    expect(cliLock.packages['node_modules/smol-toml']?.version).toBe('1.7.1');
   });
 
   it('scopes the unpatched extract-zip advisory exception to the CLI lock', () => {

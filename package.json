@@ -85,7 +85,7 @@
   },
   "packageManager": "pnpm@11.26.0",
   "volta": {
-    "node": "26.8.1",
+    "node": "26.8.2",
     "pnpm": "11.26.0"
   },
   "dependencies": {
@@ -98,12 +98,12 @@
     "@playwright/test": "^1.63.0",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
-    "@types/node": "^26.5.0",
+    "@types/node": "^26.5.1",
     "@vitest/coverage-v8": "^4.1.11",
     "canvas": "^3.2.3",
     "dpdm": "4.3.0",
     "jsdom": "^30.0.1",
-    "knip": "^6.35.0",
+    "knip": "^6.35.1",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
     "vite-plugin-monkey": "^8.1.1",
