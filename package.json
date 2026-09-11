@@ -103,7 +103,7 @@
     "canvas": "^3.2.3",
     "dpdm": "4.3.0",
     "jsdom": "^30.0.1",
-    "knip": "^6.35.0",
+    "knip": "^6.35.1",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
     "vite-plugin-monkey": "^8.1.1",
