@@ -92,24 +92,37 @@ describe('installed Chrome acceptance outcomes', () => {
     await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(paths.root, 'keep'), 'utf8')).toBe('unrelated fixture');
     const evidence = JSON.parse(await readFile(join(paths.output, 'installation-result.json'), 'utf8'));
-    expect(evidence.cleanup).toMatchObject({ browserClosed: true, profileRemoved: true, errorCount: 1 });
+    expect(evidence.cleanup).toMatchObject({
+      browserClosed: true,
+      profileRemoved: true,
+      errorCount: 1,
+      errorTypes: [{ stage: 'extension-uninstall', errorType: 'Error' }],
+    });
   });
 
   it('attempts the owned browser fallback and profile removal after context close fails', async () => {
     const paths = await fixture();
     const browserClose = vi.fn(async () => {});
+    const result = { cleanup: {} };
     await expect(cleanupChromeInstallation({
       context: { close: async () => { throw new Error('context failed'); }, browser: () => ({ close: browserClose }) },
-      cdp: null, extensionId: null, ...paths, result: { cleanup: {} },
+      cdp: null, extensionId: null, ...paths, result,
     })).rejects.toThrow(AggregateError);
     expect(browserClose).toHaveBeenCalledOnce();
     await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(result.cleanup).toMatchObject({
+      browserClosed: true,
+      profileRemoved: true,
+      errorCount: 1,
+      errorTypes: [{ stage: 'context-close', errorType: 'Error' }],
+    });
   });
 
   it('terminates only the retained browser tree when both Playwright closes fail', async () => {
     const paths = await fixture();
     const terminateProcessTree = vi.fn(async () => {});
     const checkProcessAlive = vi.fn().mockResolvedValue(true);
+    const result = { cleanup: {} };
     await expect(cleanupChromeInstallation({
       browserProcessId: 456,
       context: {
@@ -119,7 +132,7 @@ describe('installed Chrome acceptance outcomes', () => {
       cdp: null,
       extensionId: null,
       ...paths,
-      result: { cleanup: {} },
+      result,
       root: paths.root,
     }, {
       checkProcessAlive,
@@ -130,6 +143,15 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(terminateProcessTree).toHaveBeenCalledOnce();
     expect(terminateProcessTree).toHaveBeenCalledWith(456);
     await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(result.cleanup).toMatchObject({
+      browserProcessExited: true,
+      profileRemoved: true,
+      errorCount: 2,
+      errorTypes: [
+        { stage: 'context-close', errorType: 'Error' },
+        { stage: 'browser-close', errorType: 'Error' },
+      ],
+    });
   });
 
   it('preserves the owned profile when browser-tree termination cannot be proven', async () => {

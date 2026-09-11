@@ -50,6 +50,25 @@ browser. The extension is explicitly uninstalled before browser/profile cleanup.
 Firefox uses the installed system executable and native WebDriver BiDi temporary
 installation; it does not require Playwright's patched Firefox executable.
 
+The optional duration observation is a separate, exact contract: headed Chrome,
+the unpacked extension, one existing public `https://www.youtube.com/watch?v=...`
+or `https://www.youtube.com/live/VIDEO_ID` URL admitted by the controller, and
+`{ "mode": "duration", "duration_seconds": 1200 }`. It runs the
+deterministic installed-extension fixture first. It then starts a task-owned Chrome
+process with muted audio and loopback DevTools, attaches with Playwright launch
+defaults disabled, and observes five minutes visible, ten minutes natively hidden
+behind a second real tab, and five minutes visible after resume. Thirty-second
+checkpoints retain media, Canvas, bridge, renderer, native visibility, normalized
+player-error UI, and accessible-render fingerprint evidence. Public chat volume is
+uncontrolled, so a stream with no accessible chat is recorded as unverified. The
+structured observation records only chat counts and fingerprints, not raw chat text.
+
+The ordinary short installation flow keeps the persistent-context launcher and
+does not establish native tab visibility. Both Chrome launch paths use
+`--mute-audio`. A duration run closes the owned browser before removing its fresh
+profile; if exact process exit cannot be established, it preserves the profile and
+fails cleanup.
+
 Prepare the reviewed userscript manager outside the checkout:
 
 ```bash

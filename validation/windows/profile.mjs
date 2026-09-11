@@ -496,6 +496,8 @@ export async function run({ browser, root, output, installedContext, installedEx
   let page;
   try {
     page = await context.newPage();
+    // Geometry assertions use a fixed CSS viewport, including native CDP contexts.
+    await page.setViewportSize({ width: 1280, height: 720 });
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());

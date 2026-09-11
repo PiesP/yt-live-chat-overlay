@@ -168,6 +168,18 @@ describe('workflow change classification', () => {
     }
   });
 
+  it('runs portable quality and unit checks for Windows validation helpers', () => {
+    expect(classify(['validation/windows/live-duration.mjs'])).toMatchObject({
+      quality: true,
+      unit: true,
+      e2e: false,
+      build: false,
+      semgrep: true,
+      codeql_javascript: true,
+      codex_security: true,
+    });
+  });
+
   it('fails closed for unknown paths, manual runs, and unavailable revisions', () => {
     expect(Object.values(classify(['new-config.unknown']))).not.toContain(false);
     expect(
