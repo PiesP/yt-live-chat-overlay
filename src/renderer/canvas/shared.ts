@@ -11,6 +11,7 @@
 
 import type { FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
+import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import {
   resolveTextDirection,
   resolveVisualInlineLines,
@@ -26,7 +27,6 @@ import {
 } from '@renderer/layout/card-layout';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { splitGraphemeClusters as splitGraphemeClustersInternal } from '@renderer/text-segmentation';
-import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
 /** A char-wrap segment with pre-computed width. */
@@ -251,46 +251,6 @@ export function measureEmojiAdvanceWidth(
       )
     : 0;
   return Math.max(emojiSize, fallbackWidth) + spacing.xs;
-}
-
-/**
- * Truncate text to fit within maxWidth pixels on the given canvas context.
- * Uses grapheme-cluster iteration + binary search for O(log n) measureText
- * calls. Appends ellipsis (…) when truncation occurs.
- *
- * @param text      The text to potentially clip.
- * @param maxWidth  Maximum pixel width allowed.
- * @param ctx       Canvas 2D context (HTML or Offscreen).
- * @returns The original text if it fits, or a grapheme-cluster-accurate
- *          truncated version ending with an ellipsis character.
- */
-export function clipTextToWidth(
-  text: string,
-  maxWidth: number,
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
-): string {
-  if (!text || maxWidth <= 0) return '';
-
-  const fullWidth = ctx.measureText(text).width;
-  if (fullWidth <= maxWidth) return text;
-
-  const graphemes = splitGraphemeClusters(text);
-  // Binary search for max grapheme count fitting maxWidth.
-  let lo = 0;
-  let hi = graphemes.length;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi + 1) / 2);
-    const candidate = graphemes.slice(0, mid).join('');
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      lo = mid;
-    } else {
-      hi = mid - 1;
-    }
-  }
-
-  if (lo === 0) return '';
-  if (lo === graphemes.length) return text;
-  return `${graphemes.slice(0, lo).join('').trimEnd()}\u2026`;
 }
 
 /**

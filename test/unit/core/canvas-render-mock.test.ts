@@ -12,7 +12,6 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { Canvas, createCanvas } from 'canvas';
 import {
   buildWrappedLines,
-  clipTextToWidth,
   drawRoundRect,
   renderRegularMessage,
   renderSegment,
@@ -1150,45 +1149,6 @@ describe('strokeTextOutline', () => {
     expect(ctx.lineJoin).toBe('round');
     expect(ctx.lineCap).toBe('round');
     expect(ctx.miterLimit).toBe(2);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// clipTextToWidth
-// ═══════════════════════════════════════════════════════════════════
-
-describe('clipTextToWidth', () => {
-  it('returns full text when it fits within maxWidth', () => {
-    const { ctx } = createMockContext();
-    const result = clipTextToWidth('hello', 500, ctx);
-    expect(result).toBe('hello');
-  });
-
-  it('returns empty string for empty input', () => {
-    const { ctx } = createMockContext();
-    const result = clipTextToWidth('', 100, ctx);
-    expect(result).toBe('');
-  });
-
-  it('returns empty string for zero maxWidth', () => {
-    const { ctx } = createMockContext();
-    const result = clipTextToWidth('hello', 0, ctx);
-    expect(result).toBe('');
-  });
-
-  it('truncates text with ellipsis when exceeding maxWidth', () => {
-    const { ctx } = createMockContext();
-    // Long text that exceeds the mock maxWidth
-    const longText = 'this is a very long text that will not fit';
-    const result = clipTextToWidth(longText, 1, ctx);
-    expect(result.length).toBeLessThan(longText.length);
-  });
-
-  it('uses binary search for efficient truncation', () => {
-    const { ctx, state } = createMockContext();
-    clipTextToWidth('a'.repeat(100), 50, ctx);
-    // measureText should be called multiple times (binary search)
-    expect(state.measuredTexts.length).toBeGreaterThan(1);
   });
 });
 

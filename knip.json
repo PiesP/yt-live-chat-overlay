@@ -1,7 +1,22 @@
 {
   "$schema": "./node_modules/knip/schema.json",
-  "entry": ["src/main.ts", "scripts/**/*.ts", "vite.config.*.ts"],
-  "project": ["src/**/*.ts", "scripts/**/*.ts", "tooling/**/*.ts", "vite*.ts"],
+  "entry": [
+    "src/main.ts!",
+    "src/renderer/worker/renderer.ts!",
+    "extension/background.ts!",
+    "extension/content-script.ts!",
+    "extension/page-script.ts!",
+    "scripts/**/*.ts",
+    "vite.config.*.ts"
+  ],
+  "project": [
+    "src/**/*.ts!",
+    "extension/**/*.ts!",
+    "scripts/**/*.ts",
+    "tooling/**/*.ts",
+    "vite*.ts",
+    "test/**/*.ts"
+  ],
   "paths": {
     "@app/*": ["src/app/*"],
     "@chat/*": ["src/chat/*"],
@@ -14,8 +29,9 @@
     "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
-  "ignore": ["extension/**", "dist*/**", "test/**"],
-  "ignoreBinaries": [],
-  "ignoreDependencies": ["@axe-core/playwright"],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "playwright": {
+    "config": ["test/e2e/playwright.config.ts"],
+    "entry": ["test/e2e/specs/**/*.spec.ts"]
+  }
 }

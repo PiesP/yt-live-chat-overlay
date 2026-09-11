@@ -27,7 +27,6 @@ import {
 export {
   AUTHOR_BACKGROUND_ALPHA_HEX,
   DEFAULT_SETTINGS,
-  migrateSettings,
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@settings/defaults';

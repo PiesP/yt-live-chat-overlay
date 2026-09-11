@@ -8,6 +8,7 @@
  * rectangle paths on a Canvas2D context.
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
@@ -21,7 +22,6 @@ import type { CardConfig } from '@renderer/card-config';
 import { computeReadableTextColor } from '@renderer/color-utils';
 import { getAuthorNameMaxWidth } from '@renderer/layout/card-layout';
 import { getFontString, measureTextHeight } from '@renderer/text-measure';
-import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

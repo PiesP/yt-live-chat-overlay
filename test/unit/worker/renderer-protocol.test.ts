@@ -578,7 +578,7 @@ describe('Worker message protocol', () => {
       ).toBe(false);
     });
 
-    it('preserves decoded image caches across ordinary config updates', () => {
+    it('preserves decoded images across config updates and releases them on destruction', () => {
       const renderer = initializeRenderer();
       const internals = renderer as unknown as {
         emojiCache: { size: number };
@@ -597,6 +597,12 @@ describe('Worker message protocol', () => {
       );
 
       expect(internals.emojiCache.size).toBe(1);
+      expect(bitmap.close).not.toHaveBeenCalled();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(internals.emojiCache.size).toBe(0);
+      expect(bitmap.close).toHaveBeenCalledOnce();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(bitmap.close).toHaveBeenCalledOnce();
     });
 
     it('clears a transferred image failure so eviction can self-fetch immediately', async () => {

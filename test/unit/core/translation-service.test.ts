@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe('TranslationService translator lifecycle', () => {
-  it('destroys the old translator once after a successful language-pair change', async () => {
+  it('reuses cached translations within a language pair and disposes the replaced translator', async () => {
     const oldTranslator = makeTranslator('old');
     const newTranslator = makeTranslator('new');
     const newCreation = deferred<TranslatorInstance>();
@@ -61,6 +61,9 @@ describe('TranslationService translator lifecycle', () => {
 
     const service = new TranslationService();
     await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    await expect(service.translate('hello')).resolves.toBe('old:hello');
+    await expect(service.translate('hello')).resolves.toBe('old:hello');
+    expect(oldTranslator.translate).toHaveBeenCalledTimes(1);
 
     const newCreationStarted = deferred<void>();
     create.mockImplementationOnce(() => {
@@ -80,6 +83,9 @@ describe('TranslationService translator lifecycle', () => {
     await replacement;
 
     expect(oldTranslator.destroy).toHaveBeenCalledTimes(1);
+    await expect(service.translate('hello')).resolves.toBe('new:hello');
+    await expect(service.translate('hello')).resolves.toBe('new:hello');
+    expect(newTranslator.translate).toHaveBeenCalledTimes(1);
     service.destroy();
   });
 

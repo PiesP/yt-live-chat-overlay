@@ -60,8 +60,3 @@ export function parseSettingsControlName(name: string): SettingsControlTarget | 
   }
   return null;
 }
-
-/** Encode a typed settings path back to its form control name. */
-export function formatSettingsControlName(target: SettingsControlTarget): string {
-  return target.group === 'root' ? target.key : `${target.group}-${target.key}`;
-}

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { splitGraphemeClusters } from '@renderer/text-segmentation';
-import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import bidiFactory from 'bidi-js';
 
 export type TextDirection = 'ltr' | 'rtl';
@@ -183,6 +183,7 @@ export function resetBidiLayoutCaches(): void {
   planCache.clear();
 }
 
+/** @internal Cache ownership diagnostics for renderer regression tests. */
 export function getBidiLayoutCacheUsage(): {
   readonly direction: {
     readonly entries: number;

@@ -17,7 +17,7 @@
  */
 import type { TranslationSource, TranslationSourceLanguage, TranslationTarget } from '@app-types';
 import { resolveTranslationTarget } from '@i18n/index';
-import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('TranslationService');
