@@ -65,7 +65,7 @@ async function waitForProcessExit(
   return !(await checkAlive(processId));
 }
 
-async function removeOwnedProfile(root, profile) {
+export async function removeOwnedChromeProfile(root, profile) {
   assertOwnedProfile(root, profile);
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   const removed = await stat(profile).then(() => false, (error) => {
@@ -306,7 +306,7 @@ export async function cleanupChromeInstallation(
   result.cleanup.browserProcessExited = browserProcessExited;
   if (browserProcessExited) {
     try {
-      await removeOwnedProfile(root, profile);
+      await removeOwnedChromeProfile(root, profile);
       result.cleanup.profileRemoved = true;
     } catch (error) { errors.push(error); }
   } else {
@@ -320,12 +320,22 @@ export async function cleanupChromeInstallation(
 /** Install real browser packages in an isolated profile and exercise their normal delivery. */
 export async function runChromeInstallation({
   chromium, root, output, browserName = 'chrome', headless = false,
-  installation, liveUrls = [],
+  installation, liveUrls = [], liveObservation = null,
 }) {
   assert(['chrome', 'msedge'].includes(browserName), 'Unsupported Chromium channel');
   assert(['extension', 'userscript'].includes(installation), 'Unknown installation mode');
   assert(Array.isArray(liveUrls) && liveUrls.length <= 3,
     'At most three live URLs can run within the guest deadline');
+  if (liveObservation !== null) {
+    assert.deepEqual(liveObservation, { mode: 'duration', duration_seconds: 1200 });
+    assert.equal(browserName, 'chrome', 'Duration observation requires installed Chrome');
+    assert.equal(headless, false, 'Duration observation requires a headed browser');
+    assert.equal(installation, 'extension', 'Duration observation requires the extension');
+    assert.equal(liveUrls.length, 1, 'Duration observation requires one public live URL');
+    return runChromeDurationInstallation({
+      chromium, root, output, installation, liveUrls, liveObservation,
+    });
+  }
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let context;
   let cdp;
@@ -341,7 +351,7 @@ export async function runChromeInstallation({
       locale: 'en-US',
       viewport: { width: 1280, height: 720 },
       ignoreDefaultArgs: ['--disable-extensions'],
-      args: ['--enable-unsafe-extension-debugging'],
+      args: ['--enable-unsafe-extension-debugging', '--mute-audio'],
     });
     result.browserVersion = context.browser().version();
     cdp = await context.browser().newBrowserCDPSession();
@@ -390,6 +400,86 @@ export async function runChromeInstallation({
     } catch (cleanupError) {
       if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');
       throw cleanupError;
+    }
+  }
+}
+
+async function runChromeDurationInstallation({
+  chromium, root, output, installation, liveUrls, liveObservation,
+}) {
+  const [{ launchOwnedNaturalChrome }, { runLiveDuration }] = await Promise.all([
+    import('./natural-chrome.mjs'),
+    import('./live-duration.mjs'),
+  ]);
+  let ownedChrome;
+  let extensionId;
+  let primaryError;
+  const result = {
+    installation,
+    fixture: null,
+    live: [],
+    liveObservation,
+    cleanup: {},
+  };
+  try {
+    ownedChrome = await launchOwnedNaturalChrome({ chromium, root, output });
+    const { browser, context } = ownedChrome;
+    result.browserVersion = browser.version();
+    result.naturalChrome = ownedChrome.launchEvidence;
+    result.cleanup.browserProcessIdentified = true;
+    await enableDeveloperMode(context);
+    ({ id: extensionId } = await ownedChrome.cleanupCdp.send('Extensions.loadUnpacked', {
+      path: join(root, 'dist-extension'),
+    }));
+    assert.equal(typeof extensionId, 'string');
+    result.installationMethod = 'cdp-unpacked-extension';
+    result.fixture = await runFixture({
+      browser,
+      root,
+      output,
+      installedContext: context,
+      installedExtensionId: extensionId,
+      expectedRenderer: 'worker',
+    });
+    const observation = await runLiveDuration({
+      context,
+      url: liveUrls[0],
+      output,
+      installation,
+    });
+    result.live.push(observation);
+    assert.equal(
+      observation.evidenceStatus,
+      'observed',
+      `Duration observation remained unverified: ${observation.evidenceStatusReasons?.join(', ')}`
+    );
+    return result;
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    if (ownedChrome) {
+      try {
+        await cleanupChromeInstallation({
+          browserProcessId: ownedChrome.browserProcessId,
+          browserProcessIdentity: ownedChrome.browserProcessIdentity,
+          context: ownedChrome.cleanupContext,
+          cdp: ownedChrome.cleanupCdp,
+          extensionId,
+          profile: ownedChrome.profile,
+          output,
+          result,
+          root,
+        });
+      } catch (cleanupError) {
+        if (primaryError) {
+          throw new AggregateError(
+            [primaryError, cleanupError],
+            'Duration observation and cleanup failed'
+          );
+        }
+        throw cleanupError;
+      }
     }
   }
 }

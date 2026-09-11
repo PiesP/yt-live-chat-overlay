@@ -113,6 +113,9 @@ classify_path() {
     tooling/** | vite.config.ts | vite.config.*.ts)
       mark quality unit e2e build semgrep codeql_javascript codex_security
       ;;
+    validation/windows/**)
+      mark quality unit semgrep codeql_javascript codex_security
+      ;;
     test/e2e/**)
       mark quality e2e semgrep codeql_javascript codex_security
       ;;
