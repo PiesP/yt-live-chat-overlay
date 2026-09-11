@@ -49,6 +49,8 @@ export class LiveChatSource extends ChatSource {
   private readonly densityRing = new Uint16Array(DENSITY_WINDOW_SIZE);
   private densityRingWrite = 0;
   private densityRingFilled = 0;
+  /** Whether the latest successful payload contained parsed chat events. */
+  private lastSuccessfulPayloadHadEvents = false;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -71,6 +73,7 @@ export class LiveChatSource extends ChatSource {
     this.densityRing.fill(0);
     this.densityRingWrite = 0;
     this.densityRingFilled = 0;
+    this.lastSuccessfulPayloadHadEvents = false;
   }
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
@@ -114,13 +117,14 @@ export class LiveChatSource extends ChatSource {
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
     const settings = this.getSettings();
+    const useActivitySignals = this.lastSuccessfulPayloadHadEvents;
     return calculateAdaptiveDelay(
       timeoutMs,
       settings.livePollFallbackMs,
       this.consecutiveErrors,
-      this.burstRateProvider?.(),
+      useActivitySignals ? this.burstRateProvider?.() : undefined,
       this.densityRing,
-      this.densityRingFilled,
+      useActivitySignals ? this.densityRingFilled : 0,
       this.getLimits()
     );
   }
@@ -270,6 +274,7 @@ export class LiveChatSource extends ChatSource {
       undefined,
       this.isKnownReplacementTarget
     );
+    this.lastSuccessfulPayloadHadEvents = events.length > 0;
 
     if (events.length > 0) {
       let messages: ChatMessage[];
