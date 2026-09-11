@@ -206,7 +206,7 @@ jobs:
 
       - name: 📊 Upload OSV SARIF to GitHub Security
         if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') && !cancelled() }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: ${{ runner.temp }}/osv-results/osv-results.sarif
 
@@ -291,7 +291,7 @@ jobs:
 
       - name: 📊 Upload OSV SARIF to GitHub Security
         if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') && !cancelled() }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: ${{ runner.temp }}/osv-results/osv-results.sarif
 
@@ -323,14 +323,14 @@ jobs:
 
       - name: 🔧 Initialize CodeQL
         if: ${{ needs.changes.result != 'success' || (matrix.language == 'actions' && needs.changes.outputs.codeql_actions == 'true') || (matrix.language == 'javascript-typescript' && needs.changes.outputs.codeql_javascript == 'true') }}
-        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
 
       - name: 🔎 Perform CodeQL Analysis
         if: ${{ needs.changes.result != 'success' || (matrix.language == 'actions' && needs.changes.outputs.codeql_actions == 'true') || (matrix.language == 'javascript-typescript' && needs.changes.outputs.codeql_javascript == 'true') }}
-        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -375,7 +375,7 @@ jobs:
 
       - name: 📊 Upload SARIF to GitHub Security
         if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') && !cancelled() && hashFiles('semgrep.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: semgrep.sarif
 
