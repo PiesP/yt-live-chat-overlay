@@ -419,7 +419,7 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
   let stage = 'preflight:create-page';
   try {
     await persist(stage, 'before');
-    page = context.pages()[0] ?? (await context.newPage());
+    page = await context.newPage();
     background = await context.newPage();
     page.on('pageerror', (error) => {
       if (pageErrors.length < MAX_PAGE_ERRORS) pageErrors.push(error.name || 'Error');

@@ -243,23 +243,28 @@ export async function cleanupChromeInstallation(
   } = {}
 ) {
   const errors = [];
+  const errorTypes = [];
+  const recordError = (stage, error) => {
+    errors.push(error);
+    errorTypes.push({ stage, errorType: error instanceof Error ? error.name : typeof error });
+  };
   if (cdp && extensionId) {
     try {
       await cdp.send('Extensions.uninstall', { id: extensionId });
       result.cleanup.extensionUninstalled = true;
-    } catch (error) { errors.push(error); }
+    } catch (error) { recordError('extension-uninstall', error); }
   }
   try {
     await context?.close();
     result.cleanup.browserClosed = true;
   } catch (error) {
-    errors.push(error);
+    recordError('context-close', error);
     try {
       const ownedBrowser = context?.browser();
       if (!ownedBrowser) throw new Error('Owned browser cleanup handle is unavailable');
       await ownedBrowser.close();
       result.cleanup.browserClosed = true;
-    } catch (fallbackError) { errors.push(fallbackError); }
+    } catch (fallbackError) { recordError('browser-close', fallbackError); }
   }
   let browserProcessExited = result.cleanup.browserClosed === true;
   if (browserProcessId !== undefined) {
@@ -277,14 +282,16 @@ export async function cleanupChromeInstallation(
       }
     } catch (error) {
       browserProcessExited = false;
-      errors.push(error);
+      recordError('browser-process-exit-check', error);
     }
     if (!browserProcessExited) {
       let terminationError;
+      let terminationErrorStage;
       try {
         await terminateProcessTree(browserProcessId);
       } catch (error) {
         terminationError = error;
+        terminationErrorStage = 'browser-process-tree-termination';
       }
       try {
         browserProcessExited = waitForExit
@@ -292,27 +299,33 @@ export async function cleanupChromeInstallation(
           : await waitForProcessExit(browserProcessId, checkProcessAlive);
       } catch (error) {
         terminationError ??= error;
+        terminationErrorStage ??= 'browser-process-exit-check';
         browserProcessExited = false;
       }
       if (!browserProcessExited) {
-        errors.push(
+        recordError(
+          terminationErrorStage ?? 'browser-process-tree-exit',
           terminationError ?? new Error('Task-owned browser process tree did not terminate')
         );
       }
     }
   } else if (!browserProcessExited) {
-    errors.push(new Error('Task-owned browser process identity is unavailable'));
+    recordError(
+      'browser-process-identity',
+      new Error('Task-owned browser process identity is unavailable')
+    );
   }
   result.cleanup.browserProcessExited = browserProcessExited;
   if (browserProcessExited) {
     try {
       await removeOwnedChromeProfile(root, profile);
       result.cleanup.profileRemoved = true;
-    } catch (error) { errors.push(error); }
+    } catch (error) { recordError('profile-remove', error); }
   } else {
     result.cleanup.profilePreserved = true;
   }
   result.cleanup.errorCount = errors.length;
+  result.cleanup.errorTypes = errorTypes;
   await writeFile(join(output, 'installation-result.json'), JSON.stringify(result, null, 2));
   if (errors.length) throw new AggregateError(errors, 'Chrome installation cleanup failed');
 }
