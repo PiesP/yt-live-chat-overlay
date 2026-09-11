@@ -11,6 +11,7 @@
 
 import type { FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
+import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import {
   resolveTextDirection,
   resolveVisualInlineLines,
@@ -26,7 +27,6 @@ import {
 } from '@renderer/layout/card-layout';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { splitGraphemeClusters as splitGraphemeClustersInternal } from '@renderer/text-segmentation';
-import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
 /** A char-wrap segment with pre-computed width. */

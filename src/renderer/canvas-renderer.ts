@@ -34,7 +34,7 @@ import { getTranslatableText } from '@chat/message-helpers';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
-import { yieldIfOverBudgetAsync } from '@piesp/browser-core/util';
+import { ResizableByteLimitedCache, yieldIfOverBudgetAsync } from '@piesp/browser-core/util';
 import { resetBidiLayoutCaches } from '@renderer/canvas/bidi-layout';
 import {
   applyDevicePixelRatio,
@@ -97,7 +97,6 @@ import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
-import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { DensityIndicator } from '@util/density-indicator';
 import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';

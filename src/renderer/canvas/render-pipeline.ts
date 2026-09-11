@@ -11,6 +11,7 @@
  */
 
 import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
@@ -38,7 +39,6 @@ import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { getMessagePriority } from '@renderer/message-priority';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
-import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { rendererLayout } from '@util/design-tokens';
 import type { MapCompatibleLruMap } from '@util/lru-map';
 import type { MessageActivator } from '@util/message-activator';

@@ -129,6 +129,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Verify the pinned browser-core contracts
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+        run: pnpm test:core
+
       - name: 🧪 Run unit tests and coverage thresholds
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
         run: pnpm test:cov

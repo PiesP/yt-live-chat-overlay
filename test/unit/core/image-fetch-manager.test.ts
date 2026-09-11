@@ -71,6 +71,14 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(manager.emojiFetching).toContain(EMOJI_URL);
     expect(manager.imageLoading).not.toContain(AUTHOR_URL);
     expect(vi.getTimerCount()).toBeGreaterThan(0);
+    const pendingImage = PendingImage.instances[0];
+    if (!pendingImage) throw new Error('Expected a pending emoji image');
+
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const cachedImage = PendingImage.instances.at(-1);
+    if (!cachedImage?.onload) throw new Error('Expected a pending sticker image');
+    cachedImage.onload();
+    expect(manager.stickerCache.has(STICKER_URL)).toBe(true);
 
     manager.destroy();
 
@@ -81,7 +89,7 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(manager.emojiCache.size).toBe(0);
     expect(manager.authorPhotoCache.size).toBe(0);
     expect(manager.stickerCache.size).toBe(0);
-    expect(PendingImage.instances.every((image) => image.src === '')).toBe(true);
+    expect(pendingImage.src).toBe('');
     expect(vi.getTimerCount()).toBe(0);
   });
 

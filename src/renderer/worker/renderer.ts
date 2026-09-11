@@ -36,6 +36,7 @@ import type { FontWeight } from '@app-types';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
+import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { resetBidiLayoutCaches, type TextDirection } from '@renderer/canvas/bidi-layout';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
@@ -97,7 +98,6 @@ import {
 } from '@renderer/shared';
 import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
-import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import {
   computeScrollDuration,
   DEFAULT_FONT_FAMILY,
