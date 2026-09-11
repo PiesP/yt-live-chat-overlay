@@ -11,6 +11,9 @@ strictDepBuilds: true
 blockExoticSubdeps: true
 engineStrict: true
 
+# Keep paired tooling and plugin peer requirements compatible during installs.
+strictPeerDependencies: true
+
 # Enforce a 24-hour supply-chain observation window, including registries that
 # omit publication timestamps.
 minimumReleaseAge: 1440
