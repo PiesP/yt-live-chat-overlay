@@ -132,6 +132,9 @@ describe('LiveChatSource empty-response polling', () => {
     internals.consecutiveErrors = 1;
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(4_000);
 
+    await internals.handleLivePayload(makePayload('active-before-reset'));
+    expect(internals.calculateAdaptiveDelay(2_000)).toBe(0);
+
     internals.resetSessionState();
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(2_000);
   });
