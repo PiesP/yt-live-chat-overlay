@@ -116,6 +116,27 @@ describe('public duration observation contract', () => {
     });
   });
 
+  it('waits for both overlay surfaces after healthy media becomes ready', () => {
+    expect(durationModule.isInitialObservationReady({
+      ...healthySample,
+      canvasAttached: false,
+      installedBridgeReady: false,
+    })).toBe(false);
+    expect(durationModule.isInitialObservationReady({
+      ...healthySample,
+      installedBridgeReady: false,
+    })).toBe(false);
+    expect(durationModule.isInitialObservationReady({
+      ...healthySample,
+      canvasAttached: false,
+    })).toBe(false);
+    expect(durationModule.isInitialObservationReady(healthySample)).toBe(true);
+    expect(durationModule.isInitialObservationReady({
+      ...healthySample,
+      playerErrorUi: { visible: true, marker: 'youtube-player-error-ui-visible' },
+    })).toBe(false);
+  });
+
   it('requires a fresh accessible fingerprint after resume when chat exists', () => {
     expect(durationModule.classifyResumeFingerprint(
       { count: 2, fingerprint: 'before' },

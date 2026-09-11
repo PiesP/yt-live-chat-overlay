@@ -253,6 +253,19 @@ async function publicState(page) {
   });
 }
 
+export function isInitialObservationReady(state) {
+  return Boolean(
+    state?.visibility === 'visible' &&
+      state.canvasAttached &&
+      state.installedBridgeReady &&
+      state.playerErrorUi?.visible === false &&
+      state.video?.errorCode === null &&
+      state.video?.muted &&
+      !state.video?.paused &&
+      state.video?.readyState >= 2
+  );
+}
+
 async function waitForInitialMedia(page, timeoutMs) {
   const started = performance.now();
   const deadline = started + timeoutMs;
@@ -261,14 +274,7 @@ async function waitForInitialMedia(page, timeoutMs) {
   do {
     latest = await publicState(page);
     first ??= latest;
-    if (
-      latest.visibility === 'visible' &&
-      latest.playerErrorUi.visible === false &&
-      latest.video?.errorCode === null &&
-      latest.video?.muted &&
-      !latest.video?.paused &&
-      latest.video?.readyState >= 2
-    ) {
+    if (isInitialObservationReady(latest)) {
       return {
         status: 'observed',
         elapsedMs: performance.now() - started,
@@ -280,7 +286,7 @@ async function waitForInitialMedia(page, timeoutMs) {
   } while (performance.now() < deadline);
   return {
     status: 'unverified',
-    reason: 'healthy-public-media-readiness-timeout',
+    reason: 'healthy-public-media-and-overlay-readiness-timeout',
     elapsedMs: performance.now() - started,
     first,
     latest,
@@ -461,7 +467,7 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
     assert.equal(
       result.preflight.mediaReadiness.status,
       'observed',
-      'Public player did not reach healthy muted playback during bounded readiness'
+      'Public player and installed overlay did not reach bounded readiness'
     );
     result.preflight.initialState = await publicState(page);
 
