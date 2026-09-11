@@ -4,7 +4,6 @@ import {
   isAllowedImageUrl,
   normalizeYouTubeImageUrl,
   ALLOWED_IMAGE_HOST_SUFFIXES,
-  ALLOWED_IMAGE_ORIGINS,
 } from '@media/image-url-validation';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -15,13 +14,6 @@ describe('ALLOWED_IMAGE_HOST_SUFFIXES', () => {
     expect(ALLOWED_IMAGE_HOST_SUFFIXES).toContain('googleusercontent.com');
     expect(ALLOWED_IMAGE_HOST_SUFFIXES).toContain('gstatic.com');
     expect(ALLOWED_IMAGE_HOST_SUFFIXES).toContain('ytimg.com');
-  });
-});
-
-describe('ALLOWED_IMAGE_ORIGINS', () => {
-  it('contains expected YouTube CDN origins', () => {
-    expect(ALLOWED_IMAGE_ORIGINS).toContain('https://yt3.ggpht.com');
-    expect(ALLOWED_IMAGE_ORIGINS).toContain('https://yt4.ggpht.com');
   });
 });
 

@@ -770,7 +770,8 @@ describe('normalizeStoredSettings', () => {
 // isLogLevel
 // ═══════════════════════════════════════════════════════════
 
-import { clampNumber, isColorValue, isLogLevel, migrateSettings } from '@settings/schema';
+import { clampNumber, isColorValue, isLogLevel } from '@settings/schema';
+import { migrateSettings } from '@settings/defaults';
 
 describe('isLogLevel', () => {
   it("'warn' returns true", () => {

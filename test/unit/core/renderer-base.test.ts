@@ -29,6 +29,10 @@ class TestRenderer extends RendererBase {
     return this.laneAllocator.getLaneCount();
   }
 
+  get effectiveFontSize(): number {
+    return this.getEffectiveFontSize();
+  }
+
   getQueueLength(): number {
     return this.messages.length;
   }
@@ -143,6 +147,32 @@ function createRenderer(settings = defaultSettings): TestRenderer {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('RendererBase', () => {
+  it.each([
+    { height: 720, expected: 20 },
+    { height: 1440, expected: 40 },
+    { height: 360, expected: 10 },
+    { height: 10_000, expected: 40 },
+    { height: 100, expected: 10 },
+    { height: 0, expected: 20 },
+    { height: -100, expected: 20 },
+    { height: null, expected: 20 },
+    { height: 450, expected: 13 },
+    { height: 400, expected: 11 },
+  ])('scales and clamps the production font size at viewport height $height', ({ height, expected }) => {
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue(
+      height === null ? null : { width: 1920, height }
+    );
+    const renderer = createRenderer({
+      ...defaultSettings,
+      fontSize: 20,
+      fontBaseViewportHeight: 720,
+      fontMinSize: 10,
+      fontMaxSize: 40,
+    });
+
+    expect(renderer.effectiveFontSize).toBe(expected);
+  });
+
   // ── Constructor ─────────────────────────────────────────────────────
 
   describe('constructor', () => {

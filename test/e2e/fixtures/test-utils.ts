@@ -21,7 +21,6 @@ import { resolve } from 'node:path';
 
 export const DIST_DIR = resolve(process.cwd(), 'dist');
 export const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
-export const EXTENSION_DIR = resolve(process.cwd(), 'dist-extension');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -29,7 +28,6 @@ export const OVERLAY_ID = 'yt-live-chat-overlay';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
 export const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-export const MOCK_NON_WATCH_URL = 'https://www.youtube.com/feed/trending';
 export const SETTINGS_STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 /**

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  formatSettingsControlName,
   parseSettingsControlName,
   type SettingsControlTarget,
 } from '@settings/ui/control-codec';
@@ -14,9 +13,8 @@ describe('settings control name codec', () => {
     ['backgroundEnabled-verified', { group: 'backgroundEnabled', key: 'verified' }],
     ['showAuthor-superChat', { group: 'showAuthor', key: 'superChat' }],
     ['fontSize', { group: 'root', key: 'fontSize' }],
-  ])('round-trips %s', (name, target) => {
+  ])('decodes %s', (name, target) => {
     expect(parseSettingsControlName(name)).toEqual(target);
-    expect(formatSettingsControlName(target)).toBe(name);
   });
 
   it.each([

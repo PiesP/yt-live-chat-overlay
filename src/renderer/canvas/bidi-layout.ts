@@ -183,6 +183,7 @@ export function resetBidiLayoutCaches(): void {
   planCache.clear();
 }
 
+/** @internal Cache ownership diagnostics for renderer regression tests. */
 export function getBidiLayoutCacheUsage(): {
   readonly direction: {
     readonly entries: number;
