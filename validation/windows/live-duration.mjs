@@ -65,7 +65,8 @@ export function summarizePhaseHealth(samples, phase) {
     sampleCount: selected.length,
     healthySampleCount: healthy.length,
     nonProgressingIntervalCount,
-    mediaProgressSeconds:
+    // Position range includes seeks and resets; it is not elapsed playback time.
+    mediaTimeRangeSeconds:
       times.length < 2 ? null : Math.max(...times) - Math.min(...times),
   };
 }

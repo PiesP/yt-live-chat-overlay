@@ -63,6 +63,12 @@ player-error UI, and accessible-render fingerprint evidence. Public chat volume 
 uncontrolled, so a stream with no accessible chat is recorded as unverified. The
 structured observation records only chat counts and fingerprints, not raw chat text.
 
+Phase summaries report `mediaTimeRangeSeconds`, the difference between the largest
+and smallest finite sampled media positions, or `null` with fewer than two positions.
+This range includes seeks and timeline resets; it does not measure playback progress
+or watch time. Older records named this field `mediaProgressSeconds` and must be
+interpreted as the same position range. Phase health is checked separately.
+
 The ordinary short installation flow keeps the persistent-context launcher and
 does not establish native tab visibility. Both Chrome launch paths use
 `--mute-audio`. A duration run closes the owned browser before removing its fresh
