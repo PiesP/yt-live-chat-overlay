@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   cleanupChromeInstallation,
@@ -18,6 +18,7 @@ const CHILD_EXIT_MS = 8_000;
 const STDERR_LIMIT_BYTES = 64 * 1024;
 const PROTOCOL_TIMEOUT_MS = 15_000;
 const IDENTITY_WAIT_MS = 8_000;
+const DEVTOOLS_FILE_MAX_BYTES = 4096;
 
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 
@@ -78,13 +79,29 @@ export async function readDevToolsEndpoint(
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error('Owned Chrome exited before its DevTools endpoint was ready');
     }
+    let portHandle;
     try {
-      const portStat = await stat(portFile);
+      portHandle = await open(portFile, 'r');
+      const portStat = await portHandle.stat();
       assert(
-        portStat.isFile() && portStat.size >= 3 && portStat.size <= 4096,
+        portStat.isFile() && portStat.size >= 3 && portStat.size <= DEVTOOLS_FILE_MAX_BYTES,
         'DevToolsActivePort has an invalid file shape'
       );
-      const [portText, webSocketPath, ...extra] = (await readFile(portFile, 'utf8'))
+      // Keep reads on the checked handle and bound growth after the size check.
+      const buffer = Buffer.alloc(DEVTOOLS_FILE_MAX_BYTES + 1);
+      let totalBytes = 0;
+      while (totalBytes < buffer.length) {
+        const { bytesRead } = await portHandle.read(
+          buffer, totalBytes, buffer.length - totalBytes, totalBytes
+        );
+        if (bytesRead === 0) break;
+        totalBytes += bytesRead;
+      }
+      assert(
+        totalBytes >= 3 && totalBytes <= DEVTOOLS_FILE_MAX_BYTES,
+        'DevToolsActivePort has an invalid file shape'
+      );
+      const [portText, webSocketPath, ...extra] = buffer.toString('utf8', 0, totalBytes)
         .trim()
         .split(/\r?\n/u);
       assert.equal(extra.length, 0, 'DevToolsActivePort has extra records');
@@ -101,6 +118,8 @@ export async function readDevToolsEndpoint(
       return `ws://127.0.0.1:${port}${webSocketPath}`;
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
+    } finally {
+      await portHandle?.close();
     }
     await sleep(100);
   }
