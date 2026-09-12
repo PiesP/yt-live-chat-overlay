@@ -116,6 +116,49 @@ describe('public duration observation contract', () => {
     });
   });
 
+  it.each([
+    { name: 'normal increase', times: [10, 40, 70], range: 60 },
+    { name: 'stalled playback', times: [10, 10, 10], range: 0 },
+    {
+      name: 'timeline reset after a player error',
+      times: [46788.115483, 46818.165862, 0, 0],
+      range: 46818.165862,
+    },
+    { name: 'forward seek', times: [10, 3610], range: 3600 },
+    { name: 'one position', times: [10], range: null },
+    { name: 'no positions', times: [], range: null },
+    { name: 'non-finite positions', times: [10, Number.NaN, Infinity], range: null },
+  ])('reports only a media position range for $name', ({ times, range }) => {
+    const health = durationModule.summarizePhaseHealth(times.map((currentTime) => ({
+      ...healthySample,
+      video: { ...healthySample.video, currentTime },
+    })), 'active');
+
+    expect(health.mediaTimeRangeSeconds).toBe(range);
+    expect(health).not.toHaveProperty('mediaProgressSeconds');
+  });
+
+  it('keeps the recorded player-error timeline reset unverified', () => {
+    const samples = [46788.115483, 46818.165862, 0, 0].map((currentTime, index) => ({
+      ...healthySample,
+      playerErrorUi: { visible: index >= 2 },
+      video: {
+        ...healthySample.video,
+        currentTime,
+        paused: index >= 2,
+        readyState: index >= 2 ? 0 : 4,
+      },
+    }));
+
+    expect(durationModule.summarizePhaseHealth(samples, 'active')).toMatchObject({
+      status: 'unverified',
+      healthySampleCount: 2,
+      nonProgressingIntervalCount: 2,
+      mediaTimeRangeSeconds: 46818.165862,
+      reasons: ['sample-health-incomplete', 'media-time-not-progressing'],
+    });
+  });
+
   it('waits for both overlay surfaces after healthy media becomes ready', () => {
     expect(durationModule.isInitialObservationReady({
       ...healthySample,
