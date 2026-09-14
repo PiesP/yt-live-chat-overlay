@@ -148,23 +148,33 @@ jobs:
           set -euo pipefail
           install -d -m 0700 "$RUNNER_TEMP/osv-results"
           install -m 0600 .github/codex-security/osv-scanner.toml "$RUNNER_TEMP/osv-results/osv-scanner.toml"
+          install -m 0600 scripts/security/scope-osv-exceptions.py "$RUNNER_TEMP/osv-results/scope-osv-exceptions.py"
+          : > "$RUNNER_TEMP/osv-results/osv-empty.toml"
 
       - name: 🛡️ Scan dependencies before the PR
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
         continue-on-error: true
         run: |
+          scan_status=0
           docker run --rm \
             --env GOTOOLCHAIN=auto \
             --volume "$GITHUB_WORKSPACE:/src" \
             --volume "$RUNNER_TEMP/osv-results:/results" \
             --workdir /src \
             "$OSV_SCANNER_IMAGE" \
-            --config=/results/osv-scanner.toml \
+            --config=/results/osv-empty.toml \
             --format=json \
-            --output-file=/results/old-results.json \
+            --output-file=/results/old-results.raw.json \
             -r \
             --lockfile=pnpm-lock.yaml \
-            .
+            . || scan_status=$?
+          if ((scan_status > 1)); then
+            exit "$scan_status"
+          fi
+          python3 "$RUNNER_TEMP/osv-results/scope-osv-exceptions.py" \
+            --policy "$RUNNER_TEMP/osv-results/osv-scanner.toml" \
+            --input "$RUNNER_TEMP/osv-results/old-results.raw.json" \
+            --output "$RUNNER_TEMP/osv-results/old-results.json"
 
       - name: ⏩ Checkout the PR result
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
@@ -177,18 +187,26 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
         continue-on-error: true
         run: |
+          scan_status=0
           docker run --rm \
             --env GOTOOLCHAIN=auto \
             --volume "$GITHUB_WORKSPACE:/src" \
             --volume "$RUNNER_TEMP/osv-results:/results" \
             --workdir /src \
             "$OSV_SCANNER_IMAGE" \
-            --config=/results/osv-scanner.toml \
+            --config=/results/osv-empty.toml \
             --format=json \
-            --output-file=/results/new-results.json \
+            --output-file=/results/new-results.raw.json \
             -r \
             --lockfile=pnpm-lock.yaml \
-            .
+            . || scan_status=$?
+          if ((scan_status > 1)); then
+            exit "$scan_status"
+          fi
+          python3 "$RUNNER_TEMP/osv-results/scope-osv-exceptions.py" \
+            --policy "$RUNNER_TEMP/osv-results/osv-scanner.toml" \
+            --input "$RUNNER_TEMP/osv-results/new-results.raw.json" \
+            --output "$RUNNER_TEMP/osv-results/new-results.json"
 
       - name: 📋 Report newly introduced vulnerabilities
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
@@ -238,6 +256,7 @@ jobs:
           set -euo pipefail
           results_dir="$RUNNER_TEMP/osv-results"
           policy_path=.github/codex-security/osv-scanner.toml
+          helper_path=scripts/security/scope-osv-exceptions.py
           install -d -m 0700 "$results_dir"
 
           case "$EVENT_NAME" in
@@ -248,34 +267,46 @@ jobs:
                 exit 1
               fi
               git show "$BASE_SHA:$policy_path" > "$results_dir/osv-scanner.toml"
+              git show "$BASE_SHA:$helper_path" > "$results_dir/scope-osv-exceptions.py"
+              chmod 0600 "$results_dir/scope-osv-exceptions.py"
               chmod 0600 "$results_dir/osv-scanner.toml"
               ;;
             push | schedule | workflow_dispatch)
               install -m 0600 "$policy_path" "$results_dir/osv-scanner.toml"
+              install -m 0600 "$helper_path" "$results_dir/scope-osv-exceptions.py"
               ;;
             *)
               echo "Unsupported full-scan event: $EVENT_NAME" >&2
               exit 1
               ;;
           esac
+          : > "$results_dir/osv-empty.toml"
 
       - name: 🛡️ Run OSV scan
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
         continue-on-error: true
         run: |
           set -euo pipefail
+          scan_status=0
           docker run --rm \
             --env GOTOOLCHAIN=auto \
             --volume "$GITHUB_WORKSPACE:/src" \
             --volume "$RUNNER_TEMP/osv-results:/results" \
             --workdir /src \
             "$OSV_SCANNER_IMAGE" \
-            --config=/results/osv-scanner.toml \
+            --config=/results/osv-empty.toml \
             --format=json \
-            --output-file=/results/osv-results.json \
+            --output-file=/results/osv-results.raw.json \
             -r \
             --lockfile=pnpm-lock.yaml \
-            .
+            . || scan_status=$?
+          if ((scan_status > 1)); then
+            exit "$scan_status"
+          fi
+          python3 "$RUNNER_TEMP/osv-results/scope-osv-exceptions.py" \
+            --policy "$RUNNER_TEMP/osv-results/osv-scanner.toml" \
+            --input "$RUNNER_TEMP/osv-results/osv-results.raw.json" \
+            --output "$RUNNER_TEMP/osv-results/osv-results.json"
 
       - name: 📋 Convert OSV results to SARIF and enforce the vulnerability gate
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}

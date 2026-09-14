@@ -137,6 +137,9 @@ classify_path() {
     scripts/**)
       mark quality unit build semgrep codeql_javascript codex_security
       case "$path" in
+        scripts/security/scope-osv-exceptions.py)
+          mark osv
+          ;;
         scripts/ci/**)
           mark pinned_tools
           ;;
