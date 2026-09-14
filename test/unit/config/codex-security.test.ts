@@ -112,15 +112,29 @@ describe('Codex Security CLI supply-chain controls', () => {
   });
 
   it('scopes the unpatched extract-zip advisory exception to the CLI lock', () => {
+    // A CLI upgrade requires revalidating the extraction guard before this exception.
+    const cliPackage = JSON.parse(readFileSync(cliPackagePath, 'utf8')) as CliPackage;
+    expect(cliPackage.dependencies['@openai/codex-security']).toBe('0.1.27');
     expect(osvConfig).toContain('id = "GHSA-jmr9-qjv8-65gv"');
-    expect(osvConfig).toContain('ignoreUntil = 2026-09-13');
+    expect(osvConfig).toContain('id = "GHSA-7pqw-9j4j-h8q3"');
+    expect(osvConfig.match(/ignoreUntil = 2026-09-28/g)).toHaveLength(2);
+    expect(osvConfig).toContain('/src/scripts/security/codex-security/package-lock.json');
+    expect(osvConfig).toContain('ignoreUntil = 2026-09-28');
     expect(osvConfig).toContain('rejects all symlink ZIP entries before extraction');
 
     const recursiveScanCount = securityWorkflow.match(/\s-r \\\n/g)?.length ?? 0;
     const configuredScanCount =
-      securityWorkflow.match(/--config=\/results\/osv-scanner\.toml/g)?.length ?? 0;
+      securityWorkflow.match(/--config=\/results\/osv-empty\.toml/g)?.length ?? 0;
     expect(recursiveScanCount).toBeGreaterThan(0);
     expect(configuredScanCount).toBe(recursiveScanCount);
+    expect(securityWorkflow).not.toContain('--config=/results/osv-scanner.toml');
+    expect(securityWorkflow.match(/scan_status=0/g)).toHaveLength(recursiveScanCount);
+    expect(securityWorkflow.match(/if \(\(scan_status > 1\)\); then/g)).toHaveLength(
+      recursiveScanCount
+    );
+    expect(securityWorkflow.match(/python3 "\$RUNNER_TEMP\/osv-results\/scope-osv-exceptions\.py"/g)).toHaveLength(
+      recursiveScanCount
+    );
     expect(securityWorkflow).not.toContain(
       '--config=/src/.github/codex-security/osv-scanner.toml'
     );
@@ -144,7 +158,7 @@ describe('Codex Security CLI supply-chain controls', () => {
       'install -m 0600 .github/codex-security/osv-scanner.toml "$RUNNER_TEMP/osv-results/osv-scanner.toml"'
     );
     expect(prJob.match(/\.github\/codex-security\/osv-scanner\.toml/g)).toHaveLength(1);
-    expect(prJob.match(/--config=\/results\/osv-scanner\.toml/g)).toHaveLength(2);
+    expect(prJob.match(/--config=\/results\/osv-empty\.toml/g)).toHaveLength(2);
   });
 
   it('selects the full-scan policy from the event trust boundary before scanning', () => {
@@ -159,6 +173,7 @@ describe('Codex Security CLI supply-chain controls', () => {
     expect(fullJob).toContain('fetch-depth: 0');
     expect(fullJob).toContain('BASE_SHA: ${{ github.event.merge_group.base_sha }}');
     expect(fullJob).toContain('merge_group)');
+    expect(fullJob).toContain('git show "$BASE_SHA:$helper_path" > "$results_dir/scope-osv-exceptions.py"');
     expect(fullJob).toContain('[[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]');
     expect(fullJob).toContain('git cat-file -e "$BASE_SHA^{commit}"');
     expect(fullJob).toContain(
@@ -168,7 +183,7 @@ describe('Codex Security CLI supply-chain controls', () => {
     expect(fullJob).toContain(
       'install -m 0600 "$policy_path" "$results_dir/osv-scanner.toml"'
     );
-    expect(fullJob).toContain('--config=/results/osv-scanner.toml');
+    expect(fullJob).toContain('--config=/results/osv-empty.toml');
   });
 
   it('installs the trusted base lock before checking out pull-request source', () => {

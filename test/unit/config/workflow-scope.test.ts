@@ -146,6 +146,13 @@ describe('workflow change classification', () => {
     });
   });
 
+  it('runs OSV when scoped exception handling changes', () => {
+    expect(classify(['scripts/security/scope-osv-exceptions.py'])).toMatchObject({
+      unit: true,
+      osv: true,
+    });
+  });
+
   it('keeps Codex Security dependency and policy changes in supply-chain scopes', () => {
     for (const path of [
       'scripts/security/codex-security/package-lock.json',
