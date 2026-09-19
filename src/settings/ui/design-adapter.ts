@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { DESIGN_ICON_CONTRACT, QUIET_INSTRUMENTS_TOKENS } from '@piesp/browser-core/design';
+import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 
 const tokens = QUIET_INSTRUMENTS_TOKENS;
 
@@ -55,5 +56,36 @@ export const SETTINGS_UI_DESIGN = {
   },
   shadow: {
     floating: tokens['component.panel.shadow'],
+  },
+  /**
+   * Settings-dialog type intentionally keeps the established product metrics.
+   * Shared values are resolved from Quiet Instruments; `lg`, `normal`, and
+   * `tight` are settings-specific exceptions so the injected dialog preserves
+   * its existing computed typography without changing the comment renderer.
+   */
+  typography: {
+    fontFamily: DEFAULT_FONT_FAMILY,
+    fontSize: {
+      xs: tokens['reference.font.size.label'],
+      sm: tokens['reference.font.size.body'],
+      base: tokens['reference.font.size.control'],
+      lg: '18px',
+    },
+    fontWeight: {
+      normal: 400,
+      semibold: Number(tokens['reference.font.weight.semibold']),
+      bold: Number(tokens['reference.font.weight.bold']),
+    },
+    lineHeight: {
+      normal: Number(tokens['reference.font.line-height.body']),
+      tight: 1,
+    },
+  },
+  spacing: {
+    xxs: Number.parseInt(tokens['reference.space.2'], 10),
+    xs: Number.parseInt(tokens['reference.space.4'], 10),
+    sm: Number.parseInt(tokens['reference.space.8'], 10),
+    md: Number.parseInt(tokens['reference.space.12'], 10),
+    lg: Number.parseInt(tokens['reference.space.16'], 10),
   },
 } as const;
