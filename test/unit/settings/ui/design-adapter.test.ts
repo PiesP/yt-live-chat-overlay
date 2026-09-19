@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
+import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 
 describe('settings Quiet Instruments adapter', () => {
   it('maps the dark settings roles to shared tokens without changing renderer tokens', () => {
@@ -52,6 +53,28 @@ describe('settings Quiet Instruments adapter', () => {
     });
   });
 
+  it('owns settings typography and spacing while preserving product exceptions', () => {
+    expect(SETTINGS_UI_DESIGN.typography).toEqual({
+      fontFamily: DEFAULT_FONT_FAMILY,
+      fontSize: {
+        xs: QUIET_INSTRUMENTS_TOKENS['reference.font.size.label'],
+        sm: QUIET_INSTRUMENTS_TOKENS['reference.font.size.body'],
+        base: QUIET_INSTRUMENTS_TOKENS['reference.font.size.control'],
+        lg: '18px',
+      },
+      fontWeight: {
+        normal: 400,
+        semibold: Number(QUIET_INSTRUMENTS_TOKENS['reference.font.weight.semibold']),
+        bold: Number(QUIET_INSTRUMENTS_TOKENS['reference.font.weight.bold']),
+      },
+      lineHeight: {
+        normal: Number(QUIET_INSTRUMENTS_TOKENS['reference.font.line-height.body']),
+        tight: 1,
+      },
+    });
+    expect(SETTINGS_UI_DESIGN.spacing).toEqual({ xxs: 2, xs: 4, sm: 8, md: 12, lg: 16 });
+  });
+
   it('resolves the runtime stylesheet without installing global token CSS', () => {
     expect(SETTINGS_UI_STYLES).toContain(`color-scheme: ${SETTINGS_UI_DESIGN.colorScheme}`);
     expect(SETTINGS_UI_STYLES).toContain(`background: ${SETTINGS_UI_DESIGN.colors.surface}`);
@@ -62,6 +85,10 @@ describe('settings Quiet Instruments adapter', () => {
     expect(SETTINGS_UI_STYLES).toContain(`border-radius: ${SETTINGS_UI_DESIGN.radius.panel}`);
     expect(SETTINGS_UI_STYLES).toContain(`min-height: ${SETTINGS_UI_DESIGN.target.minimum}`);
     expect(SETTINGS_UI_STYLES).toContain(`font-size: ${SETTINGS_UI_DESIGN.icon.size}`);
+    expect(SETTINGS_UI_STYLES).toContain(
+      `font-size: ${SETTINGS_UI_DESIGN.typography.fontSize.sm}`
+    );
+    expect(SETTINGS_UI_STYLES).toContain(`padding: ${SETTINGS_UI_DESIGN.spacing.lg}px`);
     expect(SETTINGS_UI_STYLES).toContain(
       `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.danger} 55%, black)`
     );

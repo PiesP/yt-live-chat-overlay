@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
-import { DEFAULT_FONT_FAMILY, spacing } from '@util/design-tokens';
 
 /**
  * Settings UI styles — plain CSS string injected into the page.
@@ -70,23 +69,8 @@ const uiColorsAlpha = {
   accentBgLight: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.accent} 20%, transparent)`,
 } as const;
 
-const typography = {
-  fontSize: {
-    xs: '12px',
-    sm: '14px',
-    base: '16px',
-    lg: '18px',
-  },
-  fontWeight: {
-    normal: 400,
-    semibold: 600,
-    bold: 700,
-  },
-  lineHeight: {
-    normal: 1.5,
-    tight: 1,
-  },
-} as const;
+const typography = SETTINGS_UI_DESIGN.typography;
+const spacing = SETTINGS_UI_DESIGN.spacing;
 
 const shadows = {
   box: {
@@ -159,7 +143,7 @@ const scrollbar = {
 
 // ── Toast notification ──
 const TOAST_BG = SETTINGS_UI_DESIGN.colors.canvas;
-const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
+const TOAST_FONT = `12px/1.4 ${typography.fontFamily}`;
 const TOAST_PADDING = '6px 14px';
 
 export const SETTINGS_UI_STYLES = `
@@ -286,7 +270,7 @@ export const SETTINGS_UI_STYLES = `
         display: flex;
         flex-direction: column;
         gap: ${spacing.md}px;
-        font-family: ${DEFAULT_FONT_FAMILY};
+        font-family: ${typography.fontFamily};
         box-shadow: ${shadows.box.lg};
         animation: yt-overlay-modal-scale-in ${animDuration.slow} ease-out;
       }
@@ -644,7 +628,7 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.textMuted};
         text-align: end;
-        font-family: ${DEFAULT_FONT_FAMILY};
+        font-family: ${typography.fontFamily};
       }
 
       /* Reset confirmation dialog — native <dialog> */
@@ -667,13 +651,13 @@ export const SETTINGS_UI_STYLES = `
         margin: 0 0 ${spacing.md}px;
         font-size: ${typography.fontSize.sm};
         color: ${uiColors.text};
-        font-family: ${DEFAULT_FONT_FAMILY};
+        font-family: ${typography.fontFamily};
       }
       .yt-chat-overlay-settings-confirm-buttons {
         display: flex;
         justify-content: flex-end;
         gap: ${spacing.sm}px;
-        font-family: ${DEFAULT_FONT_FAMILY};
+        font-family: ${typography.fontFamily};
       }
       .yt-chat-overlay-settings-confirm-cancel,
       .yt-chat-overlay-settings-confirm-ok {
@@ -1137,7 +1121,7 @@ export const SETTINGS_UI_STYLES = `
        */
       /* Native Popover API tooltips */
       .yt-chat-overlay-tooltip {
-        font-family: ${DEFAULT_FONT_FAMILY};
+        font-family: ${typography.fontFamily};
         font-size: ${typography.fontSize.xs};
         line-height: 1.4;
         padding: ${spacing.xs}px ${spacing.sm}px;
