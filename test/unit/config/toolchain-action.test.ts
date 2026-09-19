@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
-  'PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9';
+  'PiesP/browser-core/automation/actions/setup-project@adb7b05ff3781268c3625341951219da778bb40a';
 const centralWorkflowJobs = {
   'ci.yaml': ['quality', 'unit', 'e2e', 'build'],
   'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
@@ -113,7 +113,7 @@ describe('project setup actions', () => {
 
     expect(existsSync(actionPath)).toBe(true);
     const action = readFileSync(actionPath, 'utf8');
-    expect(action).toContain('uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2');
+    expect(action).toContain('uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0');
     expect(action).toContain('package-json-file: package.json');
     expect(action).toContain('runtime: "node@${{ inputs.node-version }}"');
     expect(action).toContain('cache: false');
