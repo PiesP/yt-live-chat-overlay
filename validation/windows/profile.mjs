@@ -10,6 +10,36 @@ const USERSCRIPT_PATH = 'dist/yt-live-chat-overlay.user.js';
 const PREVIEW_PATH = 'test/visual/preview.html';
 const GM_MOCKS_PATH = 'test/visual/gm-mocks.js';
 const EXPECTED_MESSAGE_COUNT = 6;
+const SUSTAINED_PHASE_ACTIONS = new Map([
+  ['low-1', [messageAction('windows-sustained-low-1', 'Low rate one', [{ text: 'low rate one' }])]],
+  ['low-2', [messageAction('windows-sustained-low-2', 'Low rate two', [{ text: 'low rate two' }])]],
+  [
+    'burst',
+    Array.from({ length: 8 }, (_, index) =>
+      messageAction(
+        `windows-sustained-burst-${index + 1}`,
+        `Burst ${index + 1}`,
+        [{ text: `burst message ${index + 1}` }],
+      ),
+    ),
+  ],
+  [
+    'paused',
+    [
+      messageAction('windows-sustained-paused-1', 'Paused one', [{ text: 'paused one' }]),
+      messageAction('windows-sustained-paused-2', 'Paused two', [{ text: 'paused two' }]),
+    ],
+  ],
+  ['hidden', [messageAction('windows-sustained-hidden', 'Hidden', [{ text: 'hidden' }])]],
+  [
+    'visible',
+    [messageAction('windows-sustained-visible', 'Visible', [{ text: 'visible again' }])],
+  ],
+  [
+    'second-video',
+    [messageAction('windows-sustained-second-video', 'Second video', [{ text: 'new session' }])],
+  ],
+]);
 
 const CHAT_ACTIONS = [
   messageAction('acceptance-korean', '한국어', [{ text: '안녕하세요 Windows 화면 검증입니다 🌙' }]),
@@ -375,6 +405,7 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');
   if (await depthLayers.isChecked()) await depthLayers.uncheck();
   if (installed || inspectRenderer) await modal.locator('input[name="showDebugOverlay"]').check();
+  await modal.locator('select[name="logLevel"]').selectOption('debug');
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden', timeout: 5_000 });
 
@@ -457,6 +488,188 @@ async function verifyIsolatedPaidCardInk(page, output) {
   return result;
 }
 
+async function verifySustainedViewingLifecycle(page, expectedRenderer) {
+  const initialIds = [
+    'windows-sustained-low-1',
+    'windows-sustained-low-2',
+    ...Array.from({ length: 8 }, (_, index) => `windows-sustained-burst-${index + 1}`),
+  ];
+  const pausedIds = ['windows-sustained-paused-1', 'windows-sustained-paused-2'];
+  const foregroundIds = [...initialIds, ...pausedIds, 'windows-sustained-visible'];
+  const readIds = () => page.locator(
+    '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
+  ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+  const requestPhase = async (phase) => {
+    const previousBatches = await page.evaluate(
+      () => window.__ytAcceptanceInterceptorBatches ?? 0,
+    );
+    await page.evaluate(async (name) => {
+      const response = await fetch(
+        `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&sustained-phase=${name}`,
+      );
+      await response.json();
+    }, phase);
+    await page.waitForFunction(
+      (previous) => (window.__ytAcceptanceInterceptorBatches ?? 0) > previous,
+      previousBatches,
+    );
+  };
+  const waitForExactIds = async (expected) => {
+    await page.waitForFunction((ids) => {
+      const actual = Array.from(
+        document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+        (element) => element.dataset.messageId,
+      );
+      return actual.length === ids.length && new Set(actual).size === ids.length &&
+        JSON.stringify(actual.toSorted()) === JSON.stringify(ids.toSorted());
+    }, expected, { timeout: 15_000 });
+  };
+  const waitForWorkerIngress = async (workerIndex, expected) => {
+    await page.waitForFunction(({ index, ids }) => {
+      const actual = window.__ytAcceptanceWorkers?.[index]?.addedMessageIds?.flat() ?? [];
+      return JSON.stringify(actual) === JSON.stringify(ids);
+    }, { index: workerIndex, ids: expected }, { timeout: 15_000 });
+  };
+  const readDebugCounts = async () => page.evaluate(() => {
+    const lines = Array.from(
+      document.querySelectorAll('#yt-chat-overlay-debug > div'),
+      (element) => element.textContent ?? '',
+    );
+    const counters = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
+    const drops = /^Drop: (\d+) /u.exec(lines[1] ?? '');
+    if (!counters || !drops) throw new Error(`Debug counters are unavailable: ${lines.join(' | ')}`);
+    return {
+      received: Number(counters[1]),
+      rendered: Number(counters[2]),
+      dropped: Number(drops[1]),
+    };
+  });
+
+  const baselineIds = await readIds();
+  assert.equal(new Set(baselineIds).size, baselineIds.length, 'Accessible baseline has duplicate IDs');
+  const initialWorkerIndex = expectedRenderer === 'worker'
+    ? await page.evaluate(() => (window.__ytAcceptanceWorkers?.length ?? 0) - 1)
+    : null;
+  if (expectedRenderer === 'worker') {
+    assert(initialWorkerIndex >= 0, 'The initial renderer Worker was not observed');
+  }
+
+  await requestPhase('low-1');
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, initialIds.slice(0, 1));
+  }
+  await waitForExactIds([...baselineIds, ...initialIds.slice(0, 1)]);
+  await page.waitForTimeout(600);
+  await requestPhase('low-2');
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, initialIds.slice(0, 2));
+  }
+  await waitForExactIds([...baselineIds, ...initialIds.slice(0, 2)]);
+  await requestPhase('burst');
+  if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
+  await waitForExactIds([...baselineIds, ...initialIds]);
+
+  const beforePause = await readDebugCounts();
+  await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(12, true));
+  await requestPhase('paused');
+  if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
+  await waitForExactIds([...baselineIds, ...initialIds]);
+
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    if (!video) throw new Error('Acceptance video is missing');
+    video.currentTime = 30;
+    video.dispatchEvent(new Event('seeked'));
+  });
+  await waitForExactIds([...baselineIds, ...initialIds]);
+  await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(30, false));
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
+  }
+  await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
+  await page.waitForFunction(
+    ({ received, dropped }) => {
+      const lines = Array.from(
+        document.querySelectorAll('#yt-chat-overlay-debug > div'),
+        (element) => element.textContent ?? '',
+      );
+      return lines[0]?.startsWith(`Rcvd: ${received + 2} |`) &&
+        lines[1]?.startsWith(`Drop: ${dropped + 2} `);
+    },
+    beforePause,
+  );
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await requestPhase('hidden');
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
+  }
+  await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
+  const afterHidden = await readDebugCounts();
+  assert.equal(afterHidden.received, beforePause.received + 2);
+  assert.equal(afterHidden.dropped, beforePause.dropped + 2);
+  const hiddenMessageSuppressed = !(await readIds()).includes('windows-sustained-hidden');
+  assert(hiddenMessageSuppressed, 'A hidden-only message reached the renderer');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+  });
+  await requestPhase('visible');
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, foregroundIds);
+  }
+  await waitForExactIds([...baselineIds, ...foregroundIds]);
+  const firstSessionAccessibleIds = await readIds();
+
+  const oldWorkerCount = await page.evaluate(() => window.__ytAcceptanceWorkers?.length ?? 0);
+  await page.evaluate(() => {
+    const canvas = document.querySelector('#yt-live-chat-overlay canvas');
+    if (!canvas) throw new Error('Acceptance canvas is missing before SPA navigation');
+    window.__ytAcceptanceOldCanvas = canvas;
+    window.ytInitialData.currentVideoEndpoint.watchEndpoint.videoId = 'windows-sustained-second';
+    history.pushState({}, '', '/watch?v=windows-sustained-second');
+    window.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.waitForFunction(() => {
+    const oldCanvas = window.__ytAcceptanceOldCanvas;
+    const currentCanvas = document.querySelector('#yt-live-chat-overlay canvas');
+    return oldCanvas && !oldCanvas.isConnected && currentCanvas && currentCanvas !== oldCanvas;
+  }, undefined, { timeout: 15_000 });
+
+  if (expectedRenderer === 'worker') {
+    await page.waitForFunction((previousCount) => {
+      const workers = window.__ytAcceptanceWorkers ?? [];
+      const oldWorker = workers[previousCount - 1];
+      const replacement = workers[previousCount];
+      return oldWorker?.acknowledgements >= 1 && oldWorker?.terminated === true &&
+        replacement?.ready === true;
+    }, oldWorkerCount, { timeout: 15_000 });
+  }
+
+  await requestPhase('second-video');
+  if (expectedRenderer === 'worker') {
+    await waitForWorkerIngress(oldWorkerCount, ['windows-sustained-second-video']);
+  }
+  await waitForExactIds(['windows-sustained-second-video']);
+
+  const finalCounts = await readDebugCounts();
+  assert.equal(finalCounts.received, 1);
+  assert.equal(finalCounts.dropped, 0);
+  return {
+    firstSessionAccessibleIds,
+    firstSessionIngressIds: foregroundIds,
+    hiddenMessageSuppressed,
+    oldCanvasDetached: await page.evaluate(() => !window.__ytAcceptanceOldCanvas?.isConnected),
+    renderer: expectedRenderer,
+    secondSessionIds: await readIds(),
+    videoPauseDropDelta: 2,
+  };
+}
+
 export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer = 'main' }) {
   assert(
     browser && typeof browser.newContext === 'function',
@@ -482,6 +695,7 @@ export async function run({ browser, root, output, installedContext, installedEx
   let chatApiRequests = 0;
   let explicitChatRequests = 0;
   let backgroundChatRequests = 0;
+  let sustainedChatRequests = 0;
   const backgroundRequestTimes = [];
   let customEmojiAssetRequests = 0;
   let deliverInstalledFixture = false;
@@ -514,6 +728,18 @@ export async function run({ browser, root, output, installedContext, installedEx
         url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')
       ) {
         chatApiRequests++;
+        const sustainedActions = SUSTAINED_PHASE_ACTIONS.get(
+          url.searchParams.get('sustained-phase'),
+        );
+        if (sustainedActions) {
+          sustainedChatRequests++;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            json: chatResponse(sustainedActions),
+          });
+          return;
+        }
         const messageIndex = Number(url.searchParams.get('message'));
         const action = CHAT_ACTIONS[messageIndex];
         if (url.searchParams.get('key') === 'windows-acceptance' && action) {
@@ -567,14 +793,38 @@ export async function run({ browser, root, output, installedContext, installedEx
       const NativeWorker = window.Worker;
       window.Worker = new Proxy(NativeWorker, {
         construct(target, args) {
-          const record = { url: String(args[0]), ready: false };
+          const record = {
+            url: String(args[0]),
+            ready: false,
+            acknowledgements: 0,
+            addedMessageIds: [],
+            terminated: false,
+          };
           if (workers.length < 16) workers.push(record);
           try {
             const worker = Reflect.construct(target, args);
             worker.addEventListener('message', (event) => {
               if (event.data?.type === 'ready') record.ready = true;
+              if (event.data?.type === 'ack') record.acknowledgements++;
             });
             worker.addEventListener('error', (event) => { record.error = event.message; });
+            const nativePostMessage = worker.postMessage.bind(worker);
+            worker.postMessage = (message, transfer) => {
+              if (message?.type === 'addMessages' && Array.isArray(message.messages)) {
+                record.addedMessageIds.push(
+                  message.messages
+                    .map((entry) => entry?.id)
+                    .filter((id) => typeof id === 'string'),
+                );
+              }
+              if (transfer === undefined) nativePostMessage(message);
+              else nativePostMessage(message, transfer);
+            };
+            const nativeTerminate = worker.terminate.bind(worker);
+            worker.terminate = () => {
+              record.terminated = true;
+              nativeTerminate();
+            };
             return worker;
           } catch (error) {
             record.error = String(error);
@@ -584,10 +834,34 @@ export async function run({ browser, root, output, installedContext, installedEx
       });
     });
     await page.addInitScript((inspectPaidCardInk) => {
+      window.__ytAcceptanceInterceptorBatches = 0;
+      const nativeDebug = console.debug.bind(console);
+      console.debug = (...args) => {
+        if (
+          args[0] === '[FetchInterceptor]' &&
+          args[1] === 'chat.interceptor.messages-received'
+        ) {
+          window.__ytAcceptanceInterceptorBatches++;
+        }
+        nativeDebug(...args);
+      };
+      const playbackState = { currentTime: 0, paused: false };
+      Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
+        configurable: true,
+        get: () => playbackState.currentTime,
+        set: (value) => { playbackState.currentTime = value; },
+      });
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
         configurable: true,
-        get: () => false,
+        get: () => playbackState.paused,
       });
+      window.__ytAcceptanceSetPlaybackState = (currentTime, paused) => {
+        const video = document.querySelector('video');
+        if (!video) throw new Error('Acceptance video is missing');
+        playbackState.currentTime = currentTime;
+        playbackState.paused = paused;
+        video.dispatchEvent(new Event(paused ? 'pause' : 'play'));
+      };
       if (inspectPaidCardInk) {
         Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
           configurable: true,
@@ -818,6 +1092,8 @@ export async function run({ browser, root, output, installedContext, installedEx
     const paidCardInkContainment = expectedRenderer === 'main' && !installedContext
       ? await verifyIsolatedPaidCardInk(page, output)
       : null;
+    const sustainedViewing = await verifySustainedViewingLifecycle(page, expectedRenderer);
+    assert.equal(sustainedChatRequests, 7, 'The sustained-viewing fixture was incomplete');
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
     const backgroundObservationMs = backgroundRequestTimes.length
@@ -854,6 +1130,8 @@ export async function run({ browser, root, output, installedContext, installedEx
         translationCapabilitySeparatedFromPreference: true,
         settingsOpenMethod: 'keyboard',
         deterministicChatApi: true,
+        sustainedViewingLifecycle: true,
+        sustainedChatRequests,
         chatApiRequests,
         explicitChatRequests,
         backgroundChatRequests,
@@ -875,6 +1153,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png', ...(paidCardInkContainment ? ['yt-paid-card-ink.png'] : [])],
         backgroundObservationMs,
         paidCardInkContainment,
+        sustainedViewing,
         backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(
           (time, index) => time - backgroundRequestTimes[index],
         ),

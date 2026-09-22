@@ -71,12 +71,16 @@ export class Overlay {
   private resizeRafId: number | null = null;
   /** Aria-live region for announcing new chat messages to screen readers. */
   private liveRegion: HTMLDivElement | null = null;
-  /** Debounce timer for live region updates. */
+  /** Fixed-window batch timer for live region updates. */
   private liveRegionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Latest structured alternative per message ID waiting for the next batch. */
+  private readonly pendingLiveRegionMessages = new Map<string, AccessibleChatMessage>();
   /** Stable identities of recently announced messages. */
   private seenMessageIds = new Set<string>();
-  private static readonly LIVE_REGION_DEBOUNCE_MS = 500;
+  private static readonly LIVE_REGION_BATCH_MS = 500;
+  private static readonly LIVE_REGION_MAX_CHILDREN = 30;
   private static readonly SEEN_SNIPPET_MAX = 200;
+  private static readonly PENDING_SNIPPET_MAX = Overlay.SEEN_SNIPPET_MAX;
 
   /** User-initiated pause (Space key toggle). Independent from tab/video pause. */
   private isUserPaused = false;
@@ -236,12 +240,14 @@ export class Overlay {
     // Ensure a clean observer state before re-initializing
     this.disconnectResizeObserver();
     this.detachFullscreenHandler();
+    this.clearLiveRegionState();
 
     // Remove any existing container before creating a new one
     if (this.container) {
       this.container.remove();
       this.container = null;
     }
+    this.liveRegion = null;
 
     // Clean up stray overlay elements from previous sessions where destroy()
     // was never called (e.g. RuntimeSession restart without full teardown)
@@ -326,27 +332,36 @@ export class Overlay {
    * elements so screen readers announce only fresh content instead of
    * re-reading the entire visible-message list every cycle.
    *
-   * Debounced to 500ms to avoid flooding the accessibility tree during
-   * rapid chat.
+   * Batched in fixed 500ms windows to avoid flooding the accessibility tree
+   * without allowing sustained snapshots to postpone announcements forever.
    */
   updateLiveRegion(messages: AccessibleChatMessage[]): void {
     if (!this.liveRegion) return;
-    if (this.liveRegionTimer !== null) {
-      clearTimeout(this.liveRegionTimer);
+    for (const message of messages) {
+      this.pendingLiveRegionMessages.set(message.id, message);
+      if (this.pendingLiveRegionMessages.size > Overlay.PENDING_SNIPPET_MAX) {
+        const oldestId = this.pendingLiveRegionMessages.keys().next().value;
+        if (oldestId !== undefined) this.pendingLiveRegionMessages.delete(oldestId);
+      }
     }
+
+    if (this.pendingLiveRegionMessages.size === 0 || this.liveRegionTimer !== null) return;
     this.liveRegionTimer = setTimeout(() => {
       this.liveRegionTimer = null;
-      if (!this.liveRegion) return;
+      const pendingMessages = Array.from(this.pendingLiveRegionMessages.values());
+      this.pendingLiveRegionMessages.clear();
+      const liveRegion = this.liveRegion;
+      if (!liveRegion) return;
 
       // Filter by stable message identity so repeated text from different
       // chat messages remains available to assistive technology.
       const newMessages: AccessibleChatMessage[] = [];
-      for (const message of messages) {
+      for (const message of pendingMessages) {
         if (this.seenMessageIds.has(message.id)) {
           // Replacement actions retain the original ID. Update the existing
           // accessible node in place so find-in-page and assistive technology
           // do not retain stale text or append a duplicate announcement.
-          const existing = Array.from(this.liveRegion.children).find(
+          const existing = Array.from(liveRegion.children).find(
             (child) =>
               child instanceof HTMLParagraphElement && child.dataset.messageId === message.id
           );
@@ -381,16 +396,24 @@ export class Overlay {
         frag.appendChild(p);
       }
 
-      // Keep the live region manageable: remove old children if too many.
-      const maxChildren = 30;
-      while (this.liveRegion.children.length >= maxChildren) {
-        const first = this.liveRegion.firstElementChild;
+      liveRegion.appendChild(frag);
+
+      // Keep the live region manageable after the full batch is appended.
+      while (liveRegion.children.length > Overlay.LIVE_REGION_MAX_CHILDREN) {
+        const first = liveRegion.firstElementChild;
         if (first) first.remove();
         else break;
       }
+    }, Overlay.LIVE_REGION_BATCH_MS);
+  }
 
-      this.liveRegion.appendChild(frag);
-    }, Overlay.LIVE_REGION_DEBOUNCE_MS);
+  private clearLiveRegionState(): void {
+    if (this.liveRegionTimer !== null) {
+      clearTimeout(this.liveRegionTimer);
+      this.liveRegionTimer = null;
+    }
+    this.pendingLiveRegionMessages.clear();
+    this.seenMessageIds.clear();
   }
 
   private formatAccessibleMessage(message: AccessibleChatMessage): string {
@@ -528,15 +551,8 @@ export class Overlay {
     this.dimensionChangeCallbacks.clear();
     this.liveRegion = null;
 
-    // Clear any pending live-region update timer to prevent
-    // a stale setTimeout callback from accessing the null liveRegion.
-    if (this.liveRegionTimer !== null) {
-      clearTimeout(this.liveRegionTimer);
-      this.liveRegionTimer = null;
-    }
-
-    // Clear dedup set to free memory
-    this.seenMessageIds.clear();
+    // Prevent pending announcements from crossing runtime lifecycles.
+    this.clearLiveRegionState();
 
     // Detach keyboard handler
     if (this.keyboardHandler) {
