@@ -554,11 +554,15 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
 
   const baselineIds = await readIds();
   assert.equal(new Set(baselineIds).size, baselineIds.length, 'Accessible baseline has duplicate IDs');
-  const initialWorkerIndex = expectedRenderer === 'worker'
-    ? await page.evaluate(() => (window.__ytAcceptanceWorkers?.length ?? 0) - 1)
-    : null;
+  let initialWorkerIndex = null;
   if (expectedRenderer === 'worker') {
-    assert(initialWorkerIndex >= 0, 'The initial renderer Worker was not observed');
+    const readyWorker = await page.waitForFunction(() => {
+      const workers = window.__ytAcceptanceWorkers ?? [];
+      const index = workers.length - 1;
+      return workers[index]?.ready === true ? { index } : null;
+    }, undefined, { timeout: 15_000 });
+    initialWorkerIndex = (await readyWorker.jsonValue()).index;
+    await readyWorker.dispose();
   }
 
   await requestPhase('low-1');
