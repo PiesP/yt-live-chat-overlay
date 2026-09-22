@@ -431,6 +431,15 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
 }
 
 async function verifyIsolatedPaidCardInk(page, output) {
+  const previousSettings = await page.evaluate(() => {
+    const settings = window.__ytChatOverlay?.getSettings?.();
+    if (!settings) throw new Error('Runtime settings are unavailable');
+    return {
+      danmakuMode: settings.danmakuMode,
+      showAuthor: settings.showAuthor,
+      showSuperChatAmount: settings.showSuperChatAmount,
+    };
+  });
   await page.evaluate(async () => {
     const app = window.__ytChatOverlay;
     if (!app?.restartRuntime || !app.applySettings) throw new Error('Runtime restart hook is unavailable');
@@ -492,6 +501,11 @@ async function verifyIsolatedPaidCardInk(page, output) {
   await page.locator('#yt-live-chat-overlay canvas').screenshot({
     path: join(output, 'yt-paid-card-ink.png'), animations: 'disabled',
   });
+  await page.evaluate(async (settings) => {
+    const app = window.__ytChatOverlay;
+    app.applySettings(settings);
+    await app.restartRuntime();
+  }, previousSettings);
   return { ...result, accessibleMessageId };
 }
 
