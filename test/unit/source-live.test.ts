@@ -201,6 +201,55 @@ describe('LiveChatSource empty-response polling', () => {
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(4_000);
   });
 
+  it('trips the circuit breaker after repeated malformed poll responses', async () => {
+    vi.useFakeTimers();
+    const source = new LiveChatSource(() => ({ ...makeSettings(), livePollFailureLimit: 2 }));
+    const internals = internalsOf(source);
+    const controller = new AbortController();
+    internals.callback = vi.fn();
+    internals.liveContinuation = { continuation: 'repeated-malformed', timeoutMs: 0 };
+    const request = vi
+      .spyOn(internals, 'requestLivePayload')
+      .mockRejectedValue(new LiveChatProtocolError('malformed response'));
+
+    const loop = internals.runLiveLoop(controller.signal);
+    const outcome = expect(loop).rejects.toThrow(
+      'Live poll consecutive failure limit (2) reached',
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await outcome;
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(internals.consecutiveErrors).toBe(2);
+  });
+
+  it('resets malformed-response backoff after a valid empty response', async () => {
+    vi.useFakeTimers();
+    const source = new LiveChatSource(makeSettings);
+    const internals = internalsOf(source);
+    const controller = new AbortController();
+    internals.callback = vi.fn();
+    internals.liveContinuation = { continuation: 'recover', timeoutMs: 0 };
+    const request = vi.spyOn(internals, 'requestLivePayload').mockImplementation(async () => {
+      if (request.mock.calls.length === 1) {
+        throw new LiveChatProtocolError('malformed response');
+      }
+      controller.abort();
+      return makePayload(null);
+    });
+
+    const loop = internals.runLiveLoop(controller.signal);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(internals.consecutiveErrors).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await expect(loop).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(internals.consecutiveErrors).toBe(0);
+    expect(internals.calculateAdaptiveDelay(2_000)).toBe(2_000);
+  });
+
   it('does not clear errors before rejecting a missing continuation', async () => {
     const source = new LiveChatSource(makeSettings);
     const internals = internalsOf(source);
