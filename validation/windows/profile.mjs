@@ -551,20 +551,28 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
       return JSON.stringify(actual) === JSON.stringify(ids);
     }, { index: workerIndex, ids: expected }, { timeout: 15_000 });
   };
-  const readDebugCounts = async () => page.evaluate(() => {
-    const lines = Array.from(
-      document.querySelectorAll('#yt-chat-overlay-debug > div'),
-      (element) => element.textContent ?? '',
-    );
-    const counters = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
-    const drops = /^Drop: (\d+) /u.exec(lines[1] ?? '');
-    if (!counters || !drops) throw new Error(`Debug counters are unavailable: ${lines.join(' | ')}`);
-    return {
-      received: Number(counters[1]),
-      rendered: Number(counters[2]),
-      dropped: Number(drops[1]),
-    };
-  });
+  const readDebugCounts = async (received, dropped) => {
+    const handle = await page.waitForFunction((expected) => {
+      const lines = Array.from(
+        document.querySelectorAll('#yt-chat-overlay-debug > div'),
+        (element) => element.textContent ?? '',
+      );
+      const counters = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
+      const drops = /^Drop: (\d+) /u.exec(lines[1] ?? '');
+      if (!counters || !drops) return null;
+      const counts = {
+        received: Number(counters[1]),
+        rendered: Number(counters[2]),
+        dropped: Number(drops[1]),
+      };
+      return counts.received === expected.received && counts.dropped === expected.dropped
+        ? counts
+        : null;
+    }, { received, dropped }, { timeout: 15_000 });
+    const counts = await handle.jsonValue();
+    await handle.dispose();
+    return counts;
+  };
 
   const baselineIds = await readIds();
   assert.equal(new Set(baselineIds).size, baselineIds.length, 'Accessible baseline has duplicate IDs');
@@ -594,7 +602,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
   if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
   await waitForExactIds([...baselineIds, ...initialIds]);
 
-  const beforePause = await readDebugCounts();
+  const beforePause = await readDebugCounts(baselineIds.length + initialIds.length, 0);
   await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(12, true));
   await requestPhase('paused');
   if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
@@ -633,7 +641,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
     await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
   }
   await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
-  const afterHidden = await readDebugCounts();
+  const afterHidden = await readDebugCounts(beforePause.received + 2, beforePause.dropped + 2);
   assert.equal(afterHidden.received, beforePause.received + 2);
   assert.equal(afterHidden.dropped, beforePause.dropped + 2);
   const hiddenMessageSuppressed = !(await readIds()).includes('windows-sustained-hidden');
@@ -681,7 +689,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
   }
   await waitForExactIds(['windows-sustained-second-video']);
 
-  const finalCounts = await readDebugCounts();
+  const finalCounts = await readDebugCounts(1, 0);
   assert.equal(finalCounts.received, 1);
   assert.equal(finalCounts.dropped, 0);
   return {
