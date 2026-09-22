@@ -328,10 +328,12 @@ async function runSustainedViewingScenario(
 ): Promise<void> {
   const useWorker = renderPath === 'worker';
   const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
   const runtimeEvents: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => {
     const text = message.text();
+    if (message.type() === 'error') consoleErrors.push(text);
     if (text.includes('[RuntimeManager] runtime.session.')) runtimeEvents.push(text);
   });
 
@@ -421,10 +423,32 @@ async function runSustainedViewingScenario(
     const telemetry = await readWorkerTelemetry();
     return telemetry.addedMessageIds.flat();
   };
-  const readAccessibleMessageIds = (): Promise<Array<string | undefined>> =>
+  const readAccessibleMessageIds = (): Promise<Array<string | null>> =>
     page
       .locator(`#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p`)
-      .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+      .evaluateAll((elements) => elements.map((element) => element.dataset.messageId ?? null));
+  const expectAccessibleMessageSet = async (
+    expectedIds: string[],
+    phaseIds: string[] = expectedIds,
+  ): Promise<void> => {
+    const expected = {
+      length: expectedIds.length,
+      sortedIds: expectedIds.toSorted(),
+      uniqueCount: expectedIds.length,
+    };
+    await expect
+      .poll(async () => {
+        const ids = await readAccessibleMessageIds();
+        return {
+          length: ids.length,
+          sortedIds: ids.toSorted(),
+          uniqueCount: new Set(ids).size,
+        };
+      })
+      .toEqual(expected);
+    const actualIds = await readAccessibleMessageIds();
+    for (const id of phaseIds) expect(actualIds).toContain(id);
+  };
   const requestPhase = async (phase: string): Promise<void> => {
     const previousBatches = await page.evaluate(() =>
       Number(
@@ -482,10 +506,16 @@ async function runSustainedViewingScenario(
 
   const lowRateIds = ['sustained-low-1', 'sustained-low-2'];
   await requestPhase('low-1');
-  await expect.poll(readAccessibleMessageIds).toEqual(lowRateIds.slice(0, 1));
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(lowRateIds.slice(0, 1));
+  }
+  await expectAccessibleMessageSet(lowRateIds.slice(0, 1));
   await page.waitForTimeout(600);
   await requestPhase('low-2');
-  await expect.poll(readAccessibleMessageIds).toEqual(lowRateIds);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(lowRateIds);
+  }
+  await expectAccessibleMessageSet(lowRateIds, lowRateIds.slice(1));
   await expect(page.locator('#yt-chat-overlay-debug > div').nth(2)).toContainText('Burst: normal');
 
   const burstIds = Array.from({ length: 8 }, (_, index) => `sustained-burst-${index + 1}`);
@@ -494,10 +524,10 @@ async function runSustainedViewingScenario(
   await expect
     .poll(async () => (await page.locator('#yt-chat-overlay-debug > div').nth(2).textContent()) ?? '')
     .toMatch(/Burst: (?:elevated|high|extreme)$/u);
-  await expect.poll(readAccessibleMessageIds).toEqual(initialIds);
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(initialIds);
   }
+  await expectAccessibleMessageSet(initialIds, burstIds);
 
   await setPlaybackState(12, true);
   if (useWorker) {
@@ -506,10 +536,10 @@ async function runSustainedViewingScenario(
   await requestPhase('paused');
   const debugCounters = page.locator('#yt-chat-overlay-debug > div').first();
   const debugDrops = page.locator('#yt-chat-overlay-debug > div').nth(1);
-  await expect.poll(readAccessibleMessageIds).toEqual(initialIds);
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(initialIds);
   }
+  await expectAccessibleMessageSet(initialIds);
 
   await page.evaluate(() => {
     const video = document.querySelector('video');
@@ -517,16 +547,18 @@ async function runSustainedViewingScenario(
     video.currentTime = 30;
     video.dispatchEvent(new Event('seeked'));
   });
-  await expect.poll(readAccessibleMessageIds).toEqual(initialIds);
+  await expectAccessibleMessageSet(initialIds);
 
   const pausedIds = ['sustained-paused-1', 'sustained-paused-2'];
   const resumedIds = [...initialIds, ...pausedIds];
   await setPlaybackState(30, false);
-  await expect.poll(readAccessibleMessageIds).toEqual(resumedIds);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(resumedIds);
+  }
+  await expectAccessibleMessageSet(resumedIds, pausedIds);
   await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
   if (useWorker) {
-    await expect.poll(addedWorkerMessageIds).toEqual(resumedIds);
     await expect.poll(async () => (await readWorkerTelemetry()).pausedStates).toEqual([true, false]);
     await expect
       .poll(async () => (await readWorkerTelemetry()).stats.at(-1)?.totalDrops)
@@ -537,18 +569,23 @@ async function runSustainedViewingScenario(
   await requestPhase('hidden');
   await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
-  await expect.poll(readAccessibleMessageIds).toEqual(resumedIds);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(resumedIds);
+  }
+  await expectAccessibleMessageSet(resumedIds);
   await setVisibility('visible');
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
   });
   await requestPhase('visible');
   const foregroundIds = [...resumedIds, 'sustained-visible'];
-  await expect.poll(readAccessibleMessageIds).toEqual(foregroundIds);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(foregroundIds);
+  }
+  await expectAccessibleMessageSet(foregroundIds, ['sustained-visible']);
   await expect(debugCounters).toHaveText(/^Rcvd: 13 \| Rndr: \d+$/u);
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
   if (useWorker) {
-    await expect.poll(addedWorkerMessageIds).toEqual(foregroundIds);
     await expect
       .poll(async () => (await readWorkerTelemetry()).pausedStates)
       .toEqual([true, false, true, false]);
@@ -596,13 +633,13 @@ async function runSustainedViewingScenario(
   }
 
   await requestPhase('second-video');
-  await expect.poll(readAccessibleMessageIds).toEqual(['sustained-second-video']);
-  const secondSessionCounters = page.locator('#yt-chat-overlay-debug > div').first();
-  await expect(secondSessionCounters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/u);
-  await expect(page.locator('#yt-chat-overlay-debug > div').nth(1)).toHaveText(/^Drop: 0 /u);
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual([...foregroundIds, 'sustained-second-video']);
   }
+  await expectAccessibleMessageSet(['sustained-second-video']);
+  const secondSessionCounters = page.locator('#yt-chat-overlay-debug > div').first();
+  await expect(secondSessionCounters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/u);
+  await expect(page.locator('#yt-chat-overlay-debug > div').nth(1)).toHaveText(/^Drop: 0 /u);
 
   await page.evaluate(async () => {
     const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
@@ -631,6 +668,7 @@ async function runSustainedViewingScenario(
       .toEqual({ acknowledgements: 2, terminated: 2 });
   }
   expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 }
 
 test.describe('Playback controls', () => {

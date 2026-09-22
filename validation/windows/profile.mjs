@@ -514,14 +514,21 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
       previousBatches,
     );
   };
-  const waitForTail = async (expected) => {
+  const waitForExactIds = async (expected) => {
     await page.waitForFunction((ids) => {
       const actual = Array.from(
         document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
         (element) => element.dataset.messageId,
       );
-      return JSON.stringify(actual.slice(-ids.length)) === JSON.stringify(ids);
+      return actual.length === ids.length && new Set(actual).size === ids.length &&
+        JSON.stringify(actual.toSorted()) === JSON.stringify(ids.toSorted());
     }, expected, { timeout: 15_000 });
+  };
+  const waitForWorkerIngress = async (workerIndex, expected) => {
+    await page.waitForFunction(({ index, ids }) => {
+      const actual = window.__ytAcceptanceWorkers?.[index]?.addedMessageIds?.flat() ?? [];
+      return JSON.stringify(actual) === JSON.stringify(ids);
+    }, { index: workerIndex, ids: expected }, { timeout: 15_000 });
   };
   const readDebugCounts = async () => page.evaluate(() => {
     const lines = Array.from(
@@ -538,18 +545,35 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
     };
   });
 
+  const baselineIds = await readIds();
+  assert.equal(new Set(baselineIds).size, baselineIds.length, 'Accessible baseline has duplicate IDs');
+  const initialWorkerIndex = expectedRenderer === 'worker'
+    ? await page.evaluate(() => (window.__ytAcceptanceWorkers?.length ?? 0) - 1)
+    : null;
+  if (expectedRenderer === 'worker') {
+    assert(initialWorkerIndex >= 0, 'The initial renderer Worker was not observed');
+  }
+
   await requestPhase('low-1');
-  await waitForTail(initialIds.slice(0, 1));
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, initialIds.slice(0, 1));
+  }
+  await waitForExactIds([...baselineIds, ...initialIds.slice(0, 1)]);
   await page.waitForTimeout(600);
   await requestPhase('low-2');
-  await waitForTail(initialIds.slice(0, 2));
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, initialIds.slice(0, 2));
+  }
+  await waitForExactIds([...baselineIds, ...initialIds.slice(0, 2)]);
   await requestPhase('burst');
-  await waitForTail(initialIds);
+  if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
+  await waitForExactIds([...baselineIds, ...initialIds]);
 
   const beforePause = await readDebugCounts();
   await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(12, true));
   await requestPhase('paused');
-  assert.deepEqual((await readIds()).slice(-initialIds.length), initialIds);
+  if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
+  await waitForExactIds([...baselineIds, ...initialIds]);
 
   await page.evaluate(() => {
     const video = document.querySelector('video');
@@ -557,9 +581,12 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
     video.currentTime = 30;
     video.dispatchEvent(new Event('seeked'));
   });
-  assert.deepEqual((await readIds()).slice(-initialIds.length), initialIds);
+  await waitForExactIds([...baselineIds, ...initialIds]);
   await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(30, false));
-  await waitForTail([...initialIds, ...pausedIds]);
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
+  }
+  await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
   await page.waitForFunction(
     ({ received, dropped }) => {
       const lines = Array.from(
@@ -577,6 +604,10 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await requestPhase('hidden');
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
+  }
+  await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
   const afterHidden = await readDebugCounts();
   assert.equal(afterHidden.received, beforePause.received + 2);
   assert.equal(afterHidden.dropped, beforePause.dropped + 2);
@@ -588,7 +619,11 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
   });
   await requestPhase('visible');
-  await waitForTail(foregroundIds);
+  if (initialWorkerIndex !== null) {
+    await waitForWorkerIngress(initialWorkerIndex, foregroundIds);
+  }
+  await waitForExactIds([...baselineIds, ...foregroundIds]);
+  const firstSessionAccessibleIds = await readIds();
 
   const oldWorkerCount = await page.evaluate(() => window.__ytAcceptanceWorkers?.length ?? 0);
   await page.evaluate(() => {
@@ -616,19 +651,17 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
   }
 
   await requestPhase('second-video');
-  await page.waitForFunction(() => {
-    const ids = Array.from(
-      document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
-      (element) => element.dataset.messageId,
-    );
-    return JSON.stringify(ids) === JSON.stringify(['windows-sustained-second-video']);
-  }, undefined, { timeout: 15_000 });
+  if (expectedRenderer === 'worker') {
+    await waitForWorkerIngress(oldWorkerCount, ['windows-sustained-second-video']);
+  }
+  await waitForExactIds(['windows-sustained-second-video']);
 
   const finalCounts = await readDebugCounts();
   assert.equal(finalCounts.received, 1);
   assert.equal(finalCounts.dropped, 0);
   return {
-    firstSessionIds: foregroundIds,
+    firstSessionAccessibleIds,
+    firstSessionIngressIds: foregroundIds,
     hiddenMessageSuppressed,
     oldCanvasDetached: await page.evaluate(() => !window.__ytAcceptanceOldCanvas?.isConnected),
     renderer: expectedRenderer,
@@ -764,6 +797,7 @@ export async function run({ browser, root, output, installedContext, installedEx
             url: String(args[0]),
             ready: false,
             acknowledgements: 0,
+            addedMessageIds: [],
             terminated: false,
           };
           if (workers.length < 16) workers.push(record);
@@ -774,6 +808,18 @@ export async function run({ browser, root, output, installedContext, installedEx
               if (event.data?.type === 'ack') record.acknowledgements++;
             });
             worker.addEventListener('error', (event) => { record.error = event.message; });
+            const nativePostMessage = worker.postMessage.bind(worker);
+            worker.postMessage = (message, transfer) => {
+              if (message?.type === 'addMessages' && Array.isArray(message.messages)) {
+                record.addedMessageIds.push(
+                  message.messages
+                    .map((entry) => entry?.id)
+                    .filter((id) => typeof id === 'string'),
+                );
+              }
+              if (transfer === undefined) nativePostMessage(message);
+              else nativePostMessage(message, transfer);
+            };
             const nativeTerminate = worker.terminate.bind(worker);
             worker.terminate = () => {
               record.terminated = true;
