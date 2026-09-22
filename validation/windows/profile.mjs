@@ -482,10 +482,17 @@ async function verifyIsolatedPaidCardInk(page, output) {
   const result = await resultHandle.jsonValue();
   await resultHandle.dispose();
   assert.equal(result.outsideAlphaPixels, 0, 'Isolated outlined Super Chat ink escaped the card');
+  const accessibleMessageId = `${CHAT_ACTIONS[index].addChatItemAction.item.liveChatPaidMessageRenderer.id}-isolated-ink`;
+  await page.waitForFunction((messageId) => {
+    const messages = document.querySelectorAll(
+      '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
+    );
+    return messages.length === 1 && messages[0].dataset.messageId === messageId;
+  }, accessibleMessageId, { timeout: 10_000 });
   await page.locator('#yt-live-chat-overlay canvas').screenshot({
     path: join(output, 'yt-paid-card-ink.png'), animations: 'disabled',
   });
-  return result;
+  return { ...result, accessibleMessageId };
 }
 
 async function verifySustainedViewingLifecycle(page, expectedRenderer) {
