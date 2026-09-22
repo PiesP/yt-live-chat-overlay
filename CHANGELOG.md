@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.45.2] - Unreleased
+## [0.45.2] - 2026-09-22
 
 ### Fixed
 
@@ -12,7 +12,11 @@ All notable changes to this project will be documented in this file.
 - **Worker state and recovery** — Synchronize rendered-message counts, queue utilization, and burst lane density with the main runtime. Recover from Worker load or initialization errors, retain new messages during fallback and retries, and preserve the latest message after failed replacements.
 - **Recovery accounting** — Preserve drop tracking for pending live messages while excluding replayed active messages. Use acknowledged batch state to avoid losing new messages or restoring expired messages from delayed snapshots.
 - **Chat response limits** — Release interception slots promptly when an oversized cloned response is rejected, even while the original response remains open.
-- **Replay and backlog bounds** — Compact consumed replay-buffer entries and preserve configured backlog injection limits on larger lane layouts.
+- **Live polling recovery** — Return empty successful responses to a bounded polling interval, and route malformed or continuation-free responses through bootstrap refresh, backoff, and failure limits.
+- **Settings previews and preferences** — Keep position and opacity previews readable in compact dialogs, and preserve an explicit translation-off preference when browser translation is unavailable.
+- **Text rendering correctness** — Preserve logical bidirectional text and inline-object order across wrapped lines, and keep cached outlined text aligned and contained at each device-pixel ratio.
+- **Worker resource budgets** — Apply configured Worker image-cache budgets, fetch only assets the renderer can display, and cancel queued asset work when its message is discarded.
+- **Replay timing and bounds** — Decouple buffered display timing from serialized network requests, wake display promptly when data arrives, compact consumed entries, and preserve configured backlog injection limits on larger lane layouts.
 
 ### Changed
 
