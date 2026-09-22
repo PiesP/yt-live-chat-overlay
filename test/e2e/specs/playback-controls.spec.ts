@@ -20,7 +20,12 @@ import {
   routePlaybackWorker,
 } from '../fixtures/playback-worker';
 
-const installPlaybackMock = (options: { forceMainThread: boolean }): void => {
+const installPlaybackMock = (options: {
+  forceMainThread: boolean;
+  chatMode?: 'live' | 'replay';
+  videoId?: string;
+}): void => {
+  const { chatMode = 'replay', videoId = 'dQw4w9WgXcQ' } = options;
   if (options.forceMainThread) {
     Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
       configurable: true,
@@ -73,14 +78,21 @@ const installPlaybackMock = (options: { forceMainThread: boolean }): void => {
     },
   };
   global.ytInitialData = {
-    currentVideoEndpoint: { watchEndpoint: { videoId: 'dQw4w9WgXcQ' } },
+    currentVideoEndpoint: { watchEndpoint: { videoId } },
     contents: {
       twoColumnWatchNextResults: {
         conversationBar: {
           liveChatRenderer: {
-            isReplay: true,
+            isReplay: chatMode === 'replay',
             continuations: [
-              { playerSeekContinuationData: { continuation: 'initial-replay' } },
+              chatMode === 'replay'
+                ? { playerSeekContinuationData: { continuation: 'initial-replay' } }
+                : {
+                    timedContinuationData: {
+                      continuation: `initial-live-${videoId}`,
+                      timeoutMs: 30_000,
+                    },
+                  },
             ],
           },
         },
@@ -105,6 +117,34 @@ const replayAction = (offsetMs: number, id: string, text: string): unknown => ({
         },
       },
     ],
+  },
+});
+
+const liveAction = (id: string, text: string): unknown => ({
+  addChatItemAction: {
+    item: {
+      liveChatTextMessageRenderer: {
+        id,
+        authorName: { simpleText: `Author ${id}` },
+        message: { runs: [{ text }] },
+      },
+    },
+  },
+});
+
+const liveResponse = (actions: unknown[]): unknown => ({
+  continuationContents: {
+    liveChatContinuation: {
+      actions,
+      continuations: [
+        {
+          timedContinuationData: {
+            continuation: 'sustained-live-next',
+            timeoutMs: 30_000,
+          },
+        },
+      ],
+    },
   },
 });
 
@@ -282,6 +322,317 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   expect(pageErrors).toEqual([]);
 }
 
+async function runSustainedViewingScenario(
+  page: Page,
+  renderPath: 'main' | 'worker',
+): Promise<void> {
+  const useWorker = renderPath === 'worker';
+  const pageErrors: string[] = [];
+  const runtimeEvents: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text.includes('[RuntimeManager] runtime.session.')) runtimeEvents.push(text);
+  });
+
+  const phaseActions = new Map<string, unknown[]>([
+    ['low-1', [liveAction('sustained-low-1', 'low rate one')]],
+    ['low-2', [liveAction('sustained-low-2', 'low rate two')]],
+    [
+      'burst',
+      Array.from({ length: 8 }, (_, index) =>
+        liveAction(`sustained-burst-${index + 1}`, `burst message ${index + 1}`),
+      ),
+    ],
+    [
+      'paused',
+      [
+        liveAction('sustained-paused-1', 'arrived while paused one'),
+        liveAction('sustained-paused-2', 'arrived while paused two'),
+      ],
+    ],
+    ['hidden', [liveAction('sustained-hidden', 'suppressed while hidden')]],
+    ['visible', [liveAction('sustained-visible', 'delivered after foreground return')]],
+    ['second-video', [liveAction('sustained-second-video', 'new video session')]],
+  ]);
+
+  await setupMockPageRoute(page);
+  if (useWorker) {
+    await routePlaybackWorker(page);
+  }
+  await page.route('**/youtubei/v1/live_chat/get_live_chat**', async (route) => {
+    const url = new URL(route.request().url());
+    const actions = phaseActions.get(url.searchParams.get('phase') ?? '') ?? [];
+    await route.fulfill({ json: liveResponse(actions) });
+  });
+  if (useWorker) {
+    await page.addInitScript(installPlaybackWorkerObserver, PLAYBACK_WORKER_URL);
+  }
+  await page.addInitScript(installPlaybackMock, {
+    forceMainThread: !useWorker,
+    chatMode: 'live' as const,
+    videoId: 'sustained-first-video',
+  });
+  await page.addInitScript(() => {
+    const global = window as unknown as Record<string, unknown>;
+    global.__sustainedInterceptorBatches = 0;
+    const nativeDebug = console.debug.bind(console);
+    console.debug = (...args: unknown[]): void => {
+      if (
+        args[0] === '[FetchInterceptor]' &&
+        args[1] === 'chat.interceptor.messages-received'
+      ) {
+        global.__sustainedInterceptorBatches =
+          Number(global.__sustainedInterceptorBatches ?? 0) + 1;
+      }
+      nativeDebug(...args);
+    };
+  });
+  await page.addInitScript(installYTMock, {
+    defaults: {
+      ...DEFAULT_SETTINGS,
+      allowShortTextMessages: true,
+      authorRateLimit: 'off',
+      burstSampleWindow: 3,
+      burstElevatedThreshold: 2,
+      burstHighThreshold: 5,
+      burstExtremeThreshold: 10,
+      logLevel: 'debug',
+      showDebugOverlay: true,
+    },
+    platform: 'userscript' as const,
+  });
+  await injectUserscript(page);
+  await page.goto('https://www.youtube.com/watch?v=sustained-first-video', {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.locator(`#${OVERLAY_ID}`).waitFor({ state: 'attached' });
+  await page.waitForFunction(() => {
+    const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay;
+    return typeof handle === 'object' && handle !== null;
+  });
+
+  const readWorkerTelemetry = (): Promise<PlaybackWorkerTelemetry> =>
+    page.evaluate(() => {
+      const telemetry = (window as unknown as Record<string, unknown>).__playbackWorkerTelemetry;
+      return structuredClone(telemetry) as PlaybackWorkerTelemetry;
+    });
+  const addedWorkerMessageIds = async (): Promise<string[]> => {
+    const telemetry = await readWorkerTelemetry();
+    return telemetry.addedMessageIds.flat();
+  };
+  const readAccessibleMessageIds = (): Promise<Array<string | undefined>> =>
+    page
+      .locator(`#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p`)
+      .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+  const requestPhase = async (phase: string): Promise<void> => {
+    const previousBatches = await page.evaluate(() =>
+      Number(
+        (window as unknown as Record<string, unknown>).__sustainedInterceptorBatches ?? 0,
+      ),
+    );
+    await page.evaluate(async (name) => {
+      const response = await fetch(
+        `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?phase=${name}`,
+      );
+      await response.json();
+    }, phase);
+    await page.waitForFunction(
+      (previous) =>
+        Number(
+          (window as unknown as Record<string, unknown>).__sustainedInterceptorBatches ?? 0,
+        ) > previous,
+      previousBatches,
+    );
+  };
+  const setPlaybackState = async (currentTime: number, paused: boolean): Promise<void> => {
+    await page.evaluate(
+      ({ time, isPaused }) => {
+        const setter = (window as unknown as Record<string, unknown>).__setPlaybackState as (
+          currentTime: number,
+          paused: boolean,
+        ) => void;
+        setter(time, isPaused);
+      },
+      { time: currentTime, isPaused: paused },
+    );
+  };
+  const setVisibility = async (visibility: 'hidden' | 'visible'): Promise<void> => {
+    await page.evaluate((state) => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: state,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, visibility);
+  };
+
+  if (useWorker) {
+    await expect
+      .poll(async () => {
+        const telemetry = await readWorkerTelemetry();
+        return {
+          constructed: telemetry.constructed,
+          ready: telemetry.ready,
+          initTransferredOffscreenCanvas: telemetry.initTransferredOffscreenCanvas,
+        };
+      })
+      .toEqual({ constructed: 1, ready: 1, initTransferredOffscreenCanvas: true });
+  }
+
+  const lowRateIds = ['sustained-low-1', 'sustained-low-2'];
+  await requestPhase('low-1');
+  await expect.poll(readAccessibleMessageIds).toEqual(lowRateIds.slice(0, 1));
+  await page.waitForTimeout(600);
+  await requestPhase('low-2');
+  await expect.poll(readAccessibleMessageIds).toEqual(lowRateIds);
+  await expect(page.locator('#yt-chat-overlay-debug > div').nth(2)).toContainText('Burst: normal');
+
+  const burstIds = Array.from({ length: 8 }, (_, index) => `sustained-burst-${index + 1}`);
+  const initialIds = [...lowRateIds, ...burstIds];
+  await requestPhase('burst');
+  await expect
+    .poll(async () => (await page.locator('#yt-chat-overlay-debug > div').nth(2).textContent()) ?? '')
+    .toMatch(/Burst: (?:elevated|high|extreme)$/u);
+  await expect.poll(readAccessibleMessageIds).toEqual(initialIds);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(initialIds);
+  }
+
+  await setPlaybackState(12, true);
+  if (useWorker) {
+    await expect.poll(async () => (await readWorkerTelemetry()).pausedStates).toEqual([true]);
+  }
+  await requestPhase('paused');
+  const debugCounters = page.locator('#yt-chat-overlay-debug > div').first();
+  const debugDrops = page.locator('#yt-chat-overlay-debug > div').nth(1);
+  await expect.poll(readAccessibleMessageIds).toEqual(initialIds);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(initialIds);
+  }
+
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    if (!(video instanceof HTMLVideoElement)) throw new Error('Mock video is missing');
+    video.currentTime = 30;
+    video.dispatchEvent(new Event('seeked'));
+  });
+  await expect.poll(readAccessibleMessageIds).toEqual(initialIds);
+
+  const pausedIds = ['sustained-paused-1', 'sustained-paused-2'];
+  const resumedIds = [...initialIds, ...pausedIds];
+  await setPlaybackState(30, false);
+  await expect.poll(readAccessibleMessageIds).toEqual(resumedIds);
+  await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
+  await expect(debugDrops).toHaveText(/^Drop: 2 /u);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(resumedIds);
+    await expect.poll(async () => (await readWorkerTelemetry()).pausedStates).toEqual([true, false]);
+    await expect
+      .poll(async () => (await readWorkerTelemetry()).stats.at(-1)?.totalDrops)
+      .toBe(0);
+  }
+
+  await setVisibility('hidden');
+  await requestPhase('hidden');
+  await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
+  await expect(debugDrops).toHaveText(/^Drop: 2 /u);
+  await expect.poll(readAccessibleMessageIds).toEqual(resumedIds);
+  await setVisibility('visible');
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+  });
+  await requestPhase('visible');
+  const foregroundIds = [...resumedIds, 'sustained-visible'];
+  await expect.poll(readAccessibleMessageIds).toEqual(foregroundIds);
+  await expect(debugCounters).toHaveText(/^Rcvd: 13 \| Rndr: \d+$/u);
+  await expect(debugDrops).toHaveText(/^Drop: 2 /u);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual(foregroundIds);
+    await expect
+      .poll(async () => (await readWorkerTelemetry()).pausedStates)
+      .toEqual([true, false, true, false]);
+  }
+
+  await page.evaluate(() => {
+    const canvas = document.querySelector('#yt-live-chat-overlay canvas');
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Old overlay canvas is missing');
+    (window as unknown as Record<string, unknown>).__sustainedOldCanvas = canvas;
+    const initialData = (window as unknown as Record<string, unknown>).ytInitialData as {
+      currentVideoEndpoint: { watchEndpoint: { videoId: string } };
+    };
+    initialData.currentVideoEndpoint.watchEndpoint.videoId = 'sustained-second-video';
+    history.pushState({}, '', '/watch?v=sustained-second-video');
+    window.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.waitForFunction(() => {
+    const oldCanvas = (window as unknown as Record<string, unknown>).__sustainedOldCanvas;
+    const currentCanvas = document.querySelector('#yt-live-chat-overlay canvas');
+    return (
+      oldCanvas instanceof HTMLCanvasElement &&
+      !oldCanvas.isConnected &&
+      currentCanvas instanceof HTMLCanvasElement &&
+      currentCanvas !== oldCanvas
+    );
+  });
+  await expect
+    .poll(() => runtimeEvents.filter((event) => event.includes('runtime.session.disposed')).length)
+    .toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(() => runtimeEvents.filter((event) => event.includes('runtime.session.started')).length)
+    .toBeGreaterThanOrEqual(2);
+  if (useWorker) {
+    await expect
+      .poll(async () => {
+        const telemetry = await readWorkerTelemetry();
+        return {
+          acknowledgements: telemetry.acknowledgements,
+          constructed: telemetry.constructed,
+          ready: telemetry.ready,
+          terminated: telemetry.terminated,
+        };
+      })
+      .toEqual({ acknowledgements: 1, constructed: 2, ready: 2, terminated: 1 });
+  }
+
+  await requestPhase('second-video');
+  await expect.poll(readAccessibleMessageIds).toEqual(['sustained-second-video']);
+  const secondSessionCounters = page.locator('#yt-chat-overlay-debug > div').first();
+  await expect(secondSessionCounters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/u);
+  await expect(page.locator('#yt-chat-overlay-debug > div').nth(1)).toHaveText(/^Drop: 0 /u);
+  if (useWorker) {
+    await expect.poll(addedWorkerMessageIds).toEqual([...foregroundIds, 'sustained-second-video']);
+  }
+
+  await page.evaluate(async () => {
+    const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
+      | { stop?: () => Promise<void> }
+      | undefined;
+    await handle?.stop?.();
+  });
+  await expect(page.locator(`#${OVERLAY_ID}`)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const oldCanvas = (window as unknown as Record<string, unknown>).__sustainedOldCanvas;
+        return oldCanvas instanceof HTMLCanvasElement && !oldCanvas.isConnected;
+      }),
+    )
+    .toBe(true);
+  if (useWorker) {
+    await expect
+      .poll(async () => {
+        const telemetry = await readWorkerTelemetry();
+        return {
+          acknowledgements: telemetry.acknowledgements,
+          terminated: telemetry.terminated,
+        };
+      })
+      .toEqual({ acknowledgements: 2, terminated: 2 });
+  }
+  expect(pageErrors).toEqual([]);
+}
+
 test.describe('Playback controls', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
@@ -306,6 +657,14 @@ test.describe('Playback controls', () => {
   }) => {
     await runReplayScenario(page, 'worker');
   });
+
+  for (const renderer of ['main', 'worker'] as const) {
+    test(`preserves a sustained viewing session across playback and SPA transitions with ${renderer} rendering`, async ({
+      page,
+    }) => {
+      await runSustainedViewingScenario(page, renderer);
+    });
+  }
 
   for (const renderer of ['main', 'worker'] as const) {
     test(`flushes buffered replay during delayed network I/O with ${renderer} rendering`, async ({
