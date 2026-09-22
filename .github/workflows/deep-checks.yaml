@@ -1,7 +1,8 @@
 name: 🔬 Deep Verification
 
 # Responsibility: expensive checks that should not block quick PR feedback
-# - Fast mutation testing on integrated master
+# - Fast mutation testing on the weekly schedule or on demand
+# - Duplication checking on the weekly schedule or on demand
 # - Broader renderer mutation testing on the weekly schedule or on demand
 #
 # Manual runs can select one check to conserve Actions minutes and runner
@@ -10,22 +11,6 @@ name: 🔬 Deep Verification
 # Security: All third-party actions pinned to full commit SHAs.
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "src/**"
-      - "test/unit/**"
-      - "test/consistency/**"
-      - "test/setup.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "packages/core"
-      - "tsconfig*.json"
-      - "vitest.config.ts"
-      - "stryker.conf.fast.json"
-      - "scripts/ci/classify-workflow-changes.sh"
-      - ".github/workflows/deep-checks.yaml"
   schedule:
     - cron: "17 2 * * 0"
   workflow_dispatch:
@@ -39,6 +24,7 @@ on:
           - all
           - mutation-fast
           - mutation-renderer
+          - duplication
 
 env:
   NODE_VERSION: "26"
@@ -51,6 +37,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  duplication:
+    name: 🔍 Duplication
+    needs: changes
+    if: >-
+      ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.scope == 'all' ||
+      inputs.scope == 'duplication') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: 🔧 Install nose
+        run: bash scripts/ci/install-nose.sh
+
+      - name: 🔎 Check for new duplication
+        run: nose query src --baseline .nose-baseline.json --fail-on new
+
   changes:
     name: Classify deep-verification changes
     runs-on: ubuntu-24.04
@@ -128,7 +134,7 @@ jobs:
     name: 🎨 Renderer mutation
     needs: changes
     if: >-
-      ${{ !cancelled() && github.event_name != 'push' && (github.event_name != 'workflow_dispatch' ||
+      ${{ !cancelled() && (github.event_name != 'workflow_dispatch' ||
       inputs.scope == 'all' || inputs.scope == 'mutation-renderer') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
