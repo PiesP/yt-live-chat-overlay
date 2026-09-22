@@ -34,6 +34,10 @@ export interface ChatHealthSnapshot {
   consecutiveErrors: number;
 }
 
+export class LiveChatProtocolError extends Error {
+  override readonly name = 'LiveChatProtocolError';
+}
+
 export interface PlaybackSnapshot {
   offsetMs: number;
   paused: boolean;
@@ -309,14 +313,18 @@ export abstract class ChatSource implements Pauseable {
 
     // Mark activity BEFORE the fetch so the health watchdog doesn't
     // penalize transient network failures — the source IS actively
-    // trying, even if the current request failed.
+    // trying, even if the current request failed. A structurally invalid
+    // response restores the previous value below because it is not a
+    // successful source activity signal.
+    const previousActivityTime = this.lastActivityTime;
     this.markActivity();
 
     const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
     const payload = getLiveChatPayload(response);
     if (!payload) {
+      this.lastActivityTime = previousActivityTime;
       log.warn('chat.source.parse-failed');
-      return null;
+      throw new LiveChatProtocolError('Live chat response is missing its continuation payload');
     }
 
     return payload;
