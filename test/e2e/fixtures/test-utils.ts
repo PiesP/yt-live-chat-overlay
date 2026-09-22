@@ -34,6 +34,8 @@ export const SETTINGS_STORAGE_KEY = 'yt-live-chat-overlay-settings';
  * Minimal mock YouTube watch page HTML.
  * Includes #movie_player, a video element, and #chat (live panel marker)
  * so that the overlay can initialize correctly.
+ * Playback fixtures dispatch their own media events; an invalid media URL would
+ * add a browser console error unrelated to the overlay.
  */
 export const MOCK_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -44,7 +46,7 @@ export const MOCK_HTML = `<!DOCTYPE html>
       <div id="primary">
         <div id="player-container">
           <div id="movie_player" class="html5-video-player" style="width:800px;height:450px;position:relative;overflow:hidden">
-            <video style="width:100%;height:100%" src="about:blank"></video>
+            <video style="width:100%;height:100%"></video>
           </div>
         </div>
       </div>

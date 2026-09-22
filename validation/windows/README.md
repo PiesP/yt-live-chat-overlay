@@ -31,10 +31,22 @@ render rejects the run.
 
 This profile verifies production userscript injection, stable-browser Canvas/font rendering,
 keyboard disclosure interaction, the opacity/outline/safe-zone preview, translation capability
-separate from preference, and deterministic paid and multilingual chat rendering. It does not
+separate from preference, and deterministic paid and multilingual chat rendering. It also runs one
+connected production-runtime fixture through low-rate and burst ingress, video pause and seek,
+synthetic hidden/visible plus `pageshow` delivery, and an SPA transition to a different video. The
+fixture checks the exact duplicate-free accessible message ID set, phase membership, pause-drop
+counters, and old Canvas/session teardown. Canvas lane and collision admission can activate and
+announce equal-priority messages in a different order from ingress. The installed-extension lane
+therefore checks strict Worker `addMessages` ingress order separately, in addition to Worker
+acknowledgement, termination, and replacement readiness. It does not
 install a userscript manager, install an extension, access live or authenticated YouTube, capture
 native Windows desktop chrome, validate OS DPI/theme matrices, or measure GPU performance. Those
 remain separate acceptance profiles or host-level observations.
+
+The deterministic visibility transition exercises the production lifecycle handlers inside the
+prepared VM browser. It is not evidence of native tab occlusion, browser freezing, pixel
+equivalence between the main and Worker renderers, or sustained live-site performance; the duration
+profile remains the native visible-hidden-visible observation.
 
 ## Installed application profiles
 

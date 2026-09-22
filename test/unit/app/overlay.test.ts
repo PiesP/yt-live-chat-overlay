@@ -39,6 +39,28 @@ function makeSettings(overrides: Partial<OverlaySettings> = {}): OverlaySettings
   } as OverlaySettings;
 }
 
+async function createOverlayWithPlayer(): Promise<Overlay> {
+  const player = document.createElement('div');
+  player.id = 'movie_player';
+  Object.defineProperties(player, {
+    offsetWidth: { configurable: true, value: 1280 },
+    offsetHeight: { configurable: true, value: 720 },
+  });
+  player.getBoundingClientRect = () =>
+    ({ width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720 }) as DOMRect;
+  document.body.appendChild(player);
+
+  const overlay = new Overlay();
+  await expect(overlay.create(makeSettings())).resolves.toBe(true);
+  return overlay;
+}
+
+function getLiveRegionMessages(): HTMLParagraphElement[] {
+  return Array.from(
+    document.querySelectorAll<HTMLParagraphElement>('.yt-live-chat-overlay-live-region p')
+  );
+}
+
 describe('Overlay', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -166,6 +188,102 @@ describe('Overlay', () => {
     expect(updatedAnnouncements).toHaveLength(2);
     expect(updatedAnnouncements[0]?.textContent).toBe('Updated author — Replacement text');
 
+    overlay.destroy();
+  });
+
+  it('keeps distinct snapshots and the latest same-ID payload in one fixed window', async () => {
+    vi.useFakeTimers();
+    const overlay = await createOverlayWithPlayer();
+
+    overlay.updateLiveRegion([
+      { id: 'first', text: 'original', kind: 'text', author: 'Author' },
+    ]);
+    vi.advanceTimersByTime(250);
+    overlay.updateLiveRegion([
+      { id: 'second', text: 'second message', kind: 'text' },
+      { id: 'first', text: 'replacement', kind: 'text', author: 'Updated author' },
+    ]);
+    vi.advanceTimersByTime(249);
+    expect(getLiveRegionMessages()).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(
+      getLiveRegionMessages().map((message) => [message.dataset.messageId, message.textContent])
+    ).toEqual([
+      ['first', 'Updated author — replacement'],
+      ['second', 'second message'],
+    ]);
+
+    overlay.destroy();
+  });
+
+  it('flushes sustained snapshots every fixed window without timer starvation', async () => {
+    vi.useFakeTimers();
+    const overlay = await createOverlayWithPlayer();
+
+    for (let window = 0; window < 3; window++) {
+      overlay.updateLiveRegion([
+        { id: `window-${window}-first`, text: 'first snapshot', kind: 'text' },
+      ]);
+      vi.advanceTimersByTime(250);
+      overlay.updateLiveRegion([
+        { id: `window-${window}-second`, text: 'second snapshot', kind: 'text' },
+      ]);
+      vi.advanceTimersByTime(250);
+      expect(getLiveRegionMessages()).toHaveLength((window + 1) * 2);
+    }
+
+    overlay.destroy();
+  });
+
+  it('bounds pending snippets and keeps exactly the newest 30 live-region nodes', async () => {
+    vi.useFakeTimers();
+    const overlay = await createOverlayWithPlayer();
+    const messages = Array.from({ length: 240 }, (_, index) => ({
+      id: `bounded-${index}`,
+      text: `message ${index}`,
+      kind: 'text' as const,
+    }));
+
+    overlay.updateLiveRegion(messages);
+
+    const state = overlay as unknown as {
+      pendingLiveRegionMessages: Map<string, unknown>;
+    };
+    expect(state.pendingLiveRegionMessages.size).toBe(200);
+    expect(state.pendingLiveRegionMessages.keys().next().value).toBe('bounded-40');
+
+    vi.advanceTimersByTime(500);
+    expect(getLiveRegionMessages().map((message) => message.dataset.messageId)).toEqual(
+      Array.from({ length: 30 }, (_, index) => `bounded-${index + 210}`)
+    );
+
+    overlay.destroy();
+  });
+
+  it('discards pending live-region work when destroyed', async () => {
+    vi.useFakeTimers();
+    const overlay = await createOverlayWithPlayer();
+
+    overlay.updateLiveRegion([{ id: 'reused', text: 'first lifecycle', kind: 'text' }]);
+    vi.advanceTimersByTime(500);
+    overlay.updateLiveRegion([{ id: 'stale', text: 'stale message', kind: 'text' }]);
+    overlay.destroy();
+    vi.advanceTimersByTime(500);
+
+    expect(document.querySelector('.yt-live-chat-overlay-live-region')).toBeNull();
+    const state = overlay as unknown as {
+      pendingLiveRegionMessages: Map<string, unknown>;
+    };
+    expect(state.pendingLiveRegionMessages.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await expect(overlay.create(makeSettings())).resolves.toBe(true);
+    overlay.updateLiveRegion([{ id: 'reused', text: 'second lifecycle', kind: 'text' }]);
+    vi.advanceTimersByTime(500);
+    expect(getLiveRegionMessages().map((message) => message.textContent)).toEqual([
+      'second lifecycle',
+    ]);
     overlay.destroy();
   });
 
