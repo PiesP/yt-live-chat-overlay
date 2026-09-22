@@ -11,6 +11,8 @@ export const PLAYBACK_WORKER_URL =
 export interface PlaybackWorkerStats {
   activeMessages: number;
   pendingQueueDepth: number;
+  totalRendered: number;
+  totalDrops: number;
   activeMessageIds: string[];
   pendingMessageIds: string[];
 }
@@ -85,6 +87,9 @@ export function installPlaybackWorkerObserver(workerUrl: string): void {
             typeof record.activeMessages === 'number' ? record.activeMessages : -1,
           pendingQueueDepth:
             typeof record.pendingQueueDepth === 'number' ? record.pendingQueueDepth : -1,
+          totalRendered:
+            typeof record.totalRendered === 'number' ? record.totalRendered : -1,
+          totalDrops: typeof record.totalDrops === 'number' ? record.totalDrops : -1,
           activeMessageIds: Array.isArray(record.activeMessageIds)
             ? record.activeMessageIds.filter((id): id is string => typeof id === 'string')
             : [],
