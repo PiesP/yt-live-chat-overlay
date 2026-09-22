@@ -14,8 +14,7 @@ import {
   recordDensitySample,
 } from '@chat/live-poll-math';
 import { extractChatEvents } from '@chat/message-parser';
-import type { ChatHealthSnapshot } from '@chat/source-base';
-import { ChatSource } from '@chat/source-base';
+import { type ChatHealthSnapshot, ChatSource, LiveChatProtocolError } from '@chat/source-base';
 import {
   fetchLiveChat,
   type LiveChatPayload,
@@ -87,7 +86,7 @@ export class LiveChatSource extends ChatSource {
         return false;
       }
 
-      await this.handleLivePayload(payload, true, signal); // isInitialSeed: apply time-based filtering
+      await this.handleLivePayload(payload, true); // isInitialSeed: apply time-based filtering
       return true;
     } catch (error: unknown) {
       if (isAbortError(error)) {
@@ -172,7 +171,7 @@ export class LiveChatSource extends ChatSource {
           continue;
         }
 
-        await this.handleLivePayload(payload, false, signal);
+        await this.handleLivePayload(payload, false);
       } catch (error: unknown) {
         if (isAbortError(error)) {
           throw error;
@@ -222,11 +221,11 @@ export class LiveChatSource extends ChatSource {
         }
 
         // ── Conditional bootstrap refresh ──
-        // Only refresh bootstrap on parse errors (API format changed)
+        // Refresh bootstrap on parse/protocol errors (API format changed)
         // or periodically with exponential backoff during sustained outages.
         // Network errors (TypeError) should NOT trigger bootstrap refresh —
         // just wait and retry; the network may recover on its own.
-        const isParseError = error instanceof SyntaxError;
+        const isParseError = error instanceof SyntaxError || error instanceof LiveChatProtocolError;
         const refreshInterval = Math.min(
           LIVE_BOOTSTRAP_REFRESH_MAX,
           LIVE_BOOTSTRAP_REFRESH_BASE *
@@ -265,8 +264,7 @@ export class LiveChatSource extends ChatSource {
 
   private async handleLivePayload(
     payload: LiveChatPayload,
-    isInitialSeed: boolean = false,
-    signal?: AbortSignal
+    isInitialSeed: boolean = false
   ): Promise<void> {
     const events = extractChatEvents(
       payload.actions,
@@ -274,7 +272,6 @@ export class LiveChatSource extends ChatSource {
       undefined,
       this.isKnownReplacementTarget
     );
-    this.lastSuccessfulPayloadHadEvents = events.length > 0;
 
     if (events.length > 0) {
       let messages: ChatMessage[];
@@ -308,17 +305,16 @@ export class LiveChatSource extends ChatSource {
       }
     }
 
-    this.consecutiveErrors = 0;
     const nextContinuation = extractNextLiveContinuation(payload.continuations);
     if (!nextContinuation) {
       // Continuation token missing — API format may have changed.
-      // Refresh bootstrap immediately instead of waiting for the next poll to fail.
       log.warn('chat.live.missing-continuation');
-      await this.refreshLiveContinuation(signal);
-      // refreshLiveContinuation updates this.liveContinuation internally
-    } else {
-      this.liveContinuation = nextContinuation;
+      throw new LiveChatProtocolError('Live chat response is missing its next continuation');
     }
+
+    this.lastSuccessfulPayloadHadEvents = events.length > 0;
+    this.consecutiveErrors = 0;
+    this.liveContinuation = nextContinuation;
   }
 
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
