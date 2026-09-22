@@ -18,6 +18,7 @@ type Scope =
   | 'all'
   | 'quality'
   | 'unit'
+  | 'core'
   | 'e2e'
   | 'build'
   | 'duplication'
@@ -73,6 +74,7 @@ describe('workflow change classification', () => {
     expect(scopes).toMatchObject({
       quality: false,
       unit: false,
+      core: false,
       e2e: false,
       build: false,
       duplication: false,
@@ -91,6 +93,7 @@ describe('workflow change classification', () => {
     expect(scopes).toMatchObject({
       quality: true,
       unit: true,
+      core: false,
       e2e: true,
       build: true,
       duplication: true,
@@ -117,6 +120,7 @@ describe('workflow change classification', () => {
     expect(scopes).toMatchObject({
       quality: true,
       unit: true,
+      core: true,
       e2e: true,
       build: true,
       duplication: false,
@@ -223,7 +227,8 @@ describe('workflow scope integration', () => {
       expect(settings).toContain(`- "${check}"`);
       expect(`${ci}\n${security}`).toContain(`name: ${check}`);
     }
-    expect(ci.match(/name: No relevant changes/g)).toHaveLength(5);
+    expect(ci.match(/name: No relevant changes/g)).toHaveLength(4);
+    expect(ci).toContain('Duplication is informational for PR CI');
     expect(security.match(/name: No relevant changes/g)).toHaveLength(5);
   });
 
@@ -242,12 +247,16 @@ describe('workflow scope integration', () => {
     const ci = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
     const security = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
 
-    for (const job of ['quality', 'unit', 'e2e', 'build', 'duplication']) {
+    for (const job of ['quality', 'unit', 'e2e', 'build']) {
       const section = jobSection(ci, job);
       expect(section).toMatch(/needs: (?:changes|\[changes, quality\])/);
       expect(section).toContain('if: ${{ !cancelled() }}');
       expect(section).toContain("needs.changes.result != 'success'");
     }
+    const duplication = jobSection(ci, 'duplication');
+    expect(duplication).toContain('needs: changes');
+    expect(duplication).toContain('if: ${{ !cancelled() }}');
+    expect(duplication).toContain('Duplication is informational for PR CI');
     for (const job of ['osv-scan-pr', 'osv-scan-dispatch', 'semgrep']) {
       const section = jobSection(security, job);
       expect(section).toContain('needs: changes');
@@ -281,9 +290,9 @@ describe('workflow scope integration', () => {
     const deep = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
     const codex = readFileSync(resolve(root, '.github/workflows/codex-security.yaml'), 'utf8');
 
-    expect(deep).toContain('      - "src/**"');
-    expect(deep).toContain('      - "packages/core"');
-    expect(deep).toContain('      - ".github/workflows/deep-checks.yaml"');
+    expect(deep).toContain('  schedule:');
+    expect(deep).toContain('  workflow_dispatch:');
+    expect(deep).not.toContain('\n  push:\n');
     expect(codex).toContain('      - ".github/codex-security/**"');
     expect(codex).toContain('      - "scripts/security/codex-security/**"');
     expect(codex).toContain('      - ".github/workflows/**"');

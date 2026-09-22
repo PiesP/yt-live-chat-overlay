@@ -6,6 +6,7 @@ declare -A scopes=(
   [all]=false
   [quality]=false
   [unit]=false
+  [core]=false
   [e2e]=false
   [build]=false
   [duplication]=false
@@ -22,6 +23,7 @@ readonly scope_order=(
   all
   quality
   unit
+  core
   e2e
   build
   duplication
@@ -93,7 +95,7 @@ classify_path() {
       mark_all
       ;;
     packages/core | .gitmodules | package.json | pnpm-lock.yaml | pnpm-workspace.yaml)
-      mark quality unit e2e build osv semgrep codeql_javascript pinned_tools deep_fast codex_security
+      mark quality unit core e2e build osv semgrep codeql_javascript pinned_tools deep_fast codex_security
       ;;
     src/**)
       mark quality unit e2e build duplication semgrep codeql_javascript codex_security
@@ -146,7 +148,7 @@ classify_path() {
       esac
       ;;
     .github/workflows/ci.yaml)
-      mark quality unit e2e build duplication semgrep codeql_actions pinned_tools codex_security
+      mark quality unit core e2e build duplication semgrep codeql_actions pinned_tools codex_security
       ;;
     .github/workflows/security.yaml)
       mark quality unit osv semgrep codeql_actions pinned_tools codex_security
