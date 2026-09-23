@@ -2,15 +2,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_WATCH_HTML_BYTES,
+  WATCH_HTML_TIMEOUT_MS,
   getVideoIdFromUrl,
   buildWatchUrl,
   fetchWatchHtml,
+  bootstrapChatSession,
   findLiveChatRenderer,
 } from '@chat/youtube/api';
 import { ResponseTooLargeError } from '@chat/youtube/response-text';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 // ── getVideoIdFromUrl ─────────────────────────────────────────────────
@@ -162,6 +165,89 @@ describe('fetchWatchHtml', () => {
 
     await expect(fetchWatchHtml('video-id')).rejects.toBeInstanceOf(ResponseTooLargeError);
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('returns retryable when the watch-page response body stalls past its deadline', async () => {
+    vi.stubGlobal('location', {
+      href: 'https://www.youtube.com/watch?v=video-id',
+      origin: 'https://www.youtube.com',
+    });
+    vi.stubGlobal('ytcfg', undefined);
+    vi.stubGlobal('ytInitialData', undefined);
+
+    const timeoutController = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
+    let resolveBodyReadStarted: (() => void) | undefined;
+    const bodyReadStarted = new Promise<void>((resolve) => {
+      resolveBodyReadStarted = resolve;
+    });
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+      pull() {
+        resolveBodyReadStarted?.();
+      },
+    });
+    const abortBody = vi.fn((reason: unknown) => bodyController?.error(reason));
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        Promise.resolve().then(() => {
+          const requestSignal = init?.signal;
+          if (!requestSignal) {
+            throw new Error('Watch HTML request omitted its signal');
+          }
+          requestSignal.addEventListener('abort', () => abortBody(requestSignal.reason), {
+            once: true,
+          });
+          return new Response(body);
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bootstrap = bootstrapChatSession();
+    await bodyReadStarted;
+    expect(timeoutSpy).toHaveBeenCalledWith(WATCH_HTML_TIMEOUT_MS);
+    expect(WATCH_HTML_TIMEOUT_MS).toBe(20_000);
+    expect(bodyController).not.toBeNull();
+    timeoutController.abort(new DOMException('Timed out', 'TimeoutError'));
+
+    await expect(bootstrap).resolves.toMatchObject({
+      status: 'retryable',
+      reason: 'Watch page HTML request timed out',
+    });
+    expect(abortBody).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a caller abort when it cancels the request before the deadline', async () => {
+    const callerController = new AbortController();
+    const timeoutController = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const requestSignal = init?.signal;
+          if (!requestSignal) {
+            reject(new Error('Watch HTML request omitted its signal'));
+            return;
+          }
+          const rejectOnAbort = (): void => reject(requestSignal.reason);
+          if (requestSignal.aborted) {
+            rejectOnAbort();
+          } else {
+            requestSignal.addEventListener('abort', rejectOnAbort, { once: true });
+          }
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = fetchWatchHtml('video-id', callerController.signal);
+    callerController.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(timeoutController.signal.aborted).toBe(false);
   });
 });
 
