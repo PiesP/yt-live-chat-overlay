@@ -1,5 +1,22 @@
 # Windows acceptance profile
 
+This validation has four separate evidence tiers. None substitutes for another.
+
+1. **Artifact-only smoke (`yt-visual`):** injects the production userscript into
+   a deterministic fixture and checks stable-browser Canvas rendering and
+   lifecycle handling.
+2. **Short installed-package smoke:** installs the real extension or userscript
+   in a fresh task-owned browser profile and checks a deterministic fixture. It
+   does not establish native tab visibility or a sustained observation period.
+3. **Duration observation:** runs the installed Chrome extension for five
+   minutes visible, ten minutes natively hidden, and five minutes visible after
+   resume. This is separate from the short installed smoke.
+4. **Optional public-page observation:** inspects selected unchanged public
+   YouTube pages after the deterministic fixture and can remain unverified when
+   chat is unavailable.
+
+## Artifact-only smoke
+
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
 or Edge Stable instance, injects the production userscript, exercises the real settings dialog,
@@ -8,10 +25,9 @@ messages.
 
 ## Build prerequisite
 
-From this repository, load the workspace Node environment and build the production userscript:
+From this repository, use the pinned Node toolchain to build the production userscript:
 
 ```bash
-source /home/piesp/.config/shell/env.sh
 pnpm build:ci
 ```
 
@@ -43,10 +59,10 @@ install a userscript manager, install an extension, access live or authenticated
 native Windows desktop chrome, validate OS DPI/theme matrices, or measure GPU performance. Those
 remain separate acceptance profiles or host-level observations.
 
-The deterministic visibility transition exercises the production lifecycle handlers inside the
-prepared VM browser. It is not evidence of native tab occlusion, browser freezing, pixel
-equivalence between the main and Worker renderers, or sustained live-site performance; the duration
-profile remains the native visible-hidden-visible observation.
+The deterministic synthetic visibility transition proves lifecycle handling only. It is not
+evidence of native tab occlusion, browser freezing, pixel equivalence between the main and Worker
+renderers, or sustained live-site performance; the duration profile remains the native
+visible-hidden-visible observation.
 
 ## Installed application profiles
 
@@ -73,13 +89,20 @@ behind a second real tab, and five minutes visible after resume. Thirty-second
 checkpoints retain media, Canvas, bridge, renderer, native visibility, normalized
 player-error UI, and accessible-render fingerprint evidence. Public chat volume is
 uncontrolled, so a stream with no accessible chat is recorded as unverified. The
-structured observation records only chat counts and fingerprints, not raw chat text.
+structured observation records only chat counts and fingerprints. It does not
+retain raw chat text.
 
 Phase summaries report `mediaTimeRangeSeconds`, the difference between the largest
 and smallest finite sampled media positions, or `null` with fewer than two positions.
 This range includes seeks and timeline resets; it does not measure playback progress
 or watch time. Older records named this field `mediaProgressSeconds` and must be
 interpreted as the same position range. Phase health is checked separately.
+
+Chat message counts and fingerprints describe observed accessible-render activity.
+`mediaTimeRangeSeconds` describes the sampled media-position range.
+The five-minute, ten-minute, and five-minute phases describe the profile's
+wall-clock observation schedule. They do not establish actual viewer attention
+or viewing time. These measurements do not substitute for one another.
 
 The ordinary short installation flow keeps the persistent-context launcher and
 does not establish native tab visibility. Both Chrome launch paths use
@@ -103,21 +126,11 @@ and Allow User Scripts through Chrome's UI in the isolated profile and imports
 the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
 
-After committing a clean named checkout and running the repository gates:
-
-```bash
-source /home/piesp/.config/shell/env.sh
-python3 /home/piesp/projects/windows-acceptance/vmctl.py run \
-  --repo "$PWD" --browser chrome --installation extension \
-  --output /tmp/yt-chrome-installed
-python3 /home/piesp/projects/windows-acceptance/vmctl.py run \
-  --repo "$PWD" --browser chrome --installation userscript \
-  --manager-directory /tmp/yt-tampermonkey-5.5.0 \
-  --output /tmp/yt-userscript-installed
-python3 /home/piesp/projects/windows-acceptance/vmctl.py run \
-  --repo "$PWD" --browser firefox --installation extension \
-  --output /tmp/yt-firefox-installed
-```
+After committing a clean named checkout and running the repository gates, use
+the configured controller in the prepared Windows validation environment. Run
+the Chrome or Edge extension, userscript-manager, and Firefox extension profiles
+as separate invocations with separate task-owned profiles and evidence output
+outside the checkout.
 
 Use separate invocations/profiles so the extension and userscript cannot mask
 each other's behavior. Add repeatable `--live-url https://www.youtube.com/watch?v=...`
