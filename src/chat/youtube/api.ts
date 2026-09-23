@@ -65,6 +65,9 @@ const ENDPOINT_RETRY_BASE_DELAY_MS = 1000; // 1s → 2s → 4s
 /** Hard cap for fallback watch-page HTML before parsing page bootstrap data. */
 export const MAX_WATCH_HTML_BYTES = 16 * 1024 * 1024;
 
+/** Maximum duration for loading fallback watch-page HTML during bootstrap. */
+export const WATCH_HTML_TIMEOUT_MS = 20_000;
+
 /** Retryable: TypeError (network down), 503-504 (server), 429 (rate limit) */
 const isRetryableError = (error: unknown): boolean => {
   if (error instanceof DOMException && error.name === 'AbortError') return false;
@@ -121,25 +124,39 @@ const tryGetInitialDataFromWindow = (): JsonObject | null => {
 };
 
 export const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
-  const response = await fetch(buildWatchUrl(videoId), {
-    credentials: 'include',
-    cache: 'no-store',
-    mode: 'same-origin',
-    referrerPolicy: 'origin-when-cross-origin',
-    headers: {
-      accept: 'text/html,application/json',
-    },
-    signal: signal ?? null,
-  });
+  const timeoutSignal = AbortSignal.timeout(WATCH_HTML_TIMEOUT_MS);
+  const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
-  if (!response.ok) {
-    throw new YoutubeInnertubeRequestError(
-      `Failed to load watch page HTML (${response.status} ${response.statusText})`,
-      response.status
-    );
+  try {
+    const response = await fetch(buildWatchUrl(videoId), {
+      credentials: 'include',
+      cache: 'no-store',
+      mode: 'same-origin',
+      referrerPolicy: 'origin-when-cross-origin',
+      headers: {
+        accept: 'text/html,application/json',
+      },
+      signal: requestSignal,
+    });
+
+    if (!response.ok) {
+      throw new YoutubeInnertubeRequestError(
+        `Failed to load watch page HTML (${response.status} ${response.statusText})`,
+        response.status
+      );
+    }
+
+    return await readBoundedResponseText(response, MAX_WATCH_HTML_BYTES, 'Watch page HTML');
+  } catch (error: unknown) {
+    if (timeoutSignal.aborted && requestSignal.reason === timeoutSignal.reason) {
+      // A deadline is a transient bootstrap failure, not session cancellation.
+      // Keep it out of the AbortError path so runtime and standby can retry.
+      const timeoutError = new Error('Watch page HTML request timed out');
+      timeoutError.name = 'TimeoutError';
+      throw timeoutError;
+    }
+    throw error;
   }
-
-  return readBoundedResponseText(response, MAX_WATCH_HTML_BYTES, 'Watch page HTML');
 };
 
 const extractJsonObjectFromHtml = (html: string, markers: readonly string[]): JsonObject | null => {
