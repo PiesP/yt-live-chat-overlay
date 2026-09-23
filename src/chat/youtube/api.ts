@@ -146,7 +146,11 @@ export const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Pro
       );
     }
 
-    return await readBoundedResponseText(response, MAX_WATCH_HTML_BYTES, 'Watch page HTML');
+    const html = await readBoundedResponseText(response, MAX_WATCH_HTML_BYTES, 'Watch page HTML');
+    if (requestSignal.aborted) {
+      throw requestSignal.reason;
+    }
+    return html;
   } catch (error: unknown) {
     if (timeoutSignal.aborted && requestSignal.reason === timeoutSignal.reason) {
       // A deadline is a transient bootstrap failure, not session cancellation.

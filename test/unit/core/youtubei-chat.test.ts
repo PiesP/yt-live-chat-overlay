@@ -249,6 +249,35 @@ describe('fetchWatchHtml', () => {
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
     expect(timeoutController.signal.aborted).toBe(false);
   });
+
+  it('discards a watch-page body that finishes after caller cancellation', async () => {
+    const callerController = new AbortController();
+    const timeoutController = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
+
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              bodyController = controller;
+            },
+          })
+        )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = fetchWatchHtml('video-id', callerController.signal);
+    await vi.waitFor(() => expect(bodyController).toBeDefined());
+    callerController.abort();
+    bodyController!.enqueue(new TextEncoder().encode('late watch-page response'));
+    bodyController!.close();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(timeoutController.signal.aborted).toBe(false);
+  });
 });
 
 // ── findLiveChatRenderer ──────────────────────────────────────────────
