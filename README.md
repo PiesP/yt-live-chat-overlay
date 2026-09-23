@@ -1,5 +1,7 @@
 # YouTube Live Chat Overlay
 
+[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md)
+
 Display YouTube live chat as NicoNico-style flowing comments over live streams,
 premieres, and replays. The project is available as a userscript and as unpacked
 Chrome and temporary Firefox extension builds.
@@ -62,11 +64,12 @@ backlog, translation, performance, and accessibility options.
 | Firefox extension | Firefox 128+ technical minimum; temporary developer installation |
 
 Translation support is detected at runtime and is independent of these browser
-floors. It requires the browser's built-in Translator API and support for the
-selected language pair. Automatic source-language detection uses the Language
-Detector API when available and otherwise falls back to in-browser Unicode
-heuristics. The browser may download required language models. When Translator
-is unavailable, the overlay continues without translation.
+floors. Translation requires the browser's built-in Translator API and support
+for the selected language pair. Automatic source-language detection uses the
+Language Detector API when available and otherwise falls back to in-browser
+Unicode heuristics. The browser may download a required language model or
+language pack. Without Translator, the overlay continues to work without
+translation.
 
 Firefox 128 is the extension's technical compatibility floor, not a claim that
 Firefox 128 remains a currently serviced ESR. Use a currently supported Firefox
@@ -80,31 +83,13 @@ and Google media requests still occur. See [Privacy](./PRIVACY.md) for storage
 and network details and [Security](./.github/SECURITY.md) for vulnerability
 reports.
 
-## Development
+## Project documentation
 
 This project is developed with assistance from AI tools.
 
-Use the toolchain pinned in `package.json`, initialize the shared browser-core
-submodule, and install dependencies:
-
-```bash
-git submodule update --init --recursive
-pnpm install
-```
-
-| Command | Purpose |
-| --- | --- |
-| `pnpm dev` | Watch and rebuild the development userscript |
-| `pnpm test` | Run the Vitest suite |
-| `pnpm test:cov` | Run tests with coverage thresholds |
-| `pnpm test:e2e` | Run userscript flows and installed Chromium/Firefox extension tests |
-| `pnpm quality` | Run static, type, i18n, dependency, and source checks |
-| `pnpm verify` | Run quality, all builds, and artifact validation |
-| `pnpm verify:full` | Add coverage and browser tests to `verify` |
-
-See [Contributing](./CONTRIBUTING.md) for project constraints and validation
-expectations. Extension-specific architecture and loading details are in the
-[extension guide](./extension/README.md).
+See [Contributing](./CONTRIBUTING.md) for development setup and validation, and
+the [extension guide](./extension/README.md) for extension architecture, builds,
+and unpacked loading.
 
 ## Support
 
