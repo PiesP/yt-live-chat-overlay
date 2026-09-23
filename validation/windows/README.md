@@ -99,9 +99,10 @@ or watch time. Older records named this field `mediaProgressSeconds` and must be
 interpreted as the same position range. Phase health is checked separately.
 
 Chat message counts and fingerprints describe observed accessible-render activity.
-`mediaTimeRangeSeconds` describes the sampled media-position range. Actual viewing
-duration is the wall-clock five-minute, ten-minute, and five-minute observation
-schedule. These are different measurements and do not substitute for one another.
+`mediaTimeRangeSeconds` describes the sampled media-position range.
+The five-minute, ten-minute, and five-minute phases describe the profile's
+wall-clock observation schedule. They do not establish actual viewer attention
+or viewing time. These measurements do not substitute for one another.
 
 The ordinary short installation flow keeps the persistent-context launcher and
 does not establish native tab visibility. Both Chrome launch paths use
