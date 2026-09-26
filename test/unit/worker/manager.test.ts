@@ -216,6 +216,98 @@ describe('RenderWorkerManager', () => {
       );
     });
 
+    it('invalidates a late original translation when a deferred replacement is admitted', async () => {
+      deps.settings.queueMaxSize = 1;
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const onDimensionsChanged = vi.fn(
+        (_callback: (dimensions: { width: number; height: number }) => void) => vi.fn()
+      );
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged,
+      };
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(true);
+      const worker = (manager as unknown as {
+        worker: {
+          onmessage?: (event: MessageEvent) => void;
+          postMessage: ReturnType<typeof vi.fn>;
+        };
+      }).worker;
+      const original = {
+        id: 'deferred-replacement',
+        timestamp: Date.now(),
+        text: 'original',
+        content: [{ type: 'text' as const, content: 'original' }],
+        kind: 'text' as const,
+        authorType: 'normal' as const,
+      };
+      expect(manager.sendToWorker(original, original.id)).toBe(true);
+      await Promise.resolve();
+
+      const unacknowledgedBatches = (
+        manager as unknown as {
+          unacknowledgedBatches: Map<number, { saturationProbe: boolean }>;
+        }
+      ).unacknowledgedBatches;
+      const firstBatch = unacknowledgedBatches.get(1);
+      if (!firstBatch) throw new Error('Original batch was not sent');
+      firstBatch.saturationProbe = true;
+
+      expect(
+        manager.sendToWorker(
+          {
+            ...original,
+            actionType: 'replace',
+            text: 'replacement',
+            content: [{ type: 'text' as const, content: 'replacement' }],
+          },
+          original.id
+        )
+      ).toBe(true);
+      expect((manager as any).deferredIngress).toHaveLength(1);
+
+      manager.sendTranslation(
+        original.id,
+        'stale original translation',
+        { width: 180, height: 40, translationHeight: 12 },
+        0
+      );
+      expect((manager as any).translatedMessages.get(original.id)).toBe(
+        'stale original translation'
+      );
+
+      worker.onmessage?.({
+        data: {
+          type: 'batchReceipt',
+          epoch: 0,
+          batchSequence: 1,
+          pendingQueueDepth: 0,
+          admittedMessages: 1,
+          minimumPendingPriority: null,
+        },
+      } as MessageEvent);
+      await Promise.resolve();
+
+      expect((manager as any).deferredIngress).toHaveLength(0);
+      expect((manager as any).translatedMessages.has(original.id)).toBe(false);
+
+      worker.postMessage.mockClear();
+      deps.estimateDimensions.mockReturnValue({ width: 220, height: 60 });
+      const dimensionsChanged = onDimensionsChanged.mock.calls[0]?.[0];
+      if (!dimensionsChanged) throw new Error('Dimension listener was not registered');
+      dimensionsChanged({ width: 320, height: 180 });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(deps.estimateTranslatedDimensions).not.toHaveBeenCalled();
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'updateMessageGeometries',
+        geometries: [{ id: original.id, width: 220, height: 60 }],
+      });
+    });
+
     it('reports a transferred canvas when the init post fails', () => {
       const originalWorker = globalThis.Worker;
       const terminate = vi.fn();
