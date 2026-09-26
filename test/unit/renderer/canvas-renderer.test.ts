@@ -305,6 +305,33 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('stops the main-thread animation loop while user-paused', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as { animFrameId: number | null };
+    expect(internals.animFrameId).not.toBeNull();
+
+    renderer.setUserPaused(true);
+    expect(internals.animFrameId).toBeNull();
+
+    renderer.setUserPaused(false);
+    expect(internals.animFrameId).not.toBeNull();
+    renderer.destroy();
+  });
+
+  it('clears the Worker visibility pause while the user pause remains active', () => {
+    const setPaused = vi.spyOn(RenderWorkerManager.prototype, 'setPaused');
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+
+    renderer.setUserPaused(true);
+    renderer.pause();
+    renderer.resume();
+
+    expect(setPaused).toHaveBeenNthCalledWith(1, true);
+    expect(setPaused).toHaveBeenNthCalledWith(2, false);
+    renderer.setUserPaused(false);
+    renderer.destroy();
+  });
+
   it('isPaused is false after construction', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);

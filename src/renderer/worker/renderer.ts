@@ -414,7 +414,7 @@ export class WorkerRenderer {
   private isDestroyed = false;
   private isPaused = false;
   private isUserPaused = false;
-  private pauseStartTime = 0;
+  private pauseStartTime: number | null = null;
   private antiBlockStartTime = 0;
   private invFadeMs = 0;
   private ageFadeRate = 0;
@@ -738,27 +738,11 @@ export class WorkerRenderer {
                 cancelAnimationFrame(this.animFrameId);
                 this.animFrameId = null;
               }
-              this.pauseStartTime = performance.now();
+              this.beginPauseAccounting();
               this.isPaused = true;
             } else if (!shouldPause && this.isPaused) {
-              const now = performance.now();
-              let pausedMs = Math.max(0, now - this.pauseStartTime);
-              for (const msg of this.activeMessages) {
-                const elapsedBeforePause = now - pausedMs - msg.startTime;
-                const remainingDisplay = msg.duration - elapsedBeforePause;
-                const capped = Math.max(
-                  0,
-                  Math.min(pausedMs, Math.max(0, remainingDisplay) + 1000)
-                );
-                msg.pausedDuration += capped;
-              }
-              pausedMs = Math.min(
-                pausedMs,
-                (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
-              );
-              WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
               this.isPaused = false;
-              this.pauseStartTime = 0;
+              this.finishPauseAccounting();
               if (this.animFrameId === null && !this.isDestroyed) {
                 if (!this.isUserPaused) this.startRenderLoop();
               }
@@ -792,11 +776,14 @@ export class WorkerRenderer {
           }
           case 'setUserPaused': {
             const shouldPause = (data.paused as boolean) ?? false;
+            if (shouldPause === this.isUserPaused) break;
+            if (shouldPause) this.beginPauseAccounting();
             this.isUserPaused = shouldPause;
             if (shouldPause && this.animFrameId !== null) {
               cancelAnimationFrame(this.animFrameId);
               this.animFrameId = null;
             }
+            if (!shouldPause) this.finishPauseAccounting();
             // Restart render loop if unpausing while not otherwise paused
             if (!this.isUserPaused && !this.isPaused && !this.isDestroyed) {
               if (this.animFrameId === null) {
@@ -1046,6 +1033,30 @@ export class WorkerRenderer {
       this.animFrameId = requestAnimationFrame(frame);
     };
     this.animFrameId = requestAnimationFrame(frame);
+  }
+
+  /** Start one elapsed-time freeze interval shared by every pause cause. */
+  private beginPauseAccounting(): void {
+    this.pauseStartTime ??= performance.now();
+  }
+
+  /** Apply a completed freeze interval once after the final pause cause clears. */
+  private finishPauseAccounting(): void {
+    if (this.isPaused || this.isUserPaused || this.pauseStartTime === null) return;
+    const now = performance.now();
+    let pausedMs = Math.max(0, now - this.pauseStartTime);
+    for (const msg of this.activeMessages) {
+      const elapsedBeforePause = now - pausedMs - msg.startTime;
+      const remainingDisplay = msg.duration - elapsedBeforePause;
+      const capped = Math.max(0, Math.min(pausedMs, Math.max(0, remainingDisplay) + 1000));
+      msg.pausedDuration += capped;
+    }
+    pausedMs = Math.min(
+      pausedMs,
+      (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
+    );
+    WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
+    this.pauseStartTime = null;
   }
 
   /** Report cumulative Worker-owned render state at a bounded cadence. */
