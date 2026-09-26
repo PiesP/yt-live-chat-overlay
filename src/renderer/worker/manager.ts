@@ -643,7 +643,6 @@ export class RenderWorkerManager {
 
     const priority = this.deps.getMessagePriority(message);
     const id = msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`;
-    if (message.actionType === 'replace') this.translatedMessages.delete(id);
     const deferredForId = this.deferredIngress.find((entry) => entry.id === id);
     const isKnownReplacement =
       message.actionType === 'replace' &&
@@ -692,6 +691,7 @@ export class RenderWorkerManager {
     replaceIndex = -1
   ): boolean {
     if (!this.active || !this.worker) return false;
+    if (message.actionType === 'replace') this.translatedMessages.delete(id);
 
     if (replaceIndex < 0 && this.pendingBatch.length >= MAX_ADD_MESSAGES_PER_BATCH) {
       this.flushBatch();
