@@ -332,6 +332,41 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('preserves active message elapsed time across a long user pause', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    const renderer = new CanvasRenderer(overlay, makeSettings({ maxMessageAgeMs: 30_000 }));
+    const message = makeMessage('long-user-pause', 'long user pause');
+    const active = {
+      message,
+      renderMessage: message,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5_000,
+      invDuration: 1 / 5_000,
+      width: 100,
+      height: 20,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: message.text,
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(active);
+
+    renderer.setUserPaused(true);
+    nowSpy.mockReturnValue(121_000);
+    renderer.setUserPaused(false);
+
+    expect(active.pausedDuration).toBe(120_000);
+    expect(121_000 - active.startTime - active.pausedDuration).toBe(1_000);
+    renderer.destroy();
+  });
+
   it('isPaused is false after construction', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);

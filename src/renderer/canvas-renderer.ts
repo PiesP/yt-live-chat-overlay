@@ -421,6 +421,8 @@ export class CanvasRenderer extends RendererBase {
       settings: this.settings,
       observability: this.observability,
       estimateDimensions: (msg) => this.estimateDimensions(msg),
+      estimateTranslatedDimensions: (msg, translatedText) =>
+        this.estimateTranslatedDimensions(msg, translatedText),
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
       onMessageDispatched: (message, id) => this.prefetchAndTranslateForWorker(message, id),
@@ -2282,9 +2284,13 @@ export class CanvasRenderer extends RendererBase {
    * that would already be expired by now are left to expire naturally on
    * the next render frame via the merged cleanup pass.
    */
-  protected override applyPausedDuration(pausedMs: number): void {
+  protected override applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
     const now = performance.now();
     for (const msg of this.activeMessages) {
+      if (preserveElapsed) {
+        msg.pausedDuration += pausedMs;
+        continue;
+      }
       const elapsedBeforePause = now - pausedMs - msg.startTime;
       const remainingDisplay = msg.duration - elapsedBeforePause;
       // Clamp per-message: never push pausedDuration beyond what the

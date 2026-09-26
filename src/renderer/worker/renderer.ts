@@ -113,6 +113,7 @@ import type {
   WorkerConfig,
   WorkerContentSegment,
   WorkerMessage,
+  WorkerMessageGeometry,
   WorkerStatsMessage,
 } from './types';
 
@@ -415,6 +416,7 @@ export class WorkerRenderer {
   private isPaused = false;
   private isUserPaused = false;
   private pauseStartTime: number | null = null;
+  private pauseIncludesUserPause = false;
   private antiBlockStartTime = 0;
   private invFadeMs = 0;
   private ageFadeRate = 0;
@@ -591,6 +593,54 @@ export class WorkerRenderer {
             this.logicalHeight = cssH;
             this.initLanes(cssW, cssH);
             this.reflowActiveMessages();
+            break;
+          }
+          case 'updateMessageGeometries': {
+            const geometries = data.geometries as WorkerMessageGeometry[];
+            let activeGeometryChanged = false;
+            for (const geometry of geometries) {
+              const existing = this.messageById.get(geometry.id);
+              if (!existing) continue;
+              const pendingTranslation = this.pendingTranslations.get(geometry.id);
+              const isActive = 'laneArrayIndices' in existing;
+              const hasActiveTranslation = isActive && !!existing.translatedText;
+              if (
+                geometry.translationHeight === undefined &&
+                pendingTranslation?.translatedText === null
+              ) {
+                pendingTranslation.width = geometry.width;
+                pendingTranslation.height = geometry.height;
+                continue;
+              }
+              const hasPendingTranslation = pendingTranslation !== undefined;
+              if (
+                geometry.translationHeight === undefined &&
+                (hasActiveTranslation || hasPendingTranslation)
+              ) {
+                continue;
+              }
+              if (pendingTranslation) {
+                pendingTranslation.width = geometry.width;
+                pendingTranslation.height = geometry.height;
+                if (geometry.translationHeight !== undefined) {
+                  pendingTranslation.translationHeight = geometry.translationHeight;
+                }
+              }
+              if (isActive) {
+                this.applyActiveMessageGeometry(existing, geometry.width, geometry.height);
+                if (geometry.translationHeight !== undefined) {
+                  existing.translationHeight = geometry.translationHeight;
+                }
+                activeGeometryChanged = true;
+              } else {
+                existing.width = geometry.width;
+                existing.height = geometry.height;
+                if (geometry.translationHeight !== undefined) {
+                  existing.translationHeight = geometry.translationHeight;
+                }
+              }
+            }
+            if (activeGeometryChanged) this.reflowActiveMessages();
             break;
           }
           case 'addMessages': {
@@ -777,7 +827,10 @@ export class WorkerRenderer {
           case 'setUserPaused': {
             const shouldPause = (data.paused as boolean) ?? false;
             if (shouldPause === this.isUserPaused) break;
-            if (shouldPause) this.beginPauseAccounting();
+            if (shouldPause) {
+              this.pauseIncludesUserPause = true;
+              this.beginPauseAccounting();
+            }
             this.isUserPaused = shouldPause;
             if (shouldPause && this.animFrameId !== null) {
               cancelAnimationFrame(this.animFrameId);
@@ -1044,19 +1097,26 @@ export class WorkerRenderer {
   private finishPauseAccounting(): void {
     if (this.isPaused || this.isUserPaused || this.pauseStartTime === null) return;
     const now = performance.now();
-    let pausedMs = Math.max(0, now - this.pauseStartTime);
+    const rawPausedMs = Math.max(0, now - this.pauseStartTime);
     for (const msg of this.activeMessages) {
-      const elapsedBeforePause = now - pausedMs - msg.startTime;
+      if (this.pauseIncludesUserPause) {
+        msg.pausedDuration += rawPausedMs;
+        continue;
+      }
+      const elapsedBeforePause = now - rawPausedMs - msg.startTime;
       const remainingDisplay = msg.duration - elapsedBeforePause;
-      const capped = Math.max(0, Math.min(pausedMs, Math.max(0, remainingDisplay) + 1000));
+      const capped = Math.max(0, Math.min(rawPausedMs, Math.max(0, remainingDisplay) + 1000));
       msg.pausedDuration += capped;
     }
-    pausedMs = Math.min(
-      pausedMs,
-      (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
-    );
+    const pausedMs = this.pauseIncludesUserPause
+      ? rawPausedMs
+      : Math.min(
+          rawPausedMs,
+          (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
+        );
     WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
     this.pauseStartTime = null;
+    this.pauseIncludesUserPause = false;
   }
 
   /** Report cumulative Worker-owned render state at a bounded cadence. */

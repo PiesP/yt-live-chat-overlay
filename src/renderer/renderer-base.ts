@@ -64,6 +64,8 @@ export abstract class RendererBase {
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
   protected replayMode = false;
   protected pausedAt: number | null = null;
+  /** Whether the current shared pause interval contains an explicit user pause. */
+  private pauseIncludesUserPause = false;
   protected backlogPaused = false;
 
   /**
@@ -183,6 +185,7 @@ export abstract class RendererBase {
   setUserPaused(paused: boolean): void {
     if (this.isUserPaused === paused) return;
     if (paused) {
+      this.pauseIncludesUserPause = true;
       this.beginPauseAccounting();
       this.isUserPaused = true;
       this.onUserPause();
@@ -280,10 +283,12 @@ export abstract class RendererBase {
     // Use a higher clamp (2× maxMessageAgeMs) to avoid the per-message
     // clamp from discarding real elapsed time. CanvasRenderer applies its
     // own per-message expiry bound in applyPausedDuration().
-    const pausedDuration = Math.min(raw, this.settings.maxMessageAgeMs * 2);
-    this.applyPausedDuration(pausedDuration);
+    const preserveElapsed = this.pauseIncludesUserPause;
+    const pausedDuration = preserveElapsed ? raw : Math.min(raw, this.settings.maxMessageAgeMs * 2);
+    this.applyPausedDuration(pausedDuration, preserveElapsed);
     this.laneAllocator.shiftAll(pausedDuration);
     this.pausedAt = null;
+    this.pauseIncludesUserPause = false;
   }
 
   /**
@@ -514,7 +519,7 @@ export abstract class RendererBase {
   protected onSystemResumeWhileUserPaused(): void {}
   protected onUserPause(): void {}
   protected onUserResume(): void {}
-  protected abstract applyPausedDuration(pausedMs: number): void;
+  protected abstract applyPausedDuration(pausedMs: number, preserveElapsed?: boolean): void;
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;
 
@@ -580,6 +585,7 @@ export abstract class RendererBase {
    * Backlog injection handles new messages while existing ones fade out.
    */
   clearPausedDuration(): void {
+    if (this.pauseIncludesUserPause) return;
     this.pausedAt = null;
   }
 
