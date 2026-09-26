@@ -306,6 +306,216 @@ describe('Worker message protocol', () => {
     }
   });
 
+  it('updates pending geometry without resurrecting a missing message id', () => {
+    const renderer = initializeRenderer();
+    const internals = renderer as unknown as {
+      pendingQueue: WorkerMessage[];
+      messageById: Map<string, unknown>;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'still-pending', width: 100, height: 20 })],
+      })
+    );
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateMessageGeometries',
+        geometries: [
+          { id: 'still-pending', width: 180, height: 40 },
+          { id: 'already-expired', width: 220, height: 60 },
+        ],
+      })
+    );
+
+    expect(internals.pendingQueue).toHaveLength(1);
+    expect(internals.pendingQueue[0]).toMatchObject({
+      id: 'still-pending',
+      width: 180,
+      height: 40,
+    });
+    expect(internals.messageById.has('already-expired')).toBe(false);
+  });
+
+  it('updates pending base geometry while a translation clear is waiting to apply', () => {
+    const renderer = initializeRenderer({ translationGeneration: 0 });
+    const internals = renderer as unknown as {
+      pendingQueue: WorkerMessage[];
+      applyPendingTranslations(): void;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'clear-translation', width: 100, height: 20 })],
+      })
+    );
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateTranslation',
+        id: 'clear-translation',
+        translatedText: null,
+        width: 120,
+        height: 24,
+        translationHeight: 0,
+        translationGeneration: 0,
+      })
+    );
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateMessageGeometries',
+        geometries: [{ id: 'clear-translation', width: 200, height: 50 }],
+      })
+    );
+    internals.applyPendingTranslations();
+
+    expect(internals.pendingQueue[0]).toMatchObject({
+      id: 'clear-translation',
+      width: 200,
+      height: 50,
+      translatedText: null,
+      translationHeight: 0,
+    });
+  });
+
+  it('updates a pending translation clear without replacing active translated geometry early', () => {
+    const renderer = initializeRenderer({
+      outlineWidthPx: 0,
+      translationEnabled: true,
+      translationMode: 'dual',
+      translationGeneration: 0,
+    });
+    const internals = renderer as unknown as {
+      activeMessages: Array<{
+        id: string;
+        width: number;
+        height: number;
+        translatedText?: string | null;
+        translationHeight?: number;
+        translatedContent?: Array<{ type: string; content: string }>;
+      }>;
+      drainQueue(now: number, width: number, height: number): void;
+      applyPendingTranslations(): void;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'active-clear-resize' })],
+      })
+    );
+    internals.drainQueue(10_000, 640, 360);
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateTranslation',
+        id: 'active-clear-resize',
+        translatedText: 'translated text',
+        width: 180,
+        height: 40,
+        translationHeight: 12,
+        translationGeneration: 0,
+      })
+    );
+    internals.applyPendingTranslations();
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateTranslation',
+        id: 'active-clear-resize',
+        translatedText: null,
+        width: 120,
+        height: 24,
+        translationHeight: 0,
+        translationGeneration: 0,
+      })
+    );
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateMessageGeometries',
+        geometries: [{ id: 'active-clear-resize', width: 200, height: 50 }],
+      })
+    );
+
+    expect(internals.activeMessages[0]).toMatchObject({
+      width: 180,
+      height: 40,
+      translatedText: 'translated text',
+      translationHeight: 12,
+      translatedContent: [{ type: 'text', content: 'translated text' }],
+    });
+    internals.applyPendingTranslations();
+    expect(internals.activeMessages[0]).toMatchObject({
+      width: 200,
+      height: 50,
+      translatedText: null,
+      translationHeight: 0,
+    });
+    expect(internals.activeMessages[0]?.translatedContent).toBeUndefined();
+  });
+
+  it('preserves active translation state during a geometry-only resize update', () => {
+    const renderer = initializeRenderer({
+      outlineWidthPx: 0,
+      translationEnabled: true,
+      translationMode: 'dual',
+      translationGeneration: 0,
+    });
+    const internals = renderer as unknown as {
+      activeMessages: Array<{
+        id: string;
+        width: number;
+        height: number;
+        translatedText?: string | null;
+        translationHeight?: number;
+        translatedContent?: Array<{ type: string; content: string }>;
+      }>;
+      drainQueue(now: number, width: number, height: number): void;
+      applyPendingTranslations(): void;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'translated-resize' })],
+      })
+    );
+    internals.drainQueue(10_000, 640, 360);
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateTranslation',
+        id: 'translated-resize',
+        translatedText: 'translated text',
+        width: 180,
+        height: 40,
+        translationHeight: 12,
+        translationGeneration: 0,
+      })
+    );
+    internals.applyPendingTranslations();
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateMessageGeometries',
+        geometries: [
+          {
+            id: 'translated-resize',
+            width: 220,
+            height: 50,
+            translationHeight: 14,
+          },
+        ],
+      })
+    );
+
+    expect(internals.activeMessages[0]).toMatchObject({
+      id: 'translated-resize',
+      width: 220,
+      height: 50,
+      translatedText: 'translated text',
+      translationHeight: 14,
+      translatedContent: [{ type: 'text', content: 'translated text' }],
+    });
+  });
+
   describe('init error case', () => {
     it('posts error when canvas getContext returns null', () => {
       const BadCanvas = class { getContext() { return null; } };
@@ -1095,7 +1305,7 @@ describe('Worker message protocol', () => {
       expect(requestFrame).toHaveBeenCalledTimes(initialRequests + 1);
     });
 
-    it('freezes active message elapsed time during a user pause', () => {
+    it('freezes active message elapsed time during a long user pause', () => {
       const renderer = initializeRenderer();
       const nowSpy = vi.mocked(performance.now);
       const internals = renderer as unknown as {
@@ -1115,10 +1325,10 @@ describe('Worker message protocol', () => {
 
       nowSpy.mockReturnValue(10_000);
       renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: true }));
-      nowSpy.mockReturnValue(13_000);
+      nowSpy.mockReturnValue(130_000);
       renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: false }));
 
-      expect(internals.activeMessages[0]?.pausedDuration).toBe(3_000);
+      expect(internals.activeMessages[0]?.pausedDuration).toBe(120_000);
     });
 
     it('resumes after visibility clears before an overlapping user pause', () => {

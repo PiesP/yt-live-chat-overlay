@@ -39,6 +39,11 @@ function createMinimalDeps() {
       tick: vi.fn(),
     } as any,
     estimateDimensions: vi.fn(() => ({ width: 100, height: 20 })),
+    estimateTranslatedDimensions: vi.fn(() => ({
+      width: 180,
+      height: 40,
+      translationHeight: 12,
+    })),
     getMessagePriority: vi.fn(() => 0),
     getEffectiveSpeedPxPerSec: vi.fn(() => 100),
   };
@@ -171,8 +176,19 @@ describe('RenderWorkerManager', () => {
       manager.sendToWorker(first, first.id);
       manager.sendToWorker(second, second.id);
       await Promise.resolve();
+      manager.sendTranslation(
+        first.id,
+        'translated first',
+        { width: 180, height: 40, translationHeight: 12 },
+        0
+      );
       worker.postMessage.mockClear();
       deps.estimateDimensions.mockReturnValue({ width: 220, height: 60 });
+      deps.estimateTranslatedDimensions.mockReturnValue({
+        width: 260,
+        height: 80,
+        translationHeight: 16,
+      });
 
       const dimensionsChanged = onDimensionsChanged.mock.calls[0]?.[0];
       if (!dimensionsChanged) throw new Error('Dimension listener was not registered');
@@ -187,23 +203,16 @@ describe('RenderWorkerManager', () => {
         dpr: window.devicePixelRatio || 1,
       });
       expect(worker.postMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'addMessages',
-          messages: [
-            expect.objectContaining({
-              id: 'first',
-              actionType: 'replace',
-              width: 220,
-              height: 60,
-            }),
-            expect.objectContaining({
-              id: 'second',
-              actionType: 'replace',
-              width: 220,
-              height: 60,
-            }),
+        {
+          type: 'updateMessageGeometries',
+          geometries: [
+            { id: 'first', width: 260, height: 80, translationHeight: 16 },
+            { id: 'second', width: 220, height: 60 },
           ],
-        })
+        }
+      );
+      expect(worker.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'addMessages' })
       );
     });
 

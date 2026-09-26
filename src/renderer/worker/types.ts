@@ -203,6 +203,15 @@ export interface WorkerMessage {
   userColor?: string;
 }
 
+/** Geometry-only update for a message the Worker already owns. */
+export interface WorkerMessageGeometry {
+  id: string;
+  width: number;
+  height: number;
+  /** Updated dual-translation block height when translation is active. */
+  translationHeight?: number;
+}
+
 /** Periodic cumulative state reported by the renderer Worker. */
 export interface WorkerStatsMessage {
   type: 'stats';

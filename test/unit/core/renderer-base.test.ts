@@ -13,6 +13,7 @@ class TestRenderer extends RendererBase {
   systemResumeWhileUserPausedCalled = false;
   pausedDuration = 0;
   pausedDurations: number[] = [];
+  preserveElapsedFlags: boolean[] = [];
   stateReset = false;
   destroyed = false;
   messages: ChatMessage[] = [];
@@ -55,9 +56,10 @@ class TestRenderer extends RendererBase {
     this.systemResumeWhileUserPausedCalled = true;
   }
 
-  protected applyPausedDuration(pausedMs: number): void {
+  protected applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
     this.pausedDuration = pausedMs;
     this.pausedDurations.push(pausedMs);
+    this.preserveElapsedFlags.push(preserveElapsed);
   }
 
   protected resetState(): void {
@@ -323,6 +325,34 @@ describe('RendererBase', () => {
       r.resume();
       // B-1: clamped to maxMessageAgeMs * 2 = 60000
       expect(r.pausedDuration).toBeLessThanOrEqual(60000);
+      expect(r.preserveElapsedFlags).toEqual([false]);
+    });
+
+    it('preserves the full duration of a long user pause', () => {
+      const r = createRenderer();
+
+      r.setUserPaused(true);
+      now += 3_600_000;
+      r.setUserPaused(false);
+
+      expect(r.pausedDurations).toEqual([3_600_000]);
+      expect(r.preserveElapsedFlags).toEqual([true]);
+    });
+
+    it('does not clear elapsed accounting for a user pause overlapping hidden recovery', () => {
+      const r = createRenderer();
+
+      r.setUserPaused(true);
+      r.pause();
+      now += 20_000;
+      r.clearPausedDuration();
+      now += 10_000;
+      r.resume();
+      now += 30_000;
+      r.setUserPaused(false);
+
+      expect(r.pausedDurations).toEqual([60_000]);
+      expect(r.preserveElapsedFlags).toEqual([true]);
     });
   });
 
