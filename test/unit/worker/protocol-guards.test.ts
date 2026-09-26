@@ -251,6 +251,30 @@ describe('renderer worker protocol guards', () => {
     expect(isValidControlMessage({ ...base, height: 0 })).toBe(false);
   });
 
+  it('accepts only bounded finite geometry-only updates', () => {
+    const valid = {
+      type: 'updateMessageGeometries',
+      geometries: [{ id: 'message', width: 120, height: 40, translationHeight: 12 }],
+    };
+    expect(isValidControlMessage(valid)).toBe(true);
+    for (const geometry of [
+      { id: '', width: 120, height: 40 },
+      { id: 'message', width: 0, height: 40 },
+      { id: 'message', width: 120, height: Number.NaN },
+      { id: 'message', width: 120, height: 40, translationHeight: -1 },
+    ]) {
+      expect(
+        isValidControlMessage({ type: 'updateMessageGeometries', geometries: [geometry] })
+      ).toBe(false);
+    }
+    expect(
+      isValidControlMessage({
+        type: 'updateMessageGeometries',
+        geometries: Array.from({ length: MAX_STATS_MESSAGE_IDS + 1 }, () => valid.geometries[0]),
+      })
+    ).toBe(false);
+  });
+
   it('accepts manager messages through the guard and renderer', async () => {
     const renderer = initializeRenderer();
     const manager = createManager(renderer);

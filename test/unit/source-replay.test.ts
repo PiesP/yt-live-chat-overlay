@@ -535,6 +535,65 @@ describe('ReplayChatSource', () => {
     expect(source.drainPendingMessages()).toEqual([]);
   });
 
+  it('preserves fallback high-water through an empty page before seeking backward', async () => {
+    const received: ChatMessage[] = [];
+    const initialContinuation = { continuation: 'initial' };
+    const progressedContinuation = { continuation: 'at-thirty-minutes' };
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      bootstrap: ChatBootstrapData | null;
+      replayMode: 'continuation' | null;
+      replayContinuation: InnertubeContinuationData | null;
+      replayFallbackLastOffsetMs: number;
+      requestReplayPayload: (
+        continuation: InnertubeContinuationData,
+        signal?: AbortSignal
+      ) => Promise<LiveChatPayload>;
+      fetchNextReplayFallbackBatch: (minimumOffsetMs: number) => Promise<boolean>;
+      handleSeeked: (offsetMs: number) => void;
+    };
+    internals.callback = (messages) => {
+      received.push(...(Array.isArray(messages) ? messages : [messages]));
+    };
+    internals.bootstrap = {
+      initialContinuation,
+      isReplay: true,
+    } as ChatBootstrapData;
+    internals.replayMode = 'continuation';
+    internals.replayContinuation = progressedContinuation;
+    internals.replayFallbackLastOffsetMs = 1_800_000;
+    const requestReplayPayload = vi
+      .spyOn(internals, 'requestReplayPayload')
+      .mockResolvedValueOnce({
+        actions: [],
+        continuations: [
+          { liveChatReplayContinuationData: { continuation: 'after-empty-page' } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        actions: [makeReplayAction('five-minute-message', 300_000)],
+        continuations: [
+          { liveChatReplayContinuationData: { continuation: 'after-five-minutes' } },
+        ],
+      });
+
+    await expect(internals.fetchNextReplayFallbackBatch(0)).resolves.toBe(true);
+    expect(internals.replayFallbackLastOffsetMs).toBe(1_800_000);
+
+    internals.handleSeeked(300_000);
+    await vi.waitFor(() => expect(requestReplayPayload).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(received.map((message) => message.id)).toEqual(['five-minute-message'])
+    );
+
+    expect(requestReplayPayload).toHaveBeenNthCalledWith(
+      2,
+      initialContinuation,
+      expect.any(AbortSignal)
+    );
+    expect(internals.replayContinuation).toEqual({ continuation: 'after-five-minutes' });
+  });
+
   it('discards an initialization response invalidated by a newer session', async () => {
     const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
     const internals = source as unknown as {

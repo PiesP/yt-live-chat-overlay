@@ -32,9 +32,10 @@ import {
   isValidWorkerStatsMessage,
   MAX_ADD_MESSAGES_PER_BATCH,
 } from './protocol-guards';
-import type { WorkerBatchReceipt, WorkerStatsMessage } from './types';
+import type { WorkerBatchReceipt, WorkerMessageGeometry, WorkerStatsMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
+type TranslatedDimensionResult = DimensionResult & { translationHeight: number };
 
 export interface WorkerInitResult {
   started: boolean;
@@ -64,6 +65,10 @@ interface WorkerManagerDeps {
   settings: OverlaySettings;
   observability: ObservabilityReporter;
   estimateDimensions: (msg: ChatMessage) => DimensionResult;
+  estimateTranslatedDimensions?: (
+    msg: ChatMessage,
+    translatedText: string
+  ) => TranslatedDimensionResult;
   getMessagePriority: (msg: ChatMessage) => number;
   getEffectiveSpeedPxPerSec: () => number;
   onMessageDispatched?: (message: ChatMessage, id: string) => void;
@@ -165,6 +170,8 @@ export class RenderWorkerManager {
   private readonly deps: WorkerManagerDeps;
   /** Original message and accounting state retained while the Worker owns rendering. */
   private readonly sentMessages = new Map<string, RetainedWorkerMessage>();
+  /** Latest accepted translation text for resize-sensitive geometry estimation. */
+  private readonly translatedMessages = new Map<string, string>();
   private nextBatchSequence = 0;
   private pendingBatchSequence = 0;
   /** State to restore if the currently pending batch cannot be posted. */
@@ -183,6 +190,8 @@ export class RenderWorkerManager {
   } | null = null;
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
+  /** Coalesces resize-driven geometry refreshes until main-thread caches are invalidated. */
+  private resizeRemeasureScheduled = false;
 
   /** Callback to push structured text alternatives to the overlay's aria-live region. */
   private _liveRegionCallback: ((messages: AccessibleChatMessage[]) => void) | null = null;
@@ -559,6 +568,7 @@ export class RenderWorkerManager {
             height: d.height,
             dpr: currentDpr,
           });
+          this.scheduleResizeRemeasure(w);
         }
       });
 
@@ -592,6 +602,36 @@ export class RenderWorkerManager {
       });
       return { started: false, canvasTransferred };
     }
+  }
+
+  /** Remeasure Worker-owned messages after resize-sensitive dimension caches clear. */
+  private scheduleResizeRemeasure(worker: Worker): void {
+    if (this.resizeRemeasureScheduled) return;
+    this.resizeRemeasureScheduled = true;
+    queueMicrotask(() => {
+      this.resizeRemeasureScheduled = false;
+      if (!this.active || this.worker !== worker) return;
+      const retained = [...this.sentMessages.entries()].filter(
+        ([, entry]) => entry.epoch === this.currentEpoch
+      );
+      const geometries: WorkerMessageGeometry[] = retained.map(([id, entry]) => {
+        const translatedText = this.translatedMessages.get(id);
+        const translatedGeometry =
+          translatedText !== undefined
+            ? this.deps.estimateTranslatedDimensions?.(entry.message, translatedText)
+            : undefined;
+        const geometry = translatedGeometry ?? this.deps.estimateDimensions(entry.message);
+        return {
+          id,
+          width: geometry.width,
+          height: geometry.height,
+          ...(translatedGeometry !== undefined
+            ? { translationHeight: translatedGeometry.translationHeight }
+            : {}),
+        };
+      });
+      worker.postMessage({ type: 'updateMessageGeometries', geometries });
+    });
   }
 
   /**
@@ -651,6 +691,7 @@ export class RenderWorkerManager {
     replaceIndex = -1
   ): boolean {
     if (!this.active || !this.worker) return false;
+    if (message.actionType === 'replace') this.translatedMessages.delete(id);
 
     if (replaceIndex < 0 && this.pendingBatch.length >= MAX_ADD_MESSAGES_PER_BATCH) {
       this.flushBatch();
@@ -895,7 +936,10 @@ export class RenderWorkerManager {
     geometry: { width: number; height: number; translationHeight: number },
     translationGeneration = 0
   ): void {
-    this.worker?.postMessage({
+    if (!this.worker) return;
+    if (translatedText === null) this.translatedMessages.delete(msgId);
+    else this.translatedMessages.set(msgId, translatedText);
+    this.worker.postMessage({
       type: 'updateTranslation',
       id: msgId,
       translatedText,
@@ -1008,6 +1052,7 @@ export class RenderWorkerManager {
     this.batchFlushScheduled = false;
     if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch, previousStates);
     this.deferredIngress.length = 0;
+    this.translatedMessages.clear();
     this.currentEpoch = Math.min(Number.MAX_SAFE_INTEGER, this.currentEpoch + 1);
     sendClearStateToWorker({ worker: this.worker }, this.currentEpoch);
   }
@@ -1098,6 +1143,7 @@ export class RenderWorkerManager {
     this.stopPingPong();
     if (!this.worker) {
       this.sentMessages.clear();
+      this.translatedMessages.clear();
       this.nextBatchSequence = 0;
       this.pendingBatchSequence = 0;
       return;
@@ -1137,6 +1183,7 @@ export class RenderWorkerManager {
     terminationTimeout = setTimeout(finalizeWorkerTermination, 500);
 
     this.sentMessages.clear();
+    this.translatedMessages.clear();
     this.nextBatchSequence = 0;
     this.pendingBatchSequence = 0;
   }
@@ -1224,7 +1271,10 @@ export class RenderWorkerManager {
       if (batch.epoch < epoch) this.unacknowledgedBatches.delete(sequence);
     }
     for (const [id, retained] of this.sentMessages) {
-      if (retained.epoch < epoch) this.sentMessages.delete(id);
+      if (retained.epoch < epoch) {
+        this.sentMessages.delete(id);
+        this.translatedMessages.delete(id);
+      }
     }
     this.deps.observability.updateActiveMessages(0);
     this.deps.observability.updateQueueDepth(0);
@@ -1257,6 +1307,7 @@ export class RenderWorkerManager {
     for (const [id, retained] of this.sentMessages) {
       if (retained.batchSequence <= processedBatchSequence && !currentIds.has(id)) {
         this.sentMessages.delete(id);
+        this.translatedMessages.delete(id);
       }
     }
   }

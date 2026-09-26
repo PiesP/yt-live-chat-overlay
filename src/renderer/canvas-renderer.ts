@@ -421,6 +421,8 @@ export class CanvasRenderer extends RendererBase {
       settings: this.settings,
       observability: this.observability,
       estimateDimensions: (msg) => this.estimateDimensions(msg),
+      estimateTranslatedDimensions: (msg, translatedText) =>
+        this.estimateTranslatedDimensions(msg, translatedText),
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
       onMessageDispatched: (message, id) => this.prefetchAndTranslateForWorker(message, id),
@@ -512,7 +514,7 @@ export class CanvasRenderer extends RendererBase {
     this.startRenderLoop();
     this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
     this.imageFetchManager.setOnImageReady(() => {
-      if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
+      if (!this.isPaused && !this.isVideoPaused && !this.isUserPaused && !this.needsRerender) {
         if (this.animFrameId !== null) {
           this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
         }
@@ -1027,7 +1029,8 @@ export class CanvasRenderer extends RendererBase {
   }
 
   private startRenderLoop(): void {
-    if (this.animFrameId !== null) return;
+    if (this.animFrameId !== null || this.isPaused || this.isVideoPaused || this.isUserPaused)
+      return;
     // Reset grace period on restart — fresh cycle, no prior idle state.
     this.idleSince = null;
     const loop = (): void => {
@@ -2248,6 +2251,19 @@ export class CanvasRenderer extends RendererBase {
     this.imageFetchManager.pause();
   }
 
+  protected override onUserPause(): void {
+    this.stopRenderLoop();
+  }
+
+  protected override onSystemResumeWhileUserPaused(): void {
+    this.workerManager.setPaused(false);
+    this.imageFetchManager.resume();
+  }
+
+  protected override onUserResume(): void {
+    if (!this.workerManager.isActive) this.startRenderLoop();
+  }
+
   protected onResume(): void {
     this.startRenderLoop();
     const now = performance.now();
@@ -2268,9 +2284,13 @@ export class CanvasRenderer extends RendererBase {
    * that would already be expired by now are left to expire naturally on
    * the next render frame via the merged cleanup pass.
    */
-  protected override applyPausedDuration(pausedMs: number): void {
+  protected override applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
     const now = performance.now();
     for (const msg of this.activeMessages) {
+      if (preserveElapsed) {
+        msg.pausedDuration += pausedMs;
+        continue;
+      }
       const elapsedBeforePause = now - pausedMs - msg.startTime;
       const remainingDisplay = msg.duration - elapsedBeforePause;
       // Clamp per-message: never push pausedDuration beyond what the

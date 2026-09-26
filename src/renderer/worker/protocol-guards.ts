@@ -190,6 +190,8 @@ export function isValidControlMessage(value: unknown): boolean {
         isPositiveFiniteNumber(value.height) &&
         isPositiveFiniteNumber(value.dpr)
       );
+    case 'updateMessageGeometries':
+      return validateMessageGeometries(value.geometries);
     case 'updateConfig':
       return isSafeConfig(value.config);
     case 'setPaused':
@@ -228,6 +230,22 @@ export function isValidControlMessage(value: unknown): boolean {
     default:
       return false;
   }
+}
+
+function validateMessageGeometries(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_STATS_MESSAGE_IDS &&
+    value.every(
+      (geometry) =>
+        isRecord(geometry) &&
+        typeof geometry.id === 'string' &&
+        geometry.id.length > 0 &&
+        isPositiveFiniteNumber(geometry.width) &&
+        isPositiveFiniteNumber(geometry.height) &&
+        (!hasOwn(geometry, 'translationHeight') || isFiniteNonNegative(geometry.translationHeight))
+    )
+  );
 }
 
 /**

@@ -54,6 +54,43 @@ for (const file of [userscriptFile, userscriptMetadataFile]) {
   }
 }
 
+function assertArtifactVersion(artifactName: string, artifactVersion: unknown): void {
+  if (artifactVersion !== version) {
+    throw new Error(
+      `${artifactName} version ${typeof artifactVersion === 'string' ? artifactVersion : '(missing)'} does not match release version ${version}.`
+    );
+  }
+}
+
+function validateUserscriptVersion(file: string, artifactName: string): void {
+  const source = readFileSync(join(distDir, file), 'utf8');
+  const metadata = source.match(
+    /^\/\/ ==UserScript==\r?\n([\s\S]*?)^\/\/ ==\/UserScript==\s*$/m
+  )?.[1];
+  if (metadata === undefined) {
+    throw new Error(`dist/${file} is missing a userscript metadata block.`);
+  }
+  const versionEntries = [...metadata.matchAll(/^\/\/\s+@version\s+(\S+)\s*$/gm)];
+  if (versionEntries.length !== 1) {
+    throw new Error(`dist/${file} must contain exactly one @version entry.`);
+  }
+  assertArtifactVersion(artifactName, versionEntries[0]?.[1]);
+}
+
+function validateExtensionVersion(directory: string, artifactName: string): void {
+  const manifestPath = join(root, directory, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error(`${directory}/manifest.json does not exist. Run all extension builds first.`);
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown };
+  assertArtifactVersion(artifactName, manifest.version);
+}
+
+validateUserscriptVersion(userscriptFile, 'userscript');
+validateUserscriptVersion(userscriptMetadataFile, 'userscript metadata');
+validateExtensionVersion('dist-extension', 'Chrome extension');
+validateExtensionVersion('dist-extension-firefox', 'Firefox extension');
+
 function changelogEntry(markdown: string, releaseVersion: string): string {
   const lines = markdown.split(/\r?\n/);
   const heading = new RegExp(`^## \\[${releaseVersion.replaceAll('.', '\\.')}\\](?:\\s|$)`);

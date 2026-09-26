@@ -305,6 +305,68 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('stops the main-thread animation loop while user-paused', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as { animFrameId: number | null };
+    expect(internals.animFrameId).not.toBeNull();
+
+    renderer.setUserPaused(true);
+    expect(internals.animFrameId).toBeNull();
+
+    renderer.setUserPaused(false);
+    expect(internals.animFrameId).not.toBeNull();
+    renderer.destroy();
+  });
+
+  it('clears the Worker visibility pause while the user pause remains active', () => {
+    const setPaused = vi.spyOn(RenderWorkerManager.prototype, 'setPaused');
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+
+    renderer.setUserPaused(true);
+    renderer.pause();
+    renderer.resume();
+
+    expect(setPaused).toHaveBeenNthCalledWith(1, true);
+    expect(setPaused).toHaveBeenNthCalledWith(2, false);
+    renderer.setUserPaused(false);
+    renderer.destroy();
+  });
+
+  it('preserves active message elapsed time across a long user pause', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    const renderer = new CanvasRenderer(overlay, makeSettings({ maxMessageAgeMs: 30_000 }));
+    const message = makeMessage('long-user-pause', 'long user pause');
+    const active = {
+      message,
+      renderMessage: message,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5_000,
+      invDuration: 1 / 5_000,
+      width: 100,
+      height: 20,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: message.text,
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(active);
+
+    renderer.setUserPaused(true);
+    nowSpy.mockReturnValue(121_000);
+    renderer.setUserPaused(false);
+
+    expect(active.pausedDuration).toBe(120_000);
+    expect(121_000 - active.startTime - active.pausedDuration).toBe(1_000);
+    renderer.destroy();
+  });
+
   it('isPaused is false after construction', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);

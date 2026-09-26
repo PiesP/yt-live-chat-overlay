@@ -64,6 +64,8 @@ export abstract class RendererBase {
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
   protected replayMode = false;
   protected pausedAt: number | null = null;
+  /** Whether the current shared pause interval contains an explicit user pause. */
+  private pauseIncludesUserPause = false;
   protected backlogPaused = false;
 
   /**
@@ -181,15 +183,27 @@ export abstract class RendererBase {
 
   /** Set user-initiated pause state (Space key toggle). */
   setUserPaused(paused: boolean): void {
+    if (this.isUserPaused === paused) return;
+    if (paused) {
+      this.pauseIncludesUserPause = true;
+      this.beginPauseAccounting();
+      this.isUserPaused = true;
+      this.onUserPause();
+      return;
+    }
+
     this.isUserPaused = paused;
+    if (this.isPaused || this.isVideoPaused) return;
+    this.finishPauseAccounting();
+    this.onUserResume();
   }
 
   // ── Shared state machine ──────────────────────────────────────────────
 
   pause(): void {
     if (this.isPaused) return;
+    this.beginPauseAccounting();
     this.isPaused = true;
-    this.pausedAt = performance.now();
     this.burstDetector.pause();
     this.onPause();
     log.debug('renderer.paused', { reason: 'user' });
@@ -197,18 +211,6 @@ export abstract class RendererBase {
 
   resume(): void {
     if (!this.isPaused) return;
-
-    const now = performance.now();
-    let pausedDuration = 0;
-    if (this.pausedAt !== null) {
-      // B-1: Use a higher clamp (2× maxMessageAgeMs) to avoid the per-message
-      // clamp from discarding real elapsed time. The per-message clamp in
-      // CanvasRenderer.applyPausedDuration handles individual message expiry.
-      const raw = Math.max(0, now - this.pausedAt);
-      pausedDuration = Math.min(raw, this.settings.maxMessageAgeMs * 2);
-      this.applyPausedDuration(pausedDuration);
-    }
-    this.pausedAt = null;
 
     // Pre-warm BurstDetector EMA from pending queue density.
     // Without this, the EMA starts at 0 and takes 30+ messages to
@@ -226,21 +228,18 @@ export abstract class RendererBase {
     // returns early without starting the render loop.
     this.isPaused = false;
 
-    // Only shift lane timers if the video is actually playing.
-    // When isVideoPaused is true, the tab was hidden while the video was
-    // paused — shifting lanes would advance availability past the pause,
-    // causing messages to disappear prematurely when the video resumes.
-    if (!this.isVideoPaused) {
-      this.laneAllocator.shiftAll(pausedDuration);
-    }
-
     if (this.isVideoPaused) {
       // Don't start render loop while video is paused — it would waste
       // CPU doing nothing (renderFrame checks isVideoPaused and returns early).
-      // resumeForVideo() will call onResume() when the video un-pauses.
+      // The final pause cause will finish elapsed-time accounting and resume.
+      return;
+    }
+    if (this.isUserPaused) {
+      this.onSystemResumeWhileUserPaused();
       return;
     }
 
+    this.finishPauseAccounting();
     this.onResume();
     log.debug('renderer.resumed');
   }
@@ -259,9 +258,10 @@ export abstract class RendererBase {
     if (document.visibilityState === 'visible') {
       if (this.isPaused) {
         this.resume();
-      } else {
+      } else if (!this.isUserPaused) {
         // isPaused was already cleared by resume() when tab returned
         // while video was still paused. Render loop needs to start now.
+        this.finishPauseAccounting();
         this.onResume();
         log.debug('renderer.resumed');
       }
@@ -269,6 +269,26 @@ export abstract class RendererBase {
     // H1: Replay buffered messages from the pause period.
     // Subclasses override onResumeFromVideoPause() to receive them.
     this.flushPauseBuffer();
+  }
+
+  /** Start one elapsed-time freeze interval shared by every pause cause. */
+  private beginPauseAccounting(): void {
+    this.pausedAt ??= performance.now();
+  }
+
+  /** Apply a completed freeze interval once after the final pause cause clears. */
+  private finishPauseAccounting(): void {
+    if (this.pausedAt === null) return;
+    const raw = Math.max(0, performance.now() - this.pausedAt);
+    // Use a higher clamp (2× maxMessageAgeMs) to avoid the per-message
+    // clamp from discarding real elapsed time. CanvasRenderer applies its
+    // own per-message expiry bound in applyPausedDuration().
+    const preserveElapsed = this.pauseIncludesUserPause;
+    const pausedDuration = preserveElapsed ? raw : Math.min(raw, this.settings.maxMessageAgeMs * 2);
+    this.applyPausedDuration(pausedDuration, preserveElapsed);
+    this.laneAllocator.shiftAll(pausedDuration);
+    this.pausedAt = null;
+    this.pauseIncludesUserPause = false;
   }
 
   /**
@@ -496,7 +516,10 @@ export abstract class RendererBase {
 
   protected abstract onPause(): void;
   protected abstract onResume(): void;
-  protected abstract applyPausedDuration(pausedMs: number): void;
+  protected onSystemResumeWhileUserPaused(): void {}
+  protected onUserPause(): void {}
+  protected onUserResume(): void {}
+  protected abstract applyPausedDuration(pausedMs: number, preserveElapsed?: boolean): void;
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;
 
@@ -562,6 +585,7 @@ export abstract class RendererBase {
    * Backlog injection handles new messages while existing ones fade out.
    */
   clearPausedDuration(): void {
+    if (this.pauseIncludesUserPause) return;
     this.pausedAt = null;
   }
 

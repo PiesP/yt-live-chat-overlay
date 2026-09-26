@@ -39,6 +39,11 @@ function createMinimalDeps() {
       tick: vi.fn(),
     } as any,
     estimateDimensions: vi.fn(() => ({ width: 100, height: 20 })),
+    estimateTranslatedDimensions: vi.fn(() => ({
+      width: 180,
+      height: 40,
+      translationHeight: 12,
+    })),
     getMessagePriority: vi.fn(() => 0),
     getEffectiveSpeedPxPerSec: vi.fn(() => 100),
   };
@@ -142,6 +147,165 @@ describe('RenderWorkerManager', () => {
       expect(manager.isActive).toBe(true);
       expect(transferControlToOffscreen).toHaveBeenCalledOnce();
       expect(onDimensionsChanged).toHaveBeenCalledOnce();
+    });
+
+    it('remeasures every worker-owned message after an overlay resize', async () => {
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const onDimensionsChanged = vi.fn(
+        (_callback: (dimensions: { width: number; height: number }) => void) => vi.fn()
+      );
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged,
+      };
+      deps.estimateDimensions.mockReturnValue({ width: 100, height: 20 });
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(true);
+      const worker = (manager as unknown as { worker: { postMessage: ReturnType<typeof vi.fn> } })
+        .worker;
+      const first = {
+        id: 'first',
+        timestamp: Date.now(),
+        text: 'first',
+        content: [{ type: 'text' as const, content: 'first' }],
+        kind: 'text' as const,
+        authorType: 'normal' as const,
+      };
+      const second = { ...first, id: 'second', text: 'second' };
+      manager.sendToWorker(first, first.id);
+      manager.sendToWorker(second, second.id);
+      await Promise.resolve();
+      manager.sendTranslation(
+        first.id,
+        'translated first',
+        { width: 180, height: 40, translationHeight: 12 },
+        0
+      );
+      worker.postMessage.mockClear();
+      deps.estimateDimensions.mockReturnValue({ width: 220, height: 60 });
+      deps.estimateTranslatedDimensions.mockReturnValue({
+        width: 260,
+        height: 80,
+        translationHeight: 16,
+      });
+
+      const dimensionsChanged = onDimensionsChanged.mock.calls[0]?.[0];
+      if (!dimensionsChanged) throw new Error('Dimension listener was not registered');
+      dimensionsChanged({ width: 320, height: 180 });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'resize',
+        width: 320,
+        height: 180,
+        dpr: window.devicePixelRatio || 1,
+      });
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        {
+          type: 'updateMessageGeometries',
+          geometries: [
+            { id: 'first', width: 260, height: 80, translationHeight: 16 },
+            { id: 'second', width: 220, height: 60 },
+          ],
+        }
+      );
+      expect(worker.postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'addMessages' })
+      );
+    });
+
+    it('invalidates a late original translation when a deferred replacement is admitted', async () => {
+      deps.settings.queueMaxSize = 1;
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const onDimensionsChanged = vi.fn(
+        (_callback: (dimensions: { width: number; height: number }) => void) => vi.fn()
+      );
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged,
+      };
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(true);
+      const worker = (manager as unknown as {
+        worker: {
+          onmessage?: (event: MessageEvent) => void;
+          postMessage: ReturnType<typeof vi.fn>;
+        };
+      }).worker;
+      const original = {
+        id: 'deferred-replacement',
+        timestamp: Date.now(),
+        text: 'original',
+        content: [{ type: 'text' as const, content: 'original' }],
+        kind: 'text' as const,
+        authorType: 'normal' as const,
+      };
+      expect(manager.sendToWorker(original, original.id)).toBe(true);
+      await Promise.resolve();
+
+      const unacknowledgedBatches = (
+        manager as unknown as {
+          unacknowledgedBatches: Map<number, { saturationProbe: boolean }>;
+        }
+      ).unacknowledgedBatches;
+      const firstBatch = unacknowledgedBatches.get(1);
+      if (!firstBatch) throw new Error('Original batch was not sent');
+      firstBatch.saturationProbe = true;
+
+      expect(
+        manager.sendToWorker(
+          {
+            ...original,
+            actionType: 'replace',
+            text: 'replacement',
+            content: [{ type: 'text' as const, content: 'replacement' }],
+          },
+          original.id
+        )
+      ).toBe(true);
+      expect((manager as any).deferredIngress).toHaveLength(1);
+
+      manager.sendTranslation(
+        original.id,
+        'stale original translation',
+        { width: 180, height: 40, translationHeight: 12 },
+        0
+      );
+      expect((manager as any).translatedMessages.get(original.id)).toBe(
+        'stale original translation'
+      );
+
+      worker.onmessage?.({
+        data: {
+          type: 'batchReceipt',
+          epoch: 0,
+          batchSequence: 1,
+          pendingQueueDepth: 0,
+          admittedMessages: 1,
+          minimumPendingPriority: null,
+        },
+      } as MessageEvent);
+      await Promise.resolve();
+
+      expect((manager as any).deferredIngress).toHaveLength(0);
+      expect((manager as any).translatedMessages.has(original.id)).toBe(false);
+
+      worker.postMessage.mockClear();
+      deps.estimateDimensions.mockReturnValue({ width: 220, height: 60 });
+      const dimensionsChanged = onDimensionsChanged.mock.calls[0]?.[0];
+      if (!dimensionsChanged) throw new Error('Dimension listener was not registered');
+      dimensionsChanged({ width: 320, height: 180 });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(deps.estimateTranslatedDimensions).not.toHaveBeenCalled();
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'updateMessageGeometries',
+        geometries: [{ id: original.id, width: 220, height: 60 }],
+      });
     });
 
     it('reports a transferred canvas when the init post fails', () => {
