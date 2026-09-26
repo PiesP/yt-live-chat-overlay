@@ -428,6 +428,9 @@ export class ReplayChatSource extends ChatSource {
     // will no-op. Bail out early to avoid unnecessary async work.
     if (!this.callback) return;
 
+    const shouldRestartContinuation =
+      this.replayMode === 'continuation' && offsetMs < this.replayFallbackLastOffsetMs;
+
     // Increment seek generation — cancels any in-flight seek from a prior seek.
     const gen = ++this.seekGeneration;
 
@@ -479,7 +482,11 @@ export class ReplayChatSource extends ChatSource {
       void (async () => {
         try {
           if (gen !== this.seekGeneration) return;
-          await this.pollContinuationReplay(offsetMs, seekSignal, gen);
+          if (shouldRestartContinuation) {
+            await this.restartContinuationReplay(offsetMs, seekSignal, gen);
+          } else {
+            await this.pollContinuationReplay(offsetMs, seekSignal, gen);
+          }
           if (gen !== this.seekGeneration) return;
         } catch (error: unknown) {
           if (!isAbortError(error)) {
@@ -659,6 +666,50 @@ export class ReplayChatSource extends ChatSource {
     } finally {
       releaseRequest();
     }
+  }
+
+  /** Restart the sequential fallback chain when seeking behind its current position. */
+  private async restartContinuationReplay(
+    offsetMs: number,
+    signal?: AbortSignal,
+    generation = this.seekGeneration
+  ): Promise<boolean> {
+    const initialContinuation = this.bootstrap?.initialContinuation;
+    if (!initialContinuation) return false;
+
+    const initialPayload = await this.requestReplayPayload(initialContinuation, signal);
+    if (generation !== this.seekGeneration || !initialPayload) return false;
+
+    const minimumOffsetMs = Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS);
+    this.replayContinuation = extractReplayContinuation(initialPayload.continuations);
+    this.replayFallbackLastOffsetMs = this.appendReplayEvents(
+      extractChatEvents(
+        initialPayload.actions,
+        this.getSettings,
+        undefined,
+        this.isKnownReplacementTarget
+      ),
+      minimumOffsetMs
+    );
+    this.replayConsecutiveFailures = 0;
+    this.replayTotalFailuresSinceSuccess = 0;
+    this.replayNextAllowedFetchAt = 0;
+
+    let batchesFetched = 0;
+    while (
+      this.replayContinuation &&
+      this.replayFallbackLastOffsetMs < minimumOffsetMs &&
+      batchesFetched < this.getSettings().replayBatchLimit
+    ) {
+      throwIfAborted(signal);
+      const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
+      if (generation !== this.seekGeneration) return false;
+      if (!fetched) break;
+      batchesFetched += 1;
+    }
+
+    this.flushReplayBuffer(offsetMs);
+    return true;
   }
 
   /**

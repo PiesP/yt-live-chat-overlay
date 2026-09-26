@@ -168,6 +168,7 @@ export class RuntimeManager {
    * doesn't interfere with actual bootstrap retry counting.
    */
   private chatPreflight: ChatPreflightStateMachine = createChatPreflight();
+  private chatPreflightObserver: MutationObserver | null = null;
   private startFailureState: StartFailureState = {
     url: null,
     attempts: 0,
@@ -181,6 +182,7 @@ export class RuntimeManager {
   private renderer: RendererBase | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
+  private foregroundVisibilityHandler: (() => void) | null = null;
   private videoPauseController = new VideoPauseController();
   private readonly standbyController: StandbyController;
   private backlogController: BacklogInjectionController | null = null;
@@ -281,6 +283,7 @@ export class RuntimeManager {
     }
 
     if (reason === 'page-change') {
+      this.stopChatPreflightRecovery();
       this.lastPageChangeAt = Date.now();
       this.chatPreflight.reset();
       this.resetStartFailures();
@@ -322,6 +325,7 @@ export class RuntimeManager {
     this.clearRestartTimer();
 
     this.clearScheduledReconcile();
+    this.stopChatPreflightRecovery();
     this.disposeActiveSession();
     // Set state AFTER cleanup so disposeSession()'s isDisposedState guard
     // doesn't short-circuit out of renderer / chat source / observer disposal.
@@ -376,6 +380,7 @@ export class RuntimeManager {
     }
 
     if (!desired.shouldRun) {
+      this.stopChatPreflightRecovery();
       this.resetStartFailures();
       return;
     }
@@ -419,6 +424,7 @@ export class RuntimeManager {
       } else if (this.chatPreflight.isSettling) {
         // Settle delay expired, #chat still absent → terminal VOD.
         this.chatPreflight.markAbsent(desired.url);
+        this.armChatPreflightRecovery(desired.url);
         log.info('runtime.chat.preflight', {
           outcome: 'expected-absent',
           reason: 'chat-panel-missing',
@@ -437,6 +443,7 @@ export class RuntimeManager {
       }
     } else {
       // #chat is present in DOM — reset preflight for the next navigation.
+      this.stopChatPreflightRecovery();
       this.chatPreflight.reset();
     }
 
@@ -777,15 +784,10 @@ export class RuntimeManager {
       if (chatStarted === 'waiting') {
         // Start foreground listeners so the render loop pauses when the
         // tab is hidden — avoids wasted GPU/CPU during long standby waits.
-        if (document.visibilityState !== 'visible') {
-          this.noteHidden();
-        }
         this.startForegroundListeners();
         this.startChatPanelMonitor(this.chatSource!);
         this.standbyController.enter();
-        if (document.visibilityState !== 'visible') {
-          this.standbyController.pause();
-        }
+        this.applyCurrentVisibilityState();
         log.info('runtime.standby.entered');
         return 'started';
       }
@@ -796,15 +798,12 @@ export class RuntimeManager {
 
       this.state = 'active';
 
-      // Foreground recovery: listen for tab/window visibility changes
-      if (document.visibilityState !== 'visible') {
-        this.noteHidden();
-      }
-
+      // Foreground recovery: listen for tab/window visibility changes.
       this.startForegroundListeners();
       this.startVideoPauseListeners();
       this.startChatWatchdog();
       this.startChatPanelMonitor(this.chatSource!);
+      this.applyCurrentVisibilityState();
 
       log.info('runtime.session.started');
       return 'started';
@@ -1132,6 +1131,15 @@ export class RuntimeManager {
   private startChatPanelMonitor(chatSource: ChatSource): void {
     this.chatPanelObserver.start((state: ChatPanelState) => {
       this.renderer?.setChatPanelOpen(state.isOpen);
+
+      // Replay messages must come from the video-timestamped API path. DOM
+      // messages only carry wall-clock timestamps and would render immediately.
+      if (chatSource instanceof ReplayChatSource) {
+        this.domWatcherUnsubscribe?.();
+        this.domWatcherUnsubscribe = null;
+        this.domWatcherPanelElement = null;
+        return;
+      }
 
       if (state.isOpen) {
         // YouTube can replace the panel element without closing it. Rebind
@@ -1587,6 +1595,8 @@ export class RuntimeManager {
       }
     };
 
+    this.foregroundVisibilityHandler = handleVisibility;
+
     // Single handler for both visibilitychange and pageshow — handles
     // tab visibility changes and bfcache restores uniformly.
     document.addEventListener('visibilitychange', handleVisibility);
@@ -1625,8 +1635,15 @@ export class RuntimeManager {
       for (const fn of cleanups) {
         fn();
       }
+      this.foregroundVisibilityHandler = null;
       this.foregroundCleanup = null;
     };
+  }
+
+  private applyCurrentVisibilityState(): void {
+    if (document.visibilityState !== 'visible') {
+      this.foregroundVisibilityHandler?.();
+    }
   }
 
   private stopForegroundListeners(): void {
@@ -1870,6 +1887,59 @@ export class RuntimeManager {
 
   private clearScheduledReconcile(): void {
     this.scheduledReconcileTimer = clearSafeTimeout(this.scheduledReconcileTimer);
+  }
+
+  private armChatPreflightRecovery(url: string): void {
+    this.stopChatPreflightRecovery();
+    const body = document.body;
+    if (!body) return;
+
+    let target =
+      document.querySelector('ytd-watch-flexy') ?? document.querySelector('#columns') ?? body;
+    const containsChatPanel = (mutations: readonly MutationRecord[]): boolean => {
+      for (const mutation of mutations) {
+        for (let index = 0; index < mutation.addedNodes.length; index++) {
+          const node = mutation.addedNodes[index];
+          if (!(node instanceof Element)) continue;
+          if (node.matches(CHAT_PANEL_SELECTOR) || node.querySelector(CHAT_PANEL_SELECTOR)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    const observe = (observer: MutationObserver, nextTarget: Node): void => {
+      observer.disconnect();
+      observer.observe(nextTarget, { childList: true, subtree: true });
+      target = nextTarget;
+    };
+    const observer = new MutationObserver((mutations) => {
+      if (this.getCurrentUrl() !== url) {
+        this.stopChatPreflightRecovery();
+        return;
+      }
+      if (containsChatPanel(mutations)) {
+        this.stopChatPreflightRecovery();
+        this.chatPreflight.reset();
+        this.requestReconcile('retry');
+        return;
+      }
+
+      // Body observation is only a bootstrap fallback. Rebind to YouTube's
+      // stable watch-page subtree as soon as it exists.
+      if (target === body) {
+        const stableTarget =
+          document.querySelector('ytd-watch-flexy') ?? document.querySelector('#columns');
+        if (stableTarget) observe(observer, stableTarget);
+      }
+    });
+    observe(observer, target);
+    this.chatPreflightObserver = observer;
+  }
+
+  private stopChatPreflightRecovery(): void {
+    this.chatPreflightObserver?.disconnect();
+    this.chatPreflightObserver = null;
   }
 
   private clearRestartTimer(): void {
