@@ -183,6 +183,8 @@ export class RenderWorkerManager {
   } | null = null;
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
+  /** Coalesces resize-driven geometry refreshes until main-thread caches are invalidated. */
+  private resizeRemeasureScheduled = false;
 
   /** Callback to push structured text alternatives to the overlay's aria-live region. */
   private _liveRegionCallback: ((messages: AccessibleChatMessage[]) => void) | null = null;
@@ -559,6 +561,7 @@ export class RenderWorkerManager {
             height: d.height,
             dpr: currentDpr,
           });
+          this.scheduleResizeRemeasure(w);
         }
       });
 
@@ -592,6 +595,22 @@ export class RenderWorkerManager {
       });
       return { started: false, canvasTransferred };
     }
+  }
+
+  /** Re-serialize Worker-owned messages after resize-sensitive dimension caches clear. */
+  private scheduleResizeRemeasure(worker: Worker): void {
+    if (this.resizeRemeasureScheduled) return;
+    this.resizeRemeasureScheduled = true;
+    queueMicrotask(() => {
+      this.resizeRemeasureScheduled = false;
+      if (!this.active || this.worker !== worker) return;
+      const retained = [...this.sentMessages.entries()].filter(
+        ([, entry]) => entry.epoch === this.currentEpoch
+      );
+      for (const [id, entry] of retained) {
+        this.sendToWorker({ ...entry.message, actionType: 'replace' }, id, entry.trackDrops);
+      }
+    });
   }
 
   /**

@@ -144,6 +144,69 @@ describe('RenderWorkerManager', () => {
       expect(onDimensionsChanged).toHaveBeenCalledOnce();
     });
 
+    it('remeasures every worker-owned message after an overlay resize', async () => {
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const onDimensionsChanged = vi.fn(
+        (_callback: (dimensions: { width: number; height: number }) => void) => vi.fn()
+      );
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged,
+      };
+      deps.estimateDimensions.mockReturnValue({ width: 100, height: 20 });
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(true);
+      const worker = (manager as unknown as { worker: { postMessage: ReturnType<typeof vi.fn> } })
+        .worker;
+      const first = {
+        id: 'first',
+        timestamp: Date.now(),
+        text: 'first',
+        content: [{ type: 'text' as const, content: 'first' }],
+        kind: 'text' as const,
+        authorType: 'normal' as const,
+      };
+      const second = { ...first, id: 'second', text: 'second' };
+      manager.sendToWorker(first, first.id);
+      manager.sendToWorker(second, second.id);
+      await Promise.resolve();
+      worker.postMessage.mockClear();
+      deps.estimateDimensions.mockReturnValue({ width: 220, height: 60 });
+
+      const dimensionsChanged = onDimensionsChanged.mock.calls[0]?.[0];
+      if (!dimensionsChanged) throw new Error('Dimension listener was not registered');
+      dimensionsChanged({ width: 320, height: 180 });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'resize',
+        width: 320,
+        height: 180,
+        dpr: window.devicePixelRatio || 1,
+      });
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'addMessages',
+          messages: [
+            expect.objectContaining({
+              id: 'first',
+              actionType: 'replace',
+              width: 220,
+              height: 60,
+            }),
+            expect.objectContaining({
+              id: 'second',
+              actionType: 'replace',
+              width: 220,
+              height: 60,
+            }),
+          ],
+        })
+      );
+    });
+
     it('reports a transferred canvas when the init post fails', () => {
       const originalWorker = globalThis.Worker;
       const terminate = vi.fn();

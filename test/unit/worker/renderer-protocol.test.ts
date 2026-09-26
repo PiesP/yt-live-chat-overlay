@@ -1095,6 +1095,46 @@ describe('Worker message protocol', () => {
       expect(requestFrame).toHaveBeenCalledTimes(initialRequests + 1);
     });
 
+    it('freezes active message elapsed time during a user pause', () => {
+      const renderer = initializeRenderer();
+      const nowSpy = vi.mocked(performance.now);
+      const internals = renderer as unknown as {
+        activateMessage: (...args: unknown[]) => void;
+        activeMessages: Array<{ pausedDuration: number }>;
+      };
+      internals.activateMessage(
+        makeWorkerMessage(),
+        9_000,
+        { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
+        0,
+        0,
+        1,
+        640,
+        360
+      );
+
+      nowSpy.mockReturnValue(10_000);
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: true }));
+      nowSpy.mockReturnValue(13_000);
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: false }));
+
+      expect(internals.activeMessages[0]?.pausedDuration).toBe(3_000);
+    });
+
+    it('resumes after visibility clears before an overlapping user pause', () => {
+      const renderer = initializeRenderer();
+      const requestFrame = vi.mocked(requestAnimationFrame);
+      const initialRequests = requestFrame.mock.calls.length;
+
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: true }));
+      renderer.handleMessage(makeEvent({ type: 'setPaused', paused: true }));
+      renderer.handleMessage(makeEvent({ type: 'setPaused', paused: false }));
+      expect(requestFrame).toHaveBeenCalledTimes(initialRequests);
+
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: false }));
+      expect(requestFrame).toHaveBeenCalledTimes(initialRequests + 1);
+    });
+
     it('preserves text caches for timing changes and invalidates them for font changes', () => {
       const renderer = initializeRenderer();
       const internals = renderer as unknown as {

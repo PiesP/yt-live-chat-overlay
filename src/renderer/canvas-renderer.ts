@@ -512,7 +512,7 @@ export class CanvasRenderer extends RendererBase {
     this.startRenderLoop();
     this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
     this.imageFetchManager.setOnImageReady(() => {
-      if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
+      if (!this.isPaused && !this.isVideoPaused && !this.isUserPaused && !this.needsRerender) {
         if (this.animFrameId !== null) {
           this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
         }
@@ -1027,7 +1027,8 @@ export class CanvasRenderer extends RendererBase {
   }
 
   private startRenderLoop(): void {
-    if (this.animFrameId !== null) return;
+    if (this.animFrameId !== null || this.isPaused || this.isVideoPaused || this.isUserPaused)
+      return;
     // Reset grace period on restart — fresh cycle, no prior idle state.
     this.idleSince = null;
     const loop = (): void => {
@@ -2246,6 +2247,19 @@ export class CanvasRenderer extends RendererBase {
     this.stopRenderLoop();
     this.workerManager.setPaused(true);
     this.imageFetchManager.pause();
+  }
+
+  protected override onUserPause(): void {
+    this.stopRenderLoop();
+  }
+
+  protected override onSystemResumeWhileUserPaused(): void {
+    this.workerManager.setPaused(false);
+    this.imageFetchManager.resume();
+  }
+
+  protected override onUserResume(): void {
+    if (!this.workerManager.isActive) this.startRenderLoop();
   }
 
   protected onResume(): void {

@@ -10,7 +10,9 @@ import { DEFAULT_SETTINGS } from '@settings/schema';
 class TestRenderer extends RendererBase {
   pauseCalled = false;
   resumeCalled = false;
+  systemResumeWhileUserPausedCalled = false;
   pausedDuration = 0;
+  pausedDurations: number[] = [];
   stateReset = false;
   destroyed = false;
   messages: ChatMessage[] = [];
@@ -49,8 +51,13 @@ class TestRenderer extends RendererBase {
     this.resumeCalled = true;
   }
 
+  protected override onSystemResumeWhileUserPaused(): void {
+    this.systemResumeWhileUserPausedCalled = true;
+  }
+
   protected applyPausedDuration(pausedMs: number): void {
     this.pausedDuration = pausedMs;
+    this.pausedDurations.push(pausedMs);
   }
 
   protected resetState(): void {
@@ -221,6 +228,47 @@ describe('RendererBase', () => {
   // ── Pause / Resume state machine ─────────────────────────────────────
 
   describe('pause / resume', () => {
+    it('freezes elapsed time during a user-initiated pause', () => {
+      const r = createRenderer();
+
+      r.setUserPaused(true);
+      now += 500;
+      r.setUserPaused(false);
+
+      expect(r.pausedDurations).toEqual([500]);
+    });
+
+    it('accounts overlapping user and renderer pauses only once', () => {
+      const r = createRenderer();
+
+      r.setUserPaused(true);
+      now += 200;
+      r.pause();
+      now += 300;
+      r.setUserPaused(false);
+      now += 500;
+      r.resume();
+
+      expect(r.systemResumeWhileUserPausedCalled).toBe(false);
+      expect(r.pausedDurations).toEqual([1_000]);
+    });
+
+    it('clears a renderer pause while keeping the user pause active', () => {
+      const r = createRenderer();
+
+      r.setUserPaused(true);
+      r.pause();
+      r.resume();
+
+      expect(r.systemResumeWhileUserPausedCalled).toBe(true);
+      expect(r.resumeCalled).toBe(false);
+      expect(r.pausedDurations).toEqual([]);
+
+      now += 500;
+      r.setUserPaused(false);
+      expect(r.pausedDurations).toEqual([500]);
+    });
+
     it('pause transitions isPaused to true and calls onPause', () => {
       const r = createRenderer();
       expect(r.isPaused).toBe(false);
@@ -281,6 +329,22 @@ describe('RendererBase', () => {
   // ── PauseForVideo / ResumeForVideo state machine ─────────────────────
 
   describe('pauseForVideo / resumeForVideo', () => {
+    it('keeps elapsed time frozen when video pause clears before user pause', () => {
+      const r = createRenderer();
+
+      r.setUserPaused(true);
+      r.pauseForVideo();
+      now += 300;
+      r.resumeForVideo();
+
+      expect(r.systemResumeWhileUserPausedCalled).toBe(true);
+      expect(r.pausedDurations).toEqual([]);
+
+      now += 200;
+      r.setUserPaused(false);
+      expect(r.pausedDurations).toEqual([500]);
+    });
+
     it('pauseForVideo sets isVideoPaused and calls pause', () => {
       const r = createRenderer();
       r.pauseForVideo();
