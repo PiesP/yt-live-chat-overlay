@@ -86,9 +86,9 @@ export function detectBrowserLanguage(
       languages ?? (typeof navigator !== 'undefined' ? navigator.languages : undefined);
     const singleLanguage = typeof navigator !== 'undefined' ? navigator.language : undefined;
     return detectLocale({
-      platformUILanguage: uiLanguage,
-      languages: browserLanguages,
-      singleLanguage,
+      ...(uiLanguage ? { platformUILanguage: uiLanguage } : {}),
+      ...(browserLanguages !== undefined ? { languages: browserLanguages } : {}),
+      ...(singleLanguage !== undefined ? { singleLanguage } : {}),
     });
   } catch {
     return 'en';

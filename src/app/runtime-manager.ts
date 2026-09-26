@@ -1897,7 +1897,7 @@ export class RuntimeManager {
     const body = document.body;
     if (!body) return;
 
-    let target =
+    let target: Node =
       document.querySelector('ytd-watch-flexy') ?? document.querySelector('#columns') ?? body;
     const containsChatPanel = (mutations: readonly MutationRecord[]): boolean => {
       for (const mutation of mutations) {
