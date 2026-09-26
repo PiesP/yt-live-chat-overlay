@@ -63,6 +63,21 @@ jobs:
             echo "❌ Release tag $RELEASE_TAG is not contained in protected master $GITHUB_SHA"
             exit 1
           fi
+          latest_release_tag=""
+          while IFS= read -r candidate; do
+            if [[ "$candidate" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              latest_release_tag="$candidate"
+              break
+            fi
+          done < <(git tag --merged "$GITHUB_SHA" --list 'v*' --sort=-version:refname)
+          if [[ -z "$latest_release_tag" ]]; then
+            echo "❌ Protected master has no stable release tag"
+            exit 1
+          fi
+          if [[ "$RELEASE_TAG" != "$latest_release_tag" ]]; then
+            echo "❌ Release tag $RELEASE_TAG is not the latest stable tag on protected master ($latest_release_tag)"
+            exit 1
+          fi
           echo "release-sha=$release_sha" >> "$GITHUB_OUTPUT"
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
@@ -285,6 +300,9 @@ jobs:
   publish:
     name: 🏷️ Publish GitHub Release
     needs: [provenance, quality, unit, e2e, duplication, mutation, build]
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -295,6 +313,39 @@ jobs:
         with:
           name: release-bundle-${{ needs.provenance.outputs.release-sha }}
           path: release-bundle
+
+      - name: 🔐 Prevent release channel rollback
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          response_file="$RUNNER_TEMP/latest-release.json"
+          http_status="$(curl --silent --show-error --location \
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest")"
+          if [[ "$http_status" == "404" ]]; then
+            exit 0
+          fi
+          if [[ "$http_status" != "200" ]]; then
+            echo "❌ Failed to read the latest published release (HTTP $http_status)"
+            exit 1
+          fi
+          latest_published_tag="$(jq -er '.tag_name | strings' "$response_file")"
+          if ! [[ "$latest_published_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Latest published release has an unsupported tag: $latest_published_tag"
+            exit 1
+          fi
+          newest_tag="$(printf '%s\n%s\n' "$latest_published_tag" "$RELEASE_TAG" | sort -V | tail -n 1)"
+          if [[ "$newest_tag" != "$RELEASE_TAG" ]]; then
+            echo "❌ Refusing to move the latest release from $latest_published_tag back to $RELEASE_TAG"
+            exit 1
+          fi
 
       - name: 🏷️ Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
@@ -310,5 +361,6 @@ jobs:
             release-bundle/release/metadata.json
           draft: false
           prerelease: false
+          make_latest: legacy
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
