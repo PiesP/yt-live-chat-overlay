@@ -361,6 +361,6 @@ jobs:
             release-bundle/release/metadata.json
           draft: false
           prerelease: false
-          make_latest: true
+          make_latest: legacy
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

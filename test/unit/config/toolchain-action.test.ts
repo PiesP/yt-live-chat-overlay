@@ -70,7 +70,8 @@ describe('project setup actions', () => {
       'git tag --merged "$GITHUB_SHA" --list \'v*\' --sort=-version:refname'
     );
     expect(releaseWorkflow).toContain('if [[ "$RELEASE_TAG" != "$latest_release_tag" ]]');
-    expect(releaseWorkflow).toContain('make_latest: true');
+    expect(releaseWorkflow).toContain('make_latest: legacy');
+    expect(releaseWorkflow).not.toContain('make_latest: true');
     const publishSection = releaseWorkflow.match(
       /  publish:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/
     )?.[0];
