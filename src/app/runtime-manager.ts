@@ -57,6 +57,8 @@ type RuntimeState = (typeof RUNTIME_STATES)[number];
 const log = createLogger('RuntimeManager');
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
+/** Additional grace for delayed watch-page hydration after the initial settle. */
+const CHAT_PREFLIGHT_RECOVERY_GRACE_MS = 30_000;
 /** Retry delays with exponential backoff: 2 s → 4 s → 8 s. */
 const START_RETRY_DELAYS_MS = [2000, 4000, 8000] as const;
 const MAX_START_ATTEMPTS = 3;
@@ -169,6 +171,7 @@ export class RuntimeManager {
    */
   private chatPreflight: ChatPreflightStateMachine = createChatPreflight();
   private chatPreflightObserver: MutationObserver | null = null;
+  private chatPreflightObserverTimer: ReturnType<typeof setTimeout> | null = null;
   private startFailureState: StartFailureState = {
     url: null,
     attempts: 0,
@@ -1935,11 +1938,15 @@ export class RuntimeManager {
     });
     observe(observer, target);
     this.chatPreflightObserver = observer;
+    this.chatPreflightObserverTimer = setTimeout(() => {
+      this.stopChatPreflightRecovery();
+    }, CHAT_PREFLIGHT_RECOVERY_GRACE_MS);
   }
 
   private stopChatPreflightRecovery(): void {
     this.chatPreflightObserver?.disconnect();
     this.chatPreflightObserver = null;
+    this.chatPreflightObserverTimer = clearSafeTimeout(this.chatPreflightObserverTimer);
   }
 
   private clearRestartTimer(): void {

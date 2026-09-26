@@ -812,7 +812,8 @@ export class ReplayChatSource extends ChatSource {
         undefined,
         this.isKnownReplacementTarget
       );
-      this.replayFallbackLastOffsetMs = this.appendReplayEvents(events, minimumOffsetMs);
+      const pageLastOffsetMs = this.appendReplayEvents(events, minimumOffsetMs);
+      this.replayFallbackLastOffsetMs = Math.max(this.replayFallbackLastOffsetMs, pageLastOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
       this.replayConsecutiveFailures = 0;
       this.replayTotalFailuresSinceSuccess = 0;

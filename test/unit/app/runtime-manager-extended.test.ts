@@ -181,16 +181,29 @@ describe('RuntimeManager (extended)', () => {
       rm.destroy();
     });
 
-    it('keeps late-chat recovery active for the URL lifetime and stops it on destroy', () => {
+    it('disconnects late-chat recovery after the hydration grace interval', () => {
       vi.useFakeTimers();
-      const url = 'https://www.youtube.com/watch?v=late-chat-lifecycle';
+      const url = 'https://www.youtube.com/watch?v=late-chat-expiry';
       const rm = new RuntimeManager(createOpts({ url }));
       const internals = internalsOf(rm);
       internals.chatPreflight.markAbsent(url);
       internals.armChatPreflightRecovery(url);
 
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(29_999);
       expect(internals.chatPreflightObserver).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(internals.chatPreflightObserver).toBeNull();
+
+      rm.destroy();
+    });
+
+    it('disconnects late-chat recovery when the manager is destroyed', () => {
+      vi.useFakeTimers();
+      const url = 'https://www.youtube.com/watch?v=late-chat-destroy';
+      const rm = new RuntimeManager(createOpts({ url }));
+      const internals = internalsOf(rm);
+      internals.chatPreflight.markAbsent(url);
+      internals.armChatPreflightRecovery(url);
 
       rm.destroy();
       expect(internals.chatPreflightObserver).toBeNull();

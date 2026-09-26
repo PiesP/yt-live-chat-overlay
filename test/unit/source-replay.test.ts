@@ -535,7 +535,7 @@ describe('ReplayChatSource', () => {
     expect(source.drainPendingMessages()).toEqual([]);
   });
 
-  it('restarts continuation fallback from bootstrap after seeking backward', async () => {
+  it('preserves fallback high-water through an empty page before seeking backward', async () => {
     const received: ChatMessage[] = [];
     const initialContinuation = { continuation: 'initial' };
     const progressedContinuation = { continuation: 'at-thirty-minutes' };
@@ -546,8 +546,10 @@ describe('ReplayChatSource', () => {
       replayContinuation: InnertubeContinuationData | null;
       replayFallbackLastOffsetMs: number;
       requestReplayPayload: (
-        continuation: InnertubeContinuationData
+        continuation: InnertubeContinuationData,
+        signal?: AbortSignal
       ) => Promise<LiveChatPayload>;
+      fetchNextReplayFallbackBatch: (minimumOffsetMs: number) => Promise<boolean>;
       handleSeeked: (offsetMs: number) => void;
     };
     internals.callback = (messages) => {
@@ -560,20 +562,32 @@ describe('ReplayChatSource', () => {
     internals.replayMode = 'continuation';
     internals.replayContinuation = progressedContinuation;
     internals.replayFallbackLastOffsetMs = 1_800_000;
-    const requestReplayPayload = vi.spyOn(internals, 'requestReplayPayload').mockResolvedValue({
-      actions: [makeReplayAction('five-minute-message', 300_000)],
-      continuations: [
-        { liveChatReplayContinuationData: { continuation: 'after-five-minutes' } },
-      ],
-    });
+    const requestReplayPayload = vi
+      .spyOn(internals, 'requestReplayPayload')
+      .mockResolvedValueOnce({
+        actions: [],
+        continuations: [
+          { liveChatReplayContinuationData: { continuation: 'after-empty-page' } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        actions: [makeReplayAction('five-minute-message', 300_000)],
+        continuations: [
+          { liveChatReplayContinuationData: { continuation: 'after-five-minutes' } },
+        ],
+      });
+
+    await expect(internals.fetchNextReplayFallbackBatch(0)).resolves.toBe(true);
+    expect(internals.replayFallbackLastOffsetMs).toBe(1_800_000);
 
     internals.handleSeeked(300_000);
-    await vi.waitFor(() => expect(requestReplayPayload).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(requestReplayPayload).toHaveBeenCalledTimes(2));
     await vi.waitFor(() =>
       expect(received.map((message) => message.id)).toEqual(['five-minute-message'])
     );
 
-    expect(requestReplayPayload).toHaveBeenCalledWith(
+    expect(requestReplayPayload).toHaveBeenNthCalledWith(
+      2,
       initialContinuation,
       expect.any(AbortSignal)
     );
