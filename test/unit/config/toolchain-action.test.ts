@@ -66,6 +66,24 @@ describe('project setup actions', () => {
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"');
+    expect(releaseWorkflow).toContain(
+      'git tag --merged "$GITHUB_SHA" --list \'v*\' --sort=-version:refname'
+    );
+    expect(releaseWorkflow).toContain('if [[ "$RELEASE_TAG" != "$latest_release_tag" ]]');
+    expect(releaseWorkflow).toContain('make_latest: true');
+    const publishSection = releaseWorkflow.match(
+      /  publish:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/
+    )?.[0];
+    expect(publishSection).toBeDefined();
+    if (!publishSection) throw new Error('Release publish job not found');
+    expect(publishSection).toContain('group: release-publish');
+    expect(publishSection).toContain('cancel-in-progress: false');
+    expect(publishSection).toContain('https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest');
+    expect(publishSection).toContain('if [[ "$http_status" != "200" ]]');
+    expect(publishSection).toContain('if [[ "$newest_tag" != "$RELEASE_TAG" ]]');
+    expect(publishSection.indexOf('Prevent release channel rollback')).toBeLessThan(
+      publishSection.indexOf('uses: softprops/action-gh-release@')
+    );
     expect(releaseWorkflow).toContain('ref: ${{ github.sha }}');
     expect(releaseWorkflow).toContain(
       'git -c advice.detachedHead=false checkout --detach "$RELEASE_SHA"'
