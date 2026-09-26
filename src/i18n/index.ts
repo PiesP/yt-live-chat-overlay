@@ -82,10 +82,14 @@ export function detectBrowserLanguage(
 ): SupportedLanguage {
   try {
     const uiLanguage = (getUILang ?? getPlatformUILanguage)();
-    if (uiLanguage) {
-      return detectLocale({ platformUILanguage: uiLanguage });
-    }
-    return detectLocale(languages ? { languages } : {});
+    const browserLanguages =
+      languages ?? (typeof navigator !== 'undefined' ? navigator.languages : undefined);
+    const singleLanguage = typeof navigator !== 'undefined' ? navigator.language : undefined;
+    return detectLocale({
+      platformUILanguage: uiLanguage,
+      languages: browserLanguages,
+      singleLanguage,
+    });
   } catch {
     return 'en';
   }

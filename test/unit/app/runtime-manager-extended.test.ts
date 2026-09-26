@@ -53,6 +53,14 @@ describe('RuntimeManager (extended)', () => {
     recentRestartTimestamps: number[];
     consecutiveRefreshFailures: number;
     startFailureState: { url: string | null; attempts: number };
+    chatPreflight: {
+      isTerminalAbsent: boolean;
+      reset(): void;
+      markAbsent(url: string): void;
+    };
+    chatPreflightObserver: MutationObserver | null;
+    armChatPreflightRecovery: (url: string) => void;
+    stopChatPreflightRecovery: () => void;
     handleStartFailure: (url: string, status: 'retryable' | 'unavailable' | 'waiting') => void;
     resetStartFailures: () => void;
     disposeActiveSession: () => void;
@@ -66,6 +74,21 @@ describe('RuntimeManager (extended)', () => {
     acceptForRenderer: (msg: { id?: string; actionType?: 'add' | 'replace' }) => boolean;
     routeMessages: (msgs: Array<Record<string, unknown>>) => void;
     handleReplaySeek: () => void;
+    startChatPanelMonitor: (chatSource: LiveChatSource | ReplayChatSource) => void;
+    startForegroundListeners: () => void;
+    applyCurrentVisibilityState: () => void;
+    stopForegroundListeners: () => void;
+    chatPanelObserver: {
+      start(
+        callback: (state: {
+          isOpen: boolean;
+          element: HTMLElement | null;
+          timestamp: number;
+        }) => void
+      ): void;
+      stop(): void;
+    };
+    domWatcherUnsubscribe: (() => void) | null;
     renderer: Record<string, unknown> | null;
     chatSource: LiveChatSource | ReplayChatSource | null;
     backlogController: {
@@ -134,6 +157,139 @@ describe('RuntimeManager (extended)', () => {
       internals.disposeActiveSession();
       expect(internals.sessionGeneration).toBe(gen + 1);
       expect(internals.targetUrl).toBeNull();
+    });
+  });
+
+  describe('chat availability recovery', () => {
+    it('reconciles when a late chat panel appears after terminal preflight absence', async () => {
+      const url = 'https://www.youtube.com/watch?v=late-chat';
+      const rm = new RuntimeManager(createOpts({ url }));
+      const internals = internalsOf(rm);
+      const requestReconcile = vi.spyOn(rm, 'requestReconcile').mockImplementation(() => {});
+      internals.chatPreflight.markAbsent(url);
+      internals.armChatPreflightRecovery(url);
+
+      const panel = document.createElement('div');
+      panel.id = 'chat';
+      document.body.append(panel);
+
+      await vi.waitFor(() => expect(requestReconcile).toHaveBeenCalledWith('retry'));
+      expect(internals.chatPreflight.isTerminalAbsent).toBe(false);
+      expect(internals.chatPreflightObserver).toBeNull();
+
+      panel.remove();
+      rm.destroy();
+    });
+
+    it('disconnects late-chat recovery after the hydration grace interval', () => {
+      vi.useFakeTimers();
+      const url = 'https://www.youtube.com/watch?v=late-chat-expiry';
+      const rm = new RuntimeManager(createOpts({ url }));
+      const internals = internalsOf(rm);
+      internals.chatPreflight.markAbsent(url);
+      internals.armChatPreflightRecovery(url);
+
+      vi.advanceTimersByTime(29_999);
+      expect(internals.chatPreflightObserver).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(internals.chatPreflightObserver).toBeNull();
+
+      rm.destroy();
+    });
+
+    it('disconnects late-chat recovery when the manager is destroyed', () => {
+      vi.useFakeTimers();
+      const url = 'https://www.youtube.com/watch?v=late-chat-destroy';
+      const rm = new RuntimeManager(createOpts({ url }));
+      const internals = internalsOf(rm);
+      internals.chatPreflight.markAbsent(url);
+      internals.armChatPreflightRecovery(url);
+
+      rm.destroy();
+      expect(internals.chatPreflightObserver).toBeNull();
+    });
+  });
+
+  describe('chat panel monitoring', () => {
+    it('does not install a DOM fallback watcher for replay chat', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      const unsubscribe = vi.fn();
+      const observerHarness: {
+        callback?: (state: {
+          isOpen: boolean;
+          element: HTMLElement | null;
+          timestamp: number;
+        }) => void;
+      } = {};
+      internals.domWatcherUnsubscribe = unsubscribe;
+      internals.chatPanelObserver = {
+        start: (callback) => {
+          observerHarness.callback = callback;
+        },
+        stop: vi.fn(),
+      };
+
+      internals.startChatPanelMonitor(new ReplayChatSource(() => makeDefaults()));
+      const renderer = document.createElement('yt-live-chat-item-list-renderer');
+      const items = document.createElement('div');
+      items.id = 'items';
+      renderer.append(items);
+      document.body.append(renderer);
+      const panel = document.createElement('div');
+      const onPanelState = observerHarness.callback;
+      if (!onPanelState) throw new Error('Expected panel observer callback');
+      onPanelState({ isOpen: true, element: panel, timestamp: 0 });
+
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(internals.domWatcherUnsubscribe).toBeNull();
+      renderer.remove();
+      rm.destroy();
+    });
+  });
+
+  describe('initial visibility state', () => {
+    it('applies hidden visibility state immediately after session setup', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      const setPauseReason = vi.fn();
+      const pauseStandby = vi.fn();
+      const pauseRenderer = vi.fn();
+      const pausePanelObserver = vi.fn();
+      internals.chatSource = {
+        setPauseReason,
+        stop: vi.fn(),
+      } as unknown as LiveChatSource;
+      internals.renderer = {
+        pause: pauseRenderer,
+        trimBackgroundQueue: vi.fn(),
+        destroy: vi.fn(),
+      };
+      Object.assign(
+        (rm as unknown as { standbyController: object }).standbyController,
+        { pause: pauseStandby }
+      );
+      Object.assign(internals.chatPanelObserver, { pause: pausePanelObserver });
+
+      const originalVisibilityState = document.visibilityState;
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'hidden',
+      });
+      internals.startForegroundListeners();
+      internals.applyCurrentVisibilityState();
+
+      expect(setPauseReason).toHaveBeenCalledWith('visibility', true);
+      expect(pauseRenderer).toHaveBeenCalledOnce();
+      expect(pausePanelObserver).toHaveBeenCalledOnce();
+      expect(pauseStandby).toHaveBeenCalledOnce();
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibilityState,
+      });
+      internals.stopForegroundListeners();
+      rm.destroy();
     });
   });
 

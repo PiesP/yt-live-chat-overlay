@@ -24,6 +24,10 @@ describe('detectBrowserLanguage', () => {
     expect(detectBrowserLanguage()).toBe('ko');
   });
 
+  it('falls through an unsupported platform UI language to navigator.languages', () => {
+    expect(detectBrowserLanguage(() => 'fr-FR', ['fr-FR', 'ko-KR'])).toBe('ko');
+  });
+
   it('falls back to navigator.language when navigator.languages is empty', () => {
     vi.stubGlobal('navigator', {
       languages: [],
