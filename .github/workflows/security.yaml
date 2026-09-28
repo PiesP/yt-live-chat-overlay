@@ -3,8 +3,8 @@ name: 🔒 Security Scanning
 # Responsibility: Security analysis for Node.js + pnpm project
 # - Default branch: pinned-tool freshness + OSV full scan + CodeQL + Semgrep secrets
 # - PR/merge queue: OSV gate + CodeQL + Semgrep secrets
-# - PR gate: OSV diff scan
-# - Merge queue/manual gate: OSV full scan
+# - PR gate: OSV diff scan; merge queue: full OSV scan
+# - Scheduled/manual diagnostics: pinned-tool freshness, full OSV scan, and full Semgrep SARIF
 #
 # Full Semgrep source analysis runs on the weekly schedule or manually; the
 # required PR check retains secrets coverage on every relevant change.
@@ -646,49 +646,11 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.semgrep != 'true' }}
         run: echo "Scannable inputs are unchanged; the required Semgrep check succeeds without scanning."
 
-  report-pr-gate-statuses:
-    name: Report PR gate statuses
-    if: ${{ always() && github.event_name == 'workflow_dispatch' }}
-    needs: [osv-scan-dispatch, semgrep]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      statuses: write
-    steps:
-      - name: Publish required commit statuses
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OSV_RESULT: ${{ needs.osv-scan-dispatch.result }}
-          SEMGREP_RESULT: ${{ needs.semgrep.result }}
-        run: |
-          set -euo pipefail
-
-          publish_status() {
-            local context="$1"
-            local result="$2"
-            local state=success
-            if [[ "$result" != "success" ]]; then
-              state=failure
-            fi
-
-            gh api --method POST \
-              "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-              -f "state=$state" \
-              -f "context=$context" \
-              -f "description=workflow_dispatch result: $result" \
-              -f "target_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-              >/dev/null
-          }
-
-          publish_status "pr-gate/osv / osv-scan" "$OSV_RESULT"
-          publish_status "pr-gate/semgrep" "$SEMGREP_RESULT"
-
   security-summary:
     name: Security scan summary
     if: ${{ always() }}
     needs:
-      [pinned-tools, osv-scan-pr, osv-scan-dispatch, codeql, semgrep, report-pr-gate-statuses]
+      [pinned-tools, osv-scan-pr, osv-scan-dispatch, codeql, semgrep]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -702,7 +664,6 @@ jobs:
           OSV_FULL_RESULT: ${{ needs.osv-scan-dispatch.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
           SEMGREP_RESULT: ${{ needs.semgrep.result }}
-          STATUS_REPORT_RESULT: ${{ needs.report-pr-gate-statuses.result }}
         run: |
           set -euo pipefail
 
@@ -716,7 +677,6 @@ jobs:
             echo "| OSV full | $OSV_FULL_RESULT |"
             echo "| CodeQL | $CODEQL_RESULT |"
             echo "| Semgrep | $SEMGREP_RESULT |"
-            echo "| Manual status report | $STATUS_REPORT_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           failed=0
@@ -745,7 +705,6 @@ jobs:
             workflow_dispatch)
               expect_success "pinned tool freshness" "$PINNED_TOOLS_RESULT"
               expect_success "OSV full" "$OSV_FULL_RESULT"
-              expect_success "manual status report" "$STATUS_REPORT_RESULT"
               ;;
             *)
               echo "Unsupported security workflow event: $EVENT_NAME" >&2

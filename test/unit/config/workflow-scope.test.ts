@@ -14,6 +14,29 @@ function jobSection(workflow: string, job: string): string {
   return section;
 }
 
+function runSecuritySummary(event: string, results: Record<string, string> = {}) {
+  const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
+  const script = jobSection(workflow, 'security-summary').split('        run: |\n')[1];
+  if (!script) throw new Error('Security summary script not found');
+
+  return spawnSync('bash', ['-c', script.replace(/^ {10}/gm, '')], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GITHUB_STEP_SUMMARY: '/dev/null',
+      EVENT_NAME: event,
+      PINNED_TOOLS_RESULT: ['push', 'schedule', 'workflow_dispatch'].includes(event)
+        ? 'success'
+        : 'skipped',
+      OSV_PR_RESULT: event === 'pull_request' ? 'success' : 'skipped',
+      OSV_FULL_RESULT: event === 'pull_request' ? 'skipped' : 'success',
+      CODEQL_RESULT: 'success',
+      SEMGREP_RESULT: 'success',
+      ...results,
+    },
+  });
+}
+
 type Scope =
   | 'all'
   | 'quality'
@@ -209,10 +232,35 @@ describe('workflow change classification', () => {
 });
 
 describe('workflow scope integration', () => {
+  it.each(['pull_request', 'merge_group', 'push', 'schedule', 'workflow_dispatch'])(
+    'validates the actual scanner results for %s without manual status publishing',
+    (event) => {
+      const result = runSecuritySummary(event);
+      expect(result.status, result.stderr).toBe(0);
+      const required = [
+        'CODEQL_RESULT',
+        'SEMGREP_RESULT',
+        event === 'pull_request' ? 'OSV_PR_RESULT' : 'OSV_FULL_RESULT',
+      ];
+      if (['push', 'schedule', 'workflow_dispatch'].includes(event)) {
+        required.push('PINNED_TOOLS_RESULT');
+      }
+      for (const check of required) {
+        for (const outcome of ['failure', 'cancelled', 'skipped']) {
+          expect(runSecuritySummary(event, { [check]: outcome }).status, check).toBe(1);
+        }
+      }
+    }
+  );
+
+  it('rejects unsupported security events', () => {
+    expect(runSecuritySummary('unknown').status).toBe(1);
+  });
+
   it('keeps every required check name and explicit no-op path in CI and Security', () => {
     const ci = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
     const security = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
-    const settings = readFileSync(resolve(root, '.github/settings.yaml'), 'utf8');
+    const settings = readFileSync(resolve(root, '.github/settings.yml'), 'utf8');
     const requiredChecks = [
       'pr-gate/quality',
       'pr-gate/build',
@@ -224,7 +272,7 @@ describe('workflow scope integration', () => {
     ];
 
     for (const check of requiredChecks) {
-      expect(settings).toContain(`- "${check}"`);
+      expect(settings).toContain(`- context: "${check}"\n            app_id: 15368`);
       expect(`${ci}\n${security}`).toContain(`name: ${check}`);
     }
     expect(ci.match(/name: No relevant changes/g)).toHaveLength(4);
@@ -237,6 +285,8 @@ describe('workflow scope integration', () => {
       const workflow = readFileSync(resolve(root, '.github/workflows', filename), 'utf8');
       const triggerBlock = workflow.slice(0, workflow.indexOf('\npermissions:'));
 
+      expect(workflow).not.toContain('report-pr-gate-statuses:');
+      expect(workflow).not.toContain('statuses: write');
       expect(triggerBlock).not.toMatch(/\n\s+paths(?:-ignore)?:/);
       expect(triggerBlock).toContain('pull_request:');
       expect(triggerBlock).toContain('merge_group:');

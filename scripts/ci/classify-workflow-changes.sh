@@ -165,7 +165,7 @@ classify_path() {
     .github/actions/**)
       mark quality unit build semgrep codeql_actions pinned_tools codex_security
       ;;
-    .github/settings.yaml)
+    .github/settings.yml)
       mark quality unit semgrep codeql_actions codex_security
       ;;
     .github/codex-security/**)
