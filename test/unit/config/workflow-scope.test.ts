@@ -50,8 +50,7 @@ type Scope =
   | 'codeql_actions'
   | 'codeql_javascript'
   | 'pinned_tools'
-  | 'deep_fast'
-  | 'codex_security';
+  | 'deep_fast';
 
 function classify(paths: string[]): Record<Scope, boolean> {
   const result = spawnSync('bash', [classifier, '--paths', ...paths], {
@@ -106,7 +105,6 @@ describe('workflow change classification', () => {
       codeql_actions: false,
       codeql_javascript: false,
       deep_fast: false,
-      codex_security: false,
     });
   });
 
@@ -125,7 +123,6 @@ describe('workflow change classification', () => {
       codeql_actions: false,
       codeql_javascript: true,
       deep_fast: true,
-      codex_security: true,
     });
   });
 
@@ -151,7 +148,6 @@ describe('workflow change classification', () => {
       semgrep: true,
       codeql_javascript: true,
       deep_fast: true,
-      codex_security: true,
     });
   });
 
@@ -169,37 +165,24 @@ describe('workflow change classification', () => {
       codeql_actions: true,
       pinned_tools: true,
       deep_fast: false,
-      codex_security: true,
     });
   });
 
-  it('runs OSV when scoped exception handling changes', () => {
-    expect(classify(['scripts/security/scope-osv-exceptions.py'])).toMatchObject({
+  it('runs OSV when result validation changes', () => {
+    expect(classify(['scripts/security/validate-osv-results.py'])).toMatchObject({
       unit: true,
       osv: true,
     });
   });
 
-  it('keeps Codex Security dependency and policy changes in supply-chain scopes', () => {
-    for (const path of [
-      'scripts/security/codex-security/package-lock.json',
-      '.github/codex-security/scan.md',
-    ]) {
-      expect(classify([path])).toMatchObject({
-        quality: false,
-        unit: true,
-        e2e: false,
-        build: false,
-        duplication: false,
-        osv: true,
-        semgrep: true,
-        codeql_actions: false,
-        codeql_javascript: false,
-        pinned_tools: true,
-        deep_fast: false,
-        codex_security: true,
-      });
-    }
+  it('keeps the product threat model in documentation scope', () => {
+    expect(classify(['.github/threat-model.md'])).toMatchObject({
+      quality: false,
+      unit: false,
+      osv: false,
+      semgrep: true,
+      pinned_tools: false,
+    });
   });
 
   it('runs portable quality and unit checks for Windows validation helpers', () => {
@@ -210,7 +193,6 @@ describe('workflow change classification', () => {
       build: false,
       semgrep: true,
       codeql_javascript: true,
-      codex_security: true,
     });
   });
 
@@ -338,14 +320,9 @@ describe('workflow scope integration', () => {
 
   it('limits non-required PR and push workflows to conservative relevant paths', () => {
     const deep = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
-    const codex = readFileSync(resolve(root, '.github/workflows/codex-security.yaml'), 'utf8');
 
     expect(deep).toContain('  schedule:');
     expect(deep).toContain('  workflow_dispatch:');
     expect(deep).not.toContain('\n  push:\n');
-    expect(codex).toContain('      - ".github/codex-security/**"');
-    expect(codex).toContain('      - "scripts/security/codex-security/**"');
-    expect(codex).toContain('      - ".github/workflows/**"');
-    expect(codex).not.toContain('      - "README.md"');
   });
 });

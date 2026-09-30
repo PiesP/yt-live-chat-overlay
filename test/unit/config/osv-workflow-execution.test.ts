@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -16,20 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
 const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
-const helper = resolve(root, 'scripts/security/scope-osv-exceptions.py');
-const policy = resolve(root, '.github/codex-security/osv-scanner.toml');
-const cliPackage = JSON.parse(
-  readFileSync(resolve(root, 'scripts/security/codex-security/package.json'), 'utf8')
-) as { dependencies: Record<string, string> };
-const cliLock = JSON.parse(
-  readFileSync(resolve(root, 'scripts/security/codex-security/package-lock.json'), 'utf8')
-) as { packages: Record<string, { integrity?: string }> };
-const cliVersion = cliPackage.dependencies['@openai/codex-security'];
-const cliIntegrity = cliLock.packages['node_modules/@openai/codex-security']?.integrity;
-if (!cliVersion || !cliIntegrity) throw new Error('Codex Security lock metadata is incomplete');
-const cliLockfileSha256 = createHash('sha256')
-  .update(readFileSync(resolve(root, 'scripts/security/codex-security/package-lock.json')))
-  .digest('hex');
+const helper = resolve(root, 'scripts/security/validate-osv-results.py');
 const image = workflow.match(/OSV_SCANNER_IMAGE: "([^"]+)"/)?.[1];
 const actualContainerRuntime = process.env.OSV_TEST_CONTAINER_RUNTIME;
 const temporaryDirectories: string[] = [];
@@ -81,13 +67,6 @@ function extractStep(name: string): WorkflowStep {
   };
 }
 
-function extractFirstStep(names: string[]): WorkflowStep {
-  for (const name of names) {
-    if (workflow.includes(`- name: ${name}`)) return extractStep(name);
-  }
-  throw new Error(`None of the workflow steps exist: ${names.join(', ')}`);
-}
-
 function emptyReport(): Record<string, unknown> {
   return { results: [] };
 }
@@ -115,16 +94,16 @@ function reportWith(
       {
         source: {
           path: target
-            ? '/src/scripts/security/codex-security/package-lock.json'
-            : '/src/pnpm-lock.yaml',
+            ? '/src/pnpm-lock.yaml'
+            : '/src/package-lock.json',
           type: 'lockfile',
         },
         packages: [
           {
             package: {
               ecosystem: 'npm',
-              name: target ? 'extract-zip' : 'example-package',
-              version: target ? '2.0.1' : '1.0.0',
+              name: 'example-package',
+              version: '1.0.0',
             },
             vulnerabilities: ids.map((id) => vulnerability(id, vulnerabilityMetadata)),
             groups: ids.map((id) => ({ ids: [id], aliases: [id] })),
@@ -135,27 +114,6 @@ function reportWith(
   };
 }
 
-function activePolicy(): string {
-  return `
-[[IgnoredVulns]]
-id = "GHSA-jmr9-qjv8-65gv"
-ignoreUntil = 2099-01-01
-reason = "Workflow test"
-
-[[IgnoredVulns]]
-id = "GHSA-7pqw-9j4j-h8q3"
-ignoreUntil = 2099-01-01
-reason = "Workflow test"
-
-[CodexSecurityReview]
-package = "@openai/codex-security"
-version = "${cliVersion}"
-integrity = "${cliIntegrity}"
-lockfileSha256 = "${cliLockfileSha256}"
-reviewedOn = ${new Date().toISOString().slice(0, 10)}
-`;
-}
-
 function createSandbox(): Sandbox {
   const runnerTemp = mkdtempSync(join(tmpdir(), 'osv-workflow-'));
   temporaryDirectories.push(runnerTemp);
@@ -163,8 +121,7 @@ function createSandbox(): Sandbox {
   const bin = join(runnerTemp, 'bin');
   mkdirSync(results);
   mkdirSync(bin);
-  copyFileSync(helper, join(results, 'scope-osv-exceptions.py'));
-  writeFileSync(join(results, 'osv-scanner.toml'), activePolicy());
+  copyFileSync(helper, join(results, 'validate-osv-results.py'));
   writeFileSync(join(results, 'osv-empty.toml'), '');
   const githubOutput = join(runnerTemp, 'github-output');
   writeFileSync(githubOutput, '');
@@ -312,128 +269,63 @@ describe('executable OSV workflow boundary', () => {
   const dispatchReport = extractStep(
     '📋 Convert OSV results to SARIF and enforce the vulnerability gate'
   );
-  const materializePolicy = extractFirstStep([
-    '📁 Prepare trusted OSV policy and result directory',
-    '📁 Materialize trusted OSV policy',
-  ]);
-  const materializePrPolicy = extractFirstStep([
-    '📁 Prepare base-pinned OSV policy and result directory',
-    '📁 Materialize base OSV policy',
-    '📁 Materialize trusted OSV policy from PR base',
-  ]);
+  const materializePolicy = extractStep('📁 Materialize trusted OSV validator');
+  const materializePrPolicy = extractStep('📁 Materialize base OSV validator');
 
-  it('does not tolerate scanner or filter step failures at the job boundary', () => {
+  it('does not tolerate scanner or validator failures at the job boundary', () => {
     expect(scanSteps.every((step) => !step.continueOnError)).toBe(true);
     expect(workflow).toContain("steps.osv-report.outputs.sarif-upload == 'true'");
   });
 
-  it('keeps the fixed policy exception-free across the former expiry boundary', () => {
-    const sandbox = createSandbox();
-    const historicalPolicy = join(sandbox.results, 'historical-policy.toml');
-    writeFileSync(
-      historicalPolicy,
-      readFileSync(policy, 'utf8').replace(
-        /reviewedOn = \d{4}-\d{2}-\d{2}/,
-        'reviewedOn = 2026-09-26'
-      )
-    );
-    const execution = spawnSync('python3', ['-', helper, historicalPolicy], {
-      encoding: 'utf8',
-      input: `
-from datetime import date
-from pathlib import Path
-import runpy
-import sys
-
-validator = runpy.run_path(sys.argv[1], run_name="scope_osv_validator")
-policy = Path(sys.argv[2])
-for instant in ("2026-09-27", "2026-09-28"):
-    active = validator["load_policy"](policy, date.fromisoformat(instant))
-    print(instant + ":" + ",".join(sorted(active)))
-`,
-    });
-
-    expect(execution.status, execution.stderr).toBe(0);
-    expect(execution.stdout.trim().split('\n')).toEqual([
-      '2026-09-27:',
-      '2026-09-28:',
-    ]);
-  });
-
   it.each(['push', 'schedule', 'workflow_dispatch'])(
-    'executes the current-source policy path for the %s event',
+    'executes the current-source validator path for the %s event',
     (eventName) => {
       const sandbox = createSandbox();
-      const execution = runStep(materializePolicy, sandbox, {
-        EVENT_NAME: eventName,
-        GITHUB_EVENT_NAME: eventName,
-      });
-
+      const execution = runStep(materializePolicy, sandbox, { EVENT_NAME: eventName });
       expect(execution.status, execution.stderr).toBe(0);
-      expect(readFileSync(join(sandbox.results, 'osv-scanner.toml'), 'utf8')).toBe(
-        readFileSync(policy, 'utf8')
-      );
-      expect(readFileSync(join(sandbox.results, 'scope-osv-exceptions.py'), 'utf8')).toBe(
+      expect(readFileSync(join(sandbox.results, 'validate-osv-results.py'), 'utf8')).toBe(
         readFileSync(helper, 'utf8')
       );
+      expect(readFileSync(join(sandbox.results, 'osv-empty.toml'), 'utf8')).toBe('');
     }
   );
 
-  it('executes the PR-base policy materialization body', () => {
-    const sandbox = createSandbox();
-    const execution = runStep(materializePrPolicy, sandbox);
-
-    expect(execution.status, execution.stderr).toBe(0);
-    expect(readFileSync(join(sandbox.results, 'osv-scanner.toml'), 'utf8')).toBe(
-      readFileSync(policy, 'utf8')
+  it('materializes the PR validator from its base before switching revisions', () => {
+    expect(workflow.indexOf('- name: 📁 Materialize base OSV validator')).toBeLessThan(
+      workflow.indexOf('- name: ⏪ Checkout the PR base')
     );
-    expect(readFileSync(join(sandbox.results, 'scope-osv-exceptions.py'), 'utf8')).toBe(
-      readFileSync(helper, 'utf8')
-    );
+    expect(materializePrPolicy.run).toContain('git show "$BASE_SHA:$helper_path"');
+    expect(materializePrPolicy.run).toContain('osv-empty.toml');
+    expect(materializePolicy.run).toContain('git show "$BASE_SHA:$helper_path"');
   });
 
-  it('executes the merge-group path against the trusted base commit', () => {
+  it.each([
+    ['pull_request', materializePrPolicy],
+    ['merge_group', materializePolicy],
+  ])('uses the trusted legacy base bridge for %s without suppressing findings', (eventName, step) => {
     const sandbox = createSandbox();
     const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
-    const execution = runStep(materializePolicy, sandbox, {
-      BASE_SHA: head,
-      EVENT_NAME: 'merge_group',
-      EXPECTED_HEAD_SHA: head,
-      GITHUB_EVENT_NAME: 'merge_group',
-      POLICY_SHA: head,
-      TRUSTED_BASE_SHA: head,
-    });
-
+    const execution = runStep(step, sandbox, { BASE_SHA: head, EVENT_NAME: eventName });
     expect(execution.status, execution.stderr).toBe(0);
-    const trustedFiles: Array<[string, string]> = [
-      ['.github/codex-security/osv-scanner.toml', 'osv-scanner.toml'],
-      ['scripts/security/scope-osv-exceptions.py', 'scope-osv-exceptions.py'],
-    ];
-    for (const [repositoryPath, resultName] of trustedFiles) {
-      const expected = spawnSync('git', ['show', `${head}:${repositoryPath}`], {
-        cwd: root,
-        encoding: 'utf8',
-      });
-      expect(expected.status, expected.stderr).toBe(0);
-      expect(readFileSync(join(sandbox.results, resultName), 'utf8')).toBe(expected.stdout);
-    }
+    expect(existsSync(join(sandbox.results, 'legacy-osv-helper.py'))).toBe(true);
+
+    const raw = join(sandbox.results, 'raw.json');
+    const output = join(sandbox.results, 'validated.json');
+    const input = reportWith(['GHSA-jmr9-qjv8-65gv']);
+    writeJson(raw, input);
+    const validated = spawnSync(
+      'python3',
+      [join(sandbox.results, 'validate-osv-results.py'), '--input', raw, '--output', output],
+      { encoding: 'utf8' }
+    );
+    expect(validated.status, validated.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(input);
   });
 
-  it('keeps the repository-specific unsupported-event boundary', () => {
+  it('rejects unsupported full-scan events', () => {
     const sandbox = createSandbox();
-    const execution = runStep(materializePolicy, sandbox, {
-      EVENT_NAME: 'pull_request',
-      GITHUB_EVENT_NAME: 'pull_request',
-    });
-
-    if (materializePolicy.run.includes('Unsupported')) {
-      expect(execution.status).not.toBe(0);
-    } else {
-      expect(execution.status, execution.stderr).toBe(0);
-      expect(workflow).toContain(
-        "github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || github.event_name == 'schedule'"
-      );
-    }
+    const execution = runStep(materializePolicy, sandbox, { EVENT_NAME: 'pull_request' });
+    expect(execution.status).not.toBe(0);
   });
 
   it('purges stale outputs and stops on an injected scanner processing error', () => {
@@ -511,52 +403,20 @@ for instant in ("2026-09-27", "2026-09-28"):
     );
   });
 
-  it('normalizes scanner exit 1 when every vulnerability has an exact active exception', () => {
-    const sandbox = createSandbox();
-    installFakeDocker(sandbox.bin);
-    const raw = join(sandbox.runnerTemp, 'approved.json');
-    writeJson(
-      raw,
-      reportWith(['GHSA-jmr9-qjv8-65gv', 'GHSA-7pqw-9j4j-h8q3'], true)
-    );
-
-    const execution = runStep(dispatchScan, sandbox, {
-      FAKE_SCANNER_RAW: raw,
-      FAKE_SCANNER_STATUS: '1',
-    });
-    const filtered = JSON.parse(
-      readFileSync(join(sandbox.results, 'osv-results.json'), 'utf8')
-    ) as { results: Array<{ packages: Array<{ vulnerabilities: unknown[] }> }> };
-
-    expect(execution.status).toBe(0);
-    expect(filtered.results[0]?.packages[0]?.vulnerabilities).toEqual([]);
-  });
-
-  it('normalizes scanner exit 1 and filters only the exact active exceptions', () => {
+  it('preserves scanner findings without an exception filter', () => {
     const sandbox = createSandbox();
     installFakeDocker(sandbox.bin);
     const raw = join(sandbox.runnerTemp, 'vulnerable.json');
-    writeJson(
-      raw,
-      reportWith([
-        'GHSA-jmr9-qjv8-65gv',
-        'GHSA-7pqw-9j4j-h8q3',
-        'GHSA-test-test-test',
-      ], true)
-    );
+    const input = reportWith(['GHSA-jmr9-qjv8-65gv', 'GHSA-test-test-test']);
+    writeJson(raw, input);
 
     const execution = runStep(dispatchScan, sandbox, {
       FAKE_SCANNER_RAW: raw,
       FAKE_SCANNER_STATUS: '1',
     });
-    const filtered = JSON.parse(
-      readFileSync(join(sandbox.results, 'osv-results.json'), 'utf8')
-    ) as { results: Array<{ packages: Array<{ vulnerabilities: Array<{ id: string }> }> }> };
 
-    expect(execution.status).toBe(0);
-    expect(filtered.results[0]?.packages[0]?.vulnerabilities.map(({ id }) => id)).toEqual([
-      'GHSA-test-test-test',
-    ]);
+    expect(execution.status, execution.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(sandbox.results, 'osv-results.json'), 'utf8'))).toEqual(input);
   });
 
   it.each([
@@ -594,17 +454,17 @@ describe.runIf(Boolean(actualContainerRuntime))('pinned reporter integration thr
   }
 
   it.each([
-    ['valid approved report', {}, 0, true],
+    ['valid vulnerability report', {}, 0, true],
     ['approved report with invalid published metadata', { published: 42 }, 2, false],
   ])(
-    'validates raw scanner JSON before filtering: %s',
-    (_label, vulnerabilityMetadata, expectedStatus, expectedFiltered) => {
+    'validates raw scanner JSON before reporting: %s',
+    (_label, vulnerabilityMetadata, expectedStatus, expectedValidated) => {
       const sandbox = createSandbox();
       installScannerStubRuntimeReporter(sandbox.bin, actualContainerRuntime ?? 'podman');
       const raw = join(sandbox.runnerTemp, 'approved-raw.json');
       writeJson(
         raw,
-        reportWith(['GHSA-jmr9-qjv8-65gv'], true, vulnerabilityMetadata)
+        reportWith(['GHSA-test-test-test'], true, vulnerabilityMetadata)
       );
 
       const execution = runStep(dispatchScan, sandbox, {
@@ -613,7 +473,7 @@ describe.runIf(Boolean(actualContainerRuntime))('pinned reporter integration thr
       });
 
       expect(execution.status, `${execution.stdout}\n${execution.stderr}`).toBe(expectedStatus);
-      expect(existsSync(join(sandbox.results, 'osv-results.json'))).toBe(expectedFiltered);
+      expect(existsSync(join(sandbox.results, 'osv-results.json'))).toBe(expectedValidated);
       expect(existsSync(join(sandbox.results, 'osv-results.raw.reporter.log'))).toBe(true);
     },
     30_000
@@ -671,11 +531,11 @@ describe.runIf(Boolean(actualContainerRuntime))('pinned reporter integration thr
     30_000
   );
 
-  it('fails a full scan when the post-expiry filtered result retains the approved IDs', () => {
+  it('fails a full scan when the result contains vulnerabilities', () => {
     const sandbox = actualSandbox();
     writeJson(
       join(sandbox.results, 'osv-results.json'),
-      reportWith(['GHSA-jmr9-qjv8-65gv', 'GHSA-7pqw-9j4j-h8q3'], true)
+      reportWith(['GHSA-test-test-test', 'GHSA-another-test'], true)
     );
 
     const execution = runStep(dispatchReport, sandbox);
@@ -685,10 +545,10 @@ describe.runIf(Boolean(actualContainerRuntime))('pinned reporter integration thr
     expect(sarifResultCount(join(sandbox.results, 'osv-results.sarif'))).toBe(2);
   }, 30_000);
 
-  it('passes a PR diff when the same post-expiry vulnerabilities exist in old and new', () => {
+  it('passes a PR diff when the same vulnerabilities exist in old and new', () => {
     const sandbox = actualSandbox();
     const retained = reportWith(
-      ['GHSA-jmr9-qjv8-65gv', 'GHSA-7pqw-9j4j-h8q3'],
+      ['GHSA-test-test-test', 'GHSA-another-test'],
       true
     );
     writeJson(join(sandbox.results, 'old-results.json'), retained);
