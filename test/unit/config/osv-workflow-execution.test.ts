@@ -128,6 +128,52 @@ function createSandbox(): Sandbox {
   return { bin, githubOutput, results, runnerTemp };
 }
 
+function createLegacyBaseFixture(sandbox: Sandbox): { cwd: string; baseSha: string } {
+  const cwd = join(sandbox.runnerTemp, 'legacy-base');
+  const securityDirectory = join(cwd, 'scripts/security');
+  mkdirSync(securityDirectory, { recursive: true });
+  writeFileSync(join(securityDirectory, 'scope-osv-exceptions.py'), `
+import json
+
+def load_report(path):
+    with path.open(encoding="utf-8") as stream:
+        return json.load(stream)
+
+def validate_and_filter_report(report, active_ids):
+    if active_ids != frozenset():
+        raise ValueError("legacy exceptions must be disabled")
+    return report
+
+def prepare_output(output, protected_paths):
+    if output in protected_paths:
+        raise ValueError("output aliases input")
+    output.unlink(missing_ok=True)
+
+def write_report(output, report):
+    output.write_text(json.dumps(report), encoding="utf-8")
+`);
+
+  const init = spawnSync('git', ['init', '-q', cwd], { encoding: 'utf8' });
+  expect(init.status, init.stderr).toBe(0);
+  const add = spawnSync('git', ['add', 'scripts/security/scope-osv-exceptions.py'], {
+    cwd,
+    encoding: 'utf8',
+  });
+  expect(add.status, add.stderr).toBe(0);
+  const commit = spawnSync(
+    'git',
+    ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Legacy base'],
+    { cwd, encoding: 'utf8' }
+  );
+  expect(commit.status, commit.stderr).toBe(0);
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' });
+  expect(revision.status, revision.stderr).toBe(0);
+
+  // Simulate an untrusted PR checkout that attempts to provide its own validator.
+  writeFileSync(join(securityDirectory, 'validate-osv-results.py'), 'raise RuntimeError("PR helper ran")\n');
+  return { cwd, baseSha: revision.stdout.trim() };
+}
+
 function installFakeDocker(bin: string): void {
   const path = join(bin, 'docker');
   writeFileSync(
@@ -304,8 +350,13 @@ describe('executable OSV workflow boundary', () => {
     ['merge_group', materializePolicy],
   ])('uses the trusted legacy base bridge for %s without suppressing findings', (eventName, step) => {
     const sandbox = createSandbox();
-    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
-    const execution = runStep(step, sandbox, { BASE_SHA: head, EVENT_NAME: eventName });
+    const fixture = createLegacyBaseFixture(sandbox);
+    const execution = runStep(
+      step,
+      sandbox,
+      { BASE_SHA: fixture.baseSha, EVENT_NAME: eventName },
+      fixture.cwd
+    );
     expect(execution.status, execution.stderr).toBe(0);
     expect(existsSync(join(sandbox.results, 'legacy-osv-helper.py'))).toBe(true);
 
