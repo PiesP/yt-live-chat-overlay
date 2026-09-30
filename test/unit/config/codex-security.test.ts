@@ -104,7 +104,7 @@ describe('Codex Security CLI supply-chain controls', () => {
     const cliLock = JSON.parse(readFileSync(cliLockPath, 'utf8')) as CliLock;
 
     expect(cliPackage.overrides).toBeUndefined();
-    expect(cliLock.packages['node_modules/fast-uri']?.version).toBe('3.1.6');
+    expect(cliLock.packages['node_modules/fast-uri']?.version).toBe('3.1.8');
     expect(cliLock.packages['node_modules/fflate']?.version).toBe('0.8.3');
     expect(cliLock.packages['node_modules/smol-toml']?.version).toBe('1.8.0');
   });
