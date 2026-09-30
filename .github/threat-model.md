@@ -26,9 +26,9 @@ tab availability, extension/userscript privileges, and release artifacts.
   extension operations. The bridge validates source, origin, message shape,
   command/key allowlists, and a per-injection random nonce created with
   `crypto.randomUUID()`. The nonce is defense in depth and routing integrity,
-  not a secret capability from JavaScript executing in the same page. Do not
-  report the bridge as lacking a nonce. Findings must show a path to operations
-  beyond the one non-secret settings key or the reset/reload commands.
+  not a secret capability from JavaScript executing in the same page. A bridge
+  concern requires a path to operations beyond the one non-secret settings key
+  or the reset/reload commands.
 - Imported JSON and local settings are operator-controlled. Schema validation,
   normalization, numeric bounds, migration bounds, prototype-pollution guards,
   and safe persistence must prevent executable or irrecoverable state. Settings
@@ -37,7 +37,7 @@ tab availability, extension/userscript privileges, and release artifacts.
   registries, per-author rate limits, traversal limits, byte-bounded media and
   translation caches, image concurrency/timeouts, worker health and teardown,
   polling circuit breakers, and visibility/playback pausing. A finding needs a
-  reproducible path that defeats these controls, not merely a large input.
+  reproducible path that defeats these controls.
 - Translation is optional and uses the browser's built-in Translator/Language
   Detector APIs. The project must not send chat text to a developer-operated or
   third-party translation endpoint contrary to `PRIVACY.md`.
@@ -49,11 +49,10 @@ tab availability, extension/userscript privileges, and release artifacts.
 ## Shared dependency boundary
 
 `packages/core` is a pinned Git submodule providing `@piesp/browser-core`.
-Review calls into it as a trust boundary and include the checked-out code when
-available, but distinguish a defect in this repository's integration from a
-shared-core defect. Do not propose changing the gitlink without verifying that
-the target commit is reachable from the upstream repository and validating all
-consumers.
+Calls into it cross a trust boundary. Distinguish a defect in this
+repository's integration from a shared-core defect. Verify that any replacement
+commit is reachable from upstream and validate all consumers before changing
+the gitlink.
 
 ## Severity and exclusions
 
@@ -69,11 +68,11 @@ isolation, and session fixation are unsupported classes because no such server
 authority exists. Dependency advisories without a reachable project-specific
 attack path belong to OSV/dependency triage rather than a source vulnerability.
 
-## Required deferred runtime coverage
+## Runtime coverage limits
 
 Static review cannot establish behavior on live YouTube pages, browser/extension
 store state, redirects and response behavior of real CDN hosts, or native memory
 held by Canvas2D, OffscreenCanvas, ImageBitmap, browser decoders, and workers.
-Record those areas as deferred unless the scan has corresponding browser,
-network, process-memory, store, or release evidence. Do not infer full runtime
-coverage from unit tests or JavaScript heap behavior alone.
+Assess those areas with corresponding browser, network, process-memory, store,
+or release evidence. Unit tests and JavaScript heap behavior alone do not
+establish full runtime coverage.

@@ -16,7 +16,6 @@ declare -A scopes=(
   [codeql_javascript]=false
   [pinned_tools]=false
   [deep_fast]=false
-  [codex_security]=false
 )
 
 readonly scope_order=(
@@ -33,7 +32,6 @@ readonly scope_order=(
   codeql_javascript
   pinned_tools
   deep_fast
-  codex_security
 )
 
 mark() {
@@ -95,10 +93,10 @@ classify_path() {
       mark_all
       ;;
     packages/core | .gitmodules | package.json | pnpm-lock.yaml | pnpm-workspace.yaml)
-      mark quality unit core e2e build osv semgrep codeql_javascript pinned_tools deep_fast codex_security
+      mark quality unit core e2e build osv semgrep codeql_javascript pinned_tools deep_fast
       ;;
     src/**)
-      mark quality unit e2e build duplication semgrep codeql_javascript codex_security
+      mark quality unit e2e build duplication semgrep codeql_javascript
       if is_fast_mutation_source "$path"; then
         mark deep_fast
       fi
@@ -107,39 +105,36 @@ classify_path() {
       mark e2e build
       ;;
     extension/**/*.ts | extension/*.ts)
-      mark quality unit e2e build semgrep codeql_javascript codex_security
+      mark quality unit e2e build semgrep codeql_javascript
       ;;
     extension/*.json)
-      mark quality unit e2e build semgrep codex_security
+      mark quality unit e2e build semgrep
       ;;
     tooling/** | vite.config.ts | vite.config.*.ts)
-      mark quality unit e2e build semgrep codeql_javascript codex_security
+      mark quality unit e2e build semgrep codeql_javascript
       ;;
     validation/windows/**)
-      mark quality unit semgrep codeql_javascript codex_security
+      mark quality unit semgrep codeql_javascript
       ;;
     test/e2e/**)
-      mark quality e2e semgrep codeql_javascript codex_security
+      mark quality e2e semgrep codeql_javascript
       ;;
     test/unit/** | test/consistency/** | test/setup.ts)
-      mark quality unit semgrep codeql_javascript deep_fast codex_security
+      mark quality unit semgrep codeql_javascript deep_fast
       ;;
     test/visual/**)
-      mark semgrep codeql_javascript codex_security
+      mark semgrep codeql_javascript
       ;;
     nose.toml | .nose-baseline.json)
-      mark quality duplication semgrep codex_security
+      mark quality duplication semgrep
       ;;
     biome.json | knip.json | tsconfig*.json | vitest.config.ts | stryker.conf*.json)
-      mark quality unit e2e build semgrep codeql_javascript deep_fast codex_security
-      ;;
-    scripts/security/codex-security/**)
-      mark unit osv semgrep pinned_tools codex_security
+      mark quality unit e2e build semgrep codeql_javascript deep_fast
       ;;
     scripts/**)
-      mark quality unit build semgrep codeql_javascript codex_security
+      mark quality unit build semgrep codeql_javascript
       case "$path" in
-        scripts/security/scope-osv-exceptions.py)
+        scripts/security/validate-osv-results.py)
           mark osv
           ;;
         scripts/ci/**)
@@ -148,34 +143,31 @@ classify_path() {
       esac
       ;;
     .github/workflows/ci.yaml)
-      mark quality unit core e2e build duplication semgrep codeql_actions pinned_tools codex_security
+      mark quality unit core e2e build duplication semgrep codeql_actions pinned_tools
       ;;
     .github/workflows/security.yaml)
-      mark quality unit osv semgrep codeql_actions pinned_tools codex_security
+      mark quality unit osv semgrep codeql_actions pinned_tools
       ;;
     .github/workflows/deep-checks.yaml)
-      mark quality unit semgrep codeql_actions pinned_tools deep_fast codex_security
+      mark quality unit semgrep codeql_actions pinned_tools deep_fast
       ;;
     .github/workflows/release.yaml)
-      mark quality unit e2e build duplication semgrep codeql_actions pinned_tools codex_security
+      mark quality unit e2e build duplication semgrep codeql_actions pinned_tools
       ;;
     .github/workflows/**)
-      mark quality unit semgrep codeql_actions pinned_tools codex_security
+      mark quality unit semgrep codeql_actions pinned_tools
       ;;
     .github/actions/**)
-      mark quality unit build semgrep codeql_actions pinned_tools codex_security
+      mark quality unit build semgrep codeql_actions pinned_tools
       ;;
     .github/settings.yml)
-      mark quality unit semgrep codeql_actions codex_security
+      mark quality unit semgrep codeql_actions
       ;;
-    .github/codex-security/**)
-      mark unit osv semgrep pinned_tools codex_security
-      ;;
-    .github/SECURITY.md | PRIVACY.md)
-      mark semgrep codex_security
+    .github/SECURITY.md | .github/threat-model.md | PRIVACY.md)
+      mark semgrep
       ;;
     .githooks/**)
-      mark semgrep codex_security
+      mark semgrep
       ;;
     README.md | CHANGELOG.md | CODE_OF_CONDUCT.md | CONTRIBUTING.md | LICENSE | SUPPORT.md | \
       extension/README.md | docs/** | .github/ISSUE_TEMPLATE/** | .github/pull_request_template.md | \
