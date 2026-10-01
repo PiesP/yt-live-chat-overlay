@@ -6,27 +6,33 @@ import { appendFileSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } 
 import { dirname } from 'node:path';
 
 export const SCHEMA = 2;
-export const GATES = ['duplication', 'mutation-fast', 'mutation-renderer'];
+export const GATES = ['duplication', 'mutation-fast', 'mutation-renderer'] as const;
+type Gate = (typeof GATES)[number];
+type RunnerEnv = Record<string, string | undefined>;
+type Manifest = {
+  packageManager?: string;
+  volta?: { node?: string; pnpm?: string };
+};
 
-function assertGate(gate) {
-  if (!GATES.includes(gate)) throw new Error(`Unknown deep gate: ${gate}`);
+function assertGate(gate: string | undefined): asserts gate is Gate {
+  if (gate !== 'duplication' && gate !== 'mutation-fast' && gate !== 'mutation-renderer')
+    throw new Error(`Unknown deep gate: ${gate}`);
 }
 
-export function runnerIdentity(env = process.env) {
+export function runnerIdentity(env: RunnerEnv = process.env) {
   const { RUNNER_OS, RUNNER_ARCH, ImageOS, ImageVersion, DEEP_RUNNER_LABEL } = env;
-  if (![RUNNER_OS, RUNNER_ARCH, ImageOS, ImageVersion, DEEP_RUNNER_LABEL].every(Boolean))
-    return null;
+  if (!RUNNER_OS || !RUNNER_ARCH || !ImageOS || !ImageVersion || !DEEP_RUNNER_LABEL) return null;
   // Record ImageVersion in the marker while allowing pinned source-based checks
   // to reuse success across weekly runner image refreshes.
   return { os: RUNNER_OS, arch: RUNNER_ARCH, image: ImageOS, label: DEEP_RUNNER_LABEL };
 }
 
-export function fingerprint(gate, cwd = process.cwd(), env = process.env) {
+export function fingerprint(gate: string, cwd = process.cwd(), env: RunnerEnv = process.env) {
   assertGate(gate);
   const runner = runnerIdentity(env);
   if (!runner) return null; // Unknown runner image must run the gate.
 
-  const manifest = JSON.parse(readFileSync(`${cwd}/package.json`, 'utf8'));
+  const manifest = JSON.parse(readFileSync(`${cwd}/package.json`, 'utf8')) as Manifest;
   if (!manifest.volta?.node || !manifest.volta?.pnpm || !manifest.packageManager) return null;
 
   const hash = createHash('sha256');
@@ -52,7 +58,10 @@ export function fingerprint(gate, cwd = process.cwd(), env = process.env) {
     if (!entry) continue;
     const match = /^(\d{6}) ([0-9a-f]{40,64}) 0\t(.+)$/.exec(entry);
     if (!match) throw new Error(`Invalid or unmerged Git index entry: ${entry}`);
-    const [, mode, object, path] = match;
+    const mode = match[1];
+    const object = match[2];
+    const path = match[3];
+    if (!mode || !object || !path) throw new Error(`Invalid Git index entry: ${entry}`);
     hash.update(`\0${mode}\0${path}\0`);
     if (mode === '160000') {
       hash.update(object);
@@ -70,11 +79,15 @@ export function fingerprint(gate, cwd = process.cwd(), env = process.env) {
   return hash.digest('hex');
 }
 
-export function validMarker(markerPath, gate, expectedFingerprint) {
+export function validMarker(
+  markerPath: string,
+  gate: string,
+  expectedFingerprint: string | null | undefined
+) {
   assertGate(gate);
   if (!expectedFingerprint || !/^[0-9a-f]{64}$/.test(expectedFingerprint)) return false;
   try {
-    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>;
     return (
       marker.schema === SCHEMA &&
       marker.gate === gate &&
@@ -88,7 +101,13 @@ export function validMarker(markerPath, gate, expectedFingerprint) {
   }
 }
 
-export function shouldReuse(valid, cacheHit, restoreOutcome, eventName, reuseSuccess) {
+export function shouldReuse(
+  valid: boolean,
+  cacheHit: string | undefined,
+  restoreOutcome: string | undefined,
+  eventName: string | undefined,
+  reuseSuccess: string | undefined
+) {
   return (
     valid &&
     cacheHit === 'true' &&
@@ -97,9 +116,15 @@ export function shouldReuse(valid, cacheHit, restoreOutcome, eventName, reuseSuc
   );
 }
 
-export function writeMarker(markerPath, gate, expectedFingerprint, env = process.env) {
+export function writeMarker(
+  markerPath: string,
+  gate: string,
+  expectedFingerprint: string | undefined,
+  env: RunnerEnv = process.env
+) {
   assertGate(gate);
-  if (!/^[0-9a-f]{64}$/.test(expectedFingerprint)) throw new Error('Invalid fingerprint');
+  if (!expectedFingerprint || !/^[0-9a-f]{64}$/.test(expectedFingerprint))
+    throw new Error('Invalid fingerprint');
   if (!env.ImageVersion) throw new Error('Runner image version is required');
   mkdirSync(dirname(markerPath), { recursive: true });
   writeFileSync(
@@ -114,7 +139,7 @@ export function writeMarker(markerPath, gate, expectedFingerprint, env = process
   );
 }
 
-function output(line) {
+function output(line: string) {
   if (!process.env.GITHUB_OUTPUT) throw new Error('GITHUB_OUTPUT is required');
   appendFileSync(process.env.GITHUB_OUTPUT, `${line}\n`);
 }
@@ -127,6 +152,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     output(`cacheable=${Boolean(value)}`);
     output(`fingerprint=${value ?? 'unavailable'}`);
   } else if (command === 'verify') {
+    if (!markerPath) throw new Error('Marker path is required');
     const valid = validMarker(markerPath, gate, value);
     output(
       `reuse=${shouldReuse(
@@ -138,6 +164,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       )}`
     );
   } else if (command === 'mark') {
+    if (!markerPath) throw new Error('Marker path is required');
     writeMarker(markerPath, gate, value);
   } else {
     throw new Error(`Unknown command: ${command}`);
