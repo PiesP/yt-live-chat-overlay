@@ -32,3 +32,9 @@ The early setup pins Node and pnpm without installing dependencies. A fresh
 mutation run uses the normal frozen dependency setup; duplication installs Nose
 only when it runs. Local regression checks: `pnpm test:ci` and
 `pnpm check:scripts`.
+
+Reruns (`GITHUB_RUN_ATTEMPT > 1`) always analyze selected gates afresh, including
+scheduled runs and manual reuse opt-ins. Actions run listings expose only the
+latest attempt, so excluding the current attempt can hide its prior failures.
+A successful fresh rerun may still publish its own marker for a later run's
+first-attempt reuse.
