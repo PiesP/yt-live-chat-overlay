@@ -9,12 +9,17 @@ corrupt markers, and cache failures run fresh.
 
 Eligible successful default-branch runs attempt to save an immutable version 3
 marker with their run ID, attempt, SHA, and analysis time. Cache publication is
-best-effort. Before reuse, the workflow checks the origin
-and every later selected gate against bounded, paginated Actions history. A
+best-effort. Before reuse, the workflow checks the origin and every later
+selected gate against bounded, paginated Actions history. A
 later failed, cancelled, or unfinished gate, a rerun, or unavailable history
 runs fresh. A successful fresh pass can replace an invalidated result on the
 next schedule. Fast and renderer mutation success is recorded only after the
 respective required report upload succeeds.
+
+The run summary estimates avoided analysis time from the prior successful
+gate's check step when Actions provides valid step timing. It excludes cache
+restore, provenance API calls, setup, report uploads, and all other workflow
+overhead. This estimate is not a measure of net runtime savings or billed time.
 
 This is bounded reuse of a code-analysis result. Ubuntu image build revisions
 (`ImageVersion`) are recorded as provenance but excluded from the key, allowing

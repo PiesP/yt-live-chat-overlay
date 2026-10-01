@@ -93,7 +93,7 @@ jobs:
           ORIGIN_SHA: ${{ steps.marker.outputs.origin_sha }}
           ORIGIN_ANALYZED_AT: ${{ steps.marker.outputs.origin_analyzed_at }}
         run: |
-          echo "Duplication: reused successful result from run ${ORIGIN_RUN_ID}/${ORIGIN_RUN_ATTEMPT} (${ORIGIN_SHA}, analyzed ${ORIGIN_ANALYZED_AT}); reason: $REASON; estimated saved seconds: ${SAVED_SECONDS:-unavailable}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Duplication: reused successful result from run ${ORIGIN_RUN_ID}/${ORIGIN_RUN_ATTEMPT} (${ORIGIN_SHA}, analyzed ${ORIGIN_ANALYZED_AT}); reason: $REASON; estimated avoided analysis seconds: ${SAVED_SECONDS:-unavailable}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: 🧾 Explain fresh duplication analysis
         if: ${{ steps.marker.outputs.reuse != 'true' }}
@@ -194,7 +194,7 @@ jobs:
           ORIGIN_SHA: ${{ steps.marker.outputs.origin_sha }}
           ORIGIN_ANALYZED_AT: ${{ steps.marker.outputs.origin_analyzed_at }}
         run: |
-          echo "Fast mutation: reused successful result from run ${ORIGIN_RUN_ID}/${ORIGIN_RUN_ATTEMPT} (${ORIGIN_SHA}, analyzed ${ORIGIN_ANALYZED_AT}); reason: $REASON; estimated saved seconds: ${SAVED_SECONDS:-unavailable}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Fast mutation: reused successful result from run ${ORIGIN_RUN_ID}/${ORIGIN_RUN_ATTEMPT} (${ORIGIN_SHA}, analyzed ${ORIGIN_ANALYZED_AT}); reason: $REASON; estimated avoided analysis seconds: ${SAVED_SECONDS:-unavailable}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: 🧾 Explain fresh fast mutation analysis
         if: ${{ steps.marker.outputs.reuse != 'true' }}
@@ -304,7 +304,7 @@ jobs:
           ORIGIN_SHA: ${{ steps.marker.outputs.origin_sha }}
           ORIGIN_ANALYZED_AT: ${{ steps.marker.outputs.origin_analyzed_at }}
         run: |
-          echo "Renderer mutation: reused successful result from run ${ORIGIN_RUN_ID}/${ORIGIN_RUN_ATTEMPT} (${ORIGIN_SHA}, analyzed ${ORIGIN_ANALYZED_AT}); reason: $REASON; estimated saved seconds: ${SAVED_SECONDS:-unavailable}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Renderer mutation: reused successful result from run ${ORIGIN_RUN_ID}/${ORIGIN_RUN_ATTEMPT} (${ORIGIN_SHA}, analyzed ${ORIGIN_ANALYZED_AT}); reason: $REASON; estimated avoided analysis seconds: ${SAVED_SECONDS:-unavailable}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: 🧾 Explain fresh renderer mutation analysis
         if: ${{ steps.marker.outputs.reuse != 'true' }}
