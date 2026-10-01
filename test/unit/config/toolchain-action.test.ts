@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
-  'PiesP/browser-core/automation/actions/setup-project@5fd4c8e8d0d84d8d46dd7b71b996d1664365f6d6';
+  'PiesP/browser-core/automation/actions/setup-project@b382fa99a8b8ed5570ab6f4e1fd065a1423ea3f2';
 const centralWorkflowJobs = {
   'ci.yaml': ['quality', 'unit', 'e2e', 'build'],
   'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
@@ -38,7 +38,7 @@ describe('project setup actions', () => {
         )?.[0];
 
         expect(jobSection).toContain(`uses: ${centralAction}`);
-        expect(jobSection).toContain('node-version: ${{ env.NODE_VERSION }}');
+        expect(jobSection).not.toContain('node-version:');
       }
       expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
@@ -58,7 +58,7 @@ describe('project setup actions', () => {
       )?.[0];
 
       expect(jobSection).toContain(`uses: ${releaseAction}`);
-      expect(jobSection).toContain('node-version: ${{ env.NODE_VERSION }}');
+      expect(jobSection).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
     expect(releaseWorkflow).not.toContain(centralAction);
@@ -134,7 +134,7 @@ describe('project setup actions', () => {
     const action = readFileSync(actionPath, 'utf8');
     expect(action).toContain('uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0');
     expect(action).toContain('package-json-file: package.json');
-    expect(action).toContain('runtime: "node@${{ inputs.node-version }}"');
+    expect(action).toContain('runtime: "node@${{ steps.runtime.outputs.version }}"');
     expect(action).toContain('cache: false');
     expect(action).toContain('install: false');
     expect(action).toContain('pnpm install --frozen-lockfile --no-runtime');
