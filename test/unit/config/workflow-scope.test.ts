@@ -248,7 +248,6 @@ describe('workflow scope integration', () => {
       'pr-gate/build',
       'pr-gate/unit',
       'pr-gate/e2e',
-      'pr-gate/duplication',
       'pr-gate/osv / osv-scan',
       'pr-gate/semgrep',
     ];
@@ -258,7 +257,8 @@ describe('workflow scope integration', () => {
       expect(`${ci}\n${security}`).toContain(`name: ${check}`);
     }
     expect(ci.match(/name: No relevant changes/g)).toHaveLength(4);
-    expect(ci).toContain('Duplication is informational for PR CI');
+    expect(ci).not.toContain('name: pr-gate/duplication');
+    expect(settings).not.toContain('context: "pr-gate/duplication"');
     expect(security.match(/name: No relevant changes/g)).toHaveLength(5);
   });
 
@@ -285,10 +285,6 @@ describe('workflow scope integration', () => {
       expect(section).toContain('if: ${{ !cancelled() }}');
       expect(section).toContain("needs.changes.result != 'success'");
     }
-    const duplication = jobSection(ci, 'duplication');
-    expect(duplication).toContain('needs: changes');
-    expect(duplication).toContain('if: ${{ !cancelled() }}');
-    expect(duplication).toContain('Duplication is informational for PR CI');
     for (const job of ['osv-scan-pr', 'osv-scan-dispatch', 'semgrep']) {
       const section = jobSection(security, job);
       expect(section).toContain('needs: changes');
