@@ -54,5 +54,12 @@
     "vite.config.ts",
     "vite.config.*.ts"
   ],
-  "exclude": ["node_modules", "dist", "extension", ".vscode"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "extension",
+    ".vscode",
+    "scripts/ci/deep-check-reuse.ts",
+    "scripts/ci/deep-check-reuse.test.ts"
+  ]
 }

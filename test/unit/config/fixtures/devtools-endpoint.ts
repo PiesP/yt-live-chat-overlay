@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
+import fs, { type FileHandle } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
+// The VM harness remains a raw JavaScript asset with a separate runner contract.
+// @ts-expect-error The external Windows harness has no TypeScript declarations.
 import { readDevToolsEndpoint } from '../../../../validation/windows/natural-chrome.mjs';
 
 const actualFs = { open: fs.open, stat: fs.stat };
@@ -13,11 +15,12 @@ const record = '9222\n/devtools/browser/owned-browser\n';
 const endpoint = 'ws://127.0.0.1:9222/devtools/browser/owned-browser';
 const child = { exitCode: null, signalCode: null };
 const childState = { spawnError: null };
-let profile;
-let portFile;
-let opened;
-let afterCheck;
-let prepareHandle;
+let mockOpen: ReturnType<typeof mock.method<typeof fs, 'open'>>;
+let profile: string;
+let portFile: string;
+let opened: FileHandle[];
+let afterCheck: () => Promise<void>;
+let prepareHandle: (handle: FileHandle) => void;
 
 beforeEach(async () => {
   profile = await fs.mkdtemp(join(tmpdir(), 'yt-devtools-endpoint-'));
@@ -26,12 +29,12 @@ beforeEach(async () => {
   afterCheck = async () => {};
   prepareHandle = () => {};
   // Intercept both the former path check and the descriptor check for regression proof.
-  mock.method(fs, 'stat', async (...args) => {
+  mock.method(fs, 'stat', async (...args: Parameters<typeof fs.stat>) => {
     const metadata = await actualFs.stat(...args);
     await afterCheck();
     return metadata;
   });
-  mock.method(fs, 'open', async (...args) => {
+  mockOpen = mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
     const handle = await actualFs.open(...args);
     opened.push(handle);
     const stat = handle.stat.bind(handle);
@@ -61,7 +64,7 @@ for (const [name, contents] of [
   ['LF', record],
   ['CRLF', record.replaceAll('\n', '\r\n')],
   ['maximum size', record.padEnd(4096, ' ')],
-]) {
+] as const) {
   test(`accepts a valid bounded record: ${name}`, async () => {
     await fs.writeFile(portFile, contents);
     assert.equal(await readDevToolsEndpoint(profile, child, childState), endpoint);
@@ -88,7 +91,7 @@ test('handles short reads without truncating the record', async () => {
   await fs.writeFile(portFile, record);
   prepareHandle = (handle) => {
     const read = handle.read.bind(handle);
-    mock.method(handle, 'read', (buffer, offset, length, position) =>
+    mock.method(handle, 'read', (buffer: NodeJS.ArrayBufferView, offset: number, length: number, position: number) =>
       read(buffer, offset, Math.min(length, 2), position));
   };
   assert.equal(await readDevToolsEndpoint(profile, child, childState), endpoint);
@@ -100,7 +103,7 @@ test('closes the handle and preserves a read error', async () => {
   prepareHandle = (handle) => {
     mock.method(handle, 'read', async () => { throw failure; });
   };
-  await assert.rejects(readDevToolsEndpoint(profile, child, childState), (error) => error === failure);
+  await assert.rejects(readDevToolsEndpoint(profile, child, childState), (error: unknown) => error === failure);
 });
 
 for (const [name, contents] of [
@@ -111,7 +114,7 @@ for (const [name, contents] of [
   ['remote endpoint', '9222\nws://remote.example/devtools/browser/id'],
   ['query', '9222\n/devtools/browser/id?query'],
   ['extra record', `${record}extra`],
-]) {
+] as const) {
   test(`rejects invalid endpoint contents: ${name}`, async () => {
     await fs.writeFile(portFile, contents);
     await assert.rejects(readDevToolsEndpoint(profile, child, childState));
@@ -124,17 +127,17 @@ test('rejects a directory', async () => {
 });
 
 test('waits for a missing file to be created', async () => {
-  const sleep = mock.fn(async () => { await fs.writeFile(portFile, record); });
+  const sleep = mock.fn(async (_ms: number) => { await fs.writeFile(portFile, record); });
   assert.equal(await readDevToolsEndpoint(profile, child, childState, { sleep }), endpoint);
   assert.equal(sleep.mock.callCount(), 1);
-  assert.deepEqual(sleep.mock.calls[0].arguments, [100]);
+  assert.deepEqual(sleep.mock.calls[0]?.arguments, [100]);
 });
 
 test('preserves spawn and child-exit errors', async () => {
   const spawnError = new Error('spawn failed');
   await assert.rejects(readDevToolsEndpoint(profile, child, { spawnError }),
-    (error) => error === spawnError);
+    (error: unknown) => error === spawnError);
   await assert.rejects(readDevToolsEndpoint(profile, { ...child, exitCode: 1 }, childState),
     /exited before/u);
-  assert.equal(fs.open.mock.callCount(), 0);
+  assert.equal(mockOpen.mock.callCount(), 0);
 });

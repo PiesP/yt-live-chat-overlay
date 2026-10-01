@@ -20,6 +20,7 @@
   ],
   "exclude": [
     "test/e2e",
-    "test/node_modules"
+    "test/node_modules",
+    "test/unit/config/fixtures/devtools-endpoint.ts"
   ]
 }

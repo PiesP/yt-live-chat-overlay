@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
-  'PiesP/browser-core/automation/actions/setup-project@b382fa99a8b8ed5570ab6f4e1fd065a1423ea3f2';
+  'PiesP/browser-core/automation/actions/setup-project@1e3de928cb6828dc81b19f18a450f8320985720b';
 const centralWorkflowJobs = {
   'ci.yaml': ['quality', 'unit', 'e2e', 'build'],
-  'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
+  'deep-checks.yaml': ['duplication', 'mutation-fast', 'mutation-renderer'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
 const releaseLocalExecutionJobs = [...releaseJobs, 'duplication'];
@@ -40,7 +40,9 @@ describe('project setup actions', () => {
         expect(jobSection).toContain(`uses: ${centralAction}`);
         expect(jobSection).not.toContain('node-version:');
       }
-      expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
+      expect(workflow.split(centralAction)).toHaveLength(
+        filename === 'deep-checks.yaml' ? 6 : jobs.length + 1
+      );
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
       expect(workflow).not.toContain(releaseAction);
       expect(workflow).not.toContain('uses: pnpm/action-setup@');

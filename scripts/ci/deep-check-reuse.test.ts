@@ -6,18 +6,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { fingerprint, shouldReuse, validMarker, writeMarker } from './deep-check-reuse.mjs';
+import { fingerprint, shouldReuse, validMarker, writeMarker } from './deep-check-reuse.ts';
 
 const fixture = mkdtempSync(join(tmpdir(), 'deep-check-reuse-'));
 after(() => rmSync(fixture, { recursive: true, force: true }));
 
-function write(path, content) {
+function write(path: string, content: string | Uint8Array) {
   const fullPath = join(fixture, path);
   mkdirSync(join(fullPath, '..'), { recursive: true });
   writeFileSync(fullPath, content);
 }
 
-function git(...args) {
+function git(...args: string[]) {
   execFileSync('git', args, { cwd: fixture });
 }
 
@@ -56,6 +56,7 @@ const runner = {
   DEEP_RUNNER_LABEL: 'ubuntu-24.04',
 };
 const baseline = fingerprint('duplication', fixture, runner);
+if (!baseline) throw new Error('Fixture runner identity must be complete');
 
 test('each tracked source, test, configuration, lock, and tool input invalidates success', () => {
   assert.match(baseline, /^[0-9a-f]{64}$/);
@@ -118,13 +119,14 @@ test('fingerprint uses the length of the bytes read when a tracked file changes'
       const expected = fingerprint('duplication', fixture, runner);
       write('src/app.ts', 'original\n');
       let replaced = false;
-      t.mock.method(fs, 'readFileSync', (file, ...args) => {
+      t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
+        const [file] = args;
         if (file === path && !replaced) {
           // Change the file at the read boundary, after any separate metadata lookup.
           writeFileSync(path, replacement);
           replaced = true;
         }
-        return read(file, ...args);
+        return read(...args);
       });
       syncBuiltinESMExports();
       assert.equal(fingerprint('duplication', fixture, runner), expected);
@@ -211,8 +213,13 @@ test('only a valid successful marker can be reused', () => {
 });
 
 test('schedule reuses success; manual defaults to fresh and can opt in', () => {
-  const decide = (valid, event, choice, hit = 'true', outcome = 'success') =>
-    shouldReuse(valid, hit, outcome, event, choice);
+  const decide = (
+    valid: boolean,
+    event: string,
+    choice: string,
+    hit = 'true',
+    outcome = 'success'
+  ) => shouldReuse(valid, hit, outcome, event, choice);
   assert.equal(decide(true, 'schedule', ''), true);
   assert.equal(decide(false, 'schedule', ''), false);
   assert.equal(decide(true, 'schedule', '', '', 'success'), false);
@@ -224,12 +231,12 @@ test('schedule reuses success; manual defaults to fresh and can opt in', () => {
 });
 
 test('CLI emits a reusable result only after a successful marker is present', () => {
-  const script = fileURLToPath(new URL('./deep-check-reuse.mjs', import.meta.url));
+  const script = fileURLToPath(new URL('./deep-check-reuse.ts', import.meta.url));
   const output = join(fixture, 'output.txt');
   const marker = join(fixture, 'cli-marker.json');
-  const run = (args, extraEnv = {}) => {
+  const run = (args: string[], extraEnv: Record<string, string> = {}) => {
     writeFileSync(output, '');
-    execFileSync(process.execPath, [script, ...args], {
+    execFileSync(process.execPath, ['--experimental-strip-types', script, ...args], {
       cwd: fixture,
       env: { ...process.env, ...runner, GITHUB_OUTPUT: output, ...extraEnv },
     });
@@ -261,6 +268,19 @@ test('both mutation markers follow their required successful report uploads', ()
   assert.doesNotMatch(workflow, /^ {2}changes:/m);
   assert.match(workflow, /reuse_success:\n\s+description:.*\n\s+required: true\n\s+default: false/);
 
+  for (const gate of ['duplication', 'mutation-fast', 'mutation-renderer']) {
+    const section = workflow.split(`\n  ${gate}:\n`)[1]?.split(/\n {2}[a-z][\w-]*:\n/)[0];
+    assert.ok(section, gate);
+    const setup = section.indexOf('      - name: 📦 Setup pinned Node and pnpm');
+    const fingerprint = section.indexOf('      - name: 🔑 Fingerprint');
+    assert.ok(setup >= 0 && setup < fingerprint);
+    assert.match(section.slice(setup, fingerprint), /install-dependencies: 'false'/);
+    assert.match(
+      section.slice(fingerprint),
+      /node --experimental-strip-types scripts\/ci\/deep-check-reuse\.ts fingerprint/
+    );
+  }
+
   for (const profile of [
     { gate: 'mutation-fast', name: 'fast', report: 'reports/mutation/' },
     { gate: 'mutation-renderer', name: 'renderer', report: 'reports/mutation/renderer.json' },
@@ -269,28 +289,33 @@ test('both mutation markers follow their required successful report uploads', ()
     assert.ok(section, profile.gate);
     const starts = [...section.matchAll(/^ {6}- name: /gm)].map((match) => match.index);
     const steps = starts.map((start, index) => section.slice(start, starts[index + 1]));
-    const byName = (name) => steps.findIndex((step) => step.startsWith(`      - name: ${name}`));
+    const byName = (name: string) =>
+      steps.findIndex((step) => step.startsWith(`      - name: ${name}`));
     const check = byName(
       profile.name === 'fast' ? '🧬 Run fast mutation gate' : '🎨 Run renderer mutation gate'
     );
     const upload = byName(`📤 Upload ${profile.name} mutation report`);
+    const install = byName('📦 Set up project');
+    const marker = byName(`🔎 Validate successful ${profile.name} mutation marker`);
     const summary = byName(`✅ Record fresh ${profile.name} mutation pass`);
     const mark = byName(`📝 Mark successful ${profile.name} mutation`);
     const save = byName(`💾 Save successful ${profile.name} mutation marker`);
     assert.ok(check >= 0 && check < upload && upload < summary && summary < mark && mark < save);
+    assert.ok(marker >= 0 && marker < install && install < check);
+    assert.match(steps[install]!, /if:.*steps\.marker\.outputs\.reuse != 'true'/);
     assert.equal(save, steps.length - 1); // No later required step can fail after the marker is saved.
-    assert.match(steps[check], /if:.*steps\.marker\.outputs\.reuse != 'true'/);
-    assert.match(steps[upload], /id: upload/);
-    assert.match(steps[upload], /if:.*steps\.check\.outcome != 'skipped'/);
-    assert.ok(steps[upload].includes(`path: ${profile.report}`));
-    assert.match(steps[upload], /if-no-files-found: error/);
-    for (const step of [steps[summary], steps[mark]]) {
+    assert.match(steps[check]!, /if:.*steps\.marker\.outputs\.reuse != 'true'/);
+    assert.match(steps[upload]!, /id: upload/);
+    assert.match(steps[upload]!, /if:.*steps\.check\.outcome != 'skipped'/);
+    assert.ok(steps[upload]!.includes(`path: ${profile.report}`));
+    assert.match(steps[upload]!, /if-no-files-found: error/);
+    for (const step of [steps[summary]!, steps[mark]!]) {
       assert.match(
         step,
         /steps\.check\.outcome == 'success' && steps\.upload\.outcome == 'success'/
       );
     }
-    assert.match(steps[save], /if:.*steps\.mark\.outcome == 'success'/);
+    assert.match(steps[save]!, /if:.*steps\.mark\.outcome == 'success'/);
     assert.ok(section.includes(`deep-success-v2-${profile.gate}-`));
   }
 });
