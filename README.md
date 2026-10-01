@@ -91,6 +91,14 @@ See [Contributing](./CONTRIBUTING.md) for development setup and validation, and
 the [extension guide](./extension/README.md) for extension architecture, builds,
 and unpacked loading.
 
+The weekly Deep Verification workflow reuses a previous successful duplication,
+fast mutation, or renderer mutation result only when that gate's tracked source,
+tests, configuration, lockfile, submodule pin, declared tools, and runner
+platform match. Manual runs execute fresh checks by default. The runner image
+version is recorded with each success but does not invalidate this code-analysis
+cache when only the image revision changes. Security scans and browser/host
+compatibility checks remain independent and continue to run as configured.
+
 ## Support
 
 - Usage and troubleshooting: [Support](./SUPPORT.md)
