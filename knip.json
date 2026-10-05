@@ -2,8 +2,6 @@
   "$schema": "./node_modules/knip/schema.json",
   "entry": [
     "src/main.ts!",
-    "src/renderer/worker/renderer.ts!",
-    "extension/background.ts!",
     "extension/content-script.ts!",
     "extension/page-script.ts!",
     "scripts/**/*.ts",

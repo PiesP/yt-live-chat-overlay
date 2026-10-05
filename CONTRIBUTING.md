@@ -93,6 +93,13 @@ cooling window. Keep pnpm trust, build-script, and transitive-source controls
 enabled. `package.json`, `pnpm-workspace.yaml`, the lockfile, and pinned workflow
 references are authoritative.
 
+When upgrading static-analysis tools, review configuration hints and reconcile
+automatic entry discovery with manual entries in `knip.json`. Run
+`pnpm knip:full` and `pnpm knip:production` separately, keeping configuration
+hints fatal. Use debug output to confirm that userscript, extension, and worker
+entry points remain analyzed in both modes before running `pnpm quality` and
+`pnpm build:all:ci`.
+
 ## Pull requests
 
 Keep changes focused and describe what changed, why it changed, and how it was
