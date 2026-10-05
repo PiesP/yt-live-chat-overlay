@@ -245,7 +245,7 @@ resolve_changed_paths() {
     return
   }
 
-  if ! git diff --name-only --diff-filter=ACMRD -z "$range" > "$temp_file"; then
+  if ! git diff --no-renames --name-only -z "$range" -- > "$temp_file"; then
     echo "Unable to calculate workflow diff; enabling every scope." >&2
     rm -f -- "$temp_file"
     mark_all
