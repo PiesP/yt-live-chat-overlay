@@ -169,7 +169,7 @@ export const EN: Record<string, string> = {
   'advanced.tuningStaggerMediumDesc': 'Medium stagger delay when queue depth is medium',
   'advanced.tuningToggleCooldown': 'Backlog Toggle Cooldown (ms)',
   'advanced.tuningToggleCooldownDesc': 'Cooldown between backlog pause toggles',
-  'app.autoSave': 'Changes take effect as you edit and are saved when you close settings',
+  'app.autoSave': 'Changes apply now; saved when you close settings',
   'app.close': 'Close settings',
   'app.enabled': 'Overlay Enabled',
   'app.enabledDesc': 'Globally enable or disable the chat overlay on YouTube live streams',

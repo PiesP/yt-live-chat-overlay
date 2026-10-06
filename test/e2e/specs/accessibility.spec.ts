@@ -202,7 +202,10 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     await waitForStoredSettings(page, { fontWeight: 'normal', fontFamily: 'Georgia, serif' });
     await expect.poll(async () => (await getSettings(page)).fontFamily).toBe('Georgia, serif');
     await openSettingsModal(page);
-    await disclosure.locator('summary').click();
+    if (!(await disclosure.evaluate((details: HTMLDetailsElement) => details.open))) {
+      await disclosure.locator('summary').click();
+    }
+    await expect(disclosure).toHaveAttribute('open', '');
     await expect(regular).toHaveAttribute('aria-pressed', 'true');
     await expect(custom).toHaveValue('Georgia, serif');
     await closeSettingsModal(page, modal);

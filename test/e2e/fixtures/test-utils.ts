@@ -323,6 +323,9 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
           raw = typeof chromeValue === 'string' ? chromeValue : undefined;
         }
         if (typeof raw !== 'string') raw = window.GM_getValue?.(storageKey);
+        if (typeof raw !== 'string' && !chromeStorage && typeof window.GM_getValue !== 'function') {
+          raw = localStorage.getItem(storageKey);
+        }
         if (typeof raw !== 'string') return false;
         try {
           const saved = JSON.parse(raw) as Record<string, unknown>;
@@ -362,8 +365,9 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
 /**
  * Read raw settings from the active storage backend.
  *
- * The E2E fixture exposes both browser APIs, so the adapter's priority order
- * must be mirrored here: Chrome storage first, then GM_* fallback.
+ * The default E2E fixture exposes browser APIs; persistent-page fixtures use
+ * the localStorage fallback. Read that fallback only when neither API exists
+ * so an inactive backend cannot mask a missing active-backend write.
  */
 export async function readStoredSettings(page: Page): Promise<string | undefined> {
   return page.evaluate(async (storageKey) => {
@@ -376,6 +380,10 @@ export async function readStoredSettings(page: Page): Promise<string | undefined
       if (typeof chromeValue === 'string') return chromeValue;
     }
     const gmValue = window.GM_getValue?.(storageKey);
-    return typeof gmValue === 'string' ? gmValue : undefined;
+    if (typeof gmValue === 'string') return gmValue;
+    if (!chromeStorage && typeof window.GM_getValue !== 'function') {
+      return localStorage.getItem(storageKey) ?? undefined;
+    }
+    return undefined;
   }, SETTINGS_STORAGE_KEY);
 }
