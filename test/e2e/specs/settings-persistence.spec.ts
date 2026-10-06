@@ -166,6 +166,25 @@ test.describe('Settings Persistence', () => {
     expect(parsed.enabled).toBe(false);
   });
 
+  for (const persistedOverride of [false, true]) {
+    test(`preserves the existing reduced-motion override ${persistedOverride} through the settings form`, async ({ page }) => {
+      await setupPersistentSettingsPage(page, { ...DEFAULT_SETTINGS, language: 'en', ignoreReducedMotion: persistedOverride });
+      await page.locator('#movie_player').hover();
+      await page.locator(`#${BUTTON_ID}`).click();
+      const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+      await modal.locator('#tab-advanced').click();
+      const checkbox = modal.getByRole('checkbox', { name: 'Always animate scrolling comments' });
+      await expect(checkbox).toBeChecked({ checked: persistedOverride });
+      await expect(modal.locator('.yt-chat-overlay-settings-autosave-hint')).toContainText('saved when you close settings');
+      await page.keyboard.press('Escape');
+      await waitForStoredSettings(page, { ignoreReducedMotion: persistedOverride });
+
+      await page.locator(`#${BUTTON_ID}`).click();
+      await expect(checkbox).toBeChecked({ checked: persistedOverride });
+      await page.keyboard.press('Escape');
+    });
+  }
+
   test('reset settings restores defaults in memory and storage', async ({ page }) => {
     await setupOverlayPage(page);
 

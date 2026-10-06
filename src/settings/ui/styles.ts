@@ -398,6 +398,17 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.sm};
         min-height: 40px;
       }
+      .yt-chat-overlay-settings-control-group {
+        display: block;
+        min-width: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .yt-chat-overlay-settings-control-group legend {
+        padding: 0 0 ${spacing.xs}px;
+      }
       .yt-chat-overlay-settings-field input[type="number"] {
         width: ${uiSizing.inputWidth}px;
         padding: ${spacing.xs}px ${spacing.sm}px;

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SettingsUiForm, BACKDROP_ID } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import type { OverlaySettings } from '@app-types';
+import { resolveActiveLanguage, t } from '@i18n/index';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   return {
@@ -513,6 +514,109 @@ describe('SettingsUiForm', () => {
     expect(normal?.getAttribute('aria-pressed')).toBe('true');
     expect(bold?.getAttribute('aria-pressed')).toBe('false');
 
+    form.destroy();
+    modal.remove();
+  });
+
+  it.each(['en', 'ko', 'ja', 'es', 'zh-CN', 'ar'] as const)(
+    'names font groups and every control independently in %s',
+    (language) => {
+      resolveActiveLanguage(language);
+      const form = new SettingsUiForm(getSettings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      document.body.appendChild(modal);
+      form.setModal(modal);
+      form.populateForm(getSettings());
+
+      const weightGroup = modal.querySelector<HTMLFieldSetElement>(
+        'fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-weight-toggle)'
+      );
+      const familyGroup = modal.querySelector<HTMLFieldSetElement>(
+        'fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-font-chips-wrapper)'
+      );
+      expect(weightGroup?.querySelector('legend')?.textContent).toBe(t('danmaku.fontWeight'));
+      expect(familyGroup?.querySelector('legend')?.textContent).toBe(t('danmaku.fontFamily'));
+      expect(weightGroup?.closest('label')).toBeNull();
+      expect(familyGroup?.closest('label')).toBeNull();
+      expect(weightGroup?.querySelectorAll('label')).toHaveLength(0);
+      expect(familyGroup?.querySelectorAll('label')).toHaveLength(0);
+
+      const bold = weightGroup?.querySelector<HTMLButtonElement>('[data-value="bold"]');
+      const regular = weightGroup?.querySelector<HTMLButtonElement>('[data-value="normal"]');
+      expect(bold?.textContent).toBe(t('danmaku.weightBold'));
+      expect(regular?.textContent).toBe(t('danmaku.weightRegular'));
+      expect(bold?.getAttribute('aria-pressed')).toBe('true');
+      expect(regular?.getAttribute('aria-pressed')).toBe('false');
+      for (const button of weightGroup?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        expect(button.type).toBe('button');
+        expect(button.textContent?.trim()).toBeTruthy();
+        expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
+      }
+      const chips = familyGroup?.querySelectorAll<HTMLButtonElement>(
+        '.yt-chat-overlay-settings-font-chip'
+      );
+      expect(chips?.length).toBeGreaterThan(1);
+      for (const button of chips ?? []) {
+        expect(button.type).toBe('button');
+        expect(button.textContent?.trim()).toBeTruthy();
+        expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
+      }
+      const chip = familyGroup?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip');
+      expect(chip?.textContent).toBe(t('danmaku.fontSystemDefault'));
+      expect(chip?.hasAttribute('aria-pressed')).toBe(true);
+      expect(familyGroup?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip[data-value="monospace"]')?.textContent).toBe(t('danmaku.fontMonospace'));
+      const namedFont = Array.from(familyGroup?.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip') ?? [])
+        .find((button) => button.dataset.value === '"Noto Sans KR", sans-serif');
+      expect(namedFont?.textContent).toBe('Noto Sans KR');
+      const custom = familyGroup?.querySelector<HTMLInputElement>('.yt-chat-overlay-settings-font-custom-input');
+      expect(custom?.getAttribute('aria-label')).toBe(t('danmaku.fontCustom'));
+      expect(custom?.getAttribute('aria-label')).not.toBe(familyGroup?.querySelector('legend')?.textContent);
+
+      weightGroup?.querySelector('legend')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(bold?.getAttribute('aria-pressed')).toBe('true');
+      expect(onPreview).not.toHaveBeenCalled();
+      form.destroy();
+      modal.remove();
+      resolveActiveLanguage('en');
+    }
+  );
+
+  it('round-trips preset and custom fonts, weight, and saved motion override values', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+
+    for (const ignoreReducedMotion of [false, true]) {
+      form.populateForm(makeDefaults({ ignoreReducedMotion }));
+      expect(modal.querySelector<HTMLInputElement>('input[name="ignoreReducedMotion"]')?.checked)
+        .toBe(ignoreReducedMotion);
+      expect(form.collectSettings().ignoreReducedMotion).toBe(ignoreReducedMotion);
+    }
+
+    const regular = modal.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-weight-toggle-btn[data-value="normal"]');
+    regular?.click();
+    expect(form.collectSettings().fontWeight).toBe('normal');
+    expect(regular?.getAttribute('aria-pressed')).toBe('true');
+
+    const chip = modal.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip[data-value="monospace"]');
+    chip?.click();
+    expect(form.collectSettings().fontFamily).toBe('monospace');
+    expect(chip?.getAttribute('aria-pressed')).toBe('true');
+
+    const custom = modal.querySelector<HTMLInputElement>('.yt-chat-overlay-settings-font-custom-input');
+    custom!.value = 'Georgia, serif';
+    custom!.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(form.collectSettings().fontFamily).toBe('Georgia, serif');
+    expect(chip?.getAttribute('aria-pressed')).toBe('false');
+    expect(onPreview).toHaveBeenCalled();
+
+    form.populateForm(makeDefaults({ fontFamily: 'Georgia, serif', fontWeight: 'normal', ignoreReducedMotion: true }));
+    expect(custom?.value).toBe('Georgia, serif');
+    expect(regular?.getAttribute('aria-pressed')).toBe('true');
+    expect(form.collectSettings().ignoreReducedMotion).toBe(true);
     form.destroy();
     modal.remove();
   });

@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import {
+  cleanupAndBucketStage,
   compactRemovedMessages,
   drainStage,
   drawStage,
@@ -12,6 +13,44 @@ import {
 import type { CanvasRenderContext } from '@renderer/canvas/render-pipeline';
 import type { ChatMessage } from '@app-types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+
+describe('scrolling motion on the main Canvas path', () => {
+  it.each([false, true])('uses fixed position only when effective reduced motion is %s', (reducedMotion) => {
+    const message = {
+      message: { id: 'motion', text: 'motion', kind: 'text', content: [{ type: 'text', content: 'motion' }] },
+      startTime: 0,
+      fadeStartTime: 0,
+      pausedDuration: 0,
+      duration: 2000,
+      invDuration: 1 / 2000,
+      startX: 640,
+      x: 640,
+      y: 0,
+      width: 100,
+      height: 20,
+      speedTier: 1,
+    };
+    const ctx = makeDrainCtx({
+      settings: DEFAULT_SETTINGS,
+      activeMessages: [message] as never[],
+      isReducedMotionActive: reducedMotion,
+      farOpacityBuckets: Array.from({ length: 32 }, () => []),
+      midOpacityBuckets: Array.from({ length: 32 }, () => []),
+      nearOpacityBuckets: Array.from({ length: 32 }, () => []),
+      cachedOpacityConfig: {
+        baseOpacity: 1,
+        fadeDurationMs: 0,
+        invFadeDuration: 0,
+        backlogOpacityMultiplier: 1,
+        depthLayersEnabled: false,
+        depthFarOpacityMul: 1,
+        ageFadeRate: 0,
+      },
+    });
+    cleanupAndBucketStage(ctx, 500, { width: 640, height: 360 }, 'scroll');
+    expect(message.x).toBe(reducedMotion ? 270 : 640 - 0.25 * (640 + 100 + DEFAULT_SETTINGS.exitPaddingPx));
+  });
+});
 
 const mocks = vi.hoisted(() => ({
   renderPaidCard: vi.fn(),

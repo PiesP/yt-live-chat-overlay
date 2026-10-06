@@ -91,6 +91,22 @@ describe('CanvasRenderer', () => {
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
   });
 
+  it.each([
+    [false, false, false],
+    [false, true, false],
+    [true, false, true],
+    [true, true, false],
+  ])('resolves system reduced motion %s and stored override %s to %s', (systemReduced, override, expected) => {
+    const renderer = new CanvasRenderer(overlay, makeSettings({ ignoreReducedMotion: override }));
+    const internals = renderer as unknown as {
+      reducedMotion: boolean;
+      readonly isReducedMotionActive: boolean;
+    };
+    internals.reducedMotion = systemReduced;
+    expect(internals.isReducedMotionActive).toBe(expected);
+    renderer.destroy();
+  });
+
   it('constructs and updates from normalized fractional cache budgets', () => {
     const storedSettings = normalizeStoredSettings({
       emojiCacheMb: 1.000001,

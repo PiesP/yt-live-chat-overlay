@@ -23,7 +23,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 
-import { setupOverlayPage, USERSCRIPT_PATH } from '../fixtures/test-utils';
+import { getSettings, setupOverlayPage, USERSCRIPT_PATH, waitForStoredSettings } from '../fixtures/test-utils';
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -49,6 +49,14 @@ async function closeSettingsModal(page: Page, modal: Locator): Promise<void> {
   await page.keyboard.press('Escape');
   await expect(modal).not.toBeVisible();
   await expect(modal).not.toHaveAttribute('open', '');
+}
+
+async function tabTo(page: Page, target: Locator, limit = 60): Promise<void> {
+  for (let step = 0; step < limit; step++) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused();
 }
 
 test.describe('YT Live Chat Overlay Accessibility', () => {
@@ -150,6 +158,56 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     await expect(reduceMotionCheckbox).toBeAttached();
     await expect(reduceMotionCheckbox).toHaveAttribute('type', 'checkbox');
 
+    await closeSettingsModal(page, modal);
+  });
+
+  test('font groups have independent names and support keyboard edits through save and reopen', async ({ page }) => {
+    await setupOverlayPage(page);
+    const modal = await openSettingsModal(page);
+    const firstTab = modal.locator('#tab-comments');
+    await expect(firstTab).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(modal.locator('#tab-translation')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(firstTab).toBeFocused();
+
+    const disclosure = modal.locator('#pane-comments details.yt-chat-overlay-settings-disclosure');
+    await tabTo(page, disclosure.locator('summary'));
+    await page.keyboard.press('Enter');
+    await expect(disclosure).toHaveAttribute('open', '');
+
+    const weight = disclosure.getByRole('group', { name: 'Font weight' });
+    const family = disclosure.getByRole('group', { name: 'Font family' });
+    const bold = weight.getByRole('button', { name: 'Bold' });
+    const regular = weight.getByRole('button', { name: 'Regular' });
+    const monospace = family.getByRole('button', { name: 'Monospace' });
+    const custom = family.getByRole('textbox', { name: 'Custom font stack…' });
+    await expect(bold).toHaveAttribute('aria-pressed', 'true');
+    await expect(regular).toHaveAttribute('aria-pressed', 'false');
+    await expect(monospace).toHaveAttribute('aria-pressed', 'false');
+    await expect(custom).toHaveAccessibleName('Custom font stack…');
+
+    await tabTo(page, regular);
+    await page.keyboard.press('Space');
+    await expect(regular).toHaveAttribute('aria-pressed', 'true');
+    await tabTo(page, monospace);
+    await page.keyboard.press('Space');
+    await expect(monospace).toHaveAttribute('aria-pressed', 'true');
+    await tabTo(page, custom);
+    await page.keyboard.type('Georgia, serif');
+    await expect(monospace).toHaveAttribute('aria-pressed', 'false');
+    await expect(modal.locator('.yt-chat-overlay-settings-font-preview-text')).toHaveCSS('font-family', /Georgia.*serif/);
+
+    await closeSettingsModal(page, modal);
+    await waitForStoredSettings(page, { fontWeight: 'normal', fontFamily: 'Georgia, serif' });
+    await expect.poll(async () => (await getSettings(page)).fontFamily).toBe('Georgia, serif');
+    await openSettingsModal(page);
+    if (!(await disclosure.evaluate((details: HTMLDetailsElement) => details.open))) {
+      await disclosure.locator('summary').click();
+    }
+    await expect(disclosure).toHaveAttribute('open', '');
+    await expect(regular).toHaveAttribute('aria-pressed', 'true');
+    await expect(custom).toHaveValue('Georgia, serif');
     await closeSettingsModal(page, modal);
   });
 
