@@ -41,7 +41,8 @@ for (const path of [
   'stryker.conf.fast.json',
   'stryker.conf.renderer.json',
   'pnpm-lock.yaml',
-  'scripts/ci/install-nose.sh',
+  'scripts/ci/install-nose.ts',
+  'scripts/ci/pinned-tools.json',
   '.github/workflows/deep-checks.yaml',
 ]) {
   write(path, 'original\n');
@@ -75,7 +76,8 @@ test('each tracked source, test, configuration, lock, and tool input invalidates
     'stryker.conf.fast.json',
     'stryker.conf.renderer.json',
     'pnpm-lock.yaml',
-    'scripts/ci/install-nose.sh',
+    'scripts/ci/install-nose.ts',
+    'scripts/ci/pinned-tools.json',
     '.github/workflows/deep-checks.yaml',
     'package.json',
   ]) {

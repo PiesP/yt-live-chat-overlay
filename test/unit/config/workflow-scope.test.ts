@@ -173,6 +173,16 @@ describe('workflow change classification', () => {
       unit: true,
       osv: true,
     });
+    expect(classify(['scripts/ci/pinned-tools.json'])).toMatchObject({
+      duplication: true,
+      osv: true,
+      semgrep: true,
+      pinned_tools: true,
+    });
+    expect(classify(['scripts/ci/install-nose.ts'])).toMatchObject({
+      duplication: true,
+      pinned_tools: true,
+    });
   });
 
   it('keeps the product threat model in documentation scope', () => {
@@ -287,7 +297,7 @@ describe('workflow scope integration', () => {
     }
     for (const job of ['osv-scan-pr', 'osv-scan-dispatch', 'semgrep']) {
       const section = jobSection(security, job);
-      expect(section).toContain('needs: changes');
+      expect(section).toContain('needs: [changes, pin-metadata]');
       expect(section).toContain('!cancelled()');
       expect(section).toContain("needs.changes.result != 'success'");
     }

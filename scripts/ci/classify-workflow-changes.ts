@@ -136,7 +136,22 @@ export function classifyWorkflowChanges(
     } else if (path.startsWith('scripts/')) {
       mark('quality', 'unit', 'build', 'semgrep', 'codeql_javascript');
       if (path === 'scripts/security/validate-osv-results.py') mark('osv');
-      if (path.startsWith('scripts/ci/')) mark('pinned_tools');
+      if (path.startsWith('scripts/ci/')) {
+        mark('pinned_tools');
+        if (
+          [
+            'scripts/ci/install-nose.ts',
+            'scripts/ci/install-nose.sh',
+            'scripts/ci/pinned-tools.json',
+            'scripts/ci/pinned-tools.ts',
+          ].includes(path)
+        ) {
+          mark('duplication');
+        }
+        if (path === 'scripts/ci/pinned-tools.json' || path === 'scripts/ci/pinned-tools.ts') {
+          mark('osv');
+        }
+      }
     } else if (path === '.github/workflows/ci.yaml') {
       mark(
         'quality',

@@ -7,7 +7,7 @@ const centralAction =
   'PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969';
 const centralWorkflowJobs = {
   'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
-  'security.yaml': ['changes'],
+  'security.yaml': ['changes', 'pin-metadata', 'pinned-tools'],
   'deep-checks.yaml': ['duplication', 'mutation-fast', 'mutation-renderer'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
@@ -68,7 +68,10 @@ describe('project setup actions', () => {
       expect(jobSection).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
-    expect(releaseWorkflow).not.toContain(centralAction);
+    const duplication = releaseWorkflow.match(/  duplication:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/u)?.[0] ?? '';
+    expect(duplication).toContain(`uses: ${centralAction}`);
+    expect(duplication).toContain("install-dependencies: 'false'");
+    expect(releaseWorkflow.replace(duplication, '')).not.toContain(centralAction);
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
@@ -116,7 +119,7 @@ describe('project setup actions', () => {
       )?.[0];
       const firstLocalExecution =
         job === 'duplication'
-          ? 'run: bash scripts/ci/install-nose.sh'
+          ? 'node --experimental-strip-types "$pinned_dir/install-nose.ts"'
           : `uses: ${releaseAction}`;
 
       expect(jobSection).toBeDefined();

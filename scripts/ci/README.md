@@ -13,7 +13,7 @@ The CLI accepts `--paths` for explicit policy checks. Event comparisons use
 detection disabled, preserving both sides of a move. It prints all 13 outputs
 and appends them to `GITHUB_OUTPUT` when set.
 
-# Staged pinned security tools
+# Pinned security tools
 
 `pinned-tools.json` records the existing Nose installer version and SHA-256,
 OSV scanner image version and digest, and Semgrep version and image digest.
@@ -27,12 +27,14 @@ appends to `GITHUB_PATH` only after success. `pinned-tools.ts env` writes
 validated image references to `GITHUB_ENV` and accepts no metadata path. All
 three modules are inert on import.
 
-These helpers are staged for coordinated workflow adoption. Active workflows
-still use the existing Bash helpers and image literals. Adoption must set up
-the reviewed Node runtime first and select helper code and metadata from a
-trusted immutable source revision. The privileged security job must not run
-candidate PR code. The focused CLI fixture test is
-`test/unit/config/pinned-tools-cli.test.ts`.
+The security workflow resolves scanner images from the immutable reviewed
+`9f040ccfd72528f683f898a4b31e94a21f5913b7` revision and passes them to the
+OSV and Semgrep jobs. Its freshness job uses that revision too. Deep verification
+and release duplication retrieve the installer and metadata from the same SHA
+with `git show`, even after a release checkout. Each job sets up Node before
+running a private copy of the helpers. The privileged security jobs never run
+candidate PR helper code. Update the SHA only with a reviewed pin change.
+The focused CLI fixture test is `test/unit/config/pinned-tools-cli.test.ts`.
 
 # Deep code-analysis reuse
 
