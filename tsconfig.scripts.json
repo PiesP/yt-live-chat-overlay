@@ -20,6 +20,7 @@
     ]
   },
   "include": [
+    "scripts/ci/classify-workflow-changes.ts",
     "scripts/ci/deep-check-reuse.ts",
     "scripts/ci/deep-check-reuse.test.ts",
     "scripts/check/bootstrap.ts",

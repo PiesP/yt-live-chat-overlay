@@ -6,7 +6,8 @@ const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
   'PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969';
 const centralWorkflowJobs = {
-  'ci.yaml': ['quality', 'unit', 'e2e', 'build'],
+  'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
+  'security.yaml': ['changes'],
   'deep-checks.yaml': ['duplication', 'mutation-fast', 'mutation-renderer'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
@@ -48,6 +49,10 @@ describe('project setup actions', () => {
       expect(workflow).not.toContain('uses: pnpm/action-setup@');
       expect(workflow).not.toContain('uses: actions/setup-node@');
       expect(workflow).not.toContain('run: pnpm install --frozen-lockfile');
+      if (filename === 'ci.yaml' || filename === 'security.yaml') {
+        const changes = workflow.match(/  changes:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/)?.[0];
+        expect(changes).toContain("install-dependencies: 'false'");
+      }
     }
   });
 
