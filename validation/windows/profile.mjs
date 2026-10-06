@@ -184,7 +184,8 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
   assert.equal(await family.locator('label button, label input').count(), 0);
   const previousWeight = await bold.getAttribute('aria-pressed') === 'true' ? bold : regular;
   const previousFamily = family.locator('button[aria-pressed="true"]');
-  const previousFamilyText = await previousFamily.textContent();
+  const previousFamilyText = await previousFamily.count() ? await previousFamily.textContent() : null;
+  const previousFamilyValue = await family.locator('.yt-chat-overlay-settings-font-value').inputValue();
   const previousCustom = await custom.inputValue();
   await regular.focus();
   await page.keyboard.press('Space');
@@ -203,10 +204,13 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
     .evaluate((element) => getComputedStyle(element).fontFamily);
   assert.match(previewFamily, /Georgia.*serif/u);
   await previousWeight.click();
-  await family.getByRole('button', { name: previousFamilyText, exact: true }).click();
-  await custom.fill(previousCustom);
-  // Restore the selected preset after restoring the draft custom-input text.
-  await family.getByRole('button', { name: previousFamilyText, exact: true }).click();
+  if (previousFamilyText) {
+    await family.getByRole('button', { name: previousFamilyText, exact: true }).click();
+  } else {
+    await custom.fill(previousCustom);
+    await custom.blur();
+  }
+  assert.equal(await family.locator('.yt-chat-overlay-settings-font-value').inputValue(), previousFamilyValue);
 
   const previousViewport = page.viewportSize();
   const observations = [];
@@ -221,10 +225,12 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
       await page.setViewportSize({ width: scenario.width, height: 720 });
       await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'none', reducedMotion: 'no-preference', ...scenario.media });
       let zoom;
+      let previousLanguage;
       try {
         if (scenario.zoom) zoom = await setBrowserZoom(scenario.zoom);
         if (scenario.language) {
           await modal.locator('#tab-translation').click();
+          previousLanguage = await modal.locator('select[name="language"]').inputValue();
           await modal.locator('select[name="language"]').selectOption(scenario.language);
           await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, scenario.language);
           await modal.locator('#tab-comments').click();
@@ -248,10 +254,10 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         await modal.screenshot({ path: join(output, `yt-settings-${scenario.id}.png`), animations: 'disabled' });
         observations.push({ id: scenario.id, geometry, browserZoom: zoom?.observed ?? null });
       } finally {
-        if (zoom) await setBrowserZoom(zoom.previous);
+        if (zoom) await setBrowserZoom(zoom.previous, zoom.settings);
         if (scenario.language) {
           await modal.locator('#tab-translation').click();
-          await modal.locator('select[name="language"]').selectOption('auto');
+          await modal.locator('select[name="language"]').selectOption(previousLanguage);
           await modal.locator('#tab-comments').click();
           if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
         }
@@ -1101,18 +1107,20 @@ export async function run({ browser, root, output, installedContext, installedEx
       Boolean(installedContext),
       output,
       Boolean(expectedRenderer),
-      installedContext ? async (factor) => {
+      installedContext ? async (factor, restoreSettings) => {
         const worker = installedContext.serviceWorkers().find((candidate) => candidate.url().startsWith(`chrome-extension://${installedExtensionId}/`));
         assert(worker, 'Installed extension service worker is unavailable for scoped browser zoom');
-        return worker.evaluate(async ({ url, zoomFactor }) => {
+        return worker.evaluate(async ({ url, zoomFactor, restore }) => {
           const tabs = await chrome.tabs.query({ url });
           if (tabs.length !== 1 || !Number.isInteger(tabs[0].id)) throw new Error('Browser zoom requires one exact fixture tab');
           const id = tabs[0].id;
           const previous = await chrome.tabs.getZoom(id);
+          const settings = await chrome.tabs.getZoomSettings(id);
           await chrome.tabs.setZoomSettings(id, { mode: 'automatic', scope: 'per-tab' });
           await chrome.tabs.setZoom(id, zoomFactor);
-          return { previous, observed: await chrome.tabs.getZoom(id) };
-        }, { url: page.url(), zoomFactor: factor });
+          if (restore) await chrome.tabs.setZoomSettings(id, { mode: restore.mode, scope: restore.scope });
+          return { previous, settings, observed: await chrome.tabs.getZoom(id) };
+        }, { url: page.url(), zoomFactor: factor, restore: restoreSettings });
       } : undefined,
     );
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
