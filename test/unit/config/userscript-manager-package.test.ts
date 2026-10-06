@@ -25,14 +25,16 @@ class Response(io.BytesIO):
     def read(self, size=-1):
         self.read_sizes.append(size)
         return super().read(size)
-def package(extra=None):
+def package(extra=None, manifest=None, extra_count=0):
     data = io.BytesIO()
     with zipfile.ZipFile(data, 'w') as archive:
-        archive.writestr('manifest.json', json.dumps({'version': manager.VERSION, 'manifest_version': 3}))
+        archive.writestr('manifest.json', json.dumps(manifest if manifest is not None else {'version': manager.VERSION, 'manifest_version': 3}))
         archive.writestr('background.js', 'trusted fixture')
         archive.writestr('_metadata/verified_contents.json', '{}')
         if extra:
             archive.writestr(extra, 'escape')
+        for index in range(extra_count):
+            archive.writestr(f'files/{index:04d}', 'x')
     return b'Cr24' + struct.pack('<II', 3, 0) + data.getvalue()
 `;
 
@@ -118,6 +120,125 @@ with tempfile.TemporaryDirectory() as directory:
         except ValueError as error:
             assert 'Unsafe' in str(error)
     assert list(Path(directory).iterdir()) == [sentinel]
+`);
+  });
+
+  it('rejects a pinned package with the wrong manager or manifest version', () => {
+    runPython(String.raw`
+for manifest in [
+    {'version': '0.0.0', 'manifest_version': 3},
+    {'version': manager.VERSION, 'manifest_version': 2},
+]:
+    body = package(manifest=manifest)
+    manager.SHA256 = hashlib.sha256(body).hexdigest()
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / 'manager'
+        sentinel = Path(directory) / 'keep'
+        sentinel.write_text('existing')
+        response = Response(body)
+        with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', return_value=response):
+            try:
+                manager.prepare(output)
+                raise AssertionError('wrong-version package accepted')
+            except ValueError as error:
+                assert 'Unexpected manager manifest' in str(error)
+        assert response.closed
+        assert sorted(path.name for path in Path(directory).iterdir()) == ['keep']
+        assert sentinel.read_text() == 'existing'
+`);
+  });
+
+  it('rejects invalid CRX headers and corrupt or truncated ZIP payloads', () => {
+    runPython(String.raw`
+good = package()
+cases = [
+    (b'Bad!' + good[4:], ValueError, 'Expected a Chrome CRX'),
+    (good[:10], ValueError, 'Expected a Chrome CRX'),
+    (good[:4] + struct.pack('<I', 2) + good[8:], ValueError, 'Invalid CRX3 header'),
+    (good[:8] + struct.pack('<I', len(good)) + good[12:], ValueError, 'Invalid CRX3 header'),
+    (good[:12] + b'not-a-zip', zipfile.BadZipFile, None),
+    (good[:-22], zipfile.BadZipFile, None),
+]
+for body, expected_error, expected_message in cases:
+    manager.SHA256 = hashlib.sha256(body).hexdigest()
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / 'manager'
+        sentinel = Path(directory) / 'keep'
+        sentinel.write_text('existing')
+        response = Response(body)
+        with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', return_value=response):
+            try:
+                manager.prepare(output)
+                raise AssertionError('damaged package accepted')
+            except expected_error as error:
+                if expected_message:
+                    assert expected_message in str(error)
+        assert response.closed
+        assert sorted(path.name for path in Path(directory).iterdir()) == ['keep']
+        assert sentinel.read_text() == 'existing'
+`);
+  });
+
+  it('rejects symlink entries and excessive declared entry counts or expanded sizes', () => {
+    runPython(String.raw`
+link = zipfile.ZipInfo('link')
+link.create_system = 3
+link.external_attr = 0o120777 << 16
+ordinary = package()
+central_entry = ordinary.index(b'PK\x01\x02', 12)
+oversized = (ordinary[:central_entry + 24] + struct.pack('<I', 64 * 1024 * 1024 + 1)
+             + ordinary[central_entry + 28:])
+for body, expected_message in [
+    (package(extra=link), 'Unsafe package entry'),
+    (package(extra_count=998), 'Unexpected package size'),
+    (oversized, 'Unexpected package size'),
+]:
+    manager.SHA256 = hashlib.sha256(body).hexdigest()
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / 'manager'
+        sentinel = Path(directory) / 'keep'
+        sentinel.write_text('existing')
+        response = Response(body)
+        with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', return_value=response):
+            try:
+                manager.prepare(output)
+                raise AssertionError('unsafe archive accepted')
+            except ValueError as error:
+                assert expected_message in str(error)
+        assert response.closed
+        assert sorted(path.name for path in Path(directory).iterdir()) == ['keep']
+`);
+  });
+
+  it('cleans staged files after extraction, provenance write, or final rename failures', () => {
+    runPython(String.raw`
+body = package()
+manager.SHA256 = hashlib.sha256(body).hexdigest()
+original_extract = zipfile.ZipFile.extract
+def fail_after_manifest(self, member, path=None, pwd=None):
+    if member.filename == 'background.js':
+        raise OSError('archive write failed')
+    return original_extract(self, member, path, pwd)
+failures = [
+    ('archive write failed', patch.object(zipfile.ZipFile, 'extract', fail_after_manifest)),
+    ('provenance write failed', patch.object(Path, 'write_text', side_effect=OSError('provenance write failed'))),
+    ('final rename failed', patch.object(Path, 'rename', side_effect=OSError('final rename failed'))),
+]
+for message, failure in failures:
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / 'manager'
+        sentinel = Path(directory) / 'keep'
+        sentinel.write_text('existing')
+        response = Response(body)
+        with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', return_value=response), failure:
+            try:
+                manager.prepare(output)
+                raise AssertionError('failed staged write accepted')
+            except OSError as error:
+                assert message in str(error)
+        assert response.closed
+        assert sorted(path.name for path in Path(directory).iterdir()) == ['keep']
+        assert sentinel.read_text() == 'existing'
 `);
   });
 

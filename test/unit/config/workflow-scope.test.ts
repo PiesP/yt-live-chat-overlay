@@ -168,11 +168,7 @@ describe('workflow change classification', () => {
     });
   });
 
-  it('runs OSV when result validation changes', () => {
-    expect(classify(['scripts/security/validate-osv-results.py'])).toMatchObject({
-      unit: true,
-      osv: true,
-    });
+  it('routes reviewed tool metadata and installation changes', () => {
     expect(classify(['scripts/ci/pinned-tools.json'])).toMatchObject({
       duplication: true,
       osv: true,

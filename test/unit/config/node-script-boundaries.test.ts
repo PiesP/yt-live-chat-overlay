@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -48,6 +49,20 @@ afterEach(() => {
 });
 
 describe('Node script boundaries', () => {
+  it('checks syntax of every bundled Windows module', () => {
+    const moduleRoot = join(root, 'validation/windows');
+    const modules = readdirSync(moduleRoot, { recursive: true })
+      .map((path) => path.toString())
+      .filter((path) => path.endsWith('.mjs'))
+      .sort();
+    expect(modules.length).toBeGreaterThan(0);
+    for (const module of modules) {
+      const path = join(moduleRoot, module);
+      const result = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' });
+      expect(result.status, path + ': ' + result.stderr).toBe(0);
+    }
+  });
+
   it('type-checks all direct Node scripts separately from the browser program', () => {
     const scriptsConfig = JSON.parse(readFileSync(join(root, 'tsconfig.scripts.json'), 'utf8')) as {
       compilerOptions: { module: string; erasableSyntaxOnly: boolean; lib: string[] };
