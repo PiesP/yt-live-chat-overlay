@@ -59,6 +59,16 @@ install a userscript manager, install an extension, access live or authenticated
 native Windows desktop chrome, validate OS DPI/theme matrices, or measure GPU performance. Those
 remain separate acceptance profiles or host-level observations.
 
+The settings fixture also exercises independent font group and input names,
+keyboard weight/preset/custom edits, preview font updates, and the existing
+motion override without changing its saved representation. It retains settings
+captures and geometry for dark appearance, Forced Colors and reduced-motion
+media emulation, and a narrow Arabic RTL view. Installed Chrome/Edge runs add
+200% browser tab zoom using the installed package's Tabs API on the exact
+fixture tab, verify the reported zoom, and restore it before continuing.
+Artifact-only runs explicitly leave browser zoom unverified. These automated
+observations do not establish physical DPI or screen-reader acceptance.
+
 The deterministic synthetic visibility transition proves lifecycle handling only. It is not
 evidence of native tab occlusion, browser freezing, pixel equivalence between the main and Worker
 renderers, or sustained live-site performance; the duration profile remains the native

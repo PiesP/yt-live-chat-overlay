@@ -171,7 +171,111 @@ async function assertForcedColorsDisclosure(page, summary) {
   }
 }
 
-async function configureThroughSettingsUi(page, installed, output, inspectRenderer) {
+async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoom) {
+  const disclosure = modal.locator('#pane-comments details');
+  const weight = disclosure.getByRole('group', { name: 'Font weight', exact: true });
+  const family = disclosure.getByRole('group', { name: 'Font family', exact: true });
+  const regular = weight.getByRole('button', { name: 'Regular', exact: true });
+  const bold = weight.getByRole('button', { name: 'Bold', exact: true });
+  const custom = family.getByRole('textbox', { name: 'Custom font stack…', exact: true });
+  assert.equal(await weight.locator('legend').textContent(), 'Font weight');
+  assert.equal(await family.locator('legend').textContent(), 'Font family');
+  assert.equal(await custom.getAttribute('aria-label'), 'Custom font stack…');
+  assert.equal(await family.locator('label button, label input').count(), 0);
+  const previousWeight = await bold.getAttribute('aria-pressed') === 'true' ? bold : regular;
+  const previousFamily = family.locator('button[aria-pressed="true"]');
+  const previousFamilyText = await previousFamily.textContent();
+  const previousCustom = await custom.inputValue();
+  await regular.focus();
+  await page.keyboard.press('Space');
+  assert.equal(await regular.getAttribute('aria-pressed'), 'true');
+  assert.equal(await bold.getAttribute('aria-pressed'), 'false');
+  const monospace = family.getByRole('button', { name: 'Monospace', exact: true });
+  await monospace.focus();
+  await page.keyboard.press('Space');
+  assert.equal(await monospace.getAttribute('aria-pressed'), 'true');
+  await custom.focus();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type('Georgia, serif');
+  await custom.blur();
+  assert.equal(await monospace.getAttribute('aria-pressed'), 'false');
+  const previewFamily = await modal.locator('.yt-chat-overlay-settings-font-preview-text')
+    .evaluate((element) => getComputedStyle(element).fontFamily);
+  assert.match(previewFamily, /Georgia.*serif/u);
+  await previousWeight.click();
+  await family.getByRole('button', { name: previousFamilyText, exact: true }).click();
+  await custom.fill(previousCustom);
+  // Restore the selected preset after restoring the draft custom-input text.
+  await family.getByRole('button', { name: previousFamilyText, exact: true }).click();
+
+  const previousViewport = page.viewportSize();
+  const observations = [];
+  try {
+    for (const scenario of [
+      { id: 'dark', width: 1280, media: { colorScheme: 'dark' } },
+      { id: 'forced-colors', width: 640, media: { forcedColors: 'active' } },
+      { id: 'reduced-motion', width: 640, media: { reducedMotion: 'reduce' } },
+      { id: 'narrow-rtl', width: 401, language: 'ar', media: {} },
+      ...(setBrowserZoom ? [{ id: 'browser-zoom-200', width: 1280, zoom: 2, media: {} }] : []),
+    ]) {
+      await page.setViewportSize({ width: scenario.width, height: 720 });
+      await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'none', reducedMotion: 'no-preference', ...scenario.media });
+      let zoom;
+      try {
+        if (scenario.zoom) zoom = await setBrowserZoom(scenario.zoom);
+        if (scenario.language) {
+          await modal.locator('#tab-translation').click();
+          await modal.locator('select[name="language"]').selectOption(scenario.language);
+          await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, scenario.language);
+          await modal.locator('#tab-comments').click();
+          await disclosure.locator('summary').click();
+        }
+        const customInput = disclosure.locator('.yt-chat-overlay-settings-font-custom-input');
+        await customInput.scrollIntoViewIfNeeded();
+        await customInput.focus();
+        const geometry = await modal.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const field = element.querySelector('.yt-chat-overlay-settings-font-custom-input');
+          const control = field.getBoundingClientRect();
+          return { left: box.left, right: box.right, viewport: innerWidth, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, customLeft: control.left, customRight: control.right, focused: document.activeElement === field, direction: element.dir, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, forcedColors: matchMedia('(forced-colors: active)').matches };
+        });
+        assert(geometry.left >= -1 && geometry.right <= geometry.viewport + 1, `${scenario.id}: dialog exceeds viewport`);
+        assert(geometry.scrollWidth <= geometry.clientWidth + 1, `${scenario.id}: dialog horizontal overflow`);
+        assert(geometry.customLeft >= geometry.left - 1 && geometry.customRight <= geometry.right + 1, `${scenario.id}: custom font input clipped`);
+        assert(geometry.focused, `${scenario.id}: keyboard focus was lost`);
+        if (scenario.language) assert.equal(geometry.direction, 'rtl');
+        if (scenario.zoom) assert.equal(zoom.observed, 2);
+        await modal.screenshot({ path: join(output, `yt-settings-${scenario.id}.png`), animations: 'disabled' });
+        observations.push({ id: scenario.id, geometry, browserZoom: zoom?.observed ?? null });
+      } finally {
+        if (zoom) await setBrowserZoom(zoom.previous);
+        if (scenario.language) {
+          await modal.locator('#tab-translation').click();
+          await modal.locator('select[name="language"]').selectOption('auto');
+          await modal.locator('#tab-comments').click();
+          if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
+        }
+      }
+    }
+  } finally {
+    if (previousViewport) await page.setViewportSize(previousViewport);
+    await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'none', reducedMotion: 'no-preference' });
+    await modal.locator('#tab-comments').click();
+  }
+  await modal.locator('#tab-advanced').click();
+  const motionOverride = modal.getByRole('checkbox', { name: 'Always animate scrolling comments', exact: true });
+  const previousOverride = await motionOverride.isChecked();
+  await motionOverride.focus();
+  await page.keyboard.press('Space');
+  assert.equal(await motionOverride.isChecked(), !previousOverride);
+  await page.keyboard.press('Space');
+  assert.equal(await motionOverride.isChecked(), previousOverride);
+  assert((await modal.locator('.yt-chat-overlay-settings-autosave-hint').textContent()).includes('saved when you close settings'));
+  await modal.locator('#tab-comments').click();
+  return { fontGroups: true, customFontKeyboard: true, previewFamily, motionOverridePreserved: previousOverride, appearance: observations, browserZoom: setBrowserZoom ? 'verified-200-percent' : 'not-run-artifact-only' };
+}
+
+async function configureThroughSettingsUi(page, installed, output, inspectRenderer, setBrowserZoom) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
   await button.focus();
@@ -264,6 +368,7 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   await page.keyboard.press('Enter');
   assert.equal(await disclosure.getAttribute('open'), '', 'Fine tuning did not open from keyboard');
   await assertForcedColorsDisclosure(page, disclosureSummary);
+  const interactionState = await verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoom);
 
   await modal.locator('select[name="danmakuMode"]').selectOption('scroll');
   const fontSize = modal.locator('input[name="fontSize"]');
@@ -427,7 +532,7 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
       );
     });
   }
-  return { defaultPreviewState, localizedPreviewState };
+  return { defaultPreviewState, localizedPreviewState, interactionState };
 }
 
 async function verifyIsolatedPaidCardInk(page, output) {
@@ -996,6 +1101,19 @@ export async function run({ browser, root, output, installedContext, installedEx
       Boolean(installedContext),
       output,
       Boolean(expectedRenderer),
+      installedContext ? async (factor) => {
+        const worker = installedContext.serviceWorkers().find((candidate) => candidate.url().startsWith(`chrome-extension://${installedExtensionId}/`));
+        assert(worker, 'Installed extension service worker is unavailable for scoped browser zoom');
+        return worker.evaluate(async ({ url, zoomFactor }) => {
+          const tabs = await chrome.tabs.query({ url });
+          if (tabs.length !== 1 || !Number.isInteger(tabs[0].id)) throw new Error('Browser zoom requires one exact fixture tab');
+          const id = tabs[0].id;
+          const previous = await chrome.tabs.getZoom(id);
+          await chrome.tabs.setZoomSettings(id, { mode: 'automatic', scope: 'per-tab' });
+          await chrome.tabs.setZoom(id, zoomFactor);
+          return { previous, observed: await chrome.tabs.getZoom(id) };
+        }, { url: page.url(), zoomFactor: factor });
+      } : undefined,
     );
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
