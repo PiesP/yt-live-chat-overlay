@@ -226,11 +226,14 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
       await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'none', reducedMotion: 'no-preference', ...scenario.media });
       let zoom;
       let previousLanguage;
+      let previousModalLanguage;
       try {
         if (scenario.zoom) zoom = await setBrowserZoom(scenario.zoom);
         if (scenario.language) {
           await modal.locator('#tab-translation').click();
           previousLanguage = await modal.locator('select[name="language"]').inputValue();
+          previousModalLanguage = await modal.getAttribute('lang');
+          assert(previousModalLanguage, 'modal has no resolved language before switching');
           await modal.locator('select[name="language"]').selectOption(scenario.language);
           await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, scenario.language);
           await modal.locator('#tab-comments').click();
@@ -258,12 +261,12 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         observations.push({ id: scenario.id, geometry, browserZoom: zoom?.observed ?? null });
       } finally {
         if (zoom) await setBrowserZoom(zoom.previous, zoom.settings);
-        if (scenario.language) {
+        if (scenario.language && previousLanguage !== undefined && previousModalLanguage) {
           await modal.locator('#tab-translation').click();
           await modal.locator('select[name="language"]').selectOption(previousLanguage);
-          // Language preview rebuilds the modal after a debounce. Wait for
-          // the replacement DOM before opening its disclosure or testing focus.
-          await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, previousLanguage);
+          // The selected value may be "auto"; modal.lang is the resolved
+          // language. Wait for the debounced rebuild before testing focus.
+          await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, previousModalLanguage);
           await modal.locator('#tab-comments').click();
           if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
           assert.equal(await disclosure.getAttribute('open'), '', 'restored language disclosure stayed closed');
