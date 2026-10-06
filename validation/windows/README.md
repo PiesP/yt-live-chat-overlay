@@ -137,12 +137,15 @@ Manifest V3, writes `installation-source.json` with Store identity, URL, digest,
 method, and omission, then atomically renames a new staging directory into
 place. Failures remove that staging directory.
 
-The nine local tests in `test/unit/config/userscript-manager-package.test.ts`
+The thirteen local tests in `test/unit/config/userscript-manager-package.test.ts`
 cover a fixture package and receipt, pin mismatch, existing output, traversal,
 approved and rejected redirects, redirect count, HTTP/body limits, and transport
-failure without live downloads. They do not establish ZIP symlink or duplicate
-entry behavior, truncated/corrupt ZIP rejection, actual expanded-byte limits,
-failed-write cleanup, or VM installation. The manifest-pinned Node runtime has
+failure without live downloads. They also reject wrong manager/manifest versions,
+invalid CRX headers, corrupt/truncated ZIP payloads, symlink entries, excessive
+entry counts and declared expanded sizes. Extraction, receipt-write and final
+rename failure fixtures verify staging cleanup and preservation of unrelated
+files. They do not establish duplicate-entry behavior, actual expanded-byte
+limits, or VM installation. The manifest-pinned Node runtime has
 no ZIP archive reader in its standard modules, and this repository has no
 reviewed ZIP package. Keep the Python exception until a reviewed, pinned ZIP
 reader can be supplied by the portable host contract.
