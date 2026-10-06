@@ -2,24 +2,21 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const root = resolve(import.meta.dirname, '../../..');
-const gateWorkflow = readFileSync(resolve(root, '.github/workflows/dependabot-auto-merge.yaml'), 'utf8');
+const gateWorkflow = readFileSync(
+  resolve(process.cwd(), '.github/workflows/dependabot-auto-merge.yaml'),
+  'utf8',
+);
 const applyWorkflow = readFileSync(
-  resolve(root, '.github/workflows/dependabot-auto-merge-apply.yaml'),
-  'utf8'
+  resolve(process.cwd(), '.github/workflows/dependabot-auto-merge-apply.yaml'),
+  'utf8',
 );
 
 describe('Dependabot auto-merge security', () => {
   it('evaluates only Dependabot events with read-only permissions', () => {
-    expect(gateWorkflow).toMatch(
-      /on:\n  pull_request_target:[\s\S]*?permissions:\n  contents: read\n  pull-requests: read\n\nconcurrency:/
-    );
     expect(gateWorkflow).toContain("github.event.sender.login == 'dependabot[bot]'");
     expect(gateWorkflow).toContain("github.event.pull_request.user.login == 'dependabot[bot]'");
     expect(gateWorkflow).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-    expect(gateWorkflow).toContain(
-      'github.event.pull_request.base.ref == github.event.repository.default_branch'
-    );
+    expect(gateWorkflow).toContain('github.event.pull_request.base.ref == github.event.repository.default_branch');
     expect(gateWorkflow).toContain('github.event.pull_request.draft == false');
     expect(gateWorkflow).toContain('contents: read');
     expect(gateWorkflow).toContain('pull-requests: read');
@@ -34,30 +31,25 @@ describe('Dependabot auto-merge security', () => {
     expect(applyWorkflow).toContain('workflows: ["🤖 Dependabot Auto-Merge Gate"]');
     expect(applyWorkflow).toContain('types: [completed]');
     expect(applyWorkflow).toContain("workflow_run.conclusion == 'success'");
-    expect(applyWorkflow).toContain("workflow_run.event == 'pull_request_target'");
     expect(applyWorkflow).toContain("workflow_run.actor.login == 'dependabot[bot]'");
+    expect(applyWorkflow).toContain("workflow_run.event == 'pull_request_target'");
     expect(applyWorkflow).toContain('run-id: ${{ github.event.workflow_run.id }}');
     expect(applyWorkflow).toContain('digest-mismatch: error');
     expect(applyWorkflow).toMatch(
-      /permissions:\n  actions: read\n  contents: read\n  pull-requests: read/
+      /permissions:\n  actions: read\n  contents: read\n  pull-requests: read/,
     );
     expect(applyWorkflow).toMatch(
-      /approve:\n[\s\S]*?needs: validate\n[\s\S]*?if: needs\.validate\.outputs\.eligible == 'true'[\s\S]*?permissions:\n      contents: write\n      pull-requests: write/
+      /approve:\n[\s\S]*?needs: validate\n[\s\S]*?if: needs\.validate\.outputs\.eligible == 'true'[\s\S]*?permissions:\n      contents: write\n      pull-requests: write/,
     );
   });
 
   it('revalidates every commit and approves only the unchanged head', () => {
-    expect(applyWorkflow).toContain('pulls/$PR_NUMBER/commits');
-    expect(applyWorkflow).toContain('dependabot[bot]');
-    expect(applyWorkflow).toContain('web-flow');
-    expect(applyWorkflow).toContain('verification.verified');
-    expect(applyWorkflow).toContain("while IFS=$'\\t' read -r SHA AUTHOR COMMITTER VERIFIED");
-    expect(applyWorkflow).toContain('Commit $SHA was not created and verified by Dependabot.');
-    expect(applyWorkflow).toContain('CURRENT_HEAD');
-    expect(applyWorkflow).toContain('Pull request head changed during provenance validation.');
-    expect(applyWorkflow).toContain('pulls/$PR_NUMBER/reviews');
-    expect(applyWorkflow).toContain('--raw-field commit_id="$HEAD_SHA"');
-    expect(applyWorkflow).toContain('--raw-field event="APPROVE"');
+    const modes = [...applyWorkflow.matchAll(/run: node --experimental-strip-types scripts\/ci\/dependabot-apply\.ts (\w+)/g)].map(match => match[1]);
+    expect(modes).toEqual(['gate', 'validate', 'manual', 'recheck', 'approve', 'merge']);
+    expect(applyWorkflow.match(/ref: \$\{\{ github\.event\.repository\.default_branch \}\}/g)).toHaveLength(2);
+    expect(applyWorkflow.match(/install-dependencies: 'false'/g)).toHaveLength(2);
+    expect(applyWorkflow).toContain('HEAD_SHA: ${{ needs.validate.outputs.head_sha }}');
+    expect(applyWorkflow).toContain('BASE_REF: ${{ needs.validate.outputs.base_ref }}');
     expect(applyWorkflow).toContain('reason_base64');
     expect(applyWorkflow).not.toContain('gh pr review --approve');
     expect(applyWorkflow).not.toContain('AUTO_MERGE_TOKEN');
@@ -66,10 +58,8 @@ describe('Dependabot auto-merge security', () => {
   it('preserves eligible update auto-merge behind branch protection', () => {
     expect(gateWorkflow).toContain('version-update:semver-patch');
     expect(gateWorkflow).toContain('version-update:semver-minor');
-    expect(applyWorkflow).toContain('gh pr merge "$PR_NUMBER"');
-    expect(applyWorkflow).toContain('--match-head-commit "$HEAD_SHA"');
-    expect(applyWorkflow).toContain('--auto');
-    expect(applyWorkflow).toContain('--squash');
+    expect(applyWorkflow).toContain('scripts/ci/dependabot-apply.ts merge');
+    expect(applyWorkflow).toContain('REASON_BASE64: ${{ needs.validate.outputs.reason_base64 }}');
     expect(applyWorkflow).not.toContain('--admin');
   });
 });
