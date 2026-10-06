@@ -65,21 +65,21 @@ describe('project setup actions', () => {
       )?.[0];
 
       expect(jobSection).toContain(`uses: ${releaseAction}`);
+      expect(jobSection).not.toContain(centralAction);
       expect(jobSection).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
     const duplication = releaseWorkflow.match(/  duplication:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/u)?.[0] ?? '';
     expect(duplication).toContain(`uses: ${centralAction}`);
     expect(duplication).toContain("install-dependencies: 'false'");
-    expect(releaseWorkflow.replace(duplication, '')).not.toContain(centralAction);
+    const provenance = releaseWorkflow.match(/  provenance:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/)?.[0] ?? '';
+    expect(provenance).toContain(`uses: ${centralAction}`);
+    expect(provenance).toContain("install-dependencies: 'false'");
+    expect(releaseWorkflow.replace(duplication, '').replace(provenance, '')).not.toContain(centralAction);
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
-    expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"');
-    expect(releaseWorkflow).toContain(
-      'git tag --merged "$GITHUB_SHA" --list \'v*\' --sort=-version:refname'
-    );
-    expect(releaseWorkflow).toContain('if [[ "$RELEASE_TAG" != "$latest_release_tag" ]]');
+    expect(provenance).toContain('run: node --experimental-strip-types scripts/release/verify-source.ts');
     expect(releaseWorkflow).toContain('make_latest: legacy');
     expect(releaseWorkflow).not.toContain('make_latest: true');
     const publishSection = releaseWorkflow.match(
