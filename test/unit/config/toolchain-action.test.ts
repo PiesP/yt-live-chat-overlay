@@ -7,7 +7,7 @@ const centralAction =
   'PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969';
 const centralWorkflowJobs = {
   'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
-  'security.yaml': ['changes', 'pin-metadata', 'pinned-tools'],
+  'security.yaml': ['changes', 'pin-metadata', 'pinned-tools', 'osv-scan-pr', 'osv-scan-dispatch'],
   'deep-checks.yaml': ['duplication', 'mutation-fast', 'mutation-renderer'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
