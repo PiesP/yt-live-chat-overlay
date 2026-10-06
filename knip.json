@@ -27,6 +27,7 @@
     "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
+  "ignoreBinaries": ["nose"],
   "ignoreExportsUsedInFile": true,
   "playwright": {
     "config": ["test/e2e/playwright.config.ts"],

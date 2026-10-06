@@ -40,6 +40,8 @@ here as a reviewed gitlink update.
 
 | Command | Purpose |
 | --- | --- |
+| `pnpm install` (`preinstall`) | Check the pinned `packages/core` submodule with dependency-free Node before installing packages; prints the submodule recovery command and exits 1 when its manifest is missing |
+| `pnpm quality:nose` | Run `nose query src --baseline .nose-baseline.json --fail-on new` from the project root with the inherited environment; skip only when the local executable is absent, and fail on tool or launch errors |
 | `pnpm build:dev` | Build a development userscript with source maps |
 | `pnpm build:all:ci` | Build userscript, Chrome, and Firefox outputs |
 | `pnpm test` | Run the Vitest suite |
@@ -52,6 +54,10 @@ here as a reviewed gitlink update.
 
 Run the narrowest relevant check while working. Use `pnpm verify` before a pull
 request and `pnpm verify:full` for publication-level or browser behavior changes.
+The two command adapters live in `scripts/check/{bootstrap,nose}.ts` and use only
+Node built-ins. `preinstall` checks for the submodule manifest and has no writes;
+`quality:nose` runs an external local tool and may write its own diagnostics.
+Their CLI behavior is exercised by `test/unit/tooling/command-adapters.test.ts`.
 
 ## Project constraints
 
