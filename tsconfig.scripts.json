@@ -22,6 +22,8 @@
   "include": [
     "scripts/ci/deep-check-reuse.ts",
     "scripts/ci/deep-check-reuse.test.ts",
+    "scripts/check/bootstrap.ts",
+    "scripts/check/nose.ts",
     "test/unit/config/fixtures/devtools-endpoint.ts"
   ]
 }
