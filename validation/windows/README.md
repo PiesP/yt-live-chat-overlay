@@ -117,9 +117,39 @@ python3 validation/windows/prepare-userscript-manager.py \
   --output /tmp/yt-tampermonkey-5.5.0
 ```
 
-The helper downloads the official Store CRX and verifies its pinned SHA-256 and
-version before extraction. Downloads use direct HTTPS to the approved Store
-origins, with at most five redirects; proxy environment variables are not used.
+This is a host-side preparation step before VM installation, not an asset bundled
+in `profile.json` or code run by the Windows profile. The Python 3 standard-library
+helper owns the reviewed Tampermonkey 5.5.0 version, extension ID, exact Store URL,
+and SHA-256 pin. Importing the module only defines the preparer; network and
+filesystem work starts when `prepare()` is called or the CLI runs. The CLI takes
+`--output` as its only operational input, refuses an existing destination before
+downloading, and prints the new directory, version, and digest as JSON.
+
+The helper downloads through direct HTTPS to `clients2.google.com` or
+`clients2.googleusercontent.com` on port 443, without credentials, proxies, or
+automatic redirects. It checks each redirect (at most five), applies a 60-second
+request timeout, and limits the final body to 16 MiB. It verifies the pinned
+SHA-256 and CRX3 header bounds before using Python's `zipfile`; extraction checks
+at most 1,000 entries and 64 MiB of declared uncompressed size, rejecting
+absolute, parent-traversal, backslash, colon, and symlink entries. It validates
+entries before omitting `_metadata`, checks the manifest for version 5.5.0 and
+Manifest V3, writes `installation-source.json` with Store identity, URL, digest,
+method, and omission, then atomically renames a new staging directory into
+place. Failures remove that staging directory.
+
+The nine local tests in `test/unit/config/userscript-manager-package.test.ts`
+cover a fixture package and receipt, pin mismatch, existing output, traversal,
+approved and rejected redirects, redirect count, HTTP/body limits, and transport
+failure without live downloads. They do not establish ZIP symlink or duplicate
+entry behavior, truncated/corrupt ZIP rejection, actual expanded-byte limits,
+failed-write cleanup, or VM installation. The manifest-pinned Node runtime has
+no ZIP archive reader in its standard modules, and this repository has no
+reviewed ZIP package. Keep the Python exception until a reviewed, pinned ZIP
+reader can be supplied by the portable host contract.
+Revisit the migration with adversarial archive and transport fixtures plus
+source-bound Windows validation; do not add a guest runtime just to change the
+helper's language.
+
 This tests Tampermonkey loaded as an unpacked package,
 not the Chrome Web Store installation confirmation. It enables Developer Mode
 and Allow User Scripts through Chrome's UI in the isolated profile and imports

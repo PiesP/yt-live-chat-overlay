@@ -57,6 +57,7 @@ here as a reviewed gitlink update.
 | `pnpm quality` | Run formatting, lint, type, i18n, dependency, and source checks |
 | `pnpm verify` | Run quality, all production builds, and artifact checks |
 | `pnpm verify:full` | Add coverage and browser tests to `verify` |
+| `python3 validation/windows/prepare-userscript-manager.py --output <new-directory>` | Prepare the pinned Tampermonkey CRX on the host before Windows validation; requires Python 3 and writes a new unpacked directory with an installation-source receipt (see [Windows acceptance](./validation/windows/README.md#installed-application-profiles)) |
 
 Run the narrowest relevant check while working. Use `pnpm verify` before a pull
 request and `pnpm verify:full` for publication-level or browser behavior changes.
@@ -71,6 +72,11 @@ endpoint fixture used by Node tests. The Windows natural-Chrome `.mjs` runner
 remains an external runtime exception. Import and direct-CLI boundaries are
 covered by `test/unit/config/node-script-boundaries.test.ts` and release
 provenance by `test/unit/config/release-prepare.test.ts`.
+
+The userscript-manager preparer remains a host-side Python standard-library
+exception because this repository has no reviewed ZIP reader for Node. Its
+security bounds, focused tests, and replacement criteria are documented in the
+Windows acceptance guide.
 
 ## Project constraints
 
