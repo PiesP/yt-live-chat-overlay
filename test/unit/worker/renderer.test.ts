@@ -38,6 +38,56 @@ describe('WorkerRenderer', () => {
     expect(() => new WorkerRenderer()).not.toThrow();
   });
 
+  it.each([
+    [false, false, 455],
+    [false, true, 455],
+    [true, false, 270],
+    [true, true, 455],
+  ])('applies system reduced motion %s and stored override %s in Worker frames', (systemReduced, override, expectedX) => {
+    vi.spyOn(performance, 'now').mockReturnValue(500);
+    const message = {
+      id: 'motion', text: 'motion',
+      startTime: 0, fadeStartTime: 0, pausedDuration: 0,
+      duration: 2000, invDuration: 1 / 2000,
+      startX: 640, x: 640, y: 0, width: 100, height: 20,
+      speedTier: 1,
+    };
+    const internals = wr as unknown as {
+      ctx: OffscreenCanvasRenderingContext2D;
+      canvas: OffscreenCanvas;
+      config: Record<string, unknown>;
+      logicalWidth: number;
+      logicalHeight: number;
+      activeMessages: typeof message[];
+      statsFrameCounter: number;
+      renderFrame(): void;
+      applyPendingTranslations(): void;
+      sortPendingQueueIfNeeded(): void;
+      drainQueue(): void;
+      postStats(): void;
+      resetBatch(): void;
+    };
+    internals.ctx = { clearRect: vi.fn() } as unknown as OffscreenCanvasRenderingContext2D;
+    internals.canvas = {} as OffscreenCanvas;
+    internals.config = {
+      danmakuMode: 'scroll', reducedMotion: systemReduced,
+      ignoreReducedMotion: override, exitPaddingPx: 0,
+      outlineWidthPx: 0, outlineOpacity: 0, isReplayMode: false,
+    };
+    internals.logicalWidth = 640;
+    internals.logicalHeight = 360;
+    internals.activeMessages.push(message);
+    internals.statsFrameCounter = 1;
+    internals.applyPendingTranslations = vi.fn();
+    internals.sortPendingQueueIfNeeded = vi.fn();
+    internals.drainQueue = vi.fn();
+    internals.postStats = vi.fn();
+    internals.resetBatch = vi.fn();
+
+    internals.renderFrame();
+    expect(message.x).toBe(expectedX);
+  });
+
   it('caches a finite advance width when Worker ink bounds are invalid', () => {
     const measureText = vi.fn(
       () =>

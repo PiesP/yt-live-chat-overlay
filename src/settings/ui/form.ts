@@ -138,6 +138,15 @@ function domField(labelText: string, control: HTMLElement, _id?: string): HTMLLa
   return label;
 }
 
+function domControlGroup(labelText: string, control: HTMLElement): HTMLFieldSetElement {
+  const group = document.createElement('fieldset');
+  group.className = 'yt-chat-overlay-settings-field yt-chat-overlay-settings-control-group';
+  const legend = document.createElement('legend');
+  legend.textContent = labelText;
+  group.append(legend, control);
+  return group;
+}
+
 function createFieldErrorSlot(input: HTMLInputElement): HTMLSpanElement {
   const error = document.createElement('span');
   error.className = 'yt-chat-overlay-settings-field-error';
@@ -233,7 +242,7 @@ function createActions(): HTMLDivElement {
   }
   wrapper.appendChild(actions);
 
-  // Subtle auto-save indicator — reassures users their changes are persisted
+  // Explain when live preview becomes persistent storage.
   const autoSaveHint = document.createElement('p');
   autoSaveHint.className = 'yt-chat-overlay-settings-autosave-hint';
   autoSaveHint.textContent = t('app.autoSave');
@@ -887,7 +896,7 @@ export class SettingsUiForm {
       container.appendChild(btn);
     }
 
-    return domField(t(def.label), container);
+    return domControlGroup(t(def.label), container);
   }
 
   // ── Font chips builder ───────────────────────────────────────────────────
@@ -937,6 +946,7 @@ export class SettingsUiForm {
     customInput.autocomplete = 'off';
     customInput.className = 'yt-chat-overlay-settings-font-custom-input';
     customInput.placeholder = t('danmaku.fontCustom');
+    customInput.setAttribute('aria-label', t('danmaku.fontCustom'));
     customInput.addEventListener('input', () => {
       // Deactivate all chips when custom input is used
       chipsContainer.querySelectorAll('.yt-chat-overlay-settings-font-chip').forEach((c) => {
@@ -961,14 +971,14 @@ export class SettingsUiForm {
 
     container.appendChild(customRow);
 
-    return domField(t(def.label), container);
+    return domControlGroup(t(def.label), container);
   }
 
   /** Derive a short display label from a CSS font-family value. */
   private fontChipLabel(cssFamily: string): string {
     // Common presets → human-friendly names
     const PRESET_LABELS: Record<string, string> = {
-      'system-ui, -apple-system, sans-serif': 'System Default',
+      'system-ui, -apple-system, sans-serif': 'danmaku.fontSystemDefault',
       '"Segoe UI", system-ui, sans-serif': 'Segoe UI',
       '"-apple-system", "Helvetica Neue", sans-serif': 'SF / Helvetica',
       '"Roboto", system-ui, sans-serif': 'Roboto',
@@ -982,20 +992,20 @@ export class SettingsUiForm {
       '"Cascadia Code", "Fira Code", monospace': 'Cascadia Code',
       '"JetBrains Mono", monospace': 'JetBrains Mono',
       '"Source Code Pro", monospace': 'Source Code Pro',
-      monospace: 'Monospace',
+      monospace: 'danmaku.fontMonospace',
       'Arial, sans-serif': 'Arial',
       '"Helvetica Neue", Arial, sans-serif': 'Helvetica Neue',
       'Verdana, sans-serif': 'Verdana',
       '"Trebuchet MS", sans-serif': 'Trebuchet MS',
-      'sans-serif': 'Sans-serif',
+      'sans-serif': 'danmaku.fontSansSerif',
       'Georgia, serif': 'Georgia',
       '"Times New Roman", serif': 'Times New Roman',
-      serif: 'Serif',
+      serif: 'danmaku.fontSerif',
       '"Comic Sans MS", cursive': 'Comic Sans MS',
       'Impact, sans-serif': 'Impact',
       '"Arial Black", sans-serif': 'Arial Black',
     };
-    return PRESET_LABELS[cssFamily] ?? cssFamily;
+    return t(PRESET_LABELS[cssFamily] ?? cssFamily);
   }
 
   private buildAuthorGrid(): HTMLDivElement {

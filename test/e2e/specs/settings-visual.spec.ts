@@ -91,6 +91,42 @@ test.describe('Settings UI Visual', () => {
     expect(box!.height).toBeGreaterThan(180);
   });
 
+  for (const scenario of [
+    { name: 'dark appearance', media: { colorScheme: 'dark' as const }, width: 1280, language: 'en' },
+    { name: 'Forced Colors', media: { forcedColors: 'active' as const }, width: 640, language: 'en' },
+    { name: 'reduced motion', media: { reducedMotion: 'reduce' as const }, width: 640, language: 'en' },
+    { name: 'narrow Arabic RTL', media: {}, width: 401, language: 'ar' },
+  ]) {
+    test(`keeps font groups, preview, and controls usable in ${scenario.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: scenario.width, height: 720 });
+      await page.emulateMedia(scenario.media);
+      await setupSettingsPage(page);
+      if (scenario.language !== 'en') await applySettings(page, { language: scenario.language });
+      await page.locator(`#${BUTTON_ID}`).click({ force: true });
+      const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+      await expect(modal).toHaveAttribute('dir', scenario.language === 'ar' ? 'rtl' : 'ltr');
+      await expect(modal.locator('select[name="danmakuMode"]')).toBeVisible();
+      await expect(modal.locator('input[name="opacity"]')).toBeVisible();
+      await expect(modal.locator('.yt-chat-overlay-settings-font-preview-text')).toBeVisible();
+      const disclosure = modal.locator('#pane-comments details.yt-chat-overlay-settings-disclosure');
+      await disclosure.locator('summary').click();
+      const weightGroup = disclosure.locator('fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-weight-toggle)');
+      const familyGroup = disclosure.locator('fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-font-chips-wrapper)');
+      await expect(weightGroup).toBeVisible();
+      await expect(familyGroup).toBeVisible();
+      await expect(familyGroup.locator('input.yt-chat-overlay-settings-font-custom-input')).toBeVisible();
+      const bounds = await modal.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, viewportWidth: window.innerWidth, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth };
+      });
+      expect(bounds.left).toBeGreaterThanOrEqual(-1);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+      expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth + 1);
+      await page.keyboard.press('Escape');
+      await expect(modal).not.toBeVisible();
+    });
+  }
+
   for (const viewport of [{ width: 401, height: 592 }, { width: 1280, height: 720 }]) {
   test(`keeps default controls and the opacity sample visible at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);

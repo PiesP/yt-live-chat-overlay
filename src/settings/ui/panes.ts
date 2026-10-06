@@ -262,15 +262,20 @@ export const PANES: PaneDef[] = [
             title: 'danmaku.font',
             fields: [
               weightToggle(
-                'Weight',
+                'danmaku.fontWeight',
                 'fontWeight',
                 [
-                  ['bold', 'Bold'],
-                  ['normal', 'Regular'],
+                  ['bold', 'danmaku.weightBold'],
+                  ['normal', 'danmaku.weightRegular'],
                 ],
                 'danmaku.fontWeightDesc'
               ),
-              fontChips('Family', 'fontFamily', FONT_SUGGESTIONS, 'danmaku.fontFamilyDesc'),
+              fontChips(
+                'danmaku.fontFamily',
+                'fontFamily',
+                FONT_SUGGESTIONS,
+                'danmaku.fontFamilyDesc'
+              ),
             ],
           },
         ],
