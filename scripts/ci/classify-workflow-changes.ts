@@ -135,7 +135,6 @@ export function classifyWorkflowChanges(
       mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript', 'deep_fast');
     } else if (path.startsWith('scripts/')) {
       mark('quality', 'unit', 'build', 'semgrep', 'codeql_javascript');
-      if (path === 'scripts/security/validate-osv-results.py') mark('osv');
       if (path.startsWith('scripts/ci/')) {
         mark('pinned_tools');
         if (
