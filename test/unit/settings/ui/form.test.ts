@@ -548,6 +548,20 @@ describe('SettingsUiForm', () => {
       expect(regular?.textContent).toBe(t('danmaku.weightRegular'));
       expect(bold?.getAttribute('aria-pressed')).toBe('true');
       expect(regular?.getAttribute('aria-pressed')).toBe('false');
+      for (const button of weightGroup?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        expect(button.type).toBe('button');
+        expect(button.textContent?.trim()).toBeTruthy();
+        expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
+      }
+      const chips = familyGroup?.querySelectorAll<HTMLButtonElement>(
+        '.yt-chat-overlay-settings-font-chip'
+      );
+      expect(chips?.length).toBeGreaterThan(1);
+      for (const button of chips ?? []) {
+        expect(button.type).toBe('button');
+        expect(button.textContent?.trim()).toBeTruthy();
+        expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
+      }
       const chip = familyGroup?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip');
       expect(chip?.textContent).toBe(t('danmaku.fontSystemDefault'));
       expect(chip?.hasAttribute('aria-pressed')).toBe(true);
