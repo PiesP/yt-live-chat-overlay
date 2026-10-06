@@ -6,55 +6,27 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { arch, platform } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..', '..');
 const distDir = join(root, 'dist');
 const bundleDir = join(root, 'release-bundle');
 const releaseDir = join(bundleDir, 'release');
 
-const version = process.env.RELEASE_VERSION;
-if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-  throw new Error('RELEASE_VERSION must be a semantic version in X.Y.Z form.');
-}
-
-const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
-  version?: string;
-};
-if (packageJson.version !== version) {
-  throw new Error(
-    `Release version ${version} does not match package.json ${packageJson.version ?? '(missing)'}.`
-  );
-}
-
-const checkedOutCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
-  cwd: root,
-  encoding: 'utf8',
-}).trim();
-const expectedCommit = process.env.RELEASE_SHA;
-if (expectedCommit !== undefined && !/^[0-9a-f]{40}$/.test(expectedCommit)) {
-  throw new Error('RELEASE_SHA must be a lowercase 40-character commit ID.');
-}
-if (expectedCommit !== undefined && expectedCommit !== checkedOutCommit) {
-  throw new Error(
-    `Release source ${expectedCommit} does not match checked out commit ${checkedOutCommit}.`
-  );
-}
-const releaseCommit = expectedCommit ?? checkedOutCommit;
-
 const userscriptFile = 'yt-live-chat-overlay.user.js';
 const userscriptMetadataFile = 'yt-live-chat-overlay.meta.js';
-for (const file of [userscriptFile, userscriptMetadataFile]) {
-  if (!existsSync(join(distDir, file))) {
-    throw new Error(`dist/${file} does not exist. Run the production build first.`);
-  }
-}
 
-function assertArtifactVersion(artifactName: string, artifactVersion: unknown): void {
+function assertArtifactVersion(
+  artifactName: string,
+  artifactVersion: unknown,
+  version: string
+): void {
   if (artifactVersion !== version) {
     throw new Error(
       `${artifactName} version ${typeof artifactVersion === 'string' ? artifactVersion : '(missing)'} does not match release version ${version}.`
@@ -62,7 +34,7 @@ function assertArtifactVersion(artifactName: string, artifactVersion: unknown): 
   }
 }
 
-function validateUserscriptVersion(file: string, artifactName: string): void {
+function validateUserscriptVersion(file: string, artifactName: string, version: string): void {
   const source = readFileSync(join(distDir, file), 'utf8');
   const metadata = source.match(
     /^\/\/ ==UserScript==\r?\n([\s\S]*?)^\/\/ ==\/UserScript==\s*$/m
@@ -74,22 +46,17 @@ function validateUserscriptVersion(file: string, artifactName: string): void {
   if (versionEntries.length !== 1) {
     throw new Error(`dist/${file} must contain exactly one @version entry.`);
   }
-  assertArtifactVersion(artifactName, versionEntries[0]?.[1]);
+  assertArtifactVersion(artifactName, versionEntries[0]?.[1], version);
 }
 
-function validateExtensionVersion(directory: string, artifactName: string): void {
+function validateExtensionVersion(directory: string, artifactName: string, version: string): void {
   const manifestPath = join(root, directory, 'manifest.json');
   if (!existsSync(manifestPath)) {
     throw new Error(`${directory}/manifest.json does not exist. Run all extension builds first.`);
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown };
-  assertArtifactVersion(artifactName, manifest.version);
+  assertArtifactVersion(artifactName, manifest.version, version);
 }
-
-validateUserscriptVersion(userscriptFile, 'userscript');
-validateUserscriptVersion(userscriptMetadataFile, 'userscript metadata');
-validateExtensionVersion('dist-extension', 'Chrome extension');
-validateExtensionVersion('dist-extension-firefox', 'Firefox extension');
 
 function changelogEntry(markdown: string, releaseVersion: string): string {
   const lines = markdown.split(/\r?\n/);
@@ -144,62 +111,102 @@ function zipDirectory(sourceDirectory: string, outputFile: string): string {
   return outputFile;
 }
 
-rmSync(bundleDir, { force: true, recursive: true });
-mkdirSync(releaseDir, { recursive: true });
-cpSync(distDir, join(bundleDir, 'dist'), { recursive: true });
-copyFileSync(join(distDir, userscriptFile), join(releaseDir, userscriptFile));
-copyFileSync(join(distDir, userscriptMetadataFile), join(releaseDir, userscriptMetadataFile));
+export function prepareRelease(): void {
+  const version = process.env.RELEASE_VERSION;
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error('RELEASE_VERSION must be a semantic version in X.Y.Z form.');
+  }
 
-const archives = [
-  zipDirectory(join(root, 'dist-extension'), join(releaseDir, 'yt-live-chat-overlay-chrome.zip')),
-  zipDirectory(
-    join(root, 'dist-extension-firefox'),
-    join(releaseDir, 'yt-live-chat-overlay-firefox.zip')
-  ),
-];
-const releaseFiles = [
-  join(releaseDir, userscriptFile),
-  join(releaseDir, userscriptMetadataFile),
-  ...archives,
-];
-const checksums = releaseFiles.map((path) => {
-  const digest = createHash('sha256').update(readFileSync(path)).digest('hex');
-  return `${digest}  ${basename(path)}`;
-});
-writeFileSync(join(releaseDir, 'checksums.txt'), `${checksums.join('\n')}\n`);
+  const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    version?: string;
+  };
+  if (packageJson.version !== version) {
+    throw new Error(
+      `Release version ${version} does not match package.json ${packageJson.version ?? '(missing)'}.`
+    );
+  }
 
-const buildDate = new Date().toISOString();
-const commit = releaseCommit;
-const nodeVersion = process.env.NODE_VERSION ?? 'unknown';
-const runnerOs = process.env.RUNNER_OS ?? platform();
-const runnerArch = process.env.RUNNER_ARCH ?? arch();
-const runnerImage = process.env.ImageOS ?? 'unknown';
-const runnerImageVersion = process.env.ImageVersion ?? 'unknown';
-writeFileSync(
-  join(releaseDir, 'metadata.json'),
-  `${JSON.stringify(
-    {
-      version,
-      build_date: buildDate,
-      commit,
-      node_version: nodeVersion,
-      runner_os: runnerOs,
-      runner_arch: runnerArch,
-      runner_image: runnerImage,
-      runner_image_version: runnerImageVersion,
-    },
-    null,
-    2
-  )}\n`
-);
+  const checkedOutCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim();
+  const expectedCommit = process.env.RELEASE_SHA;
+  if (expectedCommit !== undefined && !/^[0-9a-f]{40}$/.test(expectedCommit)) {
+    throw new Error('RELEASE_SHA must be a lowercase 40-character commit ID.');
+  }
+  if (expectedCommit !== undefined && expectedCommit !== checkedOutCommit) {
+    throw new Error(
+      `Release source ${expectedCommit} does not match checked out commit ${checkedOutCommit}.`
+    );
+  }
+  const releaseCommit = expectedCommit ?? checkedOutCommit;
 
-const repository = process.env.GITHUB_REPOSITORY ?? 'PiesP/yt-live-chat-overlay';
-const previous = previousVersion(version);
-const compareUrl = previous
-  ? `https://github.com/${repository}/compare/v${previous}...v${version}`
-  : `https://github.com/${repository}/releases/tag/v${version}`;
-const changes = changelogEntry(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version);
-const releaseNotes = `# Release v${version}
+  for (const file of [userscriptFile, userscriptMetadataFile]) {
+    if (!existsSync(join(distDir, file))) {
+      throw new Error(`dist/${file} does not exist. Run the production build first.`);
+    }
+  }
+  validateUserscriptVersion(userscriptFile, 'userscript', version);
+  validateUserscriptVersion(userscriptMetadataFile, 'userscript metadata', version);
+  validateExtensionVersion('dist-extension', 'Chrome extension', version);
+  validateExtensionVersion('dist-extension-firefox', 'Firefox extension', version);
+
+  rmSync(bundleDir, { force: true, recursive: true });
+  mkdirSync(releaseDir, { recursive: true });
+  cpSync(distDir, join(bundleDir, 'dist'), { recursive: true });
+  copyFileSync(join(distDir, userscriptFile), join(releaseDir, userscriptFile));
+  copyFileSync(join(distDir, userscriptMetadataFile), join(releaseDir, userscriptMetadataFile));
+
+  const archives = [
+    zipDirectory(join(root, 'dist-extension'), join(releaseDir, 'yt-live-chat-overlay-chrome.zip')),
+    zipDirectory(
+      join(root, 'dist-extension-firefox'),
+      join(releaseDir, 'yt-live-chat-overlay-firefox.zip')
+    ),
+  ];
+  const releaseFiles = [
+    join(releaseDir, userscriptFile),
+    join(releaseDir, userscriptMetadataFile),
+    ...archives,
+  ];
+  const checksums = releaseFiles.map((path) => {
+    const digest = createHash('sha256').update(readFileSync(path)).digest('hex');
+    return `${digest}  ${basename(path)}`;
+  });
+  writeFileSync(join(releaseDir, 'checksums.txt'), `${checksums.join('\n')}\n`);
+
+  const buildDate = new Date().toISOString();
+  const commit = releaseCommit;
+  const nodeVersion = process.env.NODE_VERSION ?? 'unknown';
+  const runnerOs = process.env.RUNNER_OS ?? platform();
+  const runnerArch = process.env.RUNNER_ARCH ?? arch();
+  const runnerImage = process.env.ImageOS ?? 'unknown';
+  const runnerImageVersion = process.env.ImageVersion ?? 'unknown';
+  writeFileSync(
+    join(releaseDir, 'metadata.json'),
+    `${JSON.stringify(
+      {
+        version,
+        build_date: buildDate,
+        commit,
+        node_version: nodeVersion,
+        runner_os: runnerOs,
+        runner_arch: runnerArch,
+        runner_image: runnerImage,
+        runner_image_version: runnerImageVersion,
+      },
+      null,
+      2
+    )}\n`
+  );
+
+  const repository = process.env.GITHUB_REPOSITORY ?? 'PiesP/yt-live-chat-overlay';
+  const previous = previousVersion(version);
+  const compareUrl = previous
+    ? `https://github.com/${repository}/compare/v${previous}...v${version}`
+    : `https://github.com/${repository}/releases/tag/v${version}`;
+  const changes = changelogEntry(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version);
+  const releaseNotes = `# Release v${version}
 
 ## Installation
 
@@ -239,6 +246,18 @@ ${changes}
 - **Node.js**: \`${nodeVersion}\`
 - **Runner**: \`${runnerOs}/${runnerArch}\` (\`${runnerImage} ${runnerImageVersion}\`)
 `;
-writeFileSync(join(releaseDir, 'RELEASE_NOTES.md'), releaseNotes);
+  writeFileSync(join(releaseDir, 'RELEASE_NOTES.md'), releaseNotes);
 
-console.log(`Prepared release-bundle/ for v${version} (${releaseFiles.length} assets).`);
+  console.log(`Prepared release-bundle/ for v${version} (${releaseFiles.length} assets).`);
+}
+
+function isDirectInvocation(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectInvocation()) prepareRelease();

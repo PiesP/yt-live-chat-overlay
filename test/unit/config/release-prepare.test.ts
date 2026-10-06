@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -56,14 +57,19 @@ function createReleaseFixture(): string {
   return fixtureRoot;
 }
 
-function runPrepare(fixtureRoot: string): ReturnType<typeof spawnSync> {
+function runPrepare(
+  fixtureRoot: string,
+  overrides: NodeJS.ProcessEnv = {}
+): ReturnType<typeof spawnSync> {
+  const env: NodeJS.ProcessEnv = { ...process.env, RELEASE_VERSION: '1.2.3', ...overrides };
+  if (!('RELEASE_SHA' in overrides)) delete env.RELEASE_SHA;
   return spawnSync(
     process.execPath,
     ['--experimental-strip-types', join(fixtureRoot, 'scripts', 'release', 'prepare.ts')],
     {
       cwd: fixtureRoot,
       encoding: 'utf8',
-      env: { ...process.env, RELEASE_VERSION: '1.2.3' },
+      env,
     }
   );
 }
@@ -82,7 +88,27 @@ describe('release preparation artifact versions', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Prepared release-bundle/ for v1.2.3');
-    expect(existsSync(join(fixtureRoot, 'release-bundle', 'release', 'metadata.json'))).toBe(true);
+    const releaseDirectory = join(fixtureRoot, 'release-bundle', 'release');
+    const metadata = JSON.parse(readFileSync(join(releaseDirectory, 'metadata.json'), 'utf8')) as {
+      commit: string;
+      version: string;
+    };
+    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixtureRoot,
+      encoding: 'utf8',
+    }).trim();
+    expect(metadata).toMatchObject({ commit: sourceCommit, version: '1.2.3' });
+    expect(readFileSync(join(releaseDirectory, 'checksums.txt'), 'utf8').trim().split('\n')).toHaveLength(4);
+    expect(readFileSync(join(releaseDirectory, 'RELEASE_NOTES.md'), 'utf8')).toContain(sourceCommit);
+  });
+
+  it('rejects a source SHA mismatch before writing a release bundle', () => {
+    const fixtureRoot = createReleaseFixture();
+    const result = runPrepare(fixtureRoot, { RELEASE_SHA: '0'.repeat(40) });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match checked out commit');
+    expect(existsSync(join(fixtureRoot, 'release-bundle'))).toBe(false);
   });
 
   it.each([
