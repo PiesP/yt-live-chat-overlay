@@ -54,8 +54,13 @@ describe('shared overlay OSV workflow composition', () => {
         'sarif_file: ${{ runner.temp }}/osv-results/osv-results.sarif'
       );
       expect(body).not.toContain('continue-on-error:');
+      expect(body).toContain('needs: [changes, pin-metadata]');
+      expect(step(body, '❌ Require reviewed scanner image')).toContain(
+        "if: ${{ needs['pin-metadata'].result != 'success' }}"
+      );
+      expect(body).toContain("OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}");
       const names = [...body.matchAll(/^      - name: (.+)$/gm)].map((match) => match[1]);
-      for (const name of names.slice(0, -2)) expect(step(body, name ?? '')).toContain(`if: ${active}`);
+      for (const name of names.slice(1, -2)) expect(step(body, name ?? '')).toContain(`if: ${active}`);
     }
   });
 
