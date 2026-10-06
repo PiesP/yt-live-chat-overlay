@@ -261,8 +261,12 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         if (scenario.language) {
           await modal.locator('#tab-translation').click();
           await modal.locator('select[name="language"]').selectOption(previousLanguage);
+          // Language preview rebuilds the modal after a debounce. Wait for
+          // the replacement DOM before opening its disclosure or testing focus.
+          await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, previousLanguage);
           await modal.locator('#tab-comments').click();
           if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
+          assert.equal(await disclosure.getAttribute('open'), '', 'restored language disclosure stayed closed');
         }
       }
     }
