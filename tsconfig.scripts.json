@@ -21,10 +21,7 @@
     ]
   },
   "include": [
-  "include": [
     "scripts/**/*.ts",
-    "test/unit/config/fixtures/devtools-endpoint.ts"
-  ]
     "test/unit/config/fixtures/devtools-endpoint.ts"
   ]
 }
