@@ -31,13 +31,39 @@ concurrency:
   group: security-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # google/osv-scanner-action image v2.6.0 (linux/amd64), resolved 2026-09-19.
-  # Pin the runtime image itself: the upstream action metadata references a
-  # mutable version tag even when the action is pinned to a commit SHA.
-  OSV_SCANNER_IMAGE: "ghcr.io/google/osv-scanner-action@sha256:71ad04ab2f8798be47870f9b18817ad317c2f8f2f97aa6726ba10d5578bc174a"
-
 jobs:
+  pin-metadata:
+    name: Resolve reviewed scanner images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      OSV_SCANNER_IMAGE: ${{ steps.pins.outputs.OSV_SCANNER_IMAGE }}
+      SEMGREP_IMAGE: ${{ steps.pins.outputs.SEMGREP_IMAGE }}
+    steps:
+      - name: 📥 Checkout reviewed pin source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 9f040ccfd72528f683f898a4b31e94a21f5913b7
+          persist-credentials: false
+          submodules: false
+
+      - name: 📦 Setup reviewed pin runtime
+        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        with:
+          install-dependencies: 'false'
+
+      - name: 🔐 Export validated scanner images
+        id: pins
+        run: |
+          set -euo pipefail
+          pinned_dir="$(mktemp -d "$RUNNER_TEMP/pinned-tools.XXXXXXXX")"
+          for name in pinned-tools.json pinned-tools.ts check-pinned-tools.ts install-nose.ts; do
+            install -m 0600 "scripts/ci/$name" "$pinned_dir/$name"
+          done
+          GITHUB_ENV="$GITHUB_OUTPUT" node --experimental-strip-types "$pinned_dir/pinned-tools.ts" env
+
   changes:
     name: Classify security changes
     runs-on: ubuntu-24.04
@@ -111,13 +137,27 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: 9f040ccfd72528f683f898a4b31e94a21f5913b7
           persist-credentials: false
+          submodules: false
+
+      - name: 📦 Setup reviewed pin runtime
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
+        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        with:
+          install-dependencies: 'false'
 
       - name: 🔎 Check pinned tools after the cooling window
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/ci/check-pinned-tools.sh
+        run: |
+          set -euo pipefail
+          pinned_dir="$(mktemp -d "$RUNNER_TEMP/pinned-tools.XXXXXXXX")"
+          for name in pinned-tools.json pinned-tools.ts check-pinned-tools.ts install-nose.ts; do
+            install -m 0600 "scripts/ci/$name" "$pinned_dir/$name"
+          done
+          node --experimental-strip-types "$pinned_dir/check-pinned-tools.ts"
 
       - name: No relevant changes
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.pinned_tools != 'true' }}
@@ -125,7 +165,7 @@ jobs:
 
   osv-scan-pr:
     name: pr-gate/osv / osv-scan
-    needs: changes
+    needs: [changes, pin-metadata]
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -133,7 +173,13 @@ jobs:
       actions: read
       contents: read
       security-events: write
+    env:
+      OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}
     steps:
+      - name: ❌ Require reviewed scanner image
+        if: ${{ needs['pin-metadata'].result != 'success' }}
+        run: exit 1
+
       - name: 📥 Checkout code
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -403,11 +449,17 @@ jobs:
 
   osv-scan-dispatch:
     name: pr-gate/osv / osv-scan
-    needs: changes
+    needs: [changes, pin-metadata]
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || github.event_name == 'schedule') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}
     steps:
+      - name: ❌ Require reviewed scanner image
+        if: ${{ needs['pin-metadata'].result != 'success' }}
+        run: exit 1
+
       - name: 📥 Checkout code
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -658,18 +710,20 @@ jobs:
 
   semgrep:
     name: pr-gate/semgrep
-    needs: changes
+    needs: [changes, pin-metadata]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     if: ${{ !cancelled() }}
     permissions:
       contents: read
       security-events: write
-    # semgrep/semgrep:1.178.0 (linux/amd64) — last checked: 2026-09-25
-    # Check for updates: https://github.com/semgrep/semgrep/releases
     container:
-      image: semgrep/semgrep:1.178.0@sha256:fbba1f23d2ef94630c828e8692758f8bc6353a8089841a396a5c041451966ffb
+      image: ${{ needs['pin-metadata'].outputs.SEMGREP_IMAGE || 'invalid@@' }}
     steps:
+      - name: ❌ Require reviewed scanner image
+        if: ${{ needs['pin-metadata'].result != 'success' }}
+        run: exit 1
+
       - name: 📥 Checkout code
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
