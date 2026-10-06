@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=windowsAcceptance';
@@ -1273,6 +1273,7 @@ export async function run({ browser, root, output, installedContext, installedEx
     assert(backgroundChatRequests <= backgroundRequestBudget,
       `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`);
 
+    const screenshots = (await readdir(output)).filter((file) => file.endsWith('.png')).sort();
     return {
       checks: {
         productionUserscriptInjected: !installedContext,
@@ -1302,14 +1303,14 @@ export async function run({ browser, root, output, installedContext, installedEx
         consoleErrors: consoleErrors.length,
         customEmojiAssetRequests,
         paidCardInkContained: paidCardInkContainment?.outsideAlphaPixels === 0,
-        screenshotsWritten: paidCardInkContainment ? 5 : 4,
+        screenshotsWritten: screenshots.length,
       },
       observations: {
         browserVersion: browser.version(),
         canvas: canvasBox,
         settingsUi: settingsUiState,
         fixtureContent: ['Korean', 'Japanese', 'RTL', 'emoji', 'Super Chat', 'membership'],
-        screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png', ...(paidCardInkContainment ? ['yt-paid-card-ink.png'] : [])],
+        screenshots,
         backgroundObservationMs,
         paidCardInkContainment,
         sustainedViewing,
