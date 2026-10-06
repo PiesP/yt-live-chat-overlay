@@ -1,3 +1,18 @@
+# Workflow change classification
+
+`classify-workflow-changes.ts` uses only Node.js built-ins. CI and Security set
+up the manifest-pinned Node runtime without installing dependencies, then run
+the CLI from the trusted base revision for pull requests and merge groups.
+The first rollout has no TypeScript classifier in that revision, so the callers
+select all 13 scopes. Failed checkout, runtime setup, or classification also
+selects every scope. Pushes run the checked-out CLI.
+
+The CLI accepts `--paths` for explicit policy checks. Event comparisons use
+`BASE_SHA...HEAD_SHA` for pull requests and merge groups and
+`BASE_SHA..HEAD_SHA` for pushes. Git paths are NUL-delimited with rename
+detection disabled, preserving both sides of a move. It prints all 13 outputs
+and appends them to `GITHUB_OUTPUT` when set.
+
 # Deep code-analysis reuse
 
 The scheduled deep workflow may reuse successful duplication, fast mutation, or

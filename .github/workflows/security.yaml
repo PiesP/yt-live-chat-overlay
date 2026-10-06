@@ -58,32 +58,43 @@ jobs:
           persist-credentials: false
           submodules: false
 
+      - name: 📦 Setup classifier runtime
+        id: runtime
+        if: ${{ steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        with:
+          install-dependencies: 'false'
+
       - name: Classify changed paths
         id: scope
         if: ${{ always() }}
         env:
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
-          classifier=scripts/ci/classify-workflow-changes.sh
+          set -euo pipefail
+          classifier=scripts/ci/classify-workflow-changes.ts
           case "$EVENT_NAME" in
             pull_request | merge_group)
-              classifier="$RUNNER_TEMP/trusted-classify-workflow-changes.sh"
+              classifier="$RUNNER_TEMP/trusted-classify-workflow-changes.ts"
               if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || \
-                ! git show "$BASE_SHA:scripts/ci/classify-workflow-changes.sh" > "$classifier"; then
+                ! git show "$BASE_SHA:scripts/ci/classify-workflow-changes.ts" > "$classifier"; then
                 classifier=
               fi
               ;;
           esac
 
-          if [[ "$CHECKOUT_OUTCOME" == "success" && -n "$classifier" ]] && bash "$classifier"; then
+          if [[ "$CHECKOUT_OUTCOME" == "success" && "$RUNTIME_OUTCOME" == "success" && -n "$classifier" ]] &&
+            node --experimental-strip-types "$classifier"; then
             exit 0
           fi
 
           echo "Change classification failed; enabling every security scope." >&2
-          for scope in osv semgrep codeql_actions codeql_javascript pinned_tools; do
+          for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
             echo "$scope=true" >> "$GITHUB_OUTPUT"
           done
 

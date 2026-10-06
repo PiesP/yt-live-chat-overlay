@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
-const classifier = resolve(root, 'scripts/ci/classify-workflow-changes.sh');
+const classifier = resolve(root, 'scripts/ci/classify-workflow-changes.ts');
 
 function jobSection(workflow: string, job: string): string {
   const section = workflow.match(
@@ -53,7 +53,7 @@ type Scope =
   | 'deep_fast';
 
 function classify(paths: string[]): Record<Scope, boolean> {
-  const result = spawnSync('bash', [classifier, '--paths', ...paths], {
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', classifier, '--paths', ...paths], {
     cwd: root,
     encoding: 'utf8',
   });
@@ -71,7 +71,7 @@ function classify(paths: string[]): Record<Scope, boolean> {
 }
 
 function classifyEvent(event: Record<string, string>): Record<Scope, boolean> {
-  const result = spawnSync('bash', [classifier], {
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', classifier], {
     cwd: root,
     encoding: 'utf8',
     env: { ...process.env, ...event },
@@ -308,9 +308,12 @@ describe('workflow scope integration', () => {
       const changes = jobSection(workflow, 'changes');
       expect(changes).toContain('pull_request | merge_group');
       expect(changes).toContain(
-        'git show "$BASE_SHA:scripts/ci/classify-workflow-changes.sh"'
+        'git show "$BASE_SHA:scripts/ci/classify-workflow-changes.ts"'
       );
-      expect(changes).toContain('bash "$classifier"');
+      expect(changes).toContain('node --experimental-strip-types "$classifier"');
+      expect(changes).toContain("install-dependencies: 'false'");
+      expect(changes).toContain('RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}');
+      expect(changes).toContain('for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast');
     }
   });
 

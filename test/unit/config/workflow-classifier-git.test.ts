@@ -1,10 +1,12 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vitest';
+import { classifyWorkflowChanges, SCOPES } from '../../../scripts/ci/classify-workflow-changes.ts';
 
-const classifier = resolve(import.meta.dirname, '../../../scripts/ci/classify-workflow-changes.sh');
+const classifier = resolve(import.meta.dirname, '../../../scripts/ci/classify-workflow-changes.ts');
 
 type Scopes = Record<string, boolean>;
 
@@ -38,7 +40,7 @@ function fixture(run: (cwd: string) => void): void {
 }
 
 function classify(cwd: string, event: string, base: string, head: string): Scopes {
-  const result = spawnSync('bash', [classifier], {
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', classifier], {
     cwd,
     encoding: 'utf8',
     env: {
@@ -57,6 +59,99 @@ function classify(cwd: string, event: string, base: string, head: string): Scope
     })
   );
 }
+
+it('has no output, Git process, or output-file side effect when imported', () => {
+  fixture((cwd) => {
+    const gitMarker = join(cwd, 'git-called');
+    const outputPath = join(cwd, 'outputs.txt');
+    const fakeGit = join(cwd, 'git');
+    writeFileSync(outputPath, 'sentinel\n');
+    writeFileSync(fakeGit, '#!/bin/sh\nprintf called > "$CLASSIFIER_GIT_MARKER"\n');
+    chmodSync(fakeGit, 0o755);
+    const imported = spawnSync(process.execPath, [
+      '--experimental-strip-types', '--input-type=module', '--eval',
+      `await import(${JSON.stringify(pathToFileURL(classifier).href)})`,
+    ], {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: cwd,
+        CLASSIFIER_GIT_MARKER: gitMarker,
+        EVENT_NAME: 'push',
+        BASE_SHA: 'a'.repeat(40),
+        HEAD_SHA: 'b'.repeat(40),
+        GITHUB_OUTPUT: outputPath,
+      },
+    });
+    expect(imported.status, imported.stderr).toBe(0);
+    expect(imported.stdout).toBe('');
+    expect(imported.stderr).toBe('');
+    expect(readFileSync(outputPath, 'utf8')).toBe('sentinel\n');
+    expect(existsSync(gitMarker)).toBe(false);
+  });
+});
+
+it('keeps calls independent and runs through a symlink with all 13 outputs', () => {
+  const source = classifyWorkflowChanges(['--paths', 'src/app/page-watcher.ts']);
+  const docs = classifyWorkflowChanges(['--paths', 'README.md']);
+  expect(source.has('quality')).toBe(true);
+  expect(docs.has('quality')).toBe(false);
+  expect(docs.has('semgrep')).toBe(true);
+
+  fixture((cwd) => {
+    const alias = join(cwd, 'classifier.ts');
+    const outputPath = join(cwd, 'outputs.txt');
+    symlinkSync(classifier, alias);
+    const result = spawnSync(process.execPath, [
+      '--experimental-strip-types', alias, '--paths', 'README.md',
+    ], { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputPath } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim().split('\n')).toHaveLength(SCOPES.length);
+    expect(result.stdout).toContain('semgrep=true\n');
+    expect(result.stdout).toContain('quality=false\n');
+    expect(readFileSync(outputPath, 'utf8')).toBe(result.stdout);
+  });
+});
+
+it('selects all scopes when the trusted base has no TypeScript classifier', () => {
+  for (const filename of ['ci.yaml', 'security.yaml']) {
+    fixture((cwd) => {
+      write(cwd, 'README.md');
+      const base = commit(cwd, 'base without classifier');
+      const marker = join(cwd, 'candidate-ran');
+      write(cwd, 'scripts/ci/classify-workflow-changes.ts',
+        `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, 'executed');\n`);
+      const head = commit(cwd, 'candidate classifier');
+      const workflow = readFileSync(resolve(import.meta.dirname, '../../../.github/workflows', filename), 'utf8');
+      const changes = workflow.match(/^  changes:\n(?:(?!^  [a-z][\w-]*:\n)[\s\S])*/m)?.[0];
+      const script = changes?.split('        run: |\n')[1]?.replace(/^ {10}/gm, '');
+      expect(script, filename).toBeDefined();
+      if (!script) return;
+
+      const outputPath = join(cwd, 'outputs.txt');
+      const result = spawnSync('bash', ['-c', script], {
+        cwd,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CHECKOUT_OUTCOME: 'success',
+          RUNTIME_OUTCOME: 'success',
+          EVENT_NAME: 'pull_request',
+          BASE_SHA: base,
+          HEAD_SHA: head,
+          RUNNER_TEMP: cwd,
+          GITHUB_OUTPUT: outputPath,
+        },
+      });
+      expect(result.status, `${filename}: ${result.stderr}`).toBe(0);
+      expect(existsSync(marker)).toBe(false);
+      expect(readFileSync(outputPath, 'utf8').trim().split('\n')).toEqual(
+        SCOPES.map((scope) => `${scope}=true`)
+      );
+    });
+  }
+});
 
 function expectSource(scopes: Scopes): void {
   expect(scopes).toMatchObject({
