@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -20,11 +21,7 @@
     ]
   },
   "include": [
-    "scripts/ci/classify-workflow-changes.ts",
-    "scripts/ci/deep-check-reuse.ts",
-    "scripts/ci/deep-check-reuse.test.ts",
-    "scripts/check/bootstrap.ts",
-    "scripts/check/nose.ts",
+    "scripts/**/*.ts",
     "test/unit/config/fixtures/devtools-endpoint.ts"
   ]
 }

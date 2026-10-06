@@ -42,6 +42,12 @@ here as a reviewed gitlink update.
 | --- | --- |
 | `pnpm install` (`preinstall`) | Check the pinned `packages/core` submodule with dependency-free Node before installing packages; prints the submodule recovery command and exits 1 when its manifest is missing |
 | `pnpm quality:nose` | Run `nose query src --baseline .nose-baseline.json --fail-on new` from the project root with the inherited environment; skip only when the local executable is absent, and fail on tool or launch errors |
+| `pnpm check:scripts` | Type-check every `scripts/**/*.ts` Node entrypoint under strict NodeNext and erasable TypeScript syntax, plus the Node DevTools endpoint fixture |
+| `pnpm clean` | Remove the three generated `dist` directories relative to the caller's working directory |
+| `pnpm check:i18n` | Compare all locale keys against English without writing files |
+| `pnpm check:artifacts` | Validate production artifacts; `--e2e` selects the development userscript |
+| `pnpm check:versions` / `pnpm sync:versions` | Check extension manifest versions or sync them from `package.json`; `BUILD_VERSION` overrides the expected check version |
+| `pnpm release:prepare` | After verified builds, validate `RELEASE_VERSION` and optional `RELEASE_SHA`, then prepare archives, checksums, metadata, and release notes |
 | `pnpm build:dev` | Build a development userscript with source maps |
 | `pnpm build:all:ci` | Build userscript, Chrome, and Firefox outputs |
 | `pnpm test` | Run the Vitest suite |
@@ -51,6 +57,7 @@ here as a reviewed gitlink update.
 | `pnpm quality` | Run formatting, lint, type, i18n, dependency, and source checks |
 | `pnpm verify` | Run quality, all production builds, and artifact checks |
 | `pnpm verify:full` | Add coverage and browser tests to `verify` |
+| `python3 validation/windows/prepare-userscript-manager.py --output <new-directory>` | Prepare the pinned Tampermonkey CRX on the host before Windows validation; requires Python 3 and writes a new unpacked directory with an installation-source receipt (see [Windows acceptance](./validation/windows/README.md#installed-application-profiles)) |
 
 Run the narrowest relevant check while working. Use `pnpm verify` before a pull
 request and `pnpm verify:full` for publication-level or browser behavior changes.
@@ -58,6 +65,18 @@ The two command adapters live in `scripts/check/{bootstrap,nose}.ts` and use onl
 Node built-ins. `preinstall` checks for the submodule manifest and has no writes;
 `quality:nose` runs an external local tool and may write its own diagnostics.
 Their CLI behavior is exercised by `test/unit/tooling/command-adapters.test.ts`.
+The build, artifact, i18n, and release TypeScript entrypoints are also safe to
+import without running their CLI actions. `tsconfig.scripts.json` checks these
+Node sources separately from the browser program; it includes the DevTools
+endpoint fixture used by Node tests. The Windows natural-Chrome `.mjs` runner
+remains an external runtime exception. Import and direct-CLI boundaries are
+covered by `test/unit/config/node-script-boundaries.test.ts` and release
+provenance by `test/unit/config/release-prepare.test.ts`.
+
+The userscript-manager preparer remains a host-side Python standard-library
+exception because this repository has no reviewed ZIP reader for Node. Its
+security bounds, focused tests, and replacement criteria are documented in the
+Windows acceptance guide.
 
 ## Project constraints
 

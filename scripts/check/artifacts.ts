@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 interface ExtensionManifest {
   browser_specific_settings?: { gecko?: { id?: string; strict_min_version?: string } };
@@ -128,25 +129,39 @@ function checkFirefoxContract(): void {
   }
 }
 
-const isE2eBuild = process.argv.includes('--e2e');
-if (isE2eBuild) {
-  assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
-} else {
-  const userscript = readFileSync(join(root, 'dist/yt-live-chat-overlay.user.js'), 'utf8');
-  if (!userscript.startsWith('// ==UserScript==')) {
-    throw new Error('Production userscript metadata must remain the first bytes of the artifact.');
+export function checkArtifacts(args: readonly string[] = process.argv): void {
+  if (args.includes('--e2e')) {
+    assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
+  } else {
+    const userscript = readFileSync(join(root, 'dist/yt-live-chat-overlay.user.js'), 'utf8');
+    if (!userscript.startsWith('// ==UserScript==')) {
+      throw new Error(
+        'Production userscript metadata must remain the first bytes of the artifact.'
+      );
+    }
+    assertBidiLicense('dist/yt-live-chat-overlay.user.js');
   }
-  assertBidiLicense('dist/yt-live-chat-overlay.user.js');
+  checkExtension('dist-extension');
+  checkExtension('dist-extension-firefox');
+  checkFirefoxContract();
+  for (const artifact of [
+    'dist-extension/page-script.js',
+    'dist-extension/workers/renderer.js',
+    'dist-extension-firefox/page-script.js',
+    'dist-extension-firefox/workers/renderer.js',
+  ]) {
+    assertBidiLicense(artifact);
+  }
+  console.log('Build artifact references are valid.');
 }
-checkExtension('dist-extension');
-checkExtension('dist-extension-firefox');
-checkFirefoxContract();
-for (const artifact of [
-  'dist-extension/page-script.js',
-  'dist-extension/workers/renderer.js',
-  'dist-extension-firefox/page-script.js',
-  'dist-extension-firefox/workers/renderer.js',
-]) {
-  assertBidiLicense(artifact);
+
+function isDirectInvocation(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
 }
-console.log('Build artifact references are valid.');
+
+if (isDirectInvocation()) checkArtifacts();
