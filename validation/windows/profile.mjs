@@ -251,7 +251,10 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         assert(geometry.focused, `${scenario.id}: keyboard focus was lost`);
         if (scenario.language) assert.equal(geometry.direction, 'rtl');
         if (scenario.zoom) assert.equal(zoom.observed, 2);
-        await modal.screenshot({ path: join(output, `yt-settings-${scenario.id}.png`), animations: 'disabled' });
+        // Page capture avoids element clipping coordinates at real tab zoom.
+        await (scenario.zoom ? page : modal).screenshot({
+          path: join(output, `yt-settings-${scenario.id}.png`), animations: 'disabled',
+        });
         observations.push({ id: scenario.id, geometry, browserZoom: zoom?.observed ?? null });
       } finally {
         if (zoom) await setBrowserZoom(zoom.previous, zoom.settings);
