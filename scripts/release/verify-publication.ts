@@ -77,6 +77,20 @@ function identity(data: Uint8Array, tag: string, sha: string): void {
   const metadata = object(JSON.parse(Buffer.from(data).toString('utf8')));
   if (metadata.version !== tag.slice(1) || metadata.commit !== sha)
     throw new Error('Release metadata source or version conflicts with verified tag');
+  if (
+    typeof metadata.build_date !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(metadata.build_date) ||
+    !Number.isFinite(Date.parse(metadata.build_date)) ||
+    new Date(metadata.build_date).toISOString() !== metadata.build_date ||
+    typeof metadata.node_version !== 'string' ||
+    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.node_version)
+  )
+    throw new Error('Release metadata build date or Node.js version is invalid');
+  for (const key of ['runner_os', 'runner_arch', 'runner_image', 'runner_image_version']) {
+    const value = metadata[key];
+    if (typeof value !== 'string' || value.trim().length === 0)
+      throw new Error(`Release metadata ${key} is missing or invalid`);
+  }
 }
 
 function verifyFiles(files: Map<string, Uint8Array>, tag: string, sha: string): void {

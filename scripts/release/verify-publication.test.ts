@@ -7,6 +7,16 @@ import { verifyPublication } from './verify-publication.ts';
 const sha = 'a'.repeat(40);
 const workflowSha = 'b'.repeat(40);
 const tag = 'v1.2.3';
+const buildMetadata = {
+  version: '1.2.3',
+  commit: sha,
+  build_date: '2026-10-07T05:00:00.000Z',
+  node_version: '26.9.0',
+  runner_os: 'linux',
+  runner_arch: 'x64',
+  runner_image: 'unknown',
+  runner_image_version: 'unknown',
+};
 const payloads = [
   'yt-live-chat-overlay.user.js',
   'yt-live-chat-overlay.meta.js',
@@ -30,7 +40,7 @@ function fixture() {
         .join('\n')}\n`
     )
   );
-  files.set('metadata.json', Buffer.from(JSON.stringify({ version: '1.2.3', commit: sha })));
+  files.set('metadata.json', Buffer.from(JSON.stringify(buildMetadata)));
   files.set('RELEASE_NOTES.md', Buffer.from(`# Release ${tag}\n\nNotes`));
   const assets = [...files]
     .filter(([name]) => name !== 'RELEASE_NOTES.md')
@@ -119,6 +129,55 @@ test('missing, extra and corrupt existing assets fail closed', async () => {
     if (mutation === 'bad-checksums') f.api.set('/releases/assets/5', Buffer.from('invalid'));
     await assert.rejects(f.run(), { name: 'Error' }, mutation);
   }
+});
+
+test('prepared and existing metadata require complete valid build runtime fields', async () => {
+  for (const location of ['prepared', 'existing']) {
+    for (const [field, invalid] of [
+      ['build_date', '2026-02-30T05:00:00.000Z'],
+      ['node_version', 'unknown'],
+      ['runner_os', ''],
+      ['runner_arch', null],
+      ['runner_image', 1],
+      ['runner_image_version', '   '],
+    ] as const) {
+      for (const omit of [true, false]) {
+        const f = fixture();
+        const metadata: Record<string, unknown> = { ...buildMetadata };
+        if (omit) delete metadata[field];
+        else metadata[field] = invalid;
+        const content = Buffer.from(JSON.stringify(metadata));
+        if (location === 'prepared') f.files.set('metadata.json', content);
+        else {
+          f.api.set('/releases/latest', f.existing);
+          f.api.set(`/releases/tags/${tag}`, f.existing);
+          f.api.set('/releases/assets/6', content);
+          const asset = f.assets[5];
+          assert.ok(asset);
+          asset.size = content.length;
+          asset.digest = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+        }
+        await assert.rejects(f.run(), { name: 'Error' }, `${location}: ${field} omitted=${omit}`);
+      }
+    }
+  }
+});
+
+test('existing build runtime differences do not trigger writes', async () => {
+  const f = fixture();
+  f.api.set('/releases/latest', f.existing);
+  f.api.set(`/releases/tags/${tag}`, f.existing);
+  f.files.set(
+    'metadata.json',
+    Buffer.from(
+      JSON.stringify({
+        ...buildMetadata,
+        build_date: '2026-10-07T06:00:00.000Z',
+        node_version: '22.22.0',
+      })
+    )
+  );
+  assert.deepEqual(await f.run(), { publish: false });
 });
 
 test('conflicting source/version and malformed release response fail closed', async () => {
