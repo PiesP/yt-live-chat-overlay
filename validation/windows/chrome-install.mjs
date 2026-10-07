@@ -75,11 +75,11 @@ export async function removeOwnedChromeProfile(root, profile) {
   if (!removed) throw new Error('Task-owned Chrome profile remained after bounded cleanup');
 }
 
-async function enableDeveloperMode(context) {
+export async function enableDeveloperMode(context, browserName) {
   const page = await context.newPage();
   try {
-    await page.goto('chrome://extensions/');
-    const toggle = page.locator('#devMode');
+    await page.goto(browserName === 'msedge' ? 'edge://extensions/' : 'chrome://extensions/');
+    const toggle = page.locator(browserName === 'msedge' ? '#dev-switch:visible' : '#devMode');
     await toggle.waitFor({ state: 'visible' });
     if (!(await toggle.evaluate((element) => element.checked))) await toggle.click();
     assert(await toggle.evaluate((element) => element.checked), 'Developer mode is disabled');
@@ -371,7 +371,7 @@ export async function runChromeInstallation({
     browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
     browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
     result.cleanup.browserProcessIdentified = true;
-    await enableDeveloperMode(context);
+    await enableDeveloperMode(context, browserName);
     if (installation === 'extension') {
       ({ id: extensionId } = await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'dist-extension'),
@@ -440,7 +440,7 @@ async function runChromeDurationInstallation({
     result.browserVersion = browser.version();
     result.naturalChrome = ownedChrome.launchEvidence;
     result.cleanup.browserProcessIdentified = true;
-    await enableDeveloperMode(context);
+    await enableDeveloperMode(context, 'chrome');
     ({ id: extensionId } = await ownedChrome.cleanupCdp.send('Extensions.loadUnpacked', {
       path: join(root, 'dist-extension'),
     }));
