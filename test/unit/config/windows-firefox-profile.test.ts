@@ -147,8 +147,12 @@ afterEach(async () => {
 describe('Windows Firefox installation profile', () => {
   it('serializes native Firefox and extension lifecycle parameters', () => {
     expect(
-      buildFirefoxLaunchArguments({ profileDir: 'C:\\task\\.firefox-install-profile-a' })
+      buildFirefoxLaunchArguments({
+        platform: 'win32',
+        profileDir: 'C:\\task\\.firefox-install-profile-a',
+      })
     ).toEqual([
+      '--wait-for-browser',
       '--new-instance',
       '--no-remote',
       '--profile',
@@ -158,12 +162,37 @@ describe('Windows Firefox installation profile', () => {
       '--remote-allow-system-access',
       'about:blank',
     ]);
-    expect(
-      buildFirefoxLaunchArguments({
-        headless: true,
-        profileDir: 'C:\\task\\.firefox-install-profile-b',
-      })[0]
-    ).toBe('--headless');
+    expect(buildFirefoxLaunchArguments({
+      headless: true,
+      platform: 'win32',
+      profileDir: 'C:\\task\\.firefox-install-profile-b',
+    })).toEqual([
+      '--headless',
+      '--wait-for-browser',
+      '--new-instance',
+      '--no-remote',
+      '--profile',
+      'C:\\task\\.firefox-install-profile-b',
+      '--remote-debugging-port',
+      '0',
+      '--remote-allow-system-access',
+      'about:blank',
+    ]);
+    expect(buildFirefoxLaunchArguments({
+      headless: true,
+      platform: 'linux',
+      profileDir: '/tmp/.firefox-install-profile-c',
+    })).toEqual([
+      '--headless',
+      '--new-instance',
+      '--no-remote',
+      '--profile',
+      '/tmp/.firefox-install-profile-c',
+      '--remote-debugging-port',
+      '0',
+      '--remote-allow-system-access',
+      'about:blank',
+    ]);
     expect(extensionInstallParameters('C:\\task\\dist-extension-firefox')).toEqual({
       extensionData: { path: 'C:\\task\\dist-extension-firefox', type: 'path' },
       'moz:permanent': false,
