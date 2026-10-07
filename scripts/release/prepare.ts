@@ -177,7 +177,7 @@ export function prepareRelease(): void {
 
   const buildDate = new Date().toISOString();
   const commit = releaseCommit;
-  const nodeVersion = process.env.NODE_VERSION ?? 'unknown';
+  const nodeVersion = process.versions.node;
   const runnerOs = process.env.RUNNER_OS ?? platform();
   const runnerArch = process.env.RUNNER_ARCH ?? arch();
   const runnerImage = process.env.ImageOS ?? 'unknown';

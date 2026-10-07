@@ -75,24 +75,33 @@ describe('project setup actions', () => {
     const provenance = releaseWorkflow.match(/  provenance:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/)?.[0] ?? '';
     expect(provenance).toContain(`uses: ${centralAction}`);
     expect(provenance).toContain("install-dependencies: 'false'");
-    expect(releaseWorkflow.replace(duplication, '').replace(provenance, '')).not.toContain(centralAction);
+    const publishSection = releaseWorkflow.match(
+      /  publish:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/
+    )?.[0];
+    expect(publishSection).toBeDefined();
+    if (!publishSection) throw new Error('Release publish job not found');
+    expect(publishSection).toContain(`uses: ${centralAction}`);
+    expect(publishSection).toContain("install-dependencies: 'false'");
+    expect(
+      releaseWorkflow.replace(duplication, '').replace(provenance, '').replace(publishSection, '')
+    ).not.toContain(centralAction);
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
     expect(provenance).toContain('run: node --experimental-strip-types scripts/release/verify-source.ts');
     expect(releaseWorkflow).toContain('make_latest: legacy');
     expect(releaseWorkflow).not.toContain('make_latest: true');
-    const publishSection = releaseWorkflow.match(
-      /  publish:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/
-    )?.[0];
-    expect(publishSection).toBeDefined();
-    if (!publishSection) throw new Error('Release publish job not found');
     expect(publishSection).toContain('group: release-publish');
     expect(publishSection).toContain('cancel-in-progress: false');
-    expect(publishSection).toContain('https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest');
-    expect(publishSection).toContain('if [[ "$http_status" != "200" ]]');
-    expect(publishSection).toContain('if [[ "$newest_tag" != "$RELEASE_TAG" ]]');
-    expect(publishSection.indexOf('Prevent release channel rollback')).toBeLessThan(
+    expect(publishSection).toContain('persist-credentials: false');
+    expect(publishSection).toContain('ref: ${{ github.sha }}');
+    expect(publishSection).toContain(
+      'run: node --experimental-strip-types scripts/release/verify-publication.ts'
+    );
+    expect(publishSection).toContain("if: ${{ steps.guard.outputs.publish == 'true' }}");
+    expect(publishSection).toContain('overwrite_files: false');
+    expect(publishSection).toContain('fail_on_unmatched_files: true');
+    expect(publishSection.indexOf('Verify publication boundary')).toBeLessThan(
       publishSection.indexOf('uses: softprops/action-gh-release@')
     );
     expect(releaseWorkflow).toContain('ref: ${{ github.sha }}');

@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.3] - 2026-10-07
+
+### Fixed
+
+- **Chat startup and recovery** — Bound watch-page bootstrap loading, retry transient timeouts, and recover when a delayed chat panel appears. Keep foreground visibility and live-region announcements responsive during sustained viewing.
+- **Replay and navigation** — Keep replay messages on video timestamps, restart continuation playback when seeking backward, and release stale bootstrap, pause, seek, and navigation work across session changes.
+- **Canvas and Worker rendering** — Align pause-duration accounting, resize and active-message state, Worker recovery, and fallback so comments remain consistent when rendering mode changes.
+- **Delayed results** — Discard stale asynchronous translations and replacement results after their message or renderer lifecycle ends.
+- **Settings accessibility** — Name font groups and the custom font input clearly for keyboard and assistive-technology users. Clarify that the motion-preference override controls animation independently of when settings are saved. Existing `ignoreReducedMotion` values and font settings remain compatible; no reset or migration is required.
+- **Release publication** — Verify source identity, existing release assets, and checksums before publishing; preserve complete same-version releases without rewriting assets. Record the Node.js runtime that actually builds the release.
+
+### Changed
+
+- **Maintenance** — Refresh dependency and shared-core pins, improve source-bound release and security tooling, and expand fixture coverage for browser startup, replay, settings, and renderer recovery.
+
 ## [0.45.2] - 2026-09-22
 
 ### Fixed
