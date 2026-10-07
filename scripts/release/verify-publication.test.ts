@@ -24,7 +24,7 @@ const payloads = [
   'yt-live-chat-overlay-firefox.zip',
 ];
 
-function fixture() {
+function fixture(releaseTag = tag, nodeVersion = buildMetadata.node_version) {
   const files = new Map<string, Uint8Array>();
   for (const name of payloads) files.set(name, Buffer.from(`release payload ${name}`));
   files.set(
@@ -40,8 +40,13 @@ function fixture() {
         .join('\n')}\n`
     )
   );
-  files.set('metadata.json', Buffer.from(JSON.stringify(buildMetadata)));
-  files.set('RELEASE_NOTES.md', Buffer.from(`# Release ${tag}\n\nNotes`));
+  files.set(
+    'metadata.json',
+    Buffer.from(
+      JSON.stringify({ ...buildMetadata, version: releaseTag.slice(1), node_version: nodeVersion })
+    )
+  );
+  files.set('RELEASE_NOTES.md', Buffer.from(`# Release ${releaseTag}\n\nNotes`));
   const assets = [...files]
     .filter(([name]) => name !== 'RELEASE_NOTES.md')
     .map(([name, content], index) => ({
@@ -51,17 +56,17 @@ function fixture() {
       state: 'uploaded',
       digest: `sha256:${createHash('sha256').update(content).digest('hex')}`,
     }));
-  const existing = { tag_name: tag, draft: false, prerelease: false, assets };
+  const existing = { tag_name: releaseTag, draft: false, prerelease: false, assets };
   const api = new Map<string, unknown>([
     ['/releases/latest', { tag_name: 'v1.2.2', draft: false, prerelease: false }],
-    [`/releases/tags/${tag}`, null],
+    [`/releases/tags/${releaseTag}`, null],
   ]);
   for (const asset of assets) api.set(`/releases/assets/${asset.id}`, files.get(asset.name));
   const gitCalls: string[][] = [];
   const git = (args: string[]): string => {
     gitCalls.push(args);
     if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? workflowSha : sha;
-    if (args[0] === 'show') return JSON.stringify({ version: '1.2.3' });
+    if (args[0] === 'show') return JSON.stringify({ version: releaseTag.slice(1) });
     return '';
   };
   const readApi = async (path: string): Promise<unknown> => {
@@ -69,7 +74,7 @@ function fixture() {
     return api.get(path);
   };
   const run = () =>
-    verifyPublication(tag, sha, workflowSha, git, readApi, (name) => {
+    verifyPublication(releaseTag, sha, workflowSha, git, readApi, (name) => {
       const file = files.get(name);
       if (!file) throw new Error(`Missing prepared file: ${name}`);
       return file;
@@ -178,6 +183,66 @@ test('existing build runtime differences do not trigger writes', async () => {
     )
   );
   assert.deepEqual(await f.run(), { publish: false });
+});
+
+test('published v0.45.2 metadata keeps its historical Node runtime contract on a no-op retry', async () => {
+  for (const legacyNodeVersion of ['26', 'unknown', '26.9.0']) {
+    const f = fixture('v0.45.2', legacyNodeVersion);
+    f.api.set('/releases/latest', f.existing);
+    f.api.set('/releases/tags/v0.45.2', f.existing);
+    assert.deepEqual(await f.run(), { publish: false });
+  }
+});
+
+test('legacy Node runtime forms still require the other recorded build fields', async () => {
+  for (const location of ['prepared', 'existing']) {
+    const f = fixture('v0.45.2', '26');
+    const metadata = { ...buildMetadata, version: '0.45.2', node_version: '26' } as Record<
+      string,
+      unknown
+    >;
+    delete metadata.runner_image;
+    const content = Buffer.from(JSON.stringify(metadata));
+    if (location === 'prepared') f.files.set('metadata.json', content);
+    else {
+      f.api.set('/releases/latest', f.existing);
+      f.api.set('/releases/tags/v0.45.2', f.existing);
+      f.api.set('/releases/assets/6', content);
+      const asset = f.assets[5];
+      assert.ok(asset);
+      asset.size = content.length;
+      asset.digest = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+    }
+    await assert.rejects(f.run(), /runner_image/, location);
+  }
+});
+
+test('v0.45.3 and later reject historical major-only or unknown Node runtimes', async () => {
+  for (const releaseTag of ['v0.45.3', 'v1.2.3']) {
+    for (const legacyNodeVersion of ['26', 'unknown', undefined]) {
+      for (const location of ['prepared', 'existing']) {
+        const f = fixture(releaseTag);
+        const metadata: Record<string, unknown> = {
+          ...buildMetadata,
+          version: releaseTag.slice(1),
+        };
+        if (legacyNodeVersion === undefined) delete metadata.node_version;
+        else metadata.node_version = legacyNodeVersion;
+        const content = Buffer.from(JSON.stringify(metadata));
+        if (location === 'prepared') f.files.set('metadata.json', content);
+        else {
+          f.api.set('/releases/latest', f.existing);
+          f.api.set(`/releases/tags/${releaseTag}`, f.existing);
+          f.api.set('/releases/assets/6', content);
+          const asset = f.assets[5];
+          assert.ok(asset);
+          asset.size = content.length;
+          asset.digest = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+        }
+        await assert.rejects(f.run(), /Node\.js version is invalid/, `${releaseTag}: ${location}`);
+      }
+    }
+  }
 });
 
 test('conflicting source/version and malformed release response fail closed', async () => {

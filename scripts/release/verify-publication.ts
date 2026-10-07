@@ -77,13 +77,20 @@ function identity(data: Uint8Array, tag: string, sha: string): void {
   const metadata = object(JSON.parse(Buffer.from(data).toString('utf8')));
   if (metadata.version !== tag.slice(1) || metadata.commit !== sha)
     throw new Error('Release metadata source or version conflicts with verified tag');
+  const nodeVersion = metadata.node_version;
+  // Older prepared bundles recorded NODE_VERSION (or its unknown fallback).
+  // Accurate process.versions.node metadata begins with v0.45.3.
+  const validNodeVersion =
+    typeof nodeVersion === 'string' &&
+    (/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(nodeVersion) ||
+      (compare(tag, 'v0.45.3') < 0 &&
+        (/^(0|[1-9]\d*)$/.test(nodeVersion) || nodeVersion === 'unknown')));
   if (
     typeof metadata.build_date !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(metadata.build_date) ||
     !Number.isFinite(Date.parse(metadata.build_date)) ||
     new Date(metadata.build_date).toISOString() !== metadata.build_date ||
-    typeof metadata.node_version !== 'string' ||
-    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.node_version)
+    !validNodeVersion
   )
     throw new Error('Release metadata build date or Node.js version is invalid');
   for (const key of ['runner_os', 'runner_arch', 'runner_image', 'runner_image_version']) {
