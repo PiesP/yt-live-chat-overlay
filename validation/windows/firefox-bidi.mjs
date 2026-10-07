@@ -139,12 +139,13 @@ export async function cleanupFirefoxResources(
   if (errors.length > 0) throw new AggregateError(errors, 'Firefox resource cleanup failed');
 }
 
-export function buildFirefoxLaunchArguments({ profileDir, headless = false }) {
+export function buildFirefoxLaunchArguments({ profileDir, headless = false, platform = process.platform }) {
   if (typeof profileDir !== 'string' || profileDir.length === 0) {
     throw new TypeError('profileDir must be a non-empty string');
   }
   return [
     ...(headless ? ['--headless'] : []),
+    ...(platform === 'win32' ? ['--wait-for-browser'] : []),
     '--new-instance',
     '--no-remote',
     '--profile',

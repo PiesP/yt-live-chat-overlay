@@ -10,7 +10,7 @@ import * as chromeInstallModule from '../../../validation/windows/chrome-install
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.mjs';
 
-const { cleanupChromeInstallation, readOwnedBrowserProcessId, requireLiveSuccess } =
+const { cleanupChromeInstallation, enableDeveloperMode, readOwnedBrowserProcessId, requireLiveSuccess } =
   chromeInstallModule;
 
 const roots: string[] = [];
@@ -30,6 +30,49 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('uses the visible Edge switch and its checked property, while keeping Chrome controls', async () => {
+    for (const browserName of ['msedge', 'chrome']) {
+      const visible = { checked: browserName === 'chrome', getAttribute: () => 'false' };
+      const click = vi.fn(async () => { visible.checked = true; });
+      const locator = vi.fn((selector: string) => {
+        const expected = browserName === 'msedge' ? '#dev-switch:visible' : '#devMode';
+        if (selector !== expected) throw new Error('Selected a hidden or unsupported toggle');
+        return {
+          waitFor: vi.fn(async () => {}),
+          evaluate: async (read: (element: typeof visible) => boolean) => read(visible),
+          click,
+        };
+      });
+      const page = { goto: vi.fn(async () => {}), locator, close: vi.fn(async () => {}) };
+      await enableDeveloperMode({ newPage: async () => page }, browserName);
+      expect(page.goto).toHaveBeenCalledWith(
+        browserName === 'msedge' ? 'edge://extensions/' : 'chrome://extensions/'
+      );
+      expect(locator).toHaveBeenCalledWith(
+        browserName === 'msedge' ? '#dev-switch:visible' : '#devMode'
+      );
+      expect(click).toHaveBeenCalledTimes(browserName === 'msedge' ? 1 : 0);
+      expect(visible.checked).toBe(true);
+      expect(page.close).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('rejects an Edge switch that remains disabled after clicking', async () => {
+    const switchElement = { checked: false };
+    const page = {
+      goto: vi.fn(async () => {}),
+      locator: vi.fn(() => ({
+        waitFor: async () => {},
+        evaluate: async (read: (element: typeof switchElement) => boolean) => read(switchElement),
+        click: async () => {},
+      })),
+      close: vi.fn(async () => {}),
+    };
+    await expect(enableDeveloperMode({ newPage: async () => page }, 'msedge'))
+      .rejects.toThrow('Developer mode is disabled');
+    expect(page.close).toHaveBeenCalledOnce();
+  });
+
   it('requires an observed page-policy restriction before accepting extension main rendering', () => {
     const { validateLiveRenderer, countUnexpectedLiveErrors } = liveRenderingModule;
     const blocked = { type: 'error', text: "This document requires 'TrustedScriptURL' assignment. The action has been blocked.", url: 'chrome-extension://owned/page-script.js' };
