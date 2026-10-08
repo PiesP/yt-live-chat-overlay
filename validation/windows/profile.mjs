@@ -1327,13 +1327,15 @@ export async function run({ browser, root, output, installedContext, installedEx
         `Extreme density bypassed the polling floor: ${waits[4]}, ${waits[5]}`);
       assert(waits[7] >= 1000 - eventToleranceMs, `Empty response did not restore ordinary polling: ${waits[7]}`);
       assert.equal(await page.locator('#yt-live-chat-overlay canvas').count(), 1);
-      const delivered = await page.evaluate(() => window.__ytAcceptanceWorkers.some(
-        (worker) => !worker.terminated && worker.addedMessageIds.flat().some((id) => id.startsWith('windows-poll-floor-6-')),
-      ));
-      assert(delivered, 'High-activity messages did not reach the production renderer worker');
+      const deliveredCount = await page.evaluate(() => new Set(window.__ytAcceptanceWorkers
+        .filter((worker) => !worker.terminated)
+        .flatMap((worker) => worker.addedMessageIds.flat())
+        .filter((id) => id.startsWith('windows-poll-floor-'))).size);
+      assert(deliveredCount >= 32, 'High-activity messages did not reach the production renderer worker');
       highActivityPolling = { status: 'passed', minPollIntervalMs: 500, ordinaryIntervalMs: 1000,
         eventToleranceMs, highResponses: 7, messagesPerResponse: 32, maxActive: probe.maxActive,
-        samples: probe.samples, waitsAfterResponseMs: waits, rendererWorkerDelivery: delivered };
+        samples: probe.samples, waitsAfterResponseMs: waits, rendererWorkerDelivery: true,
+        rendererDeliveredMessages: deliveredCount };
     }
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
