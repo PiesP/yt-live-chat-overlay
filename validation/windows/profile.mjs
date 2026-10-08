@@ -1328,7 +1328,7 @@ export async function run({ browser, root, output, installedContext, installedEx
       assert(waits[7] >= 1000 - eventToleranceMs, `Empty response did not restore ordinary polling: ${waits[7]}`);
       assert.equal(await page.locator('#yt-live-chat-overlay canvas').count(), 1);
       const delivered = await page.evaluate(() => window.__ytAcceptanceWorkers.some(
-        (worker) => !worker.terminated && worker.addedMessageIds.some((id) => id.startsWith('windows-poll-floor-6-')),
+        (worker) => !worker.terminated && worker.addedMessageIds.flat().some((id) => id.startsWith('windows-poll-floor-6-')),
       ));
       assert(delivered, 'High-activity messages did not reach the production renderer worker');
       highActivityPolling = { status: 'passed', minPollIntervalMs: 500, ordinaryIntervalMs: 1000,
