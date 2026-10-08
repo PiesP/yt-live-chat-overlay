@@ -98,7 +98,10 @@ describe('LiveChatSource empty-response polling', () => {
     });
     const loop = internals.runLiveLoop(controller.signal);
 
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(request).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
     expect(request).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1_999);
@@ -114,8 +117,9 @@ describe('LiveChatSource empty-response polling', () => {
     await expect(loop).rejects.toMatchObject({ name: 'AbortError' });
   });
 
-  it('keeps zero-delay chaining while successful burst responses remain non-empty', async () => {
+  it('waits for the floor after each burst response and keeps requests sequential', async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(0);
     const source = new LiveChatSource(makeSettings);
     const internals = internalsOf(source);
     const controller = new AbortController();
@@ -124,14 +128,53 @@ describe('LiveChatSource empty-response polling', () => {
     internals.liveContinuation = { continuation: 'burst', timeoutMs: 2_000 };
     await internals.handleLivePayload(makePayload('seed'));
 
+    const starts: number[] = [];
+    let finishFirst: ((payload: LiveChatPayload) => void) | undefined;
     const request = vi.spyOn(internals, 'requestLivePayload').mockImplementation(async () => {
-      if (request.mock.calls.length === 2) controller.abort();
+      starts.push(Date.now());
+      if (request.mock.calls.length === 1) {
+        return new Promise<LiveChatPayload>((resolve) => { finishFirst = resolve; });
+      }
       return makePayload(`burst-${request.mock.calls.length}`);
     });
 
-    await internals.runLiveLoop(controller.signal);
+    const loop = internals.runLiveLoop(controller.signal);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(request).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(request).toHaveBeenCalledOnce();
+    expect(finishFirst).toBeDefined();
+    finishFirst!(makePayload('first-response'));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(request).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toEqual([1_000, 8_000]);
 
+    controller.abort();
+    await expect(loop).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(request).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels the minimum burst wait before issuing a request', async () => {
+    vi.useFakeTimers();
+    const source = new LiveChatSource(makeSettings);
+    const internals = internalsOf(source);
+    const controller = new AbortController();
+    source.burstRateProvider = () => 100;
+    internals.callback = vi.fn();
+    await internals.handleLivePayload(makePayload('seed'));
+    const request = vi.spyOn(internals, 'requestLivePayload');
+    const loop = internals.runLiveLoop(controller.signal);
+    await vi.advanceTimersByTimeAsync(999);
+    controller.abort();
+    await expect(loop).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(request).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -145,7 +188,7 @@ describe('LiveChatSource empty-response polling', () => {
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(4_000);
 
     await internals.handleLivePayload(makePayload('active-before-reset'));
-    expect(internals.calculateAdaptiveDelay(2_000)).toBe(0);
+    expect(internals.calculateAdaptiveDelay(2_000)).toBe(1_000);
 
     internals.resetSessionState();
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(2_000);

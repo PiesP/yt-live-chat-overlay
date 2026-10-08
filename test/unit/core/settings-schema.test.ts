@@ -33,6 +33,29 @@ describe('STORAGE_KEY', () => {
   });
 });
 
+describe('polling interval normalization', () => {
+  it.each([
+    [0, 0, 50, 1_000],
+    [-1, -1, 50, 1_000],
+    [Number.NaN, Number.POSITIVE_INFINITY, 50, 2_000],
+    [Number.NEGATIVE_INFINITY, Number.NaN, 50, 2_000],
+    [5_000, 1_000, 1_000, 5_000],
+    [250, 3_000, 250, 3_000],
+  ])('normalizes stored and patched intervals %s / %s', (min, max, expectedMin, expectedMax) => {
+    const patch = { minPollIntervalMs: min, maxPollIntervalMs: max };
+    for (const settings of [
+      normalizeStoredSettings(patch),
+      applySettingsPatch(DEFAULT_SETTINGS, patch),
+    ]) {
+      expect(settings.minPollIntervalMs).toBe(expectedMin);
+      expect(settings.maxPollIntervalMs).toBe(expectedMax);
+      expect(Number.isFinite(settings.minPollIntervalMs)).toBe(true);
+      expect(settings.minPollIntervalMs).toBeGreaterThan(0);
+      expect(settings.minPollIntervalMs).toBeLessThanOrEqual(settings.maxPollIntervalMs);
+    }
+  });
+});
+
 describe('DEFAULT_SETTINGS', () => {
   it('has expected root defaults', () => {
     expect(DEFAULT_SETTINGS.enabled).toBe(true);
