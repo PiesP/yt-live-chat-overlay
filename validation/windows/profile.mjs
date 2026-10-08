@@ -855,6 +855,8 @@ export async function run({ browser, root, output, installedContext, installedEx
   let deliverInstalledFixture = false;
   let installedFixtureDelivered = false;
   let installedFixtureCursor = 0;
+  let highActivityProbe = null;
+  const highActivityRequests = new Map();
   const context = installedContext ?? await browser.newContext({
     colorScheme: 'dark',
     locale: 'en-US',
@@ -869,6 +871,20 @@ export async function run({ browser, root, output, installedContext, installedEx
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    page.on('requestfinished', (request) => {
+      const sample = highActivityRequests.get(request);
+      if (sample) {
+        sample.finishedAt = performance.now();
+        highActivityRequests.delete(request);
+      }
+    });
+    page.on('requestfailed', (request) => {
+      const sample = highActivityRequests.get(request);
+      if (sample) {
+        sample.failed = request.failure()?.errorText ?? 'unknown';
+        highActivityRequests.delete(request);
+      }
     });
 
     await page.route('**/*', async (route) => {
@@ -912,6 +928,20 @@ export async function run({ browser, root, output, installedContext, installedEx
         } else {
           backgroundChatRequests++;
           backgroundRequestTimes.push(performance.now());
+          if (highActivityProbe && route.request().method() === 'POST' && highActivityProbe.samples.length < 9) {
+            const index = highActivityProbe.samples.length;
+            const sample = { startedAt: performance.now(), finishedAt: null, failed: null };
+            highActivityProbe.samples.push(sample);
+            highActivityRequests.set(route.request(), sample);
+            highActivityProbe.maxActive = Math.max(highActivityProbe.maxActive, highActivityRequests.size);
+            const actions = index < 7 ? Array.from({ length: 32 }, (_, message) => messageAction(
+              `windows-poll-floor-${index}-${message}`,
+              `Floor viewer ${index}-${message}`,
+              [{ text: `Sustained polling floor message ${index}-${message}` }],
+            )) : [];
+            await route.fulfill({ status: 200, contentType: 'application/json', json: chatResponse(actions, 1000) });
+            return;
+          }
           const actions = deliverInstalledFixture && !installedFixtureDelivered
             ? [CHAT_ACTIONS[installedFixtureCursor++]]
             : [];
@@ -1263,6 +1293,50 @@ export async function run({ browser, root, output, installedContext, installedEx
       : null;
     const sustainedViewing = await verifySustainedViewingLifecycle(page, expectedRenderer);
     assert.equal(sustainedChatRequests, 7, 'The sustained-viewing fixture was incomplete');
+    let highActivityPolling = null;
+    if (installedContext && expectedRenderer === 'worker') {
+      await page.locator('#yt-chat-overlay-settings-button').click();
+      const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+      await modal.waitFor({ state: 'visible' });
+      await modal.locator('#tab-advanced').click();
+      await modal.locator('input[name="minPollIntervalMs"]').fill('500');
+      await modal.locator('input[name="minPollIntervalMs"]').press('Tab');
+      await page.keyboard.press('Escape');
+      await modal.waitFor({ state: 'hidden' });
+      await page.locator('#yt-chat-overlay-settings-button').click();
+      await modal.waitFor({ state: 'visible' });
+      await modal.locator('#tab-advanced').click();
+      assert.equal(await modal.locator('input[name="minPollIntervalMs"]').inputValue(), '500');
+      await page.keyboard.press('Escape');
+      await modal.waitFor({ state: 'hidden' });
+      highActivityProbe = { samples: [], maxActive: 0 };
+      const deadline = performance.now() + 20_000;
+      while (highActivityProbe.samples.filter((sample) => sample.finishedAt !== null).length < 9 && performance.now() < deadline) {
+        await page.waitForTimeout(100);
+      }
+      const probe = highActivityProbe;
+      highActivityProbe = null;
+      assert.equal(probe.samples.length, 9, 'High-activity fixture did not complete nine polls');
+      assert(probe.samples.every((sample) => sample.finishedAt !== null && sample.failed === null));
+      assert.equal(probe.maxActive, 1, 'Live polls overlapped');
+      const waits = probe.samples.slice(1).map((sample, index) => sample.startedAt - probe.samples[index].finishedAt);
+      // Browser network-event timestamps can straddle response processing.
+      // Exact floor boundaries are covered separately with fake-time loop tests.
+      const eventToleranceMs = 25;
+      assert(waits[4] >= 500 - eventToleranceMs && waits[5] >= 500 - eventToleranceMs,
+        `Extreme density bypassed the polling floor: ${waits[4]}, ${waits[5]}`);
+      assert(waits[7] >= 1000 - eventToleranceMs, `Empty response did not restore ordinary polling: ${waits[7]}`);
+      assert.equal(await page.locator('#yt-live-chat-overlay canvas').count(), 1);
+      const deliveredCount = await page.evaluate(() => new Set(window.__ytAcceptanceWorkers
+        .filter((worker) => !worker.terminated)
+        .flatMap((worker) => worker.addedMessageIds.flat())
+        .filter((id) => id.startsWith('windows-poll-floor-'))).size);
+      assert(deliveredCount >= 32, 'High-activity messages did not reach the production renderer worker');
+      highActivityPolling = { status: 'passed', minPollIntervalMs: 500, ordinaryIntervalMs: 1000,
+        eventToleranceMs, highResponses: 7, messagesPerResponse: 32, maxActive: probe.maxActive,
+        samples: probe.samples, waitsAfterResponseMs: waits, rendererWorkerDelivery: true,
+        rendererDeliveredMessages: deliveredCount };
+    }
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
     const backgroundObservationMs = backgroundRequestTimes.length
@@ -1301,6 +1375,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         settingsOpenMethod: 'keyboard',
         deterministicChatApi: true,
         sustainedViewingLifecycle: true,
+        highActivityPollingFloor: highActivityPolling?.status === 'passed',
         sustainedChatRequests,
         chatApiRequests,
         explicitChatRequests,
@@ -1324,6 +1399,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         backgroundObservationMs,
         paidCardInkContainment,
         sustainedViewing,
+        highActivityPolling,
         backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(
           (time, index) => time - backgroundRequestTimes[index],
         ),

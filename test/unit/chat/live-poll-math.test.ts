@@ -51,9 +51,9 @@ describe('live-poll-math', () => {
       expect(computeBurstAdjustedMs(1000, undefined, limits)).toBeNull();
     });
 
-    it('returns 0 for extreme density', () => {
+    it('returns the configured minimum for extreme density', () => {
       const result = computeBurstAdjustedMs(1000, 30, limits);
-      expect(result).toBe(0);
+      expect(result).toBe(limits.minPollIntervalMs);
     });
 
     it('returns reduced interval for high density', () => {
@@ -70,11 +70,11 @@ describe('live-poll-math', () => {
       expect(result).toBeGreaterThanOrEqual(limits.minPollIntervalMs);
     });
 
-    it('returns 0 for extreme average density', () => {
+    it('returns the configured minimum for extreme average density', () => {
       const ring = new Uint16Array(5);
       ring.fill(30);
       const result = computeDensityAdjustedMs(1000, ring, 5, limits);
-      expect(result).toBe(0);
+      expect(result).toBe(limits.minPollIntervalMs);
     });
   });
 

@@ -69,7 +69,7 @@ export function computeBurstAdjustedMs(
   limits: DensityConfig
 ): number | null {
   if (emaRate === undefined) return null;
-  if (emaRate >= EXTREME_DENSITY_THRESHOLD) return 0;
+  if (emaRate >= EXTREME_DENSITY_THRESHOLD) return limits.minPollIntervalMs;
   if (emaRate >= DENSITY_HIGH_THRESHOLD) {
     return Math.max(
       limits.minPollIntervalMs,
@@ -99,7 +99,7 @@ export function computeDensityAdjustedMs(
   }
   const avgCount = sum / densityRingFilled;
 
-  if (avgCount >= EXTREME_DENSITY_THRESHOLD) return 0;
+  if (avgCount >= EXTREME_DENSITY_THRESHOLD) return limits.minPollIntervalMs;
 
   let base = Math.max(limits.minPollIntervalMs, Math.min(limits.maxPollIntervalMs, fallbackMs));
 

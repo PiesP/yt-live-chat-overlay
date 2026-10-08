@@ -143,13 +143,8 @@ export class LiveChatSource extends ChatSource {
       const timeoutMs = this.liveContinuation?.timeoutMs ?? this.getSettings().livePollFallbackMs;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
 
-      // Extreme density: skip sleep entirely (chained polling).
-      // When delayMs is 0, the next fetch fires immediately after the
-      // previous response is processed, achieving sub-200ms effective
-      // poll intervals during high-activity bursts.
-      if (delayMs > 0) {
-        await sleep(delayMs, signal);
-      }
+      // Even sustained bursts yield for the configured minimum interval.
+      await sleep(delayMs, signal);
 
       throwIfAborted(signal);
 

@@ -59,6 +59,14 @@ install a userscript manager, install an extension, access live or authenticated
 native Windows desktop chrome, validate OS DPI/theme matrices, or measure GPU performance. Those
 remain separate acceptance profiles or host-level observations.
 
+The installed Chrome/Edge Worker fixture also checks sustained high-activity
+polling. It saves a positive minimum through the settings UI, delivers enough
+unique batches to fill the density window, records request/response timestamps
+and concurrent requests, then verifies ordinary polling resumes after an empty
+response. `profile.mjs` records the fixture sizes and network-event tolerance;
+fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
+scenario uses intercepted fixture traffic rather than a live chat account.
+
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
 motion override without changing its saved representation. It retains settings

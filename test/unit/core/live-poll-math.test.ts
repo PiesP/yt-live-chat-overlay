@@ -115,9 +115,9 @@ describe('computeBurstAdjustedMs', () => {
     expect(computeBurstAdjustedMs(2000, undefined, TEST_LIMITS)).toBeNull();
   });
 
-  it('returns 0 for extreme density', () => {
-    expect(computeBurstAdjustedMs(2000, EXTREME_DENSITY_THRESHOLD, TEST_LIMITS)).toBe(0);
-    expect(computeBurstAdjustedMs(2000, 100, TEST_LIMITS)).toBe(0);
+  it('returns the configured minimum for extreme density', () => {
+    expect(computeBurstAdjustedMs(2000, EXTREME_DENSITY_THRESHOLD, TEST_LIMITS)).toBe(TEST_LIMITS.minPollIntervalMs);
+    expect(computeBurstAdjustedMs(2000, 100, TEST_LIMITS)).toBe(TEST_LIMITS.minPollIntervalMs);
   });
 
   it('returns reduced delay for high density', () => {
@@ -159,14 +159,14 @@ describe('computeDensityAdjustedMs', () => {
     expect(result).toBe(2000);
   });
 
-  it('returns 0 for extreme average density', () => {
+  it('returns the configured minimum for extreme average density', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
     ring[0] = 40;
     ring[1] = 40;
     ring[2] = 40;
     const result = computeDensityAdjustedMs(2000, ring, 3, TEST_LIMITS);
-    // avg = 120/3 = 40 >= 30 → return 0
-    expect(result).toBe(0);
+    // avg = 120/3 = 40 >= 30 → configured minimum
+    expect(result).toBe(TEST_LIMITS.minPollIntervalMs);
   });
 
   it('reduces delay for high average density', () => {
@@ -234,7 +234,7 @@ describe('calculateAdaptiveDelay', () => {
 
   it('error backoff takes priority over burst and density', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 40; ring[1] = 40; // extreme density → would return 0
+    ring[0] = 40; ring[1] = 40; // extreme density → would return the minimum
     // But error backoff should take priority
     const result = calculateAdaptiveDelay(2000, 2000, 3, undefined, ring, 2, TEST_LIMITS);
     // delayed = 2000 * 2^3 = 16000 → clamped to 5000
@@ -257,11 +257,11 @@ describe('calculateAdaptiveDelay', () => {
     expect(result).toBe(2000);
   });
 
-  it('returns 0 when extreme burst is active', () => {
+  it('returns the configured minimum when extreme burst is active', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
     ring[0] = 5; ring[1] = 5;
     const result = calculateAdaptiveDelay(2000, 2000, 0, EXTREME_DENSITY_THRESHOLD, ring, 2, TEST_LIMITS);
-    expect(result).toBe(0);
+    expect(result).toBe(TEST_LIMITS.minPollIntervalMs);
   });
 
   it('handles negative timeoutMs (uses livePollFallbackMs)', () => {
