@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.4] - 2026-10-09
+
+### Fixed
+
+- **Live polling floor** — Honor the configured positive minimum interval during both extreme burst-rate and sustained average-density activity. Polls remain spaced even when chat is busiest; the additional wait trades immediate fetching for fewer closely spaced requests. Existing valid saved settings remain compatible, with no reset or migration required.
+
+### Changed
+
+- **Build and test tooling** — Update Vite to 8.3.3, Playwright to 1.64.0, and Knip to 6.40.0.
+- **Installed browser validation** — Improve the Windows Edge and Firefox validation controls and profiles.
+
 ## [0.45.3] - 2026-10-07
 
 ### Fixed
