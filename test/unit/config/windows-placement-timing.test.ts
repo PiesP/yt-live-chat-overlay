@@ -4,9 +4,53 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { findOverlappingActivePair, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 describe('Windows placement timing probe', () => {
+  it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
+    const names = PLACEMENT_SCENARIOS.map((scenario: { name: string }) => scenario.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(expect.arrayContaining([
+      'worker-top', 'worker-bottom', 'worker-reduced-toggle', 'worker-safe-density',
+      'worker-congestion', 'worker-translation', 'worker-replay',
+    ]));
+  });
+
+  it('detects visible active rectangles that overlap after reflow', () => {
+    const a = { id: 'a', x: 10, y: 10, width: 50, height: 20 };
+    const b = { id: 'b', x: 30, y: 20, width: 50, height: 20 };
+    expect(findOverlappingActivePair([a, b], 100, 100)).toEqual(['a', 'b']);
+    expect(findOverlappingActivePair([a, { ...b, y: 31 }], 100, 100)).toBeNull();
+    expect(findOverlappingActivePair([{ ...a, x: 101 }, b], 100, 100)).toBeNull();
+  });
+
+  it('retains bounded timing and geometry when a scenario fails before its final assertion', async () => {
+    const raw = { sourcePrefixed: true, sourceHooked: true, requestAtEpochMs: 1000,
+      frames: [], bounds: [], firstEntry: {}, ingress: {}, overflow: 0,
+      workers: [{ ready: true, stats: [], sample: {
+        frames: [{ workMs: 4, preClearMs: 2 }], bounds: [{ id: 'WINDOWS193_SHORT',
+          left: 10, top: 10, right: 20, bottom: 20 }], firstEntry: { WINDOWS193_SHORT: 1010 },
+        ingress: { WINDOWS193_SHORT: 1000 }, overflow: 0,
+        exact: { frames: [{ workMs: 3 }], drains: [{ workMs: 1 }],
+          dispositions: [], active: [], activeNow: [], config: {}, overflow: 0 },
+      } }],
+    };
+    const page = { setViewportSize: async () => {}, emulateMedia: async () => {},
+      route: async () => { throw new Error('Synthetic fixture setup failure'); },
+      screenshot: async () => {}, isClosed: () => false, close: async () => {},
+      evaluate: async (fn: () => unknown) => fn.toString().includes('const probe = window.__ytPlacementProbe')
+        ? raw : undefined,
+      waitForTimeout: async () => {},
+    };
+    const result = await runPlacementTimingFixture({
+      context: { newPage: async () => page }, root: process.cwd(), output: '/tmp', extensionId: 'fixture',
+    });
+    expect(result.status).toBe('failed');
+    expect(result.scenarios[0]).toMatchObject({ status: 'failed', errorType: 'Error',
+      frameWorkMs: { count: 1, p95: 4 }, exactWorkerDrainMs: { count: 1, p95: 1 },
+      bounds: [{ id: 'WINDOWS193_SHORT' }], screenshot: 'placement-worker-scroll.png' });
+  });
+
   it('summarizes bounded, nonnegative frame samples without treating invalid values as work', () => {
     expect(summarizeSamples([])).toEqual({ count: 0, p50: null, p95: null, max: null });
     expect(summarizeSamples([10, 1, Infinity, -1, 3, 2, 4])).toEqual({
