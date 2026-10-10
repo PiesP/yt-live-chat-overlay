@@ -54,6 +54,7 @@ vi.spyOn(performance, 'now').mockReturnValue(10000);
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
+import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
 import {
   getBidiLayoutCacheUsage,
   resolveTextDirection,
@@ -1281,13 +1282,15 @@ describe('Worker message protocol', () => {
       postMessageSpy.mockClear();
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 7 }));
 
-      expect(postMessageSpy).toHaveBeenCalledWith({
+      expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
         type: 'messageSnapshot',
         requestId: 7,
+        epoch: 0,
         activeMessageIds: [],
         pendingMessageIds: ['pending-message'],
         processedBatchSequence: 0,
-      });
+        motionSnapshot: expect.objectContaining({ activeMotions: [] }),
+      }));
     });
 
     it('uses the pending array as the single queue cursor while preserving every snapshot id', () => {
@@ -1300,13 +1303,62 @@ describe('Worker message protocol', () => {
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 8 }));
 
       expect(renderer).not.toHaveProperty('pendingQueueOffset');
-      expect(postMessageSpy).toHaveBeenCalledWith({
+      expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
         type: 'messageSnapshot',
         requestId: 8,
+        epoch: 0,
         activeMessageIds: [],
         pendingMessageIds: ['pending-first', 'pending-second'],
         processedBatchSequence: 0,
+        motionSnapshot: expect.objectContaining({ activeMotions: [] }),
+      }));
+    });
+
+    it('snapshots the actual active timeline with a frozen clock during pause', () => {
+      vi.spyOn(performance, 'now').mockReturnValue(10_000);
+      const renderer = initializeRenderer();
+      renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [makeWorkerMessage({ id: 'future-active' })],
+      }));
+      const internals = renderer as unknown as {
+        drainQueue(now: number, width: number, height: number): void;
+        activeMessages: ActiveMessage[];
+      };
+      internals.drainQueue(10_000, 640, 360);
+      const active = internals.activeMessages[0];
+      expect(active).toBeDefined();
+      if (!active) return;
+      active.startTime = 10_500;
+      active.fadeStartTime = 10_450;
+      active.pausedDuration = 300;
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: true }));
+      vi.spyOn(performance, 'now').mockReturnValue(10_600);
+
+      postMessageSpy.mockClear();
+      renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 9, epoch: 0 }));
+      const snapshot = postMessageSpy.mock.calls.at(-1)?.[0] as {
+        type: string; epoch: number; motionSnapshot: {
+          effectiveNowEpochMs: number; capturedAtEpochMs: number; isPaused: boolean;
+          viewportWidthPx: number; exitPaddingPx: number;
+          activeMotions: Array<{ id: string; startEpochMs: number; fadeStartEpochMs: number;
+            startX: number; durationMs: number; laneIndex: number }>;
+        };
+      };
+      expect(snapshot.epoch).toBe(0);
+      expect(isValidWorkerMessageSnapshot(snapshot)).toBe(true);
+      expect(snapshot.motionSnapshot).toMatchObject({
+        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+        effectiveNowEpochMs: performance.timeOrigin + 10_000,
+        capturedAtEpochMs: performance.timeOrigin + 10_600,
       });
+      expect(snapshot.motionSnapshot.activeMotions).toEqual([
+        expect.objectContaining({
+          id: active.id, startX: active.startX, durationMs: active.duration,
+          laneIndex: active.laneIndex,
+          startEpochMs: performance.timeOrigin + 10_800,
+          fadeStartEpochMs: performance.timeOrigin + 10_750,
+        }),
+      ]);
     });
 
     it('keeps only the latest translation per id and reflows once per bounded frame batch', () => {
