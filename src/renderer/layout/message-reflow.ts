@@ -45,7 +45,7 @@ export function reflowMotionPlan(
 ): MessageMotionPlan {
   const elapsed = now - previous.startTime;
   const startTime =
-    elapsed < 0
+    previous.viewportEntryTime > now
       ? Math.max(
           previous.startTime,
           previous.viewportEntryTime - (next.viewportEntryTime - next.startTime)

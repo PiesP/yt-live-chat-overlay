@@ -91,6 +91,9 @@ See [Contributing](./CONTRIBUTING.md) for development setup and validation, and
 the [extension guide](./extension/README.md) for extension architecture, builds,
 and unpacked loading.
 
+The [rendering timing contract](./docs/rendering-timing.md) describes reservation
+safety, entry ordering, reflow capacity, and Worker recovery.
+
 The weekly Deep Verification workflow may reuse a previous successful duplication,
 fast mutation, or renderer mutation result when that gate's tracked inputs and
 runner platform match, its origin run is verified, and no later selected gate

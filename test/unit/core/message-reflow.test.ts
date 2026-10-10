@@ -81,6 +81,19 @@ describe('collision-aware message reflow', () => {
     expect(reconciled.viewportEntryTime).toBeCloseTo(previous.viewportEntryTime);
   });
 
+  it.each(['scroll', 'reverse'] as const)('preserves %s entry after motion starts outside the viewport', (mode) => {
+    const previous = computeMessageMotionPlan({
+      ...input, mode, batchIndex: 5, maxStaggerDelayMs: 1200,
+      mediumStaggerDelayMs: 1200, staggerSample: 1,
+    });
+    const now = previous.startTime + 1;
+    expect(previous.viewportEntryTime).toBeGreaterThan(now);
+    const next = computeMessageMotionPlan({ ...input, mode, now, screenWidth: 960 });
+    const reconciled = reflowMotionPlan(previous, next, now, 100);
+    expect(reconciled.viewportEntryTime).toBeCloseTo(previous.viewportEntryTime);
+    expect(reconciled.startTime).toBeGreaterThan(now);
+  });
+
   it('retains safe same-lane scrolling sharing instead of reserving full lifetimes', () => {
     const leading = computeMessageMotionPlan({ ...input, mode: 'scroll', velocityPxPerSec: 200 });
     const following = computeMessageMotionPlan({ ...input, mode: 'scroll', placementWaitMs: 1000, velocityPxPerSec: 200 });

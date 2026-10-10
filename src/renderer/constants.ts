@@ -148,6 +148,8 @@ export const EMPTY_CHAT_MESSAGE: ChatMessage = {
 
 /** Canvas-side message state used by the render loop. */
 export interface CanvasMessage {
+  /** Whether a subsequent permanent disposition contributes to drop metrics. */
+  trackDrops?: boolean;
   /** Last committed geometry, retained for resize and mode transitions. */
   motion?: MessageMotionPlan;
   message: ChatMessage;

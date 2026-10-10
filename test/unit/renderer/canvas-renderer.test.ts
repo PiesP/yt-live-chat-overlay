@@ -1280,6 +1280,63 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it.each([false, true])('restores Worker progress and future reservations across fallback (paused=%s)', async (paused) => {
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings({
+      speedPxPerSec: 350, scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
+      exitPaddingPx: 100, headwayGapRatio: 0.08,
+    }));
+    const internals = renderer as unknown as {
+      activeMessages: CanvasMessage[];
+      pendingQueue: { toArray(): ChatMessage[] };
+      fallbackInProgress: boolean;
+      workerManager: { snapshotMessages(): Promise<WorkerRecoveryMessage[]>; destroy(): void; setActive(active: boolean): void };
+      replaceCanvas(): boolean;
+      startRenderLoop(): void;
+    };
+    if (paused) renderer.pause();
+    vi.spyOn(internals, 'replaceCanvas').mockReturnValue(true);
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
+    const origin = performance.timeOrigin;
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
+      ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
+        message: makeMessage(`active-${laneIndex}`, 'active'), trackDrops: false,
+        activeMotion: {
+          id: `active-${laneIndex}`, mode: 'scroll', startX: 640,
+          width: 100, height: 20, y: laneIndex * 20, laneIndex, laneSlotCount: 1,
+          durationMs: 5000, startEpochMs: origin + start, fadeStartEpochMs: origin + start,
+          speedTier: 1, epoch: 0, capturedAtEpochMs: origin + 1000,
+          effectiveNowEpochMs: origin + 1000, isPaused: paused,
+          viewportWidthPx: 640, exitPaddingPx: 100,
+        },
+      })),
+      { message: makeMessage('pending-only', 'pending'), trackDrops: true },
+    ]);
+    clock = 1500;
+    renderer.fallbackToMainThread('controlled-snapshot');
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+    expect(internals.activeMessages).toHaveLength(2);
+    expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
+    const [visible, future] = internals.activeMessages;
+    expect(visible?.startTime).toBe(0);
+    expect(future?.startTime).toBe(2000);
+    const effectiveNow = paused ? 1000 : 1500;
+    expect(visible?.x).toBeCloseTo(640 - effectiveNow * (840 / 5000));
+    expect(future?.x).toBe(640);
+    expect(rendered).not.toHaveBeenCalled();
+    if (paused) {
+      clock = 5000;
+      renderer.resume();
+      expect(visible?.pausedDuration).toBe(4000);
+      expect(future && future.startTime + future.pausedDuration).toBe(6000);
+    }
+    renderer.destroy();
+  });
+
   it('keeps failed canvas recovery unhealthy and retries without losing buffered ingress', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);

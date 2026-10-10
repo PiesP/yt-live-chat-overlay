@@ -653,7 +653,9 @@ export class CanvasRenderer extends RendererBase {
     }
     for (const dropped of reconciled.dropped) {
       this.messageActivator.releaseMessage(dropped.message);
-      this.observability.onMessagesDropped(1, dropped.reason);
+      if (dropped.message.trackDrops !== false) {
+        this.observability.onMessagesDropped(1, dropped.reason);
+      }
     }
   }
 
@@ -998,8 +1000,8 @@ export class CanvasRenderer extends RendererBase {
   private mergeRecoveredMessages(
     snapshotMessages: readonly WorkerRecoveryMessage[],
     fallbackIngress: readonly FallbackIngressEntry[]
-  ): FallbackIngressEntry[] {
-    const merged: FallbackIngressEntry[] = [];
+  ): WorkerRecoveryMessage[] {
+    const merged: WorkerRecoveryMessage[] = [];
     const indexById = new Map<string, number>();
     for (const entry of [...snapshotMessages, ...fallbackIngress]) {
       const id = entry.message.id;
@@ -1887,6 +1889,7 @@ export class CanvasRenderer extends RendererBase {
       {
         onActivated: (cm) => {
           cm.motion = motion;
+          cm.trackDrops = this.trackedPendingMessages.has(message);
           this.activeMessages.push(cm);
           const slotCount = placement.slotCount;
           cm.slotCount = slotCount;
@@ -2435,6 +2438,61 @@ export class CanvasRenderer extends RendererBase {
 
   // ── Worker recovery / fallback ──────────────────────────────────────────
 
+  /** Restore a validated snapshot before rebuilding all current lane reservations. */
+  private restoreWorkerActiveMessage(entry: WorkerRecoveryMessage, now: number): boolean {
+    const saved = entry.activeMotion;
+    if (!saved) return false;
+    // Epoch clocks cross the Worker boundary; animation remains monotonic in
+    // this realm. A paused snapshot preserves its frozen progress on receipt.
+    const frozenNow = this.pausedAt ?? now;
+    const shift = saved.isPaused
+      ? performance.timeOrigin + frozenNow - saved.effectiveNowEpochMs
+      : 0;
+    const startTime = saved.startEpochMs - performance.timeOrigin + shift;
+    const fadeStartTime = saved.fadeStartEpochMs - performance.timeOrigin + shift;
+    if (frozenNow - startTime >= saved.durationMs) return true;
+    const motion = motionPlanFromMessage(
+      {
+        startTime,
+        pausedDuration: 0,
+        startX: saved.startX,
+        width: saved.width,
+        duration: saved.durationMs,
+      },
+      saved.mode,
+      saved.viewportWidthPx,
+      saved.exitPaddingPx
+    );
+    const translationGeneration = this.translationConfigurationGeneration;
+    this.messageActivator.activate(
+      entry.message,
+      startTime,
+      saved.width,
+      saved.height,
+      saved.y,
+      {
+        onActivated: (message) => {
+          message.motion = motion;
+          message.trackDrops = entry.trackDrops;
+          message.fadeStartTime = fadeStartTime;
+          message.slotCount = saved.laneSlotCount;
+          this.activeMessages.push(message);
+        },
+        // The Worker has already reported this activation.
+        onMessageRendered: () => {},
+        onTranslationResult: (message, text) => {
+          this.queueTranslationResult(message, text, translationGeneration);
+        },
+      },
+      saved.durationMs,
+      saved.startX,
+      saved.laneIndex,
+      0,
+      saved.speedTier
+    );
+    return true;
+  }
+
   /**
    * Replace the current canvas with a new one and acquire a fresh 2D context.
    * Used when the original canvas is unrecoverable (transferred to a dead
@@ -2540,14 +2598,20 @@ export class CanvasRenderer extends RendererBase {
         for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
 
         const dims = this.overlay.getDimensions();
+        const now = performance.now();
+        this.entryPacing.clear();
+        this.drainCursors.clear();
+        this.drainResumePriority = undefined;
         if (dims) {
-          this.laneAllocator.reset(dims);
+          this.laneAllocator.reset(dims, this.pausedAt ?? now);
         }
-        this.laneAllocator.resetBatch();
+        this.laneAllocator.resetBatch(this.pausedAt ?? now);
 
         for (const entry of this.mergeRecoveredMessages(messages, fallbackIngress)) {
+          if (dims && this.restoreWorkerActiveMessage(entry, now)) continue;
           this.enqueueMessage(entry.message, entry.trackDrops);
         }
+        if (dims && this.activeMessages.length > 0) this.reflowActiveMessages(dims);
         // Close the transition before yielding to another microtask. Any
         // ingress queued after the snapshot continuation will now enter the
         // restored main-thread queue directly instead of a stranded buffer.
