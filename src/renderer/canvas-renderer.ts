@@ -610,7 +610,7 @@ export class CanvasRenderer extends RendererBase {
       headwayGapRatio: this.settings.headwayGapRatio,
       now,
     });
-    this.laneAllocator.reset(dimensions);
+    this.laneAllocator.reset(dimensions, now);
     this.activeMessagesByLane.clear();
     this.activeMessages.length = 0;
     for (const placement of reconciled.placements) {

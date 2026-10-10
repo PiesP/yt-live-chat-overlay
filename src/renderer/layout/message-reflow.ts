@@ -10,8 +10,6 @@ import {
   motionPlansCollide,
 } from '@renderer/layout/message-schedule';
 
-const MAX_REFLOW_LANE_ATTEMPTS = 128;
-
 /** Reconstruct paused time while retaining the prior viewport and measured geometry. */
 export function previousMotionPlan(
   message: {
@@ -100,6 +98,8 @@ export function reconcileMessagePlacements<T>(
   dropped: Array<{ message: T; reason: 'oversized' | 'reflow_capacity' }>;
 } {
   const placements: ReflowPlacement<T>[] = [];
+  const occupants = new Map<number, ReflowPlacement<T>[]>();
+  const scratch = new Set<ReflowPlacement<T>>();
   const dropped: Array<{ message: T; reason: 'oversized' | 'reflow_capacity' }> = [];
   const displaced: ReflowCandidate<T>[] = [];
   const tryLane = (
@@ -111,7 +111,11 @@ export function reconcileMessagePlacements<T>(
     const y =
       computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) +
       Math.floor((slotCount * options.laneHeight - candidate.height) / 2);
-    for (const other of placements) {
+    scratch.clear();
+    for (let lane = laneIndex - 1; lane <= laneIndex + slotCount; lane++) {
+      for (const other of occupants.get(lane) ?? []) scratch.add(other);
+    }
+    for (const other of scratch) {
       if (other.y + other.height <= y || other.y >= y + candidate.height) continue;
       if (
         motionPlansCollide(candidate.motion, other.motion, options.headwayGapRatio, options.now)
@@ -119,7 +123,17 @@ export function reconcileMessagePlacements<T>(
         return false;
       }
     }
-    placements.push({ ...candidate, laneIndex, slotCount, y });
+    const placed = { ...candidate, laneIndex, slotCount, y };
+    placements.push(placed);
+    for (let offset = 0; offset < slotCount; offset++) {
+      const lane = laneIndex + offset;
+      let entries = occupants.get(lane);
+      if (!entries) {
+        entries = [];
+        occupants.set(lane, entries);
+      }
+      entries.push(placed);
+    }
     return true;
   };
   for (const candidate of candidates) {
@@ -134,11 +148,9 @@ export function reconcileMessagePlacements<T>(
     const slotCount = Math.max(1, Math.ceil(candidate.height / options.laneHeight));
     const maxLane = options.laneCount - slotCount;
     let placed = false;
-    // Sample across the full safe zone if an unusually tall viewport exceeds
-    // the attempt budget. Keep synchronous resize/translation work bounded.
-    const attempts = Math.min(maxLane + 1, MAX_REFLOW_LANE_ATTEMPTS);
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const offset = attempts > 1 ? Math.round((attempt * maxLane) / (attempts - 1)) : 0;
+    // Scan every actual lane before declaring capacity unavailable. Indexed
+    // occupants bound pair checks to each candidate's vertical block.
+    for (let offset = 0; offset <= maxLane; offset++) {
       const lane = options.mode === 'bottom' ? maxLane - offset : offset;
       if (tryLane(candidate, lane, slotCount)) {
         placed = true;

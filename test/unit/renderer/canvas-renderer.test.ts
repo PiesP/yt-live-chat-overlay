@@ -91,6 +91,7 @@ describe('Canvas reservation safety', () => {
       laneAllocator: LaneAllocator;
       activeMessages: CanvasMessage[];
       reducedMotion: boolean;
+      pausedAt: number | null;
       pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
       estimateDimensions(message: ChatMessage): { width: number; height: number };
       drainQueue(now: number): void;
@@ -135,6 +136,17 @@ describe('Canvas reservation safety', () => {
       expect(message.motion?.isScrolling).toBe(false);
       expect(message.motion && messageXAtTime(message.motion, message.startTime + 600)).toBe(Math.floor((640 - message.width) / 2));
     }
+    renderer.destroy();
+  });
+
+  it('rebuilds reservations at the frozen pause clock before resume shifts timers', () => {
+    const { renderer, internals } = setup();
+    internals.pausedAt = 1000;
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    internals.reflowActiveMessages({ width: 640, height: 40 });
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 1000)).toBe(true);
+    internals.laneAllocator.shiftAll(9000);
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(true);
     renderer.destroy();
   });
 });

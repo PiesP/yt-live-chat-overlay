@@ -138,7 +138,7 @@ export class LaneAllocator {
     this.options.laneDensityFactor = factor;
   }
 
-  reset(dimensions: OverlayDimensions | null): void {
+  reset(dimensions: OverlayDimensions | null, now: number = performance.now()): void {
     this.heap = [];
     this.indexMap = new Map();
     this.collidedLanes.clear();
@@ -172,7 +172,6 @@ export class LaneAllocator {
     });
 
     // Uniform initialization: all lanes start at the same available time.
-    const now = performance.now();
     this.heap = buildLaneHeap(this.numLanes, now, this.indexMap);
   }
 

@@ -16,6 +16,16 @@ const options = {
 };
 
 describe('collision-aware message reflow', () => {
+  it('finds the only free lane in a tall viewport before reporting capacity loss', () => {
+    const motion = computeMessageMotionPlan(input);
+    const candidates = Array.from({ length: 129 }, (_, laneIndex) => ({
+      message: `retained-${laneIndex}`, laneIndex, height: 20, motion,
+    })).filter((entry) => entry.laneIndex !== 64);
+    candidates.push({ message: 'displaced', laneIndex: 129, height: 20, motion });
+    const result = reconcileMessagePlacements(candidates, { ...options, laneCount: 129, viewportHeight: 2580 });
+    expect(result.dropped).toEqual([]);
+    expect(result.placements.find((p) => p.message === 'displaced')?.laneIndex).toBe(64);
+  });
   it('moves two clipped fixed lanes into distinct legal blocks without changing future starts', () => {
     const future = computeMessageMotionPlan({ ...input, placementWaitMs: 1000 });
     const result = reconcileMessagePlacements([
