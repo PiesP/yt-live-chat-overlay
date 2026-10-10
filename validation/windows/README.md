@@ -147,8 +147,13 @@ For a baseline comparison, make a baseline-only harness commit that changes
 record both source and bundle hashes with the receipts. The baseline receipt
 sets `comparisonOnly: true`; it still requires the real parser, renderer,
 Backlog activation, unclamped geometry and source guards, while allowing the
-old two-slot row and extra Worker burst acceleration. The candidate commit
-keeps the constant `false` and applies strict spacing and speed assertions. Preserve
+old two-slot row and extra Worker burst acceleration. If the original
+capacity-constrained gap reflow removes the sampled Backlog ID, the baseline
+receipt records that absence, any observed per-ID drop disposition, and that
+the exact cause is unobserved. Worker-to-Canvas recovery must still attach and
+report its configuration; same-ID recovery retention is marked unverified
+after a baseline reflow absence. The candidate commit keeps the constant
+`false` and requires same-ID retention through reflow and recovery. Preserve
 both attempts and their source, bundle and probe hashes outside Git. Do not
 interpret a `comparisonOnly` pass as a fix or substitute it for candidate
 acceptance. The ordinary real-YouTube smoke retains its existing route and
