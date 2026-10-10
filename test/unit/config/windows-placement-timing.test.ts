@@ -68,10 +68,6 @@ describe('Windows placement timing probe', () => {
       'WINDOWS195_BACKLOG_LONG')).toThrow(/video geometry/);
     expect(() => assertBacklogReflow(before, { ...after, activeNow: [] },
       'WINDOWS195_BACKLOG_LONG')).toThrow(/disappeared/);
-    expect(assertBacklogReflow(before, { ...after, activeNow: [] },
-      'WINDOWS195_BACKLOG_LONG', true)).toBe(false);
-    expect(() => assertBacklogReflow(before, { ...after, config: before.config },
-      'WINDOWS195_BACKLOG_LONG', true)).toThrow(/video geometry/);
   });
 
   it('adds a Canvas probe only at the expected packaged app entry', () => {

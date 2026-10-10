@@ -125,14 +125,15 @@ pitch in `data-preview-rows`, `data-preview-row-height` and
 
 The speed phase routes 51 chat actions through the normal response parser to
 trigger Backlog injection, then four ordinary actions through the same parser
-to raise the burst detector without crowding the subsequent reflow. The fixture
-grows its video player from the initial 860px CSS cap to 1000px during resize
-and requires the logical video dimensions to grow before setting Lane Gap 0.
-One Backlog message has
-long Japanese text so its committed duration remains between the configured
+to raise the burst detector. The fixture grows its video player from the
+initial 860px CSS cap to 1000px during resize and requires the logical video
+dimensions to grow while the same Backlog ID stays active. Lane Gap 0 and 8
+were already sampled before the burst, and the settings slider exercises the
+gap again after recovery. One Backlog message has long Japanese text so its
+committed duration remains between the configured
 5–30 second bounds. The receipt keeps its serialized burst multiplier
 (Worker), committed travel distance, actual velocity, duration, geometric entry/exit, queue residence,
-resize/spacing reflow and pause/resume observations. An observed Worker error
+resize reflow and pause/resume observations. An observed Worker error
 event exercises the application's recovery into Canvas; public YouTube traffic
 is never altered. A private source-bound probe is inserted into the packaged
 `page-script.js` closure before its ordinary `main()` call to observe Canvas
@@ -147,13 +148,10 @@ For a baseline comparison, make a baseline-only harness commit that changes
 record both source and bundle hashes with the receipts. The baseline receipt
 sets `comparisonOnly: true`; it still requires the real parser, renderer,
 Backlog activation, unclamped geometry and source guards, while allowing the
-old two-slot row and extra Worker burst acceleration. If the original
-capacity-constrained gap reflow removes the sampled Backlog ID, the baseline
-receipt records that absence, any observed per-ID drop disposition, and that
-the exact cause is unobserved. Worker-to-Canvas recovery must still attach and
-report its configuration; same-ID recovery retention is marked unverified
-after a baseline reflow absence. The candidate commit keeps the constant
-`false` and requires same-ID retention through reflow and recovery. Preserve
+old two-slot row and extra Worker burst acceleration. Both baseline and
+candidate require same-ID retention through actual video resize and
+Worker-to-Canvas recovery. The candidate commit keeps the constant `false`
+and applies strict spacing and speed assertions. Preserve
 both attempts and their source, bundle and probe hashes outside Git. Do not
 interpret a `comparisonOnly` pass as a fix or substitute it for candidate
 acceptance. The ordinary real-YouTube smoke retains its existing route and
