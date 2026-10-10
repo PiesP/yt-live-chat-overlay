@@ -372,7 +372,7 @@ function attachWorkerRendererProbe(renderer) {
 
 function messageAction(id, text) {
   return { addChatItemAction: { item: { liveChatTextMessageRenderer: {
-    id, authorName: { simpleText: `Fixture viewer ${id}` }, message: { runs: [{ text }] },
+    id, authorName: { simpleText: `Fixture viewer ${id}` }, message: { runs: [{ text: text.includes(id) ? text : `${id} ${text}` }] },
   } } } };
 }
 
@@ -398,7 +398,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const replay = mode === 'replay';
   const replayObservations = {};
   const ids = replay ? TOKENS.slice(3, 6) : mode === 'reverse' ? [TOKENS[2]] : TOKENS.slice(0, 2);
-  const paidId = `windows193-paid-${mode}`;
+  const paidId = `WINDOWS193_PAID_${mode.toUpperCase()}`;
   const actions = ids.map((id) => messageAction(id, id === TOKENS[1] ? `${id}_${'W'.repeat(100)}` : id));
   if (!replay) actions.push({ addChatItemAction: { item: { liveChatPaidMessageRenderer: {
     id: paidId, authorName: { simpleText: 'Fixture donor' },
