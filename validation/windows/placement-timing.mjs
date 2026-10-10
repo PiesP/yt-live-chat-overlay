@@ -34,7 +34,7 @@ function installProbeRuntime(options) {
   const state = {
     frames: [], bounds: [], firstEntry: {}, ingress: {}, stats: [], workers: [],
     sourcePrefixed: false, sourceHooked: false, overflow: 0, ready: false, canvas: null,
-    frameCount: 0, reportCount: 0,
+    frameCount: 0, reportCount: 0, videoEntry: {},
   };
   scope.__ytPlacementProbe = state;
   const epochNow = () => performance.timeOrigin + performance.now();
@@ -59,8 +59,9 @@ function installProbeRuntime(options) {
     };
     if (state.bounds.length < MAX_SAMPLES) state.bounds.push(bound);
     else state.overflow++;
-    const canvasWidth = ctx.canvas.width / Math.max(1, transform.a);
-    const canvasHeight = ctx.canvas.height / Math.max(1, transform.d);
+    // Bounds and viewport use backing-store pixels after applying the transform.
+    const canvasWidth = ctx.canvas.width;
+    const canvasHeight = ctx.canvas.height;
     if (bound.right > 0 && bound.left < canvasWidth && bound.bottom > 0 && bound.top < canvasHeight) {
       state.firstEntry[id] ??= bound.atEpochMs;
     }
@@ -138,6 +139,18 @@ function installProbeRuntime(options) {
     });
     return;
   }
+  const replayOffsets = { WINDOWS193_REPLAY_DUE: 10000,
+    WINDOWS193_REPLAY_NEXT: 10001, WINDOWS193_REPLAY_FUTURE: 11500 };
+  new MutationObserver(() => {
+    for (const element of document.querySelectorAll('.yt-live-chat-overlay-live-region > p')) {
+      const id = element.dataset.messageId;
+      if (ids.has(id) && !state.videoEntry[id] && replayOffsets[id] !== undefined) {
+        const videoTimeMs = document.querySelector('video')?.currentTime * 1000;
+        state.videoEntry[id] = { atEpochMs: epochNow(), videoTimeMs,
+          offsetMs: replayOffsets[id], videoTimeErrorMs: videoTimeMs - replayOffsets[id] };
+      }
+    }
+  }).observe(document, { childList: true, subtree: true });
   if (options.forceFallback) {
     Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
       configurable: true,
@@ -266,23 +279,41 @@ function attachWorkerRendererProbe(renderer) {
         startX: active?.startX ?? null, durationMs: active?.duration ?? null,
         pendingDepth: this.pendingQueue.length,
         staggerDelayMs: active?.motion?.staggerDelayMs ?? null,
-        isScrolling: active?.motion?.isScrolling ?? null });
+        isScrolling: active?.motion?.isScrolling ?? null,
+        geometricEntryAtEpochMs: active?.motion
+          ? performance.timeOrigin + active.motion.viewportEntryTime
+          : (() => {
+            if (!active || !this.config || !Number.isFinite(this.logicalWidth) ||
+              ![active.startX, active.startTime, active.pausedDuration, active.duration, active.width,
+                this.config.exitPaddingPx].every(Number.isFinite)) return null;
+            const reverse = this.config?.danmakuMode === 'reverse';
+            const fixed = this.config?.danmakuMode === 'top' || this.config?.danmakuMode === 'bottom' ||
+              (this.config?.reducedMotion && !this.config?.ignoreReducedMotion);
+            const endX = reverse ? this.logicalWidth + this.config.exitPaddingPx
+              : -active.width - this.config.exitPaddingPx;
+            const velocity = Math.abs(endX - active.startX) / active.duration;
+            const distance = fixed ? 0 : reverse ? Math.max(0, -active.startX - active.width)
+              : Math.max(0, active.startX - this.logicalWidth);
+            return performance.timeOrigin + active.startTime + active.pausedDuration +
+              (distance === 0 ? 0 : distance / velocity);
+          })(),
+        geometricEntryProvenance: active?.motion ? 'committed motion plan' : 'committed baseline path' });
       queuedAt.delete(message.id);
     }
     return result;
   };
   const nativeDrop = renderer.recordDrop;
-  renderer.recordDrop = function (message) {
-    const reason = inEnqueue ? 'queue-capacity' : inDrain &&
-      message.height > this.numLanes * this.laneHeight ? 'oversize' : 'other';
-    exact.drops[reason] = (exact.drops[reason] ?? 0) + 1;
+  renderer.recordDrop = function (message, ...args) {
+    const reason = typeof args[0] === 'string' ? args[0] : inEnqueue ? 'queue-capacity'
+      : inDrain && message.height > this.numLanes * this.laneHeight ? 'oversize' : 'other';
+    if (message.trackDrops !== false) exact.drops[reason] = (exact.drops[reason] ?? 0) + 1;
     if (isFixture(message.id)) {
-      bounded(exact.dispositions, { id: message.id, kind: 'dropped', reason,
+      bounded(exact.dispositions, { id: message.id, kind: 'dropped', reason, tracked: message.trackDrops !== false,
         queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
         atEpochMs: epochNow() });
       queuedAt.delete(message.id);
     }
-    return nativeDrop.call(this, message);
+    return nativeDrop.call(this, message, ...args);
   };
   const nativeCollision = renderer.checkCollision;
   renderer.checkCollision = function (...args) {
@@ -341,7 +372,7 @@ function attachWorkerRendererProbe(renderer) {
 
 function messageAction(id, text) {
   return { addChatItemAction: { item: { liveChatTextMessageRenderer: {
-    id, authorName: { simpleText: 'Fixture viewer' }, message: { runs: [{ text }] },
+    id, authorName: { simpleText: `Fixture viewer ${id}` }, message: { runs: [{ text }] },
   } } } };
 }
 
@@ -366,7 +397,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   let replayRequests = 0;
   const replay = mode === 'replay';
   const replayObservations = {};
-  const ids = replay ? TOKENS.slice(3) : mode === 'reverse' ? [TOKENS[2]] : TOKENS.slice(0, 2);
+  const ids = replay ? TOKENS.slice(3, 6) : mode === 'reverse' ? [TOKENS[2]] : TOKENS.slice(0, 2);
   const paidId = `windows193-paid-${mode}`;
   const actions = ids.map((id) => messageAction(id, id === TOKENS[1] ? `${id}_${'W'.repeat(100)}` : id));
   if (!replay) actions.push({ addChatItemAction: { item: { liveChatPaidMessageRenderer: {
@@ -380,7 +411,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const batches = new Map([
     ['1', actions],
     ['2', transition === 'congestion'
-      ? Array.from({ length: 80 }, (_, index) => messageAction(
+      ? Array.from({ length: 50 }, (_, index) => messageAction(
         `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
       : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
         'Bounded transition fixture')]],
@@ -439,7 +470,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       const probe = window.__ytPlacementProbe;
       if (!probe) return null;
       return { sourcePrefixed: probe.sourcePrefixed, sourceHooked: probe.sourceHooked,
-        requestAtEpochMs: probe.requestAtEpochMs,
+        requestAtEpochMs: probe.requestAtEpochMs, videoEntry: probe.videoEntry,
         frames: probe.frames, bounds: probe.bounds, firstEntry: probe.firstEntry,
         ingress: probe.ingress, overflow: probe.overflow,
         workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })) };
@@ -460,6 +491,13 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         selected?.firstEntry?.[id] !== undefined && ingress[id] !== undefined
           ? selected.firstEntry[id] - ingress[id] : null])),
       firstEntryAtEpochMs: selected?.firstEntry ?? {},
+      firstEntryScope: 'first sampled visible text ink; includes fade and frame quantization',
+      geometryUnits: 'backing-store pixels',
+      replayVideoTime: raw?.videoEntry ?? {},
+      geometricEntryLatencyMs: Object.fromEntries((selected?.exact?.dispositions ?? [])
+        .filter((entry) => entry.kind === 'activated' && Number.isFinite(entry.geometricEntryAtEpochMs))
+        .map((entry) => [entry.id, ingress[entry.id] === undefined ? null
+          : entry.geometricEntryAtEpochMs - ingress[entry.id]])),
       frameWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.workMs) ?? []),
       preClearWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.preClearMs) ?? []),
       exactWorkerFrameMs: selected?.exact

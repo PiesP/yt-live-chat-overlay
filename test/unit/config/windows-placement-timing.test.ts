@@ -58,10 +58,10 @@ describe('Windows placement timing probe', () => {
     });
   });
 
-  it('associates a cached fixture bitmap with actual Worker canvas draw bounds', () => {
+  it.each([1, 2])('associates a cached bitmap with viewport bounds at scale %s', (scale) => {
     const listeners: Record<string, (event: { data: unknown }) => void> = {};
     const messages: Array<{ type: string; sample?: { firstEntry: Record<string, number>; bounds: unknown[] } }> = [];
-    const overlay = { width: 640, height: 360 };
+    const overlay = { width: 640 * scale, height: 360 * scale };
     const bitmap = { width: 100, height: 24 };
     let now = 5;
     class FakeContext {
@@ -72,7 +72,7 @@ describe('Windows placement timing probe', () => {
       drawImage(_image: object, _x: number, _y: number, _width: number, _height: number) {}
       clearRect(_x: number, _y: number, _width: number, _height: number) {}
       measureText() { return { width: 100, actualBoundingBoxAscent: 20, actualBoundingBoxDescent: 4 }; }
-      getTransform() { return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }; }
+      getTransform() { return { a: scale, b: 0, c: 0, d: scale, e: 0, f: 0 }; }
     }
     const sandbox = {
       OffscreenCanvasRenderingContext2D: FakeContext,
@@ -93,7 +93,7 @@ describe('Windows placement timing probe', () => {
       cache.fillText('WINDOWS193_SHORT', 0, 0);
       const display = new FakeContext(overlay);
       display.clearRect(0, 0, 640, 360);
-      display.drawImage(bitmap, 12, 20, 100, 24);
+      display.drawImage(bitmap, 500, 20, 100, 24);
     });
     listeners.message?.({ data: { type: 'ytPlacementFlush' } });
 
@@ -101,7 +101,8 @@ describe('Windows placement timing probe', () => {
     expect(sample?.firstEntry.WINDOWS193_SHORT).toBeGreaterThan(1000);
     expect(sample?.bounds).toHaveLength(1);
     expect(sample?.bounds[0]).toMatchObject({
-      id: 'WINDOWS193_SHORT', left: 12, top: 20, right: 112, bottom: 44,
+      id: 'WINDOWS193_SHORT', left: 500 * scale, top: 20 * scale,
+      right: 600 * scale, bottom: 44 * scale,
     });
   });
 
@@ -111,7 +112,7 @@ describe('Windows placement timing probe', () => {
       enqueueMessage(message) { this.pendingQueue.push(message); return true; },
       activateMessage(message) { this.activeMessages.push({ ...message, x: 10, y: 5,
         startX: 10, duration: 100, laneIndex: 1 }); },
-      recordDrop() {}, checkCollision() { return true; },
+      recordDrop(message, reason) { this.lastDrop = [message.id, reason]; }, checkCollision() { return true; },
       findPlacement() { return { laneIndex: 1 }; },
       drainQueue() { const message = this.pendingQueue.shift(); if (message) this.activateMessage(message); },
       renderFrame() { this.drainQueue(); }, handleMessage() {},
@@ -121,6 +122,7 @@ describe('Windows placement timing probe', () => {
     expect(suffix).toContain('(sample)');
     const listeners: Record<string, (event: { data: unknown }) => void> = {};
     const messages: Array<{ sample?: { exact?: {
+      drops: Record<string, number>;
       drains: unknown[]; frames: unknown[]; dispositions: Array<{ queueResidenceMs: number }>;
     } } }> = [];
     let now = 1;
@@ -131,18 +133,23 @@ describe('Windows placement timing probe', () => {
         listeners[type] = listener;
       },
       postMessage: (message: { sample?: { exact?: {
-        drains: unknown[]; frames: unknown[]; dispositions: Array<{ queueResidenceMs: number }>;
+        drops: Record<string, number>;
+      drains: unknown[]; frames: unknown[]; dispositions: Array<{ queueResidenceMs: number }>;
       } } }) => { messages.push(message); },
     };
     runInNewContext(`self = globalThis; ${workerProbePrelude(['WINDOWS193_SHORT'])}${source}${suffix}`,
       sandbox);
-    runInNewContext(`sample.enqueueMessage({ id: 'WINDOWS193_SHORT' }); sample.renderFrame();`, sandbox);
+    runInNewContext(`sample.enqueueMessage({ id: 'WINDOWS193_SHORT' }); sample.renderFrame();
+      sample.recordDrop({ id: 'WINDOWS193_DROP' }, 'reflow_capacity');
+      sample.recordDrop({ id: 'WINDOWS193_UNTRACKED', trackDrops: false }, 'oversized');`, sandbox);
     listeners.message?.({ data: { type: 'ytPlacementFlush' } });
     const exact = messages.at(-1)?.sample?.exact;
     expect(exact?.drains).toHaveLength(1);
     expect(exact?.frames).toHaveLength(1);
-    expect(exact?.dispositions).toMatchObject([
-      { kind: 'activated', id: 'WINDOWS193_SHORT', queueResidenceMs: expect.any(Number) },
-    ]);
+    expect(exact?.dispositions[0]).toMatchObject({
+      kind: 'activated', id: 'WINDOWS193_SHORT', queueResidenceMs: expect.any(Number),
+    });
+    expect(exact?.drops).toEqual({ reflow_capacity: 1 });
+    expect(runInNewContext('sample.lastDrop', sandbox)).toEqual(['WINDOWS193_UNTRACKED', 'oversized']);
   });
 });
