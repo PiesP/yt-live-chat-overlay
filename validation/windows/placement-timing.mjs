@@ -375,7 +375,7 @@ function attachWorkerRendererProbe(renderer) {
       exact.activeNow = this.activeMessages.filter((message) => isFixture(message.id))
         .slice(0, 100).map((message) => ({ id: message.id, atEpochMs: epochNow(),
           x: message.x, y: message.y, width: message.width, height: message.height,
-          laneIndex: message.laneIndex,
+          laneIndex: message.laneIndex, isScrolling: message.motion?.isScrolling ?? null,
           startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
           visibleNow: performance.now() >= message.startTime + message.pausedDuration &&
             performance.now() < message.startTime + message.pausedDuration + message.duration }));
@@ -653,28 +653,25 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assert(reduced.dispositions.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === false),
         'Reduced-motion message was not activated in fixed mode');
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ ignoreReducedMotion: true }));
-      await sendBatch('3');
-      await page.waitForFunction((id) => document.querySelector(
-        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[7]);
-      await waitForWorkerEntry(TOKENS[7]);
       const override = await workerSnapshot();
       assert.equal(override.config.ignoreReducedMotion, true);
-      assert(override.dispositions.some((entry) => entry.id === TOKENS[7] && entry.isScrolling === true),
+      assert(override.activeNow.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === true),
         'Reduced-motion override did not restore scrolling');
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ ignoreReducedMotion: false }));
-      await sendBatch('4');
-      await waitForWorkerEntry(TOKENS[10]);
       const restored = await workerSnapshot();
       assert.equal(restored.config.ignoreReducedMotion, false);
-      assert(restored.dispositions.some((entry) => entry.id === TOKENS[10] &&
+      assert(restored.activeNow.some((entry) => entry.id === TOKENS[6] &&
         entry.isScrolling === false), 'Disabling override did not restore reduced motion');
       await page.emulateMedia({ reducedMotion: 'no-preference' });
-      await sendBatch('5');
-      await waitForWorkerEntry(TOKENS[11]);
       const systemOff = await workerSnapshot();
       assert.equal(systemOff.config.reducedMotion, false);
-      assert(systemOff.dispositions.some((entry) => entry.id === TOKENS[11] &&
+      assert(systemOff.activeNow.some((entry) => entry.id === TOKENS[6] &&
         entry.isScrolling === true), 'System reduced-motion off did not restore scrolling');
+      for (const state of [reduced, override, restored, systemOff]) {
+        assert.equal(findOverlappingActivePair(state.activeNow,
+          state.config.logicalWidth, state.config.logicalHeight), null,
+        'Visible messages overlapped during a live reduced-motion transition');
+      }
       phaseObservations.push({ phase: 'initial', config: baseline.config },
         { phase: 'reduced', config: reduced.config }, { phase: 'override', config: override.config },
         { phase: 'override-off', config: restored.config },
