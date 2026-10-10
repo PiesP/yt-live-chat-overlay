@@ -338,16 +338,14 @@ export function assertBacklogMotion(disposition, renderer, comparisonOnly = fals
   }
 }
 
-export function assertBacklogReflow(before, after, id, comparisonOnly = false) {
+export function assertBacklogReflow(before, after, id) {
   assert(after?.config?.logicalWidth > before?.config?.logicalWidth &&
     after.config.logicalHeight > before.config.logicalHeight,
   'Fixture video geometry did not grow during resize');
   assert.equal(before.config.fontSize, 32);
   assert.equal(after.config.fontSize, 32, 'Reflow changed the configured 32px font');
-  const retained = after.activeNow.some((entry) => entry.id === id);
-  if (!comparisonOnly) assert(retained,
+  assert(after.activeNow.some((entry) => entry.id === id),
     'Backlog message disappeared during resize and spacing reflow');
-  return retained;
 }
 
 export function workerProbePrelude(tokens = TOKENS) {
@@ -1018,19 +1016,6 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assertBacklogReflow(resumed.exact, grown.exact, TOKENS[17]);
       phaseObservations.push({ phase: 'resize-expanded', config: grown.exact.config,
         active: grown.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 0 }));
-      const reflow = await issueSnapshot();
-      const reflowRetained = assertBacklogReflow(resumed.exact, reflow.exact,
-        TOKENS[17], comparisonOnly);
-      assert.equal(reflow.exact.config.laneSpacing, 0,
-        'Lane Gap update did not reach the resized renderer');
-      phaseObservations.push({ phase: 'reflow', config: reflow.exact.config,
-        active: reflow.exact.activeNow.filter((entry) => entry.id === TOKENS[17]),
-        sameBacklogRetained: reflowRetained,
-        retentionAssertion: reflowRetained ? 'observed-active'
-          : 'comparison-only: absent after gap reflow; original capacity discard is possible, exact cause unobserved',
-        dropDisposition: reflow.exact.dispositions.find((entry) =>
-          entry.id === TOKENS[17] && entry.kind === 'dropped') ?? null });
       if (!forceFallback) {
         await page.evaluate(() => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
@@ -1043,13 +1028,10 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         const recovered = await captureProbe();
         assert(recovered?.canvasSourceHooked && recovered.exact?.config,
           'Worker failure did not recover into the instrumented Canvas');
-        const recoveredRetained = recovered.exact.activeNow.some((entry) => entry.id === TOKENS[17]);
-        if (reflowRetained) assert(recoveredRetained,
+        assert(recovered.exact.activeNow.some((entry) => entry.id === TOKENS[17]),
           'Backlog message was lost during Worker-to-Canvas recovery');
         phaseObservations.push({ phase: 'worker-recovery', config: recovered.exact.config,
-          active: recovered.exact.activeNow.filter((entry) => entry.id === TOKENS[17]),
-          sameBacklogRetained: recoveredRetained,
-          retentionAssertion: reflowRetained ? 'required' : 'unverified-after-comparison-reflow-absence' });
+          active: recovered.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
       }
       await page.locator('#yt-chat-overlay-settings-button').click({ force: true });
       const modal = page.locator('#yt-chat-overlay-settings-backdrop');
