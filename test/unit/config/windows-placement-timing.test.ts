@@ -4,7 +4,7 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 describe('Windows placement timing probe', () => {
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
@@ -42,6 +42,20 @@ describe('Windows placement timing probe', () => {
       actualVelocityPxPerMs: 0.675 };
     expect(() => assertBacklogMotion(accelerated, 'worker')).toThrow(/extra burst/);
     expect(() => assertBacklogMotion(accelerated, 'worker', true)).not.toThrow();
+  });
+
+  it('keeps Canvas exact observations out of Worker-only timing fields', () => {
+    const canvas = { exact: { dispositions: [{ id: 'WINDOWS196_GAP0_A' }],
+      activeNow: [{ id: 'WINDOWS196_GAP0_A' }] } };
+    expect(summarizeExactWorkerProbe(canvas, 'main')).toEqual({
+      exactWorkerFrameMs: null, exactWorkerDrainMs: null, exactWorker: null,
+    });
+    const worker = { exact: { frames: [{ workMs: 2 }], drains: [{ workMs: 1 }],
+      dispositions: [], active: [] } };
+    expect(summarizeExactWorkerProbe(worker, 'worker')).toMatchObject({
+      exactWorkerFrameMs: { count: 1, p95: 2 },
+      exactWorkerDrainMs: { count: 1, p95: 1 },
+    });
   });
 
   it('adds a Canvas probe only at the expected packaged app entry', () => {
