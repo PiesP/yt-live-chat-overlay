@@ -115,7 +115,8 @@ export const KO: Record<string, string> = {
   'translation.displayModeReplace': '번역만 표시',
 
   // ── Tooltips ──
-  'danmaku.laneGapDesc': '댓글 행 사이 간격 (0 = 바로 이어지는 행)',
+  'danmaku.laneGapDesc':
+    '댓글 행 사이에 추가할 세로 간격입니다. 0은 글자와 외곽선이 겹치지 않는 최소 간격을 사용합니다.',
   'danmaku.fontCustomDesc':
     'CSS font-family 값. 예: "Noto Sans KR", sans-serif. 글꼴이 없으면 시스템 기본값을 사용합니다.',
   'appearance.superchatOpacityDesc': '슈퍼챗 카드의 배경 불투명도',

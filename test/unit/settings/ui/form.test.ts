@@ -333,13 +333,29 @@ describe('SettingsUiForm', () => {
       form.setModal(modal);
       form.populateForm(settings);
       expect(animationFrames.size).toBe(1);
+      expect(stage.style.blockSize).toBe('1044px');
+
+      // A hidden pane has no DOM height. Reserve its newly painted Canvas
+      // before the scheduled frame so opening it cannot use a stale safe zone.
+      Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 0 });
+      form.populateForm(settings);
+      const oldCanvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
+      const oldStageHeight = Number.parseFloat(stage.style.blockSize);
+      form.populateForm({ ...settings, outline: { ...settings.outline, widthPx: 3 } });
+      const canvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
+      expect(canvasHeight).toBeGreaterThan(oldCanvasHeight);
+      expect(Number.parseFloat(stage.style.blockSize)).toBeGreaterThan(oldStageHeight);
+      expect(Number.parseFloat(stage.style.blockSize) * 0.25).toBeGreaterThanOrEqual(canvasHeight + 1);
+      expect(animationFrames.size).toBe(1);
+      Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 260 });
+      form.populateForm(settings);
       const firstFrame = animationFrames.entries().next().value as
         | [number, FrameRequestCallback]
         | undefined;
       expect(firstFrame).toBeDefined();
       animationFrames.delete(firstFrame![0]);
       firstFrame![1](0);
-      expect(stage.style.blockSize).toBe('');
+      expect(stage.style.blockSize).toBe('1044px');
 
       stageWidth = 280;
       resizeCallback?.([], {} as ResizeObserver);

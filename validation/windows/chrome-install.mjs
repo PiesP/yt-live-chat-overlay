@@ -517,8 +517,10 @@ export async function runChromeInstallation({
       installedContext: context, installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
     if (browserName === 'msedge' && installation === 'extension') {
+      // A baseline-only harness commit can set this to true with the same probe bytes.
+      const comparisonOnly = false;
       result.placementTiming = await runPlacementTimingFixture({
-        context, root, output, extensionId,
+        context, root, output, extensionId, comparisonOnly,
       });
       assert.equal(result.placementTiming.status, 'passed',
         'Installed Edge placement or replay fixture did not satisfy its observations');

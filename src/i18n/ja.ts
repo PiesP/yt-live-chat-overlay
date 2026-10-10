@@ -131,7 +131,8 @@ export const JA: Record<string, string> = {
   'translation.displayModeReplace': '翻訳のみ表示',
 
   // ── Tooltips ──
-  'danmaku.laneGapDesc': 'コメント行の間隔 (0 = 行が隣接)',
+  'danmaku.laneGapDesc':
+    'コメント行の間に追加する縦の余白です。0では文字と輪郭が重ならない最小間隔を使います。',
   'danmaku.fontWeightDesc': 'ボールドはより読みやすく、レギュラーはGPUメモリ消費が少なくなります',
   'danmaku.fontFamily': 'フォントの種類',
   'danmaku.fontSystemDefault': 'システム既定',

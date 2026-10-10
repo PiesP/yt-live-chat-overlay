@@ -11,6 +11,7 @@
  */
 
 import { LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO, SPEED_TIER } from '@renderer/constants';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -339,10 +340,11 @@ export function findPlacementShared(
   speedTier: number,
   random: () => number = Math.random,
   strategy: LaneSelectionStrategy = 'spread',
-  exactMotionValidation = false
+  exactMotionValidation = false,
+  laneSpacing = 0
 ): { laneIndex: number; waitMs: number } | null {
   if (state.heap.length === 0) return null;
-  const slotCount = Math.max(1, Math.ceil(msgHeight / laneHeight));
+  const slotCount = getRowSlotCount(msgHeight, laneHeight, laneSpacing);
   const numLanes = state.numLanes;
   if (numLanes <= 0) return null;
 

@@ -119,6 +119,7 @@ export abstract class RendererBase {
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
       laneSpacing: this.settings.laneSpacing,
+      outlineWidthPx: this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
       headwayGapRatio: this.settings.headwayGapRatio,
       exitPaddingPx: this.settings.exitPaddingPx,
       scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
@@ -168,17 +169,9 @@ export abstract class RendererBase {
     this.replayMode = enabled;
   }
 
-  /**
-   * Compute the effective font size scaled to the current viewport height.
-   * Linear scaling: fontSize × (viewportHeight / fontBaseViewportHeight),
-   * clamped to [fontMinSize, fontMaxSize].
-   */
+  /** Preserve the configured visible size; viewport changes only change capacity. */
   protected getEffectiveFontSize(): number {
-    const dims = this.overlay.getDimensions();
-    if (!dims || dims.height <= 0) return this.settings.fontSize;
-    const { fontSize, fontBaseViewportHeight, fontMinSize, fontMaxSize } = this.settings;
-    const scaled = Math.round(fontSize * (dims.height / fontBaseViewportHeight));
-    return Math.max(fontMinSize, Math.min(fontMaxSize, scaled));
+    return this.settings.fontSize;
   }
 
   /** Set user-initiated pause state (Space key toggle). */
@@ -321,6 +314,7 @@ export abstract class RendererBase {
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
       laneSpacing: this.settings.laneSpacing,
+      outlineWidthPx: this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
     };
 
     this.settings = settings;
@@ -342,16 +336,14 @@ export abstract class RendererBase {
       settings.fontSize !== prev.fontSize ||
       settings.fontWeight !== prev.fontWeight ||
       settings.fontFamily !== prev.fontFamily;
-    const laneSpacingChanged = settings.laneSpacing !== prev.laneSpacing;
 
-    if (fontChanged || laneSpacingChanged) {
-      this.laneAllocator.updateFontMetrics(
-        this.getEffectiveFontSize(),
-        settings.fontWeight,
-        settings.fontFamily,
-        settings.laneSpacing
-      );
-    }
+    this.laneAllocator.updateFontMetrics(
+      this.getEffectiveFontSize(),
+      settings.fontWeight,
+      settings.fontFamily,
+      settings.laneSpacing,
+      settings.outline.enabled ? settings.outline.widthPx : 0
+    );
 
     if (fontChanged) {
       clearTextMeasurementCaches();

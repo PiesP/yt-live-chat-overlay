@@ -158,16 +158,16 @@ function createRenderer(settings = defaultSettings): TestRenderer {
 describe('RendererBase', () => {
   it.each([
     { height: 720, expected: 20 },
-    { height: 1440, expected: 40 },
-    { height: 360, expected: 10 },
-    { height: 10_000, expected: 40 },
-    { height: 100, expected: 10 },
+    { height: 1440, expected: 20 },
+    { height: 360, expected: 20 },
+    { height: 10_000, expected: 20 },
+    { height: 100, expected: 20 },
     { height: 0, expected: 20 },
     { height: -100, expected: 20 },
     { height: null, expected: 20 },
-    { height: 450, expected: 13 },
-    { height: 400, expected: 11 },
-  ])('scales and clamps the production font size at viewport height $height', ({ height, expected }) => {
+    { height: 450, expected: 20 },
+    { height: 400, expected: 20 },
+  ])('preserves the visible configured font size at viewport height $height', ({ height, expected }) => {
     vi.spyOn(overlay, 'getDimensions').mockReturnValue(
       height === null ? null : { width: 1920, height }
     );

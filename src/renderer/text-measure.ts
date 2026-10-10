@@ -48,6 +48,68 @@ const WIDTH_CACHE_EVICT_BATCH = Math.floor(WIDTH_CACHE_MAX * 0.1);
  */
 const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
 
+export interface TextTopBounds {
+  /** Ink above the Canvas `top` origin (e.g. stacked combining marks). */
+  above: number;
+  /** Ink below the Canvas `top` origin, including its typographic leading. */
+  below: number;
+}
+
+type TextMeasureContext = Pick<
+  CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  'font' | 'textBaseline' | 'measureText'
+>;
+
+const topBoundsCache = new Map<string, TextTopBounds>();
+let measurementGeneration = 0;
+export function getTextMeasurementGeneration(): number {
+  return measurementGeneration;
+}
+/** Ordinary row envelope; actual content may exceed it and reserve more slots. */
+export const REGULAR_FONT_SAMPLE = 'Mg国한Ágj';
+// Missing glyph metrics need a conservative CJK/fallback-font envelope.
+const REGULAR_HEIGHT_FALLBACK_FACTOR = 1.4;
+
+/** Cached preparation-time measurement in the same coordinate system as drawing. */
+export function measureTextTopBounds(
+  font: string,
+  fontSize: number,
+  text = REGULAR_FONT_SAMPLE,
+  context?: TextMeasureContext
+): TextTopBounds {
+  const key = `${font}\u0000${text}`;
+  const cached = topBoundsCache.get(key);
+  if (cached) return cached;
+  const ctx = context ?? getCtx();
+  if (!ctx) return { above: 0, below: Math.ceil(fontSize * REGULAR_HEIGHT_FALLBACK_FACTOR) };
+  const previousFont = ctx.font;
+  const previousBaseline = ctx.textBaseline;
+  ctx.font = font;
+  ctx.textBaseline = 'top';
+  let metrics: TextMetrics;
+  try {
+    metrics = ctx.measureText(text);
+  } finally {
+    ctx.font = previousFont;
+    ctx.textBaseline = previousBaseline;
+  }
+  const valid =
+    Number.isFinite(metrics.actualBoundingBoxAscent) &&
+    Number.isFinite(metrics.actualBoundingBoxDescent);
+  const bounds = valid
+    ? {
+        above: Math.max(0, Math.ceil(metrics.actualBoundingBoxAscent)),
+        below: Math.max(0, Math.ceil(metrics.actualBoundingBoxDescent)),
+      }
+    : { above: 0, below: Math.ceil(fontSize * REGULAR_HEIGHT_FALLBACK_FACTOR) };
+  if (topBoundsCache.size >= WIDTH_CACHE_MAX) {
+    const oldest = topBoundsCache.keys().next().value;
+    if (oldest !== undefined) topBoundsCache.delete(oldest);
+  }
+  topBoundsCache.set(key, bounds);
+  return bounds;
+}
+
 /**
  * Compute the bounding-box width from a TextMetrics object.
  *
@@ -98,10 +160,12 @@ function getCtx(): CanvasRenderingContext2D | null {
  * Call when settings change (font, fontSize) to avoid stale entries.
  */
 export function clearTextMeasurementCaches(): void {
+  measurementGeneration++;
   widthCache.clear();
   spaceWidthCache.clear();
   totalCacheEntries = 0;
   fontMetricsCache.clear();
+  topBoundsCache.clear();
 }
 
 /**

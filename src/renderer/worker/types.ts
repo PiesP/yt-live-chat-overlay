@@ -21,11 +21,11 @@ export interface WorkerConfig {
   speedPxPerSec: number;
   /** Font size in logical pixels. */
   fontSize: number;
-  /** Base viewport height for font size reference (px). */
+  /** Retained legacy preference; drawing and geometry use fontSize. */
   fontBaseViewportHeight: number;
-  /** Minimum effective font size (px). */
+  /** Retained legacy minimum. */
   fontMinSize: number;
-  /** Maximum effective font size (px). */
+  /** Retained legacy maximum. */
   fontMaxSize: number;
   /** Font weight: 'normal' | 'bold'. */
   fontWeight: FontWeight;

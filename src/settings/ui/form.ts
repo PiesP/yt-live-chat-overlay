@@ -3,8 +3,18 @@
 
 import type { OverlaySettings } from '@app-types';
 import { t } from '@i18n/index';
+import { renderRegularMessage, splitGraphemeClusters } from '@renderer/canvas/shared';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
+import {
+  getRegularRowHeight,
+  getRowContentOffset,
+  getRowGridHeight,
+  getRowSlotCount,
+} from '@renderer/layout/row-geometry';
+import { estimateMessageDimensions } from '@renderer/shared';
+import { getFontString, measureTextWidth } from '@renderer/text-measure';
 import type {
   OutlineSettingKey,
   RootNumericSettingKey,
@@ -402,6 +412,7 @@ export class SettingsUiForm {
   private isUpdating = false;
   private previewResizeObserver: ResizeObserver | null = null;
   private previewLayoutFrame: number | null = null;
+  private previewSettings: Readonly<OverlaySettings> | null = null;
 
   // Track event listeners added to the modal so they can be removed before
   // re-adding on language change (which calls rebuildModalContent → setModal).
@@ -455,6 +466,7 @@ export class SettingsUiForm {
       cancelAnimationFrame(this.previewLayoutFrame);
     }
     this.previewLayoutFrame = null;
+    this.previewSettings = null;
   }
 
   private scheduleSettingsPreviewLayout(): void {
@@ -477,11 +489,29 @@ export class SettingsUiForm {
     const text = this.modal.querySelector<HTMLElement>(
       '.yt-chat-overlay-settings-font-preview-text'
     );
-    if (!stage || !text || stage.getBoundingClientRect().width <= 0) return;
+    if (!stage || !text) return;
+
+    const stageWidth = stage.getBoundingClientRect().width;
+
+    const canvas = text.querySelector('canvas');
+    const width = Math.max(1, Math.floor(text.parentElement?.getBoundingClientRect().width || 320));
+    const dpr = window.devicePixelRatio || 1;
+    if (
+      this.previewSettings &&
+      canvas &&
+      stageWidth > 0 &&
+      (Number(canvas.dataset.logicalWidth) !== width || Number(canvas.dataset.dpr) !== dpr)
+    ) {
+      this.populateSpacingPreview(this.previewSettings, text);
+    }
 
     const availableFraction = Number(stage.dataset.previewAvailableFraction);
     const minimumHeight = Number.parseFloat(getComputedStyle(stage).minBlockSize);
-    const textHeight = Math.max(text.scrollHeight, text.getBoundingClientRect().height);
+    const textHeight = Math.max(
+      text.scrollHeight,
+      text.getBoundingClientRect().height,
+      Number.parseFloat(canvas?.style.blockSize || '0')
+    );
     if (
       !Number.isFinite(availableFraction) ||
       availableFraction <= 0 ||
@@ -1240,6 +1270,7 @@ export class SettingsUiForm {
       '.yt-chat-overlay-settings-font-preview-text'
     );
     if (!preview || !previewEl) return;
+    this.previewSettings = settings;
     previewEl.style.fontSize = `${settings.fontSize}px`;
     previewEl.style.fontWeight = settings.fontWeight === 'bold' ? '700' : '400';
     previewEl.style.fontFamily = settings.fontFamily;
@@ -1250,6 +1281,7 @@ export class SettingsUiForm {
     const strokeWidth = Math.max(0, outlineWidth * OUTLINE_STROKE_SCALE);
     const strokeColor = computeOutlineColor(settings.colors.normal, outlineOpacity);
     previewEl.style.setProperty('-webkit-text-stroke', `${strokeWidth}px ${strokeColor}`);
+    this.populateSpacingPreview(settings, previewEl);
 
     const topZone = preview.querySelector<HTMLElement>('[data-preview-zone="top"]');
     const bottomZone = preview.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
@@ -1269,6 +1301,9 @@ export class SettingsUiForm {
     if (stage) {
       stage.dataset.previewAvailableFraction = String(availableFraction);
       stage.style.gridTemplateRows = `minmax(0, ${settings.safeTop}fr) minmax(0, ${availableFraction}fr) minmax(0, ${settings.safeBottom}fr)`;
+      // Reserve the new Canvas height even while this pane is hidden. Waiting
+      // for the next frame can briefly paint into the previous safe-zone row.
+      this.updateSettingsPreviewLayout();
       this.scheduleSettingsPreviewLayout();
     }
 
@@ -1277,9 +1312,114 @@ export class SettingsUiForm {
       metrics.textContent = [
         `${t('danmaku.textOpacity')}: ${Math.round(settings.opacity * 100)}%`,
         `${t('appearance.outline')}: ${outlineWidth}px / ${Math.round(outlineOpacity * 100)}%`,
+        `${t('danmaku.laneGap')}: ${settings.laneSpacing}px`,
         `${t('danmaku.topClearZone')}: ${Math.round(settings.safeTop * 100)}%`,
         `${t('danmaku.bottomClearZone')}: ${Math.round(settings.safeBottom * 100)}%`,
       ].join(' · ');
+    }
+  }
+
+  /** The preview paints the same regular geometry and row reservation as Canvas. */
+  private populateSpacingPreview(settings: Readonly<OverlaySettings>, element: HTMLElement): void {
+    let canvas = element.querySelector('canvas');
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', t('danmaku.previewMessage'));
+      element.replaceChildren(canvas);
+    }
+    const message = {
+      text: t('danmaku.previewMessage'),
+      content: [{ type: 'text' as const, content: t('danmaku.previewMessage') }],
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+      timestamp: 0,
+    };
+    canvas.textContent = message.text;
+    const outlineWidth = settings.outline.enabled ? settings.outline.widthPx : 0;
+    const availableWidth = element.parentElement?.getBoundingClientRect().width ?? 0;
+    const width = Math.max(1, Math.floor(availableWidth || 320));
+    const font = getFontString(settings.fontSize, settings.fontWeight, settings.fontFamily);
+    const textWidth = Math.max(
+      0,
+      width - 2 * getRegularCardInsets(settings.fontSize, outlineWidth).horizontal
+    );
+    if (measureTextWidth(message.text, font) > textWidth) {
+      const pieces = splitGraphemeClusters(message.text);
+      while (pieces.length && measureTextWidth(`${pieces.join('')}…`, font) > textWidth)
+        pieces.pop();
+      message.text = measureTextWidth('…', font) <= textWidth ? `${pieces.join('')}…` : '';
+      message.content = [{ type: 'text', content: message.text }];
+    }
+    const measured = estimateMessageDimensions(
+      message,
+      settings.fontSize,
+      false,
+      settings.fontWeight,
+      settings.fontFamily,
+      undefined,
+      undefined,
+      '0px',
+      outlineWidth,
+      undefined,
+      undefined,
+      settings.backgroundColors.normal
+    );
+    const base = getRegularRowHeight(
+      settings.fontSize,
+      settings.fontWeight,
+      settings.fontFamily,
+      outlineWidth
+    );
+    const grid = getRowGridHeight(base, settings.laneSpacing);
+    const pitch = getRowSlotCount(measured.height, grid, settings.laneSpacing) * grid;
+    const offset = getRowContentOffset(measured.height, grid, settings.laneSpacing);
+    const height = offset + pitch + measured.height;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.ceil(width * dpr);
+    canvas.height = Math.ceil(height * dpr);
+    canvas.dataset.logicalWidth = String(width);
+    canvas.dataset.dpr = String(dpr);
+    canvas.style.inlineSize = '100%';
+    canvas.style.blockSize = `${height}px`;
+    element.dataset.previewRows = '2';
+    element.dataset.previewRowHeight = String(measured.height);
+    element.dataset.previewRowPitch = String(pitch);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Opacity belongs to the existing preview element; don't apply it twice.
+    const config = {
+      showAuthor: false,
+      fontSize: settings.fontSize,
+      fontWeight: settings.fontWeight,
+      fontFamily: settings.fontFamily,
+      color: settings.colors.normal,
+      outlineWidthPx: outlineWidth,
+      outlineOpacity: settings.outline.enabled ? settings.outline.opacity : 0,
+      backgroundColor: settings.backgroundColors.normal,
+      messageWidth: measured.width,
+      messageHeight: measured.height,
+    };
+    const noBitmap = { maxBytes: 0, get: (): undefined => undefined, set: (): boolean => false };
+    const noImages = { get: (): null => null };
+    const getFont = (size: number): string =>
+      getFontString(size, settings.fontWeight, settings.fontFamily);
+    for (let row = 0; row < 2; row++) {
+      renderRegularMessage(
+        ctx,
+        message,
+        Math.max(0, (width - measured.width) / 2),
+        offset + row * pitch,
+        config,
+        noBitmap,
+        noImages,
+        () => false,
+        noImages,
+        () => false,
+        getFont,
+        (text) => measureTextWidth(text, getFont(settings.fontSize))
+      );
     }
   }
 

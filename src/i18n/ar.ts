@@ -131,7 +131,8 @@ export const AR: Record<string, string> = {
   'translation.displayModeReplace': 'استبدال (الترجمة فقط)',
 
   // ── Tooltips ──
-  'danmaku.laneGapDesc': 'الفجوة الرأسية بين صفوف التعليقات (0 = صفوف متجاورة)',
+  'danmaku.laneGapDesc':
+    'مسافة رأسية إضافية بين صفوف التعليقات. يستخدم 0 أقل مسافة آمنة تمنع تداخل النص وحدوده.',
   'danmaku.fontWeightDesc': 'العريض أكثر قابلية للقراءة، العادي يستخدم ذاكرة GPU أقل',
   'danmaku.fontFamily': 'عائلة الخط',
   'danmaku.fontSystemDefault': 'خط النظام الافتراضي',

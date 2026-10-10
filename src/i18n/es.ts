@@ -131,7 +131,8 @@ export const ES: Record<string, string> = {
   'translation.displayModeReplace': 'Reemplazar (solo traducción)',
 
   // ── Tooltips ──
-  'danmaku.laneGapDesc': 'Espacio vertical entre filas (0 = filas adyacentes)',
+  'danmaku.laneGapDesc':
+    'Espacio vertical adicional entre filas. 0 usa la separación mínima segura para el texto y sus contornos.',
   'danmaku.fontWeightDesc': 'Negrita es más legible, Normal usa menos memoria de GPU',
   'danmaku.fontFamily': 'Familia tipográfica',
   'danmaku.fontSystemDefault': 'Predeterminada del sistema',

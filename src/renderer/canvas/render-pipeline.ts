@@ -34,9 +34,10 @@ import {
   TRANSLATION_FONT_SCALE,
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
-import { getRegularCardInsets } from '@renderer/layout/card-layout';
+import { getRegularCardInsets, hasRegularBackground } from '@renderer/layout/card-layout';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { messageXAtElapsed, resolveEffectiveMotionMode } from '@renderer/layout/message-schedule';
+import { getRegularContentBounds } from '@renderer/layout/row-geometry';
 import { getMessagePriority } from '@renderer/message-priority';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
@@ -467,11 +468,20 @@ export function drawStage(
             ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
             ctx.settings.showAuthor[renderMessage.authorType] &&
               !!renderMessage.author &&
-              !!renderMessage.authorPhotoUrl
+              !!renderMessage.authorPhotoUrl,
+            hasRegularBackground(ctx.settings.backgroundColors[renderMessage.authorType])
           );
           const paddingH = isPaidCard ? paidPadding.paddingH : regularInsets.horizontal;
           const paddingV = isPaidCard ? paidPadding.paddingV : regularInsets.vertical;
-          const transY = snappedY + msg.height - paddingV - translationHeight;
+          const translationAbove = isPaidCard
+            ? 0
+            : getRegularContentBounds(
+                { text: msg.translatedText, content: [] },
+                getFontString(fontSize, 'normal', ctx.settings.fontFamily),
+                fontSize,
+                renderCtx
+              ).above;
+          const transY = snappedY + msg.height - paddingV - translationHeight + translationAbove;
           const transColor =
             ctx.settings.preserveUserColor && renderMessage.userColor
               ? renderMessage.userColor

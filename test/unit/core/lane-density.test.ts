@@ -1,76 +1,51 @@
-import { describe, it, expect } from 'vitest';
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
 
-// ── Lane density factor math ──────────────────────────────────────────
+import { describe, expect, it } from 'vitest';
+import { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { getRegularRowHeight, getRowSlotCount } from '@renderer/layout/row-geometry';
 
-describe('lane density factor', () => {
-  it('at 1.0 produces normal lane count', () => {
-    // 1080p with 10% safe zones → usableHeight = 864
-    // laneHeight ≈ 38 → numLanes ≈ 22
-    const rawLaneHeight = 38;
-    const effectiveLaneHeight = Math.max(1, Math.round(rawLaneHeight * 1.0));
-    const usableHeight = 864;
-    const numLanes = Math.floor(usableHeight / effectiveLaneHeight);
-    expect(numLanes).toBe(22);
+const baseOptions = { safeTop: 0, safeBottom: 0, fontSize: 32, fontWeight: 'bold' as const, fontFamily: 'sans-serif', laneSpacing: 6, outlineWidthPx: 2, headwayGapRatio: 0.08, exitPaddingPx: 100, scrollDurationMaxMs: 30000 };
+
+describe('production density grid', () => {
+  it('refines the grid without claiming extra ordinary-row capacity or wasting pitch', () => {
+    const height = getRegularRowHeight(32, 'bold', 'sans-serif', 2);
+    const lanes = [1, 0.75, 0.5].map((factor) => {
+      const allocator = new LaneAllocator({ ...baseOptions, laneDensityFactor: factor });
+      allocator.reset({ width: 1920, height: 1080 }, 0);
+      return allocator;
+    });
+    const normal = lanes[0];
+    if (!normal) throw new Error('normal grid missing');
+    for (const allocator of lanes) {
+      const slots = getRowSlotCount(height, allocator.getLaneHeight(), 6);
+      expect(slots * allocator.getLaneHeight()).toBeCloseTo(height + 6);
+      expect(Math.floor(allocator.getLaneCount() / slots)).toBe(normal.getLaneCount());
+    }
+    expect(lanes[1]?.getLaneHeight()).toBeCloseTo(normal.getLaneHeight() / 2);
+    expect(lanes[2]?.getLaneHeight()).toBeCloseTo(normal.getLaneHeight() / 4);
   });
 
-  it('at 0.5 doubles lane count', () => {
-    const rawLaneHeight = 38;
-    const effectiveLaneHeight = Math.max(1, Math.round(rawLaneHeight * 0.5));
-    const usableHeight = 864;
-    const numLanes = Math.floor(usableHeight / effectiveLaneHeight);
-    expect(numLanes).toBe(45); // 864 / 19 = 45
+  it('reduces genuine tall-content rounding at finer grid densities', () => {
+    const base = getRegularRowHeight(32, 'bold', 'sans-serif', 2);
+    const tallHeight = base * 1.2;
+    let previous = Number.POSITIVE_INFINITY;
+    for (const factor of [1, 0.75, 0.5]) {
+      const allocator = new LaneAllocator({ ...baseOptions, laneDensityFactor: factor });
+      allocator.reset({ width: 1920, height: 1080 }, 0);
+      const reserved = getRowSlotCount(tallHeight, allocator.getLaneHeight(), 6) * allocator.getLaneHeight();
+      expect(reserved).toBeGreaterThanOrEqual(tallHeight + 6);
+      expect(reserved).toBeLessThanOrEqual(previous);
+      previous = reserved;
+    }
   });
 
-  it('at 0.75 produces ~1.33× lane count (transitional step)', () => {
-    const rawLaneHeight = 38;
-    const effectiveLaneHeight = Math.max(1, Math.round(rawLaneHeight * 0.75));
-    const usableHeight = 864;
-    const numLanes = Math.floor(usableHeight / effectiveLaneHeight);
-    expect(numLanes).toBe(29); // 864 / 29 = 29.8 → 29
-  });
-
-  it('effective height never drops below 1px with extreme factor', () => {
-    const rawLaneHeight = 3;
-    const effective = Math.max(1, Math.round(rawLaneHeight * 0.5));
-    expect(effective).toBeGreaterThanOrEqual(1);
-    expect(effective).toBe(2); // 3 * 0.5 = 1.5 → round → 2
-  });
-
-  it('at 0.5 a short message fits in 1 slot', () => {
-    // Short message height < effectiveLaneHeight
-    const rawLaneHeight = 38;
-    const effectiveLaneHeight = Math.max(1, Math.round(rawLaneHeight * 0.5));
-    const shortMsgHeight = 18;
-    const slotCount = Math.ceil(shortMsgHeight / effectiveLaneHeight);
-    expect(slotCount).toBe(1); // 18/19 < 1 → 1
-  });
-
-  it('at 0.5 a normal message needs 2 slots', () => {
-    const rawLaneHeight = 38;
-    const effectiveLaneHeight = Math.max(1, Math.round(rawLaneHeight * 0.5));
-    const normalMsgHeight = 36;
-    const slotCount = Math.ceil(normalMsgHeight / effectiveLaneHeight);
-    expect(slotCount).toBe(2); // 36/19 = 1.89 → 2
-  });
-
-  it('at 0.5 multi-slot message still allocates correctly', () => {
-    const rawLaneHeight = 38;
-    const effectiveLaneHeight = Math.max(1, Math.round(rawLaneHeight * 0.5));
-    const superchatHeight = 90;
-    const slotCount = Math.ceil(superchatHeight / effectiveLaneHeight);
-    expect(slotCount).toBe(5); // 90/19 = 4.74 → 5
-  });
-
-  it('lane Y spacing at 0.5 is half the normal spacing', () => {
-    const rawLaneHeight = 38;
-    const normalLaneHeight = Math.max(1, Math.round(rawLaneHeight * 1.0));
-    const halfLaneHeight = Math.max(1, Math.round(rawLaneHeight * 0.5));
-
-    const normalY = (laneIndex: number) => 100 + laneIndex * normalLaneHeight;
-    const halfY = (laneIndex: number) => 100 + laneIndex * halfLaneHeight;
-
-    // Same physical position at 2× lane index
-    expect(halfY(2)).toBe(normalY(1)); // lane 2 half-cell = lane 1 full-cell
-    expect(halfY(4)).toBe(normalY(2)); // lane 4 half-cell = lane 2 full-cell
+  it('bounds grid work to four subdivisions at large viewports and the minimum font', () => {
+    const normal = new LaneAllocator({ ...baseOptions, fontSize: 14, laneSpacing: 0, laneDensityFactor: 1 });
+    const dense = new LaneAllocator({ ...baseOptions, fontSize: 14, laneSpacing: 0, laneDensityFactor: 0.5 });
+    const dimensions = { width: 7680, height: 4320 };
+    normal.reset(dimensions, 0); dense.reset(dimensions, 0);
+    expect(dense.getLaneCount()).toBeLessThanOrEqual(4 * normal.getLaneCount() + 3);
+    expect(dense.snapshot().heap).toHaveLength(dense.getLaneCount());
   });
 });
