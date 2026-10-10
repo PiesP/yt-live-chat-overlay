@@ -467,6 +467,17 @@ describe('resetBatchShared', () => {
 // ── commitPlacementShared ────────────────────────────────────────
 
 describe('commitPlacementShared', () => {
+  it('does not shorten an existing future reservation when a later commit clears earlier', () => {
+    const state = makeState(4);
+    commitPlacementShared(state, 1, 2, 1_000, 2_000, 4_000, 1);
+    commitPlacementShared(state, 1, 1, 1_500, 200, 1_000, 2);
+
+    expect(heapGetSlotAvailableAt(state.heap, state.indexMap, 1)).toBe(3_000);
+    expect(heapGetSlotAvailableAt(state.heap, state.indexMap, 2)).toBe(3_000);
+    expect(state.speedTierLanes.get(1)).toEqual({ tier: 1, until: 5_000 });
+    expect(state.speedTierLanes.get(2)).toEqual({ tier: 1, until: 5_000 });
+  });
+
   it('updates single-slot placement', () => {
     const state = makeState(4);
     commitPlacementShared(state, 1, 1, 1000, 600, 3000, 1);

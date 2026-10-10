@@ -9,6 +9,7 @@ import {
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
 } from '@renderer/constants';
+import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
 import { computeScrollDuration } from '@util/design-tokens';
 
 export interface MessageMotionPlanInput {
@@ -33,6 +34,7 @@ export interface MessageMotionPlanInput {
 }
 
 export interface MessageMotionPlan {
+  mode: DanmakuMode;
   isScrolling: boolean;
   horizontalStaggerPx: number;
   staggerLimitMs: number;
@@ -41,6 +43,154 @@ export interface MessageMotionPlan {
   startX: number;
   travelDistancePx: number;
   durationMs: number;
+  screenWidthPx: number;
+  messageWidthPx: number;
+  actualVelocityPxPerMs: number;
+  viewportEntryTime: number;
+  visibleExitTime: number;
+  endTime: number;
+}
+
+/** Resolve the visual mode before choosing a lane or reserving its lifetime. */
+export function resolveEffectiveMotionMode(
+  mode: DanmakuMode,
+  reducedMotion: boolean,
+  ignoreReducedMotion: boolean
+): DanmakuMode {
+  return reducedMotion && !ignoreReducedMotion && (mode === 'scroll' || mode === 'reverse')
+    ? 'top'
+    : mode;
+}
+
+function motionGeometry(
+  mode: DanmakuMode,
+  startTime: number,
+  startX: number,
+  messageWidthPx: number,
+  screenWidthPx: number,
+  durationMs: number,
+  exitPaddingPx: number
+): Pick<
+  MessageMotionPlan,
+  'travelDistancePx' | 'actualVelocityPxPerMs' | 'viewportEntryTime' | 'visibleExitTime' | 'endTime'
+> {
+  const isScrolling = mode === 'scroll' || mode === 'reverse';
+  const travelDistancePx = isScrolling
+    ? mode === 'scroll'
+      ? startX + messageWidthPx + exitPaddingPx
+      : screenWidthPx - startX + exitPaddingPx
+    : 0;
+  const actualVelocityPxPerMs = isScrolling && durationMs > 0 ? travelDistancePx / durationMs : 0;
+  const entryOffsetPx = isScrolling
+    ? mode === 'scroll'
+      ? Math.max(0, startX - screenWidthPx)
+      : Math.max(0, -startX - messageWidthPx)
+    : 0;
+  const viewportEntryTime =
+    startTime + (actualVelocityPxPerMs > 0 ? entryOffsetPx / actualVelocityPxPerMs : 0);
+  const visibleDistancePx = isScrolling
+    ? mode === 'scroll'
+      ? startX + messageWidthPx
+      : screenWidthPx - startX
+    : 0;
+  const endTime = startTime + durationMs;
+  const visibleExitTime =
+    isScrolling && actualVelocityPxPerMs > 0
+      ? Math.min(endTime, startTime + visibleDistancePx / actualVelocityPxPerMs)
+      : endTime;
+  return { travelDistancePx, actualVelocityPxPerMs, viewportEntryTime, visibleExitTime, endTime };
+}
+
+/** Reconstruct the exact drawn motion from an active message's committed fields. */
+export function motionPlanFromMessage(
+  message: {
+    startTime: number;
+    pausedDuration: number;
+    startX: number;
+    width: number;
+    duration: number;
+  },
+  mode: DanmakuMode,
+  screenWidthPx: number,
+  exitPaddingPx: number
+): MessageMotionPlan {
+  const startTime = message.startTime + message.pausedDuration;
+  const geometry = motionGeometry(
+    mode,
+    startTime,
+    message.startX,
+    message.width,
+    screenWidthPx,
+    message.duration,
+    exitPaddingPx
+  );
+  return {
+    mode,
+    isScrolling: mode === 'scroll' || mode === 'reverse',
+    horizontalStaggerPx:
+      mode === 'scroll'
+        ? Math.max(0, message.startX - screenWidthPx)
+        : mode === 'reverse'
+          ? Math.max(0, -message.startX - message.width)
+          : 0,
+    staggerLimitMs: 0,
+    staggerDelayMs: 0,
+    startTime,
+    startX: message.startX,
+    durationMs: message.duration,
+    screenWidthPx,
+    messageWidthPx: message.width,
+    ...geometry,
+  };
+}
+
+/** Canvas and Worker use this position expression for the committed motion. */
+export function messageXAtElapsed(
+  mode: DanmakuMode,
+  startX: number,
+  messageWidthPx: number,
+  screenWidthPx: number,
+  exitPaddingPx: number,
+  elapsedMs: number,
+  durationMs: number
+): number {
+  if (mode === 'top' || mode === 'bottom') return startX;
+  if (durationMs <= 0) return startX;
+  const progress = Math.min(1, Math.max(0, elapsedMs / durationMs));
+  const distance =
+    mode === 'scroll'
+      ? startX + messageWidthPx + exitPaddingPx
+      : screenWidthPx - startX + exitPaddingPx;
+  return startX + (mode === 'scroll' ? -1 : 1) * progress * distance;
+}
+
+export function messageXAtTime(plan: MessageMotionPlan, now: number): number {
+  if (!plan.isScrolling) return plan.startX;
+  const elapsed = Math.min(plan.durationMs, Math.max(0, now - plan.startTime));
+  return plan.startX + (plan.mode === 'scroll' ? -1 : 1) * elapsed * plan.actualVelocityPxPerMs;
+}
+
+/** Affine separation needs checking only at the common visible interval's endpoints. */
+export function motionPlansCollide(
+  a: MessageMotionPlan,
+  b: MessageMotionPlan,
+  headwayGapRatio: number,
+  fromTime = -Infinity
+): boolean {
+  const first = Math.max(a.viewportEntryTime, b.viewportEntryTime, fromTime);
+  const last = Math.min(a.visibleExitTime, b.visibleExitTime);
+  if (first >= last) return false;
+  const gap = Math.max(
+    computeBaseHeadwayPx(a.messageWidthPx, headwayGapRatio),
+    computeBaseHeadwayPx(b.messageWidthPx, headwayGapRatio)
+  );
+  const ax = messageXAtTime(a, first);
+  const bx = messageXAtTime(b, first);
+  const axLast = messageXAtTime(a, last);
+  const bxLast = messageXAtTime(b, last);
+  const aBeforeB = ax + a.messageWidthPx + gap <= bx && axLast + a.messageWidthPx + gap <= bxLast;
+  const bBeforeA = bx + b.messageWidthPx + gap <= ax && bxLast + b.messageWidthPx + gap <= axLast;
+  return !aBeforeB && !bBeforeA;
 }
 
 /**
@@ -71,9 +221,8 @@ export function computeAdaptiveStaggerLimit(
  * Compute all activation-time motion values from one pure policy shared by
  * the main-thread and Worker renderers.
  *
- * Temporal gaps are cumulative exponential samples. Unlike independent
- * `batchIndex * sample` delays, the cursor can never move backward, so later
- * comments cannot overtake earlier comments before either one is visible.
+ * Temporal gaps are cumulative within a batch. Viewport entry also depends on
+ * the horizontal offset and actual velocity, and batches have separate cursors.
  */
 export function computeMessageMotionPlan(input: MessageMotionPlanInput): MessageMotionPlan {
   const isScrolling = input.mode === 'scroll' || input.mode === 'reverse';
@@ -131,13 +280,24 @@ export function computeMessageMotionPlan(input: MessageMotionPlanInput): Message
     : 0;
 
   return {
+    mode: input.mode,
     isScrolling,
     horizontalStaggerPx,
     staggerLimitMs,
     staggerDelayMs,
     startTime: input.now + placementWaitMs + staggerDelayMs,
     startX,
-    travelDistancePx,
     durationMs,
+    screenWidthPx: screenWidth,
+    messageWidthPx: messageWidth,
+    ...motionGeometry(
+      input.mode,
+      input.now + placementWaitMs + staggerDelayMs,
+      startX,
+      messageWidth,
+      screenWidth,
+      durationMs,
+      exitPaddingPx
+    ),
   };
 }

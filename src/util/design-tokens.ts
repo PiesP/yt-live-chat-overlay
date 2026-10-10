@@ -13,11 +13,10 @@ import { MS_TO_S } from '@renderer/constants';
 /**
  * Compute DLIOS animation duration from total travel distance and velocity.
  *
- * The minimum duration is velocity-aware so that short messages at high
- * scroll speeds are not artificially slowed down by a static floor.
- * Without this, at speedPxPerSec=500 a 3-char message's computed duration
- * (~3070ms) was clamped to the settings scrollDurationMinMs (5000ms), capping
- * the effective speed at 307px/s instead of the user-configured 500px/s.
+ * Configured velocity determines the nominal duration. The minimum readability
+ * duration can slow short messages; the maximum duration caps long messages.
+ * The caller applies moderator/owner duration multipliers afterwards, so
+ * collision safety must use travelDistance / the final duration.
  *
  * @param totalDistance  — screenWidth + textWidth + exitPadding
  * @param velocity       — constant scroll velocity in px/sec
@@ -39,8 +38,8 @@ export function computeScrollDuration(
   if (Number.isNaN(totalDistance) || Number.isNaN(velocity) || velocity <= 0) {
     return durationMin;
   }
-  // Velocity-based floor: at minimum, allow the message to travel
-  // exitPadding pixels at the configured velocity, but no less than the minimum duration.
+  // Preserve the minimum readability duration. At ordinary settings, the
+  // exit-padding term is smaller than durationMin; it remains for compatibility.
   const velocityFloor = Math.max(durationMin, (exitPaddingPx / velocity) * MS_TO_S);
   return Math.max(velocityFloor, Math.min(durationMax, (totalDistance / velocity) * MS_TO_S));
 }

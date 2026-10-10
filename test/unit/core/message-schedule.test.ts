@@ -2,7 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   computeAdaptiveStaggerLimit,
   computeMessageMotionPlan,
+  messageXAtElapsed,
+  messageXAtTime,
+  motionPlanFromMessage,
+  motionPlansCollide,
+  resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
+import {
+  buildLaneHeap,
+  commitPlacementShared,
+  computeOccupancyMs,
+  findPlacementShared,
+} from '@renderer/layout/lane-shared';
+import type { LaneAllocationState } from '@renderer/layout/lane-shared';
 
 const baseInput = {
   mode: 'scroll' as const,
@@ -32,6 +44,98 @@ describe('computeAdaptiveStaggerLimit', () => {
     expect(computeAdaptiveStaggerLimit(40, 200, 100)).toBe(50);
     expect(computeAdaptiveStaggerLimit(50, 200, 100)).toBe(0);
     expect(computeAdaptiveStaggerLimit(500, 200, 100)).toBe(0);
+  });
+});
+
+describe('committed motion and lane safety', () => {
+  it.each(['scroll', 'reverse'] as const)(
+    'detects a same-tier future follower catching a future predecessor in %s mode',
+    (mode) => {
+      const indexMap = new Map<number, number>();
+      const state: LaneAllocationState = {
+        heap: buildLaneHeap(2, 0, indexMap),
+        indexMap,
+        numLanes: 2,
+        speedTierLanes: new Map(),
+        collidedLanes: new Set(),
+      };
+      // An earlier reservation forces A to wait, while the other lane remains busy.
+      commitPlacementShared(state, 0, 1, 0, 911, 911, 2);
+      commitPlacementShared(state, 1, 1, 0, 2_418, 2_418, 2);
+      const firstLane = findPlacementShared(state, 0, 20, 20, 30_000, 2, () => 0);
+      expect(firstLane).toEqual({ laneIndex: 0, waitMs: 911 });
+      const a = computeMessageMotionPlan({
+        ...baseInput, mode, now: 0, screenWidth: 640, messageWidth: 100,
+        batchIndex: 1, previousStaggerDelayMs: 0, staggerSample: 1,
+        maxStaggerDelayMs: 200, mediumStaggerDelayMs: 100,
+        placementWaitMs: firstLane!.waitMs, velocityPxPerSec: 350,
+        scrollDurationMinMs: 5_000, scrollDurationMaxMs: 30_000,
+      });
+      const occupancy = computeOccupancyMs(a.durationMs, 100, 0.08, 100, 640, 40);
+      commitPlacementShared(state, firstLane!.laneIndex, 1, a.startTime, occupancy, a.durationMs, 2);
+
+      const secondLane = findPlacementShared(state, 0, 20, 20, 30_000, 2, () => 0);
+      expect(secondLane?.laneIndex).toBe(0);
+      const b = computeMessageMotionPlan({
+        ...baseInput, mode, now: 0, screenWidth: 640, messageWidth: 600,
+        batchIndex: 2, previousStaggerDelayMs: a.staggerDelayMs, staggerSample: 1,
+        maxStaggerDelayMs: 200, mediumStaggerDelayMs: 100,
+        placementWaitMs: secondLane!.waitMs, velocityPxPerSec: 350,
+        scrollDurationMinMs: 5_000, scrollDurationMaxMs: 30_000,
+      });
+      expect(a.actualVelocityPxPerMs).toBeCloseTo(0.176);
+      expect(b.actualVelocityPxPerMs).toBeCloseTo(0.284);
+      expect(a.viewportEntryTime).toBeGreaterThan(0);
+      expect(b.viewportEntryTime).toBeGreaterThan(0);
+      expect(motionPlansCollide(a, b, 0.08, 0)).toBe(true);
+      const activeA = motionPlanFromMessage({
+        startTime: a.startTime, pausedDuration: 0, startX: a.startX,
+        width: 100, duration: a.durationMs,
+      }, mode, 640, 100);
+      expect(motionPlansCollide(activeA, b, 0.08, 0)).toBe(true);
+      expect(messageXAtTime(activeA, 2_000)).toBeCloseTo(messageXAtTime(a, 2_000));
+    }
+  );
+
+  it('checks a visible predecessor against a future follower and preserves pause accounting', () => {
+    const a = computeMessageMotionPlan({ ...baseInput, now: 0, screenWidth: 640,
+      messageWidth: 100, velocityPxPerSec: 350, scrollDurationMinMs: 5_000 });
+    const b = computeMessageMotionPlan({ ...baseInput, now: 1_000, screenWidth: 640,
+      messageWidth: 600, velocityPxPerSec: 350, scrollDurationMinMs: 5_000 });
+    expect(motionPlansCollide(a, b, 0.08, 500)).toBe(true);
+    const paused = motionPlanFromMessage({ startTime: a.startTime, pausedDuration: 300,
+      startX: a.startX, width: a.messageWidthPx, duration: a.durationMs },
+      'scroll', 640, 100);
+    expect(paused.startTime).toBe(a.startTime + 300);
+    expect(paused.viewportEntryTime).toBe(a.viewportEntryTime + 300);
+  });
+
+  it('uses final duration including author multiplier in safety', () => {
+    const ordinary = computeMessageMotionPlan({ ...baseInput, now: 0, screenWidth: 960,
+      messageWidth: 100, velocityPxPerSec: 350, scrollDurationMinMs: 5_000 });
+    const author = computeMessageMotionPlan({ ...baseInput, now: 0, screenWidth: 960,
+      messageWidth: 800, velocityPxPerSec: 350, scrollDurationMinMs: 5_000,
+      durationMultiplier: 1.5 });
+    expect(ordinary.actualVelocityPxPerMs).toBeCloseTo(0.232);
+    expect(author.actualVelocityPxPerMs).toBeCloseTo(0.35 / 1.5);
+    expect(author.actualVelocityPxPerMs).toBeCloseTo(author.travelDistancePx / author.durationMs);
+  });
+
+  it('uses stationary geometry and occupancy when reduced motion is effective', () => {
+    expect(resolveEffectiveMotionMode('scroll', true, false)).toBe('top');
+    expect(resolveEffectiveMotionMode('reverse', true, false)).toBe('top');
+    expect(resolveEffectiveMotionMode('bottom', true, false)).toBe('bottom');
+    expect(resolveEffectiveMotionMode('scroll', true, true)).toBe('scroll');
+    expect(resolveEffectiveMotionMode('scroll', false, false)).toBe('scroll');
+    const mode = resolveEffectiveMotionMode('scroll', true, false);
+    const a = computeMessageMotionPlan({ ...baseInput, mode, now: 0,
+      screenWidth: 960, messageWidth: 100, topBottomDurationMs: 5_800 });
+    const b = computeMessageMotionPlan({ ...baseInput, mode, now: 600,
+      screenWidth: 960, messageWidth: 100, topBottomDurationMs: 5_800 });
+    expect(messageXAtTime(a, 3_000)).toBe(430);
+    expect(messageXAtElapsed(mode, a.startX, 100, 960, 100, 3_000, a.durationMs)).toBe(430);
+    expect(motionPlansCollide(a, b, 0.08)).toBe(true);
+    expect(motionPlansCollide(a, b, 0.08, 5_800)).toBe(false);
   });
 });
 

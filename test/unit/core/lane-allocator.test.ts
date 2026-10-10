@@ -192,6 +192,14 @@ describe('LaneAllocator', () => {
   // ── markCollision / resetBatch ──────────────────────────────────────────
 
   describe('markCollision / resetBatch', () => {
+    it('keeps retry exclusions local to each incoming candidate', () => {
+      allocator.reset(defaultDimensions);
+      allocator.markCollision(0);
+      expect(allocator.findPlacement(10, defaultDimensions, 1, now, 'top')?.laneIndex).toBe(1);
+      allocator.clearCandidateExclusions();
+      expect(allocator.findPlacement(10, defaultDimensions, 1, now, 'top')?.laneIndex).toBe(0);
+    });
+
     it('markCollision does not throw', () => {
       allocator.reset(defaultDimensions);
       expect(() => allocator.markCollision(0)).not.toThrow();
