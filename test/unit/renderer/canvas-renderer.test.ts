@@ -35,6 +35,7 @@ function makeSettings(overrides: Partial<OverlaySettings> = {}): OverlaySettings
     maxConcurrentMessages: 300, allowShortTextMessages: false, minTextLength: 1,
     logLevel: 'warn' as const,
     showAuthor: { normal: false, member: true, moderator: true, owner: true, verified: true, superChat: true },
+    backgroundColors: { normal: '#00000000', member: '#00000000', moderator: '#00000000', owner: '#00000000', verified: '#00000000', superChat: '#00000000' },
     colors: { normal: '#FFFFFF', member: '#0F9D58', moderator: '#5E84F1', owner: '#FFD600', verified: '#AAAAAA' },
     outline: { enabled: true, widthPx: 2, opacity: 0.7 },
     laneSpacing: 1, showDebugOverlay: false, ignoreReducedMotion: false,
@@ -83,7 +84,7 @@ describe('Canvas reservation safety', () => {
     const overlay = new Overlay();
     (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 640, height: 40 };
     const renderer = new CanvasRenderer(overlay, makeSettings({
-      danmakuMode: mode, speedPxPerSec: 350, scrollDurationMinMs: 5000,
+      danmakuMode: mode, speedPxPerSec: 350, scrollDurationMinMs: 5000, laneSpacing: 0,
       scrollDurationMaxMs: 30000, exitPaddingPx: 100, headwayGapRatio: 0.08,
       outline: { enabled: false, widthPx: 0, opacity: 0 },
     }));

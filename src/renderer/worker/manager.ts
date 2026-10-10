@@ -1006,6 +1006,11 @@ export class RenderWorkerManager {
       settings.membershipMaxBodyLines !== previous.membershipMaxBodyLines ||
       settings.showSuperChatAmount !== previous.showSuperChatAmount ||
       settings.translationMode !== previous.translationMode ||
+      Object.keys(settings.backgroundColors).some(
+        (key) =>
+          settings.backgroundColors[key as keyof OverlaySettings['backgroundColors']] !==
+          previous.backgroundColors[key as keyof OverlaySettings['backgroundColors']]
+      ) ||
       Object.keys(settings.showAuthor).some(
         (key) =>
           settings.showAuthor[key as keyof OverlaySettings['showAuthor']] !==

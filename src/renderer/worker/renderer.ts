@@ -55,7 +55,6 @@ import {
   drawAuthorSection,
   drawRoundRect,
   getDisplayText,
-  getSafeTextHeight,
   type RegularMessageRenderConfig,
   renderRegularMessage,
   renderSegment,
@@ -82,7 +81,11 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
 import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
-import { getAuthorNameMaxWidth, getRegularCardInsets } from '@renderer/layout/card-layout';
+import {
+  getAuthorNameMaxWidth,
+  getRegularCardInsets,
+  hasRegularBackground,
+} from '@renderer/layout/card-layout';
 import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
@@ -109,6 +112,13 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
+import {
+  getRegularContentBounds,
+  getRegularRowHeight,
+  getRowContentOffset,
+  getRowGridHeight,
+  getRowSlotCount,
+} from '@renderer/layout/row-geometry';
 import { resolveRequiredRenderAssets } from '@renderer/render-assets';
 import {
   computeAgeFadeRate,
@@ -116,7 +126,11 @@ import {
   computeMessageOpacity,
   type OpacityConfig,
 } from '@renderer/shared';
-import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
+import {
+  clearTextMeasurementCaches,
+  getFontString,
+  measureBoundingBoxWidth,
+} from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
 import {
   DEFAULT_FONT_FAMILY,
@@ -459,12 +473,9 @@ export class WorkerRenderer {
       this.config?.fontFamily ?? DEFAULT_FONT_FAMILY
     );
 
-  /** Compute effective font size scaled to current viewport height. */
+  /** Match actual body drawing, prewarming, and ghost text. */
   private getEffectiveFontSize(): number {
-    if (!this.config || this.logicalHeight <= 0) return this.config?.fontSize ?? 32;
-    const { fontSize, fontBaseViewportHeight, fontMinSize, fontMaxSize } = this.config;
-    const scaled = Math.round(fontSize * (this.logicalHeight / fontBaseViewportHeight));
-    return Math.max(fontMinSize, Math.min(fontMaxSize, scaled));
+    return this.config?.fontSize ?? DEFAULT_SETTINGS.fontSize;
   }
 
   private static TEXT_MEASURE_CACHE_MAX = 500;
@@ -479,7 +490,6 @@ export class WorkerRenderer {
     return t;
   })();
   private textMeasureCache = new Map<string, number>();
-  private fontMetricsCache = new Map<string, { height: number }>();
   private activeMessages: ActiveMessage[] = [];
   private activeMessagesByLane = new Map<number, ActiveMessage[]>();
   private readonly collisionScratch = new Set<ActiveMessage>();
@@ -622,6 +632,7 @@ export class WorkerRenderer {
             this.ctx.setTransform(newDpr, 0, 0, newDpr, 0, 0);
             this.logicalWidth = cssW;
             this.logicalHeight = cssH;
+            clearTextMeasurementCaches();
             this.initLanes(cssW, cssH);
             this.reflowActiveMessages();
             break;
@@ -742,6 +753,13 @@ export class WorkerRenderer {
                   nextConfig.fontWeight !== this.config.fontWeight) ||
                 (nextConfig.fontFamily !== undefined &&
                   nextConfig.fontFamily !== this.config.fontFamily) ||
+                (nextConfig.outlineWidthPx !== undefined &&
+                  nextConfig.outlineWidthPx !== this.config.outlineWidthPx) ||
+                (nextConfig.backgroundColors !== undefined &&
+                  Object.keys(nextConfig.backgroundColors).some(
+                    (key) =>
+                      nextConfig.backgroundColors?.[key] !== this.config?.backgroundColors[key]
+                  )) ||
                 (nextConfig.laneSpacing !== undefined &&
                   nextConfig.laneSpacing !== this.config.laneSpacing) ||
                 (nextConfig.safeTop !== undefined && nextConfig.safeTop !== this.config.safeTop) ||
@@ -787,7 +805,7 @@ export class WorkerRenderer {
               this.recomputeConfigDerived();
               if (fontMetricsChanged) {
                 this.textMeasureCache.clear();
-                this.fontMetricsCache.clear();
+                clearTextMeasurementCaches();
               }
               if (textBitmapStyleChanged) this.textBitmapCache.clear();
               // Preserve decoded image caches across ordinary settings
@@ -991,19 +1009,6 @@ export class WorkerRenderer {
   private getFontFromConfig(fontSize: number): string {
     if (!this.config) return `${fontSize}px sans-serif`;
     return getFontString(fontSize, this.config.fontWeight, this.config.fontFamily);
-  }
-
-  private measureTextHeight(fontSize: number): number {
-    if (!this.ctx) return Math.ceil(fontSize * 1.1);
-    const font = this.getFontFromConfig(fontSize);
-    let metrics = this.fontMetricsCache.get(font);
-    if (!metrics) {
-      this.ctx.font = font;
-      const m = this.ctx.measureText('Mg');
-      metrics = { height: getSafeTextHeight(m, fontSize) };
-      this.fontMetricsCache.set(font, metrics);
-    }
-    return metrics.height;
   }
 
   private static estimateBitmapBytes(bitmap: ImageBitmap): number {
@@ -1310,6 +1315,26 @@ export class WorkerRenderer {
 
   /** Reposition active messages and restore their lane reservations after resize. */
   private reflowActiveMessages(): void {
+    if (this.config && this.ctx) {
+      for (const message of this.activeMessages) {
+        if (message.kind !== 'text') continue;
+        getRegularContentBounds(
+          { text: message.text, content: message.content ?? [] },
+          this.getFontFromConfig(this.config.fontSize),
+          this.config.fontSize,
+          this.ctx
+        );
+        if (message.author) {
+          const size = Math.round(this.config.fontSize * rendererLayout.authorFontScale);
+          getRegularContentBounds(
+            { text: message.author, content: [] },
+            this.getFontFromConfig(size),
+            size,
+            this.ctx
+          );
+        }
+      }
+    }
     const config = this.config;
     if (!config || this.numLanes <= 0) return;
     const now = this.pauseStartTime ?? performance.now();
@@ -1348,6 +1373,7 @@ export class WorkerRenderer {
     const reconciled = reconcileMessagePlacements(candidates, {
       laneCount: this.numLanes,
       laneHeight: this.laneHeight,
+      laneSpacing: config.laneSpacing,
       viewportHeight: this.logicalHeight,
       safeTop: config.safeTop,
       mode: config.danmakuMode,
@@ -1403,9 +1429,14 @@ export class WorkerRenderer {
 
   private initLanes(_width: number, height: number): void {
     if (!this.config || !this.ctx) return;
-    const textHeight = this.measureTextHeight(this.getEffectiveFontSize());
-    const rawLaneHeight = Math.max(1, textHeight + this.config.laneSpacing);
-    this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.laneDensityFactor));
+    const baseHeight = getRegularRowHeight(
+      this.config.fontSize,
+      this.config.fontWeight,
+      this.config.fontFamily,
+      this.config.outlineWidthPx,
+      this.ctx
+    );
+    this.laneHeight = getRowGridHeight(baseHeight, this.config.laneSpacing, this.laneDensityFactor);
     const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
     this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
     const now = performance.now();
@@ -1440,17 +1471,22 @@ export class WorkerRenderer {
       speedTier,
       Math.random,
       strategy,
-      true
+      true,
+      this.config?.laneSpacing ?? 0
     );
     if (!result) return null;
-    const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
+    const slotCount = getRowSlotCount(msgHeight, this.laneHeight, this.config?.laneSpacing ?? 0);
     const laneY = computeLaneY(
       result.laneIndex,
       this.logicalHeight,
       this.config?.safeTop ?? 0,
       this.laneHeight
     );
-    const verticalOffset = Math.floor((slotCount * this.laneHeight - msgHeight) / 2);
+    const verticalOffset = getRowContentOffset(
+      msgHeight,
+      this.laneHeight,
+      this.config?.laneSpacing ?? 0
+    );
     return { ...result, laneY, slotCount, verticalOffset };
   }
 
@@ -1925,13 +1961,25 @@ export class WorkerRenderer {
                 strokeWidth,
                 (cfg.showAuthor[msg.authorType ?? 'normal'] ?? true) &&
                   !!msg.author &&
-                  !!msg.authorPhotoUrl
+                  !!msg.authorPhotoUrl,
+                hasRegularBackground(
+                  cfg.backgroundColors[msg.authorType ?? 'normal'] ?? '#00000000'
+                )
               );
               const paddingH = msg.cardConfigWorker
                 ? paidPadding.paddingH
                 : regularInsets.horizontal;
               const paddingV = msg.cardConfigWorker ? paidPadding.paddingV : regularInsets.vertical;
-              const translationY = sy + msg.height - paddingV - translationHeight;
+              const translationAbove = msg.cardConfigWorker
+                ? 0
+                : getRegularContentBounds(
+                    { text: msg.translatedText, content: [] },
+                    getFontString(translationFontSize, 'normal', cfg.fontFamily),
+                    translationFontSize,
+                    this.ctx
+                  ).above;
+              const translationY =
+                sy + msg.height - paddingV - translationHeight + translationAbove;
               this.ctx.save();
               try {
                 this.ctx.globalAlpha =
@@ -2186,7 +2234,7 @@ export class WorkerRenderer {
       lastPriority = entry.priority;
       attempts++;
       const speedTier = getSpeedTier(entry, this.config);
-      const requiredSlots = Math.max(1, Math.ceil(entry.height / this.laneHeight));
+      const requiredSlots = getRowSlotCount(entry.height, this.laneHeight, this.config.laneSpacing);
       if (requiredSlots > this.numLanes) {
         // A message taller than the viewport can never obtain a contiguous
         // block. Treat it as a permanent drop instead of retrying it every
@@ -2250,6 +2298,24 @@ export class WorkerRenderer {
       batchIndex++;
       committed.add(entry);
 
+      // Prepare content metrics before drawing; shared lookups never need DOM in Worker.
+      if (entry.kind === 'text' && this.ctx) {
+        getRegularContentBounds(
+          { text: entry.text, content: entry.content ?? [] },
+          this.getFontFromConfig(this.config.fontSize),
+          this.config.fontSize,
+          this.ctx
+        );
+        if (entry.author) {
+          const size = Math.round(this.config.fontSize * rendererLayout.authorFontScale);
+          getRegularContentBounds(
+            { text: entry.author, content: [] },
+            this.getFontFromConfig(size),
+            size,
+            this.ctx
+          );
+        }
+      }
       // Pre-warm text bitmap cache — see canvas-renderer.ts drainQueue for rationale.
       if (entry.content && this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0) {
         const warmColor =

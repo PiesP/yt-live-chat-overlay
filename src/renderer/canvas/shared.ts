@@ -24,8 +24,15 @@ import {
   getAuthorPhotoSlotWidth,
   getAuthorRowHeight,
   getRegularCardInsets,
+  hasRegularBackground,
 } from '@renderer/layout/card-layout';
-import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
+import { getRegularContentBounds } from '@renderer/layout/row-geometry';
+import {
+  getFontString,
+  measureTextHeight,
+  measureTextTopBounds,
+  measureTextWidth,
+} from '@renderer/text-measure';
 import { splitGraphemeClusters as splitGraphemeClustersInternal } from '@renderer/text-segmentation';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
@@ -53,6 +60,8 @@ export interface ImageCacheLike<T = unknown> {
 }
 
 const MAX_TEXT_BITMAP_DIMENSION = 8192;
+/** Weak metadata follows the cached bitmap's lifetime without retaining it. */
+const bitmapTopInsets = new WeakMap<object, number>();
 
 function getCanvasDpr(ctx: AnyCanvasContext): number {
   const dpr = ctx.getTransform().a;
@@ -644,7 +653,18 @@ function cacheTextBitmap(
   const lsExtraWidth = lsPx > 0 ? Math.ceil(Math.max(0, [...text].length - 1) * lsPx) : 0;
   const bitmapPadding = Math.ceil(strokeWidth / 2) + 1;
   const width = Math.ceil(textWidth + bitmapPadding * 2 + lsExtraWidth);
-  const height = Math.ceil(getSafeTextHeight(metrics, fontSize) + bitmapPadding * 2);
+  const above = Number.isFinite(metrics.actualBoundingBoxAscent)
+    ? Math.max(0, Math.ceil(metrics.actualBoundingBoxAscent))
+    : 0;
+  const bitmapTextHeight =
+    Number.isFinite(metrics.actualBoundingBoxAscent) &&
+    Number.isFinite(metrics.actualBoundingBoxDescent)
+      ? getSafeTextHeight(metrics, fontSize)
+      : (() => {
+          const bounds = measureTextTopBounds(font, fontSize, text, ctx);
+          return bounds.above + bounds.below;
+        })();
+  const height = Math.ceil(bitmapTextHeight + bitmapPadding * 2);
   ctx.restore();
 
   // Match the current canvas backing-store density. The caller includes this
@@ -680,10 +700,11 @@ function cacheTextBitmap(
   offCtx.lineJoin = 'round';
   offCtx.lineCap = 'round';
   offCtx.miterLimit = 2;
-  offCtx.strokeText(text, bitmapPadding, bitmapPadding);
+  offCtx.strokeText(text, bitmapPadding, bitmapPadding + above);
   offCtx.fillStyle = fillColor;
-  offCtx.fillText(text, bitmapPadding, bitmapPadding);
+  offCtx.fillText(text, bitmapPadding, bitmapPadding + above);
 
+  bitmapTopInsets.set(offscreen, above);
   textBitmapCache.set(key, offscreen);
 }
 
@@ -717,11 +738,17 @@ function drawBitmapAtCssSize(
     bh = bitmap.height;
   }
   if (bw <= 0 || bh <= 0) {
-    ctx.drawImage(bitmap, x - originInset, y - originInset); // fallback for non-canvas sources
+    ctx.drawImage(bitmap, x - originInset, y - originInset - (bitmapTopInsets.get(bitmap) ?? 0)); // fallback for non-canvas sources
     return;
   }
   const dpr = getCanvasDpr(ctx);
-  ctx.drawImage(bitmap, x - originInset, y - originInset, bw / dpr, bh / dpr);
+  ctx.drawImage(
+    bitmap,
+    x - originInset,
+    y - originInset - (bitmapTopInsets.get(bitmap) ?? 0),
+    bw / dpr,
+    bh / dpr
+  );
 }
 
 /**
@@ -914,15 +941,21 @@ function renderContentSegments(
   measureTextFn: (text: string, direction?: TextDirection) => number,
   emojiCache: ImageCacheLike,
   isValidEmoji: (image: unknown) => boolean,
-  letterSpacing = '0px'
+  letterSpacing = '0px',
+  textAbove = 0
 ): void {
   let cursorX = startX;
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const font = getFontFn(fontSize);
   ctx.save();
   ctx.font = font;
-  const textHeight = measureTextHeight(font, fontSize);
-  const emojiY = y + Math.round((textHeight - emojiSize) / 2);
+  const textHeight = getRegularContentBounds(
+    { text: '', content: segments },
+    font,
+    fontSize,
+    ctx
+  ).height;
+  const emojiY = y - textAbove + Math.round((textHeight - emojiSize) / 2);
   const visualPieces = resolveVisualInlinePieces(
     segments.map((segment) =>
       segment.type === 'text'
@@ -1110,7 +1143,8 @@ export function drawAuthorSection<T>(
   photoCache: ImageCacheLike<T>,
   isValidPhoto: (photo: T) => boolean,
   textBitmapCache: TextBitmapCache,
-  getFontFn: (fontSize: number) => string
+  getFontFn: (fontSize: number) => string,
+  regularNameBounds?: { height: number; above: number }
 ): number {
   if (!message.author) return startY;
 
@@ -1122,7 +1156,7 @@ export function drawAuthorSection<T>(
   // Measure text height directly from the context (compatible with both
   // CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D).
   const nameMetrics = ctx.measureText('Mg');
-  const nameHeight = getSafeTextHeight(nameMetrics, authorFontSize);
+  const nameHeight = regularNameBounds?.height ?? getSafeTextHeight(nameMetrics, authorFontSize);
   const sectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   // Author photo (if available and valid)
@@ -1134,7 +1168,10 @@ export function drawAuthorSection<T>(
     }
   }
   const nameX = textX + getAuthorPhotoSlotWidth(authorPhotoUrl);
-  const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
+  const nameY =
+    startY +
+    Math.max(0, Math.floor((sectionHeight - nameHeight) / 2)) +
+    (regularNameBounds?.above ?? 0);
 
   // Truncate author name with ellipsis if it exceeds the allowed width
   let displayName = message.author;
@@ -1255,7 +1292,8 @@ export function renderRegularMessage(
   const insets = getRegularCardInsets(
     fontSize,
     outlineWidthPx,
-    showAuthor && !!message.author && !!message.authorPhotoUrl
+    showAuthor && !!message.author && !!message.authorPhotoUrl,
+    hasRegularBackground(backgroundColor)
   );
   const textX = x + insets.horizontal;
   let textY = y + insets.vertical;
@@ -1277,10 +1315,20 @@ export function renderRegularMessage(
       authorPhotoCache,
       isValidAuthorPhoto,
       textBitmapCache,
-      getFontFn
+      getFontFn,
+      getRegularContentBounds(
+        { text: message.author, content: [] },
+        getFontString(authorFontSize, fontWeight as FontWeight, fontFamily),
+        authorFontSize,
+        ctx
+      )
     );
     textY += spacing.xs;
   }
+
+  const displayed = overrideText ? { text: overrideText, content: [] } : message;
+  const textAbove = getRegularContentBounds(displayed, getFontFn(fontSize), fontSize, ctx).above;
+  textY += textAbove;
 
   if (overrideText) {
     renderSegment(
@@ -1311,7 +1359,8 @@ export function renderRegularMessage(
       measureTextFn,
       emojiCache,
       isValidEmoji,
-      letterSpacing
+      letterSpacing,
+      textAbove
     );
   } else if (message.text.length > 0) {
     renderSegment(

@@ -826,7 +826,7 @@ export const SETTINGS_UI_STYLES = `
         border-top: 1px solid ${uiColors.border};
       }
 
-      /* ── Fixed-message settings preview ── */
+      /* ── Three-row Canvas settings preview ── */
       .yt-chat-overlay-settings-font-preview {
         background: ${uiColors.background};
         border: 1px solid ${uiColors.border};
@@ -876,12 +876,16 @@ export const SETTINGS_UI_STYLES = `
         min-width: 0;
         max-width: 100%;
         box-sizing: border-box;
-        padding: ${spacing.md}px;
+        padding: 0;
         overflow-wrap: anywhere;
         text-align: center;
         paint-order: stroke fill;
         transition: font-size ${animDuration.fast} ${SETTINGS_UI_DESIGN.motion.easing}, font-weight ${animDuration.fast} ${SETTINGS_UI_DESIGN.motion.easing};
         line-height: 1.3;
+      }
+      .yt-chat-overlay-settings-font-preview-text canvas {
+        display: block;
+        max-inline-size: 100%;
       }
       .yt-chat-overlay-settings-font-preview-metrics {
         padding: ${spacing.xs}px ${spacing.sm}px;
@@ -1010,10 +1014,6 @@ export const SETTINGS_UI_STYLES = `
         }
         .yt-chat-overlay-settings-font-preview-stage {
           min-height: 112px;
-        }
-        .yt-chat-overlay-settings-font-preview-text {
-          padding-block: ${spacing.xs}px;
-          padding-inline: ${spacing.md}px;
         }
       }
       @media (max-height: 640px) {

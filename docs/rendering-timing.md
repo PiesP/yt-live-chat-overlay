@@ -23,6 +23,28 @@ placement and at deliberate resize, translation, or settings reflow. A committed
 motion plan keeps its velocity and reservation until collision-aware reflow;
 pause and recovery preserve its elapsed progress and future entry.
 
+Vertical geometry uses the saved `fontSize` in logical pixels for measurement,
+regular drawing, prewarming, lane creation and reflow in both renderers.
+Resizing/fullscreen changes capacity and paid-card width without resizing text.
+Legacy responsive sizing preferences remain stored but do not scale the lanes.
+Transparent regular comments keep outline/antialiasing and photo overflow without
+decorative vertical card padding; visible backgrounds retain their card insets.
+Top-baseline font envelopes and cached actual-content bounds account for CJK,
+fallback fonts, combining marks and emoji. Outlined bitmaps preserve above-origin
+ink and its draw origin. Horizontal padding and wrapping are unchanged.
+
+`laneSpacing` is additional logical-pixel separation outside each content
+rectangle. Its existing 0–20 range, 1px step and default zero remain unchanged.
+The ordinary row pitch is its complete compact height plus this gap. Density
+factors 1, 0.75 and 0.5 select 1, 2 and 4 subdivisions of that pitch; an ordinary
+row reserves all its subdivisions, so finer grids do not claim more ordinary
+capacity or increase its pitch. Genuinely taller author, translation and paid
+content reserves `ceil((height + gap) / gridHeight)` slots. Its remaining discrete
+rounding space is centered around content, excluding the user gap. Reservations
+and reflow use the same rule. Spread still spans the full safe zone and may
+leave unused rows or future reservations. The settings preview paints three
+rows with the shared estimate, reservation and drawing code.
+
 Live entry pacing groups messages by queue priority and speed tier. Backlog
 messages retain their existing lower priority. Temporal delay and horizontal
 offset share the adaptive entry window. A group's previous geometric entry is

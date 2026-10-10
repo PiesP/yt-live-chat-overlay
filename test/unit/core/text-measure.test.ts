@@ -278,15 +278,15 @@ describe('text measurement caches', () => {
 
       const first = estimateMessageDimensions(message, 16, false);
       const cached = estimateMessageDimensions(message, 16, false);
-      const insets = getRegularCardInsets(16);
+      const insets = getRegularCardInsets(16, 0, false, false);
 
       expect(first).toEqual({
         width: 42 + insets.horizontal * 2,
-        height: Math.ceil(16 * 1.1) + insets.vertical * 2,
+        height: Math.ceil(16 * 1.4) + insets.vertical * 2,
       });
       expect(cached).toEqual(first);
       expect(Object.values(first).every(Number.isFinite)).toBe(true);
-      expect(measureText.mock.calls.map(([text]) => text)).toEqual(['hello', 'Mg']);
+      expect(measureText.mock.calls.map(([text]) => text)).toEqual(['hello', 'Mg国한Ágj', 'hello']);
     } finally {
       getContext.mockRestore();
       vi.resetModules();

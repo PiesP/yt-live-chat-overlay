@@ -123,7 +123,7 @@ export const ZH_CN: Record<string, string> = {
   'translation.displayModeReplace': '仅翻译',
 
   // ── Tooltips ──
-  'danmaku.laneGapDesc': '弹幕行之间的垂直间距 (0 = 行紧邻)',
+  'danmaku.laneGapDesc': '评论行之间额外的垂直间距。0 使用文字和描边不重叠的最小安全间距。',
   'danmaku.fontWeightDesc': '粗体更易阅读，常规使用更少GPU内存',
   'danmaku.fontFamily': '字体系列',
   'danmaku.fontSystemDefault': '系统默认',

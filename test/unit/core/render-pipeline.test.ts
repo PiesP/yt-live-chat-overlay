@@ -322,6 +322,7 @@ describe('drawStage', () => {
     });
     const renderCtx = {
       globalAlpha: 1,
+      measureText: vi.fn(() => ({ actualBoundingBoxAscent: 0, actualBoundingBoxDescent: 16, width: 100 })),
       save: vi.fn(),
       restore: vi.fn(),
     } as unknown as CanvasRenderingContext2D;
@@ -331,7 +332,7 @@ describe('drawStage', () => {
     drawStage(ctx, renderCtx, buckets as never);
 
     expect(mocks.renderSegment.mock.calls[0]?.[2]).toBe(22);
-    expect(mocks.renderSegment.mock.calls[0]?.[3]).toBe(39);
+    expect(mocks.renderSegment.mock.calls[0]?.[3]).toBe(43);
   });
 
   it('isolates paid-card canvas state and replaces its body with translated text', () => {

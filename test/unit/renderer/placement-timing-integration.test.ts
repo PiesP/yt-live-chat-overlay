@@ -101,6 +101,7 @@ interface Harness {
     x: number; y: number; width: number; height: number;
     motion: NonNullable<CanvasMessage['motion']>;
   }>;
+  resize(width: number, height: number): Promise<void>;
   close(): void;
 }
 
@@ -212,6 +213,11 @@ function createHarness(
         };
       });
     },
+    async resize(width, height) {
+      (overlay as unknown as { updateDimensionsFromRect(width: number, height: number): void }).updateDimensionsFromRect(width, height);
+      await Promise.resolve();
+      await Promise.resolve();
+    },
     close() { runtime.destroy(); container.remove(); },
   };
   vi.spyOn(sourceInternals, 'getPlaybackSnapshot').mockImplementation(() => harness.playback);
@@ -308,6 +314,78 @@ describe('Placement through source, runtime and renderer', () => {
     await harness.flush();
     harness.frame(10_032);
     expect(harness.delivered).toEqual(['old', 'new']);
+  });
+
+  it.each((['main', 'worker'] as const).flatMap((mode) => [14, 32, 50].map((fontSize) => ({ mode, fontSize }))))('reconciles cached vertical geometry, density, pause and resize in $mode at $fontSize px', async ({ mode, fontSize }) => {
+    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    harness = createHarness(mode, clock, { fontSize, laneSpacing: 0, showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false }, outline: { enabled: false, widthPx: 0, opacity: 0 } });
+    for (const id of ['日本語コメント1', '한국어댓글2']) harness.insert(id, 10_000);
+    await harness.flush(); harness.frame(10_000);
+    const initial = harness.active();
+    expect(initial).toHaveLength(2);
+    expect(Math.abs((initial[1]?.y ?? 0) - (initial[0]?.y ?? 0))).toBe(initial[0]?.height);
+    harness.frame(11_000);
+    const previous = harness.active();
+    const settings = (harness.renderer as unknown as { settings: OverlaySettings }).settings;
+    harness.renderer.setUserPaused(true);
+    const next = { ...settings, laneSpacing: 8, fontSize: 40, backgroundColors: { ...settings.backgroundColors, normal: '#00000040' }, outline: { enabled: true, widthPx: 4, opacity: 0.7 } };
+    harness.renderer.updateSettings(next);
+    await Promise.resolve(); await Promise.resolve();
+    // Apply a geometry refresh through Overlay's production resize callback.
+    await harness.resize(1280, 1080);
+    const changed = harness.active();
+    expect(changed).toHaveLength(2);
+    expect(changed.every((message) => message.height > (initial[0]?.height ?? 0))).toBe(true);
+    for (const message of changed) {
+      const old = previous.find((entry) => entry.id === message.id);
+      if (!old) throw new Error('lost prior placement');
+      const beforeProgress = (11_000 - old.motion.startTime) / old.duration;
+      expect((11_000 - message.motion.startTime) / message.duration).toBeCloseTo(beforeProgress);
+    }
+    if (mode === 'worker') {
+      if (!harness.worker) throw new Error('Worker missing');
+      const backend = harness.worker.backend as unknown as { laneHeight: number };
+      const beforeHeight = backend.laneHeight;
+      harness.worker.postMessage({ type: 'laneDensity', factor: 0.5 });
+      expect(backend.laneHeight).toBeCloseTo(beforeHeight / 4);
+    } else {
+      const allocator = (harness.renderer as unknown as { laneAllocator: { updateLaneDensityFactor(factor: number): void } }).laneAllocator;
+      allocator.updateLaneDensityFactor(0.5);
+      harness.renderer.resetAllocator({ width: 1280, height: 1080 });
+      (harness.renderer as unknown as { reflowActiveMessages(size: { width: number; height: number }): void }).reflowActiveMessages({ width: 1280, height: 1080 });
+    }
+    clock.now = 12_000;
+    harness.renderer.setUserPaused(false);
+    const measurement = mode === 'worker'
+      ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx.measureText : harness.mainContext.measureText;
+    measurement.mockClear();
+    const originalMeasurement = measurement.getMockImplementation();
+    const measurementStacks: string[] = [];
+    measurement.mockImplementation((text) => {
+      measurementStacks.push(new Error().stack ?? '');
+      return originalMeasurement?.(text) ?? { width: 0, actualBoundingBoxAscent: 0, actualBoundingBoxDescent: 0 };
+    });
+    harness.frame(12_000);
+    // Existing inline-width/bitmap measurements have separate caches. The new
+    // vertical bounds must be prepared before this first resumed draw.
+    expect(measurementStacks.filter((stack) => stack.includes('measureTextTopBounds'))).toEqual([]);
+    const resumed = harness.active();
+    expect(resumed).toHaveLength(2);
+    const [first, second] = resumed;
+    if (!first || !second) throw new Error('resumed placements missing');
+    expect(motionPlansCollide(first.motion, second.motion, 0.08, 12_000) &&
+      first.y + first.height > second.y && second.y + second.height > first.y).toBe(false);
+    harness.renderer.updateSettings(settings);
+    await Promise.resolve(); await Promise.resolve();
+    await harness.resize(640, 160);
+    harness.frame(12_000);
+    const restored = harness.active();
+    expect(restored).toHaveLength(2);
+    expect(restored.every((message) => message.height === initial[0]?.height)).toBe(true);
+    const drawing = mode === 'worker'
+      ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx : harness.mainContext;
+    expect(drawing.font).toContain(`${fontSize}px`);
   });
 
   it('keeps committed geometry and drops equivalent across Canvas and Worker frame partitions', async () => {

@@ -22,7 +22,9 @@ import {
   getAuthorRowHeight,
   getPaidCardWidthBounds,
   getRegularCardInsets,
+  hasRegularBackground,
 } from '@renderer/layout/card-layout';
+import { getRegularContentBounds } from '@renderer/layout/row-geometry';
 import { RendererBase } from '@renderer/renderer-base';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/schema';
@@ -76,7 +78,8 @@ export function estimateMessageDimensions(
   letterSpacing = '0px',
   outlineWidthPx = 0,
   availableWidth?: number,
-  minimumPaidCardWidth?: number
+  minimumPaidCardWidth?: number,
+  backgroundColor = '#00000000'
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -114,7 +117,8 @@ export function estimateMessageDimensions(
     fontWeight,
     fontFamily,
     letterSpacing,
-    outlineWidthPx
+    outlineWidthPx,
+    backgroundColor
   );
 }
 
@@ -126,19 +130,16 @@ function estimateRegularMessageDimensions(
   fontWeight: FontWeight,
   fontFamily: string,
   letterSpacing: string,
-  outlineWidthPx: number
+  outlineWidthPx: number,
+  backgroundColor: string
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize, letterSpacing);
-  const textHeight = Math.max(
-    measureTextHeight(font, fontSize),
-    message.content.some((segment) => segment.type === 'emoji')
-      ? Math.round(fontSize * rendererLayout.emojiSize)
-      : 0
-  );
+  const textHeight = getRegularContentBounds(message, font, fontSize).height;
   const insets = getRegularCardInsets(
     fontSize,
     outlineWidthPx,
-    showAuthor && !!message.author && !!message.authorPhotoUrl
+    showAuthor && !!message.author && !!message.authorPhotoUrl,
+    hasRegularBackground(backgroundColor)
   );
 
   if (!showAuthor || !message.author) {
@@ -153,7 +154,11 @@ function estimateRegularMessageDimensions(
   const authorNameWidth = measureTextWidth(message.author, authorFont);
   const authorSectionWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl) + authorNameWidth;
   const totalWidth = Math.max(authorSectionWidth, textWidth) + insets.horizontal * 2;
-  const nameHeight = measureTextHeight(authorFont, authorFontSize);
+  const nameHeight = getRegularContentBounds(
+    { text: message.author, content: [] },
+    authorFont,
+    authorFontSize
+  ).height;
   const authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   return {
@@ -359,6 +364,7 @@ export interface MessageDimensionOptions {
   letterSpacing?: string;
   outlineWidthPx?: number;
   availableWidth?: number;
+  backgroundColor?: string;
 }
 
 export interface TranslatedMessageDimensions extends MessageDimensions {
@@ -383,6 +389,7 @@ export function estimateTranslatedMessageDimensions(
     letterSpacing = '0px',
     outlineWidthPx = 0,
     availableWidth,
+    backgroundColor = '#00000000',
   } = options;
   const estimate = (candidate: ChatMessage, minimumPaidCardWidth?: number): MessageDimensions =>
     estimateMessageDimensions(
@@ -396,7 +403,8 @@ export function estimateTranslatedMessageDimensions(
       letterSpacing,
       outlineWidthPx,
       availableWidth,
-      minimumPaidCardWidth
+      minimumPaidCardWidth,
+      backgroundColor
     );
   const base = estimate(message);
   if (!translatedText || (mode === 'dual' && translatedText === message.text)) {
@@ -414,14 +422,22 @@ export function estimateTranslatedMessageDimensions(
 
   const translationFontSize = Math.max(1, Math.round(fontSize * TRANSLATION_FONT_SCALE));
   const translationFont = getFontString(translationFontSize, 'normal', fontFamily);
-  const translationLineHeight = Math.ceil(measureTextHeight(translationFont, translationFontSize));
+  const translationLineHeight =
+    message.kind === 'text'
+      ? getRegularContentBounds(
+          { text: translatedText, content: [] },
+          translationFont,
+          translationFontSize
+        ).height
+      : Math.ceil(measureTextHeight(translationFont, translationFontSize));
   const translationTextWidth = measureTextWidth(translatedText, translationFont);
 
   if (message.kind === 'text') {
     const insets = getRegularCardInsets(
       fontSize,
       outlineWidthPx,
-      showAuthor && !!message.author && !!message.authorPhotoUrl
+      showAuthor && !!message.author && !!message.authorPhotoUrl,
+      hasRegularBackground(backgroundColor)
     );
     return {
       width: Math.max(base.width, Math.ceil(translationTextWidth) + insets.horizontal * 2),

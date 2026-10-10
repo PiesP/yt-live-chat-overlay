@@ -12,7 +12,8 @@ export interface CardInsets {
 export function getRegularCardInsets(
   fontSize: number,
   outlineWidthPx = 0,
-  hasAuthorPhoto = false
+  hasAuthorPhoto = false,
+  backgroundVisible = true
 ): CardInsets {
   const safeFontSize = Number.isFinite(fontSize) ? Math.max(1, fontSize) : 1;
   const safeOutline = Number.isFinite(outlineWidthPx) ? Math.max(0, outlineWidthPx) : 0;
@@ -29,15 +30,23 @@ export function getRegularCardInsets(
       photoSafety
     ),
     vertical: Math.max(
-      rendererLayout.regularCard.paddingYMin,
-      Math.min(
-        rendererLayout.regularCard.paddingYMax,
-        Math.round(safeFontSize * rendererLayout.regularCard.paddingYScale)
-      ),
+      1,
+      backgroundVisible ? rendererLayout.regularCard.paddingYMin : 0,
+      backgroundVisible
+        ? Math.min(
+            rendererLayout.regularCard.paddingYMax,
+            Math.round(safeFontSize * rendererLayout.regularCard.paddingYScale)
+          )
+        : 0,
       outlineSafety,
       photoSafety
     ),
   };
+}
+
+/** Saved background colors are normalized to #RRGGBBAA. */
+export function hasRegularBackground(color = '#00000000'): boolean {
+  return !color.endsWith('00');
 }
 
 /** Width reserved for an author photo and its following name gap. */

@@ -34,6 +34,7 @@ export interface OverlaySettings {
   danmakuMode: DanmakuMode;
   speedPxPerSec: number;
   fontSize: number;
+  /** Retained legacy sizing preferences; visible text always uses fontSize. */
   fontBaseViewportHeight: number;
   fontMinSize: number;
   fontMaxSize: number;

@@ -91,6 +91,7 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
 import {
@@ -515,7 +516,14 @@ export class CanvasRenderer extends RendererBase {
       // Queued messages must be remeasured after every resize.
       this.dimensionCache.clear();
       if (d && this.canvas) {
+        clearTextMeasurementCaches();
         this.applyDevicePixelRatio(d);
+        for (const message of this.activeMessages) {
+          this.applyMessageGeometry(
+            message,
+            this.estimateTranslatedDimensions(message.message, message.translatedText ?? null)
+          );
+        }
         this.laneAllocator.reset(d);
         this.reflowActiveMessages(d);
       }
@@ -609,6 +617,7 @@ export class CanvasRenderer extends RendererBase {
     const reconciled = reconcileMessagePlacements(candidates, {
       laneCount,
       laneHeight,
+      laneSpacing: this.settings.laneSpacing,
       viewportHeight: dimensions.height,
       safeTop: this.settings.safeTop,
       mode: this.settings.danmakuMode,
@@ -1709,7 +1718,7 @@ export class CanvasRenderer extends RendererBase {
     //     incompatibility, or wait-timeout); keep in queue for retry next frame.
     const totalLanes = this.laneAllocator.getLaneCount();
     const laneHeight = this.laneAllocator.getLaneHeight();
-    const requiredSlots = Math.max(1, Math.ceil(msgHeight / laneHeight));
+    const requiredSlots = getRowSlotCount(msgHeight, laneHeight, this.settings.laneSpacing);
     if (requiredSlots > totalLanes) {
       this.observability.recordCollisionCheck(performance.now() - t0);
       return { ok: false, reason: 'oversized' };
@@ -1948,7 +1957,9 @@ export class CanvasRenderer extends RendererBase {
       this.settings.showSuperChatAmount,
       this.getSpeedTier(message) === SPEED_TIER.FAR ? '1px' : '0px',
       this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
-      this.overlay.getDimensions()?.width
+      this.overlay.getDimensions()?.width,
+      undefined,
+      this.settings.backgroundColors[message.authorType]
     );
 
     if (message.id) {
@@ -1988,6 +1999,7 @@ export class CanvasRenderer extends RendererBase {
         showSuperChatAmount: this.settings.showSuperChatAmount,
         letterSpacing: this.getSpeedTier(message) === SPEED_TIER.FAR ? '1px' : '0px',
         outlineWidthPx: this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
+        backgroundColor: this.settings.backgroundColors[message.authorType],
         ...(availableWidth !== undefined ? { availableWidth } : {}),
       }
     );
@@ -2121,6 +2133,11 @@ export class CanvasRenderer extends RendererBase {
       settings.membershipMaxBodyLines !== this.settings.membershipMaxBodyLines ||
       settings.showSuperChatAmount !== this.settings.showSuperChatAmount ||
       settings.translationMode !== this.settings.translationMode ||
+      Object.keys(settings.backgroundColors).some(
+        (key) =>
+          settings.backgroundColors[key as keyof OverlaySettings['backgroundColors']] !==
+          this.settings.backgroundColors[key as keyof OverlaySettings['backgroundColors']]
+      ) ||
       Object.keys(settings.showAuthor).some(
         (key) =>
           settings.showAuthor[key as keyof OverlaySettings['showAuthor']] !==

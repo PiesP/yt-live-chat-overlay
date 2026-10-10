@@ -227,7 +227,8 @@ export const EN: Record<string, string> = {
   'danmaku.fontSizeDesc': 'Text size in pixels (14-50)',
   'danmaku.fontWeightDesc': 'Bold is more readable, Regular uses less GPU memory',
   'danmaku.laneGap': 'Lane Gap (px)',
-  'danmaku.laneGapDesc': 'Vertical gap between comment rows (0 = adjacent rows)',
+  'danmaku.laneGapDesc':
+    'Additional vertical space between comment rows. 0 keeps the minimum safe gap for text and outlines.',
   'danmaku.maxScrollDuration': 'Max Scroll Duration (ms)',
   'danmaku.maxScrollDurationDesc':
     'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)',

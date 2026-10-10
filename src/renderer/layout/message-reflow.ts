@@ -9,6 +9,7 @@ import {
   motionPlanFromMessage,
   motionPlansCollide,
 } from '@renderer/layout/message-schedule';
+import { getRowContentOffset, getRowSlotCount } from '@renderer/layout/row-geometry';
 
 /** Reconstruct paused time while retaining the prior viewport and measured geometry. */
 export function previousMotionPlan(
@@ -87,6 +88,7 @@ export function reconcileMessagePlacements<T>(
   options: {
     laneCount: number;
     laneHeight: number;
+    laneSpacing?: number;
     viewportHeight: number;
     safeTop: number;
     mode: DanmakuMode;
@@ -110,7 +112,7 @@ export function reconcileMessagePlacements<T>(
     if (laneIndex < 0 || laneIndex + slotCount > options.laneCount) return false;
     const y =
       computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) +
-      Math.floor((slotCount * options.laneHeight - candidate.height) / 2);
+      getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
     scratch.clear();
     for (let lane = laneIndex - 1; lane <= laneIndex + slotCount; lane++) {
       for (const other of occupants.get(lane) ?? []) scratch.add(other);
@@ -137,7 +139,7 @@ export function reconcileMessagePlacements<T>(
     return true;
   };
   for (const candidate of candidates) {
-    const slotCount = Math.max(1, Math.ceil(candidate.height / options.laneHeight));
+    const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
     if (slotCount > options.laneCount) {
       dropped.push({ message: candidate.message, reason: 'oversized' });
     } else if (!tryLane(candidate, candidate.laneIndex, slotCount)) {
@@ -145,7 +147,7 @@ export function reconcileMessagePlacements<T>(
     }
   }
   for (const candidate of displaced) {
-    const slotCount = Math.max(1, Math.ceil(candidate.height / options.laneHeight));
+    const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
     const maxLane = options.laneCount - slotCount;
     let placed = false;
     // Scan every actual lane before declaring capacity unavailable. Indexed

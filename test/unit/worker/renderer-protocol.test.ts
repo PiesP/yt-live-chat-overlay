@@ -164,7 +164,7 @@ describe('Worker reservation safety', () => {
     vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const renderer = initializeRenderer({
-      danmakuMode: mode, reducedMotion, speedPxPerSec: 350,
+      danmakuMode: mode, reducedMotion, speedPxPerSec: 350, laneSpacing: 0,
       scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
       outlineWidthPx: 0, outlineOpacity: 0,
     });
@@ -1526,7 +1526,6 @@ describe('Worker message protocol', () => {
       const renderer = initializeRenderer();
       const internals = renderer as unknown as {
         textMeasureCache: Map<string, number>;
-        fontMetricsCache: Map<string, { height: number }>;
         textBitmapCache: {
           set(key: string, value: OffscreenCanvas): boolean;
           clear(): void;
@@ -1534,10 +1533,8 @@ describe('Worker message protocol', () => {
         };
       };
       internals.textMeasureCache.clear();
-      internals.fontMetricsCache.clear();
       internals.textBitmapCache.clear();
       internals.textMeasureCache.set('measure', 10);
-      internals.fontMetricsCache.set('font', { height: 10 });
       const bitmapCanvas = new MockOffscreenCanvas() as unknown as OffscreenCanvas;
       Object.assign(bitmapCanvas, { width: 2, height: 2 });
       internals.textBitmapCache.set('bitmap', bitmapCanvas);
@@ -1546,14 +1543,12 @@ describe('Worker message protocol', () => {
         makeEvent({ type: 'updateConfig', config: { ...makeMinimalConfig(), opacity: 0.5 } })
       );
       expect(internals.textMeasureCache.size).toBe(1);
-      expect(internals.fontMetricsCache.size).toBe(1);
       expect(internals.textBitmapCache.size).toBe(1);
 
       renderer.handleMessage(
         makeEvent({ type: 'updateConfig', config: { fontFamily: 'serif' } })
       );
       expect(internals.textMeasureCache.size).toBe(0);
-      expect(internals.fontMetricsCache.has('font')).toBe(false);
       expect(internals.textBitmapCache.size).toBe(0);
     });
 

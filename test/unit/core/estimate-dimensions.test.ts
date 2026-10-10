@@ -9,8 +9,10 @@ vi.mock('@renderer/text-measure', () => ({
     `${weight} ${size}px ${family}`
   ),
   measureTextWidth: vi.fn((text: string) => text.length * 8),
+  measureTextTopBounds: vi.fn((_font: string, size: number) => ({ above: 0, below: Math.round(size * 1.2) })),
   measureTextHeight: vi.fn((_font: string, size: number) => Math.round(size * 1.2)),
   clearTextMeasurementCaches: vi.fn(),
+  getTextMeasurementGeneration: () => 0,
   measureBoundingBoxWidth: vi.fn((m: { width: number }) => m.width),
   setTextMeasureCallback: vi.fn(),
 }));
@@ -84,7 +86,7 @@ describe('estimateMessageDimensions — regular text', () => {
     // Font-relative insets keep the card compact while ensuring the glyph
     // ink is contained on all four sides.
     expect(dims.width).toBe(108);
-    expect(dims.height).toBe(25);
+    expect(dims.height).toBe(21);
   });
 
   it('includes author section when showAuthor is true and author present', () => {

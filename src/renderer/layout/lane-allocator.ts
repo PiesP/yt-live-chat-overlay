@@ -13,7 +13,12 @@ import {
   heapSiftDown,
   resetBatchShared,
 } from '@renderer/layout/lane-shared';
-import { getFontString, measureTextHeight } from '@renderer/text-measure';
+import {
+  getRegularRowHeight,
+  getRowContentOffset,
+  getRowGridHeight,
+  getRowSlotCount,
+} from '@renderer/layout/row-geometry';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('LaneAllocator');
@@ -40,11 +45,11 @@ export interface LaneAllocatorOptions {
   fontWeight: FontWeight;
   fontFamily: string;
   laneSpacing: number;
+  outlineWidthPx?: number;
   headwayGapRatio: number;
   exitPaddingPx: number;
   scrollDurationMaxMs: number;
-  /** Lane density factor: 1.0 = full-cell, < 1.0 = sub-cell mode.
-   *  effectiveLaneHeight = laneHeight * laneDensityFactor. */
+  /** 1, 0.75, 0.5 select 1, 2, 4 subdivisions of the complete row pitch. */
   laneDensityFactor: number;
 }
 
@@ -125,12 +130,14 @@ export class LaneAllocator {
     fontSize: number,
     fontWeight: FontWeight,
     fontFamily: string,
-    laneSpacing: number
+    laneSpacing: number,
+    outlineWidthPx = this.options.outlineWidthPx ?? 0
   ): void {
     this.options.fontSize = fontSize;
     this.options.fontWeight = fontWeight;
     this.options.fontFamily = fontFamily;
     this.options.laneSpacing = laneSpacing;
+    this.options.outlineWidthPx = outlineWidthPx;
   }
 
   /** Update lane density factor — caller must call `reset()` afterwards to apply. */
@@ -149,18 +156,19 @@ export class LaneAllocator {
       return;
     }
 
-    // Lane spacing is the only vertical spacing control for regular comments.
-    // Regular messages have no separate vertical padding, so a value of 0
-    // places the next lane exactly one text row below the previous one.
-    const font = getFontString(
+    // The baseline row contains its complete transparent glyph/outline bounds.
+    // User spacing is reserved outside content, independently of the sub-grid.
+    const baseHeight = getRegularRowHeight(
       this.options.fontSize,
       this.options.fontWeight,
-      this.options.fontFamily
+      this.options.fontFamily,
+      this.options.outlineWidthPx ?? 0
     );
-    const textHeight = measureTextHeight(font, this.options.fontSize);
-
-    const rawLaneHeight = Math.max(1, textHeight + this.options.laneSpacing);
-    this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.options.laneDensityFactor));
+    this.laneHeight = getRowGridHeight(
+      baseHeight,
+      this.options.laneSpacing,
+      this.options.laneDensityFactor
+    );
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
@@ -254,7 +262,7 @@ export class LaneAllocator {
     const totalLanes = this.numLanes;
     if (totalLanes <= 0) return null;
 
-    const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
+    const slotCount = getRowSlotCount(messageHeight, this.laneHeight, this.options.laneSpacing);
 
     // Delegate to shared pure function via LaneAllocationState cast.
     const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
@@ -267,7 +275,8 @@ export class LaneAllocator {
       speedTier,
       random,
       strategy,
-      exactMotionValidation
+      exactMotionValidation,
+      this.options.laneSpacing
     );
     if (!result) return null;
 
@@ -276,7 +285,7 @@ export class LaneAllocator {
       waitMs: result.waitMs,
       laneY: this.getLaneY(result.laneIndex, dimensions.height),
       slotCount,
-      verticalOffset: Math.floor((slotCount * this.laneHeight - messageHeight) / 2),
+      verticalOffset: getRowContentOffset(messageHeight, this.laneHeight, this.options.laneSpacing),
     };
   }
 
