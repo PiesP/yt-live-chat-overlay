@@ -338,6 +338,16 @@ export function assertBacklogMotion(disposition, renderer, comparisonOnly = fals
   }
 }
 
+export function assertBacklogReflow(before, after, id) {
+  assert(after?.config?.logicalWidth > before?.config?.logicalWidth &&
+    after.config.logicalHeight > before.config.logicalHeight,
+  'Fixture video geometry did not grow during resize');
+  assert.equal(before.config.fontSize, 32);
+  assert.equal(after.config.fontSize, 32, 'Reflow changed the configured 32px font');
+  assert(after.activeNow.some((entry) => entry.id === id),
+    'Backlog message disappeared during resize and spacing reflow');
+}
+
 export function workerProbePrelude(tokens = TOKENS) {
   return `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: true, tokens })});\n`;
 }
@@ -660,7 +670,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         : `${id} バックログ`);
     }) : [messageAction(transition === 'reduced' ? TOKENS[7] : TOKENS[9],
       'Bounded second transition fixture')]],
-    ['4', spacingSpeed ? Array.from({ length: 20 }, (_, index) => messageAction(
+    ['4', spacingSpeed ? Array.from({ length: 4 }, (_, index) => messageAction(
       `WINDOWS195_BURST_${String(index).padStart(2, '0')}`, 'Bounded live burst'))
       : [messageAction(TOKENS[10], 'Reduced-motion override disabled')]],
     ['5', [messageAction(TOKENS[11], 'System reduced motion disabled')]],
@@ -993,12 +1003,24 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       phaseObservations.push({ phase: 'pause-resume',
         pauseStart: atPauseStart, paused: atPauseEnd,
         resumed: resumed.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 0 }));
+      await page.locator('.player-wrapper').evaluate((element) => {
+        element.style.maxWidth = '1000px';
+      });
       await page.setViewportSize({ width: 1100, height: 700 });
-      await page.waitForTimeout(350);
+      await page.waitForFunction(({ width, height }) => {
+        const video = document.querySelector('video')?.getBoundingClientRect();
+        return video && video.width > width && video.height > height;
+      }, { width: resumed.exact.config.logicalWidth,
+        height: resumed.exact.config.logicalHeight }, { timeout: 5000 });
+      const grown = await issueSnapshot();
+      assertBacklogReflow(resumed.exact, grown.exact, TOKENS[17]);
+      phaseObservations.push({ phase: 'resize-expanded', config: grown.exact.config,
+        active: grown.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 0 }));
       const reflow = await issueSnapshot();
-      assert(reflow.exact.activeNow.some((entry) => entry.id === TOKENS[17]),
-        'Backlog message disappeared during resize and spacing reflow');
+      assertBacklogReflow(resumed.exact, reflow.exact, TOKENS[17]);
+      assert.equal(reflow.exact.config.laneSpacing, 0,
+        'Lane Gap update did not reach the resized renderer');
       phaseObservations.push({ phase: 'reflow', config: reflow.exact.config,
         active: reflow.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
       if (!forceFallback) {

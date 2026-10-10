@@ -4,7 +4,7 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 describe('Windows placement timing probe', () => {
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
@@ -56,6 +56,18 @@ describe('Windows placement timing probe', () => {
       exactWorkerFrameMs: { count: 1, p95: 2 },
       exactWorkerDrainMs: { count: 1, p95: 1 },
     });
+  });
+
+  it('requires real video growth and retention of the same Backlog ID after reflow', () => {
+    const before = { config: { logicalWidth: 858, logicalHeight: 482, fontSize: 32 },
+      activeNow: [{ id: 'WINDOWS195_BACKLOG_LONG' }] };
+    const after = { config: { logicalWidth: 998, logicalHeight: 561, fontSize: 32 },
+      activeNow: [{ id: 'WINDOWS195_BACKLOG_LONG' }] };
+    expect(() => assertBacklogReflow(before, after, 'WINDOWS195_BACKLOG_LONG')).not.toThrow();
+    expect(() => assertBacklogReflow(before, { ...after, config: before.config },
+      'WINDOWS195_BACKLOG_LONG')).toThrow(/video geometry/);
+    expect(() => assertBacklogReflow(before, { ...after, activeNow: [] },
+      'WINDOWS195_BACKLOG_LONG')).toThrow(/disappeared/);
   });
 
   it('adds a Canvas probe only at the expected packaged app entry', () => {
