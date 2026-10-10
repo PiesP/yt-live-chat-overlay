@@ -35,10 +35,12 @@ import {
 import type {
   WorkerActiveMotion,
   WorkerBatchReceipt,
+  WorkerDropReasonCounts,
   WorkerMessageGeometry,
   WorkerMotionSnapshot,
   WorkerStatsMessage,
 } from './types';
+import { WORKER_DROP_REASONS } from './types';
 
 type DimensionResult = { width: number; height: number };
 type TranslatedDimensionResult = DimensionResult & { translationHeight: number };
@@ -174,6 +176,7 @@ export class RenderWorkerManager {
   private _laneUtilization = 0;
   private lastWorkerTotalRendered = 0;
   private lastWorkerTotalDrops = 0;
+  private lastWorkerDropReasons: WorkerDropReasonCounts | null = null;
   private lastWorkerProcessedBatchSequence = 0;
   private lastWorkerReceiptSequence = 0;
   private latestWorkerPendingDepth = 0;
@@ -1219,11 +1222,23 @@ export class RenderWorkerManager {
   }
 
   private applyWorkerStats(stats: WorkerStatsMessage): void {
+    const previousReasonCounts = this.lastWorkerDropReasons;
+    const reasonCounts: WorkerDropReasonCounts | null = stats.dropReasons
+      ? {
+          queue_priority: stats.dropReasons.queue_priority ?? 0,
+          queue_replaced: stats.dropReasons.queue_replaced ?? 0,
+          oversized: stats.dropReasons.oversized ?? 0,
+          reflow_capacity: stats.dropReasons.reflow_capacity ?? 0,
+        }
+      : null;
     if (
       stats.totalRendered < this.lastWorkerTotalRendered ||
       stats.totalDrops < this.lastWorkerTotalDrops ||
       stats.processedBatchSequence < this.lastWorkerProcessedBatchSequence ||
-      stats.processedBatchSequence > this.nextBatchSequence
+      stats.processedBatchSequence > this.nextBatchSequence ||
+      (reasonCounts !== null &&
+        previousReasonCounts !== null &&
+        WORKER_DROP_REASONS.some((reason) => reasonCounts[reason] < previousReasonCounts[reason]))
     ) {
       log.debug('renderer.worker.stats-regressed-or-ahead');
       return;
@@ -1248,9 +1263,24 @@ export class RenderWorkerManager {
 
     const dropDelta = stats.totalDrops - this.lastWorkerTotalDrops;
     if (dropDelta > 0) {
-      this.deps.observability.onMessagesDropped(dropDelta);
+      if (reasonCounts && (previousReasonCounts || this.lastWorkerTotalDrops === 0)) {
+        const deltas = WORKER_DROP_REASONS.map((reason) => ({
+          reason,
+          count: reasonCounts[reason] - (previousReasonCounts?.[reason] ?? 0),
+        }));
+        if (deltas.reduce((sum, entry) => sum + entry.count, 0) === dropDelta) {
+          for (const { reason, count } of deltas) {
+            if (count > 0) this.deps.observability.onMessagesDropped(count, reason);
+          }
+        } else {
+          this.deps.observability.onMessagesDropped(dropDelta);
+        }
+      } else {
+        this.deps.observability.onMessagesDropped(dropDelta);
+      }
     }
     this.lastWorkerTotalDrops = stats.totalDrops;
+    this.lastWorkerDropReasons = reasonCounts;
     this.lastWorkerProcessedBatchSequence = stats.processedBatchSequence;
     this.lastWorkerActiveMessageIds = new Set(stats.activeMessageIds);
     this.lastWorkerPendingMessageIds = new Set(stats.pendingMessageIds);
@@ -1317,6 +1347,7 @@ export class RenderWorkerManager {
     this._laneUtilization = 0;
     this.lastWorkerTotalRendered = 0;
     this.lastWorkerTotalDrops = 0;
+    this.lastWorkerDropReasons = null;
     this.lastWorkerProcessedBatchSequence = 0;
     this.lastWorkerReceiptSequence = 0;
     this.latestWorkerPendingDepth = 0;

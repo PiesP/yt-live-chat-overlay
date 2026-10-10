@@ -175,6 +175,7 @@ describe('Worker reservation safety', () => {
       activeMessages: ActiveMessage[];
       pendingQueue: WorkerMessage[];
       totalDrops: number;
+      dropReasons: { oversized: number; reflow_capacity: number };
       drainQueue(now: number, width: number, height: number): void;
       reflowActiveMessages(): void;
     };
@@ -218,6 +219,7 @@ describe('Worker reservation safety', () => {
     internals.logicalHeight = 20;
     internals.reflowActiveMessages();
     expect(internals.totalDrops).toBe(1);
+    expect(internals.dropReasons.reflow_capacity).toBe(1);
     expect(internals.activeMessages).toHaveLength(2);
     expect(internals.activeMessages.every((m) => m.startTime === futureStarts.get(m.id))).toBe(true);
     for (const a of internals.activeMessages) {
@@ -226,6 +228,17 @@ describe('Worker reservation safety', () => {
         expect(motionPlansCollide(motionPlanFromMessage(a, 'top', 640, 100), motionPlanFromMessage(b, 'top', 640, 100), 0.08, 0)).toBe(false);
       }
     }
+  });
+
+  it('labels an active message that becomes taller than the viewport on reflow', () => {
+    const { internals } = setup('top');
+    internals.drainQueue(0, 640, 40);
+    const first = internals.activeMessages[0];
+    expect(first).toBeDefined();
+    if (!first) return;
+    first.height = 10_000;
+    internals.reflowActiveMessages();
+    expect(internals.dropReasons.oversized).toBe(1);
   });
 
   it('reconciles a live reduced-motion preference change before drawing', () => {
@@ -780,6 +793,7 @@ describe('Worker message protocol', () => {
         drainQueue: (now: number, width: number, height: number) => void;
         pendingQueue: WorkerMessage[];
         totalDrops: number;
+        dropReasons: { oversized: number };
       };
       const oversized = makeWorkerMessage({ height: 10_000 });
 
@@ -788,6 +802,7 @@ describe('Worker message protocol', () => {
 
       expect(internals.pendingQueue).toHaveLength(0);
       expect(internals.totalDrops).toBe(1);
+      expect(internals.dropReasons.oversized).toBe(1);
     });
 
     it('does not count transient placement failures as drops or starve later candidates', () => {
@@ -1318,7 +1333,7 @@ describe('Worker message protocol', () => {
       vi.spyOn(performance, 'now').mockReturnValue(10_000);
       const renderer = initializeRenderer();
       renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [makeWorkerMessage({ id: 'future-active' })],
+        type: 'addMessages', messages: [makeWorkerMessage({ id: 'future-active', trackDrops: false })],
       }));
       const internals = renderer as unknown as {
         drainQueue(now: number, width: number, height: number): void;
@@ -1340,7 +1355,7 @@ describe('Worker message protocol', () => {
         type: string; epoch: number; motionSnapshot: {
           effectiveNowEpochMs: number; capturedAtEpochMs: number; isPaused: boolean;
           viewportWidthPx: number; exitPaddingPx: number;
-          activeMotions: Array<{ id: string; startEpochMs: number; fadeStartEpochMs: number;
+          activeMotions: Array<{ id: string; trackDrops?: boolean; startEpochMs: number; fadeStartEpochMs: number;
             startX: number; durationMs: number; laneIndex: number }>;
         };
       };
@@ -1354,6 +1369,7 @@ describe('Worker message protocol', () => {
       expect(snapshot.motionSnapshot.activeMotions).toEqual([
         expect.objectContaining({
           id: active.id, startX: active.startX, durationMs: active.duration,
+          trackDrops: false,
           laneIndex: active.laneIndex,
           startEpochMs: performance.timeOrigin + 10_800,
           fadeStartEpochMs: performance.timeOrigin + 10_750,
