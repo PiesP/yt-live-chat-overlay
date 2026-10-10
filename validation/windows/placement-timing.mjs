@@ -279,6 +279,19 @@ export function summarizeSamples(values) {
     p95: samples[Math.ceil(samples.length * 0.95) - 1], max: samples.at(-1) };
 }
 
+export function summarizeExactWorkerProbe(selected, renderer) {
+  if (renderer !== 'worker' || !selected?.exact) {
+    return { exactWorkerFrameMs: null, exactWorkerDrainMs: null, exactWorker: null };
+  }
+  const exact = selected.exact;
+  return {
+    exactWorkerFrameMs: summarizeSamples(exact.frames.map((frame) => frame.workMs)),
+    exactWorkerDrainMs: summarizeSamples(exact.drains.map((drain) => drain.workMs)),
+    exactWorker: { ...exact, dispositions: exact.dispositions.slice(0, MAX_SAMPLES),
+      active: exact.active.slice(0, MAX_SAMPLES) },
+  };
+}
+
 export function findOverlappingActivePair(messages, width, height) {
   const visible = messages.filter((item) => item.x < width && item.x + item.width > 0 &&
     item.y < height && item.y + item.height > 0 && item.visibleNow !== false);
@@ -537,6 +550,7 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
       const motion = active?.motion;
       bounded({ id: message.id, kind: 'activated', atEpochMs: performance.timeOrigin + performance.now(),
         isBacklog: message.isBacklog === true, laneIndex: active?.laneIndex ?? null,
+        burstSpeedMultiplier: null,
         laneSpacing: this.settings.laneSpacing, fontSize: this.settings.fontSize,
         width: active?.width ?? null, height: active?.height ?? null, y: active?.y ?? null,
         laneHeight: this.laneAllocator.getLaneHeight(), slotCount: active?.slotCount ?? null,
@@ -751,14 +765,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
           : entry.geometricEntryAtEpochMs - ingress[entry.id]])),
       frameWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.workMs) ?? []),
       preClearWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.preClearMs) ?? []),
-      exactWorkerFrameMs: selected?.exact
-        ? summarizeSamples(selected.exact.frames.map((frame) => frame.workMs)) : null,
-      exactWorkerDrainMs: selected?.exact
-        ? summarizeSamples(selected.exact.drains.map((drain) => drain.workMs)) : null,
-      exactWorker: selected?.exact ? { ...selected.exact,
-        dispositions: selected.exact.dispositions.slice(0, MAX_SAMPLES),
-        active: selected.exact.active.slice(0, MAX_SAMPLES),
-      } : null,
+      ...summarizeExactWorkerProbe(selected, forceFallback ? 'main' : 'worker'),
       bounds: selected?.bounds?.slice(0, MAX_SAMPLES) ?? [],
       ink: selected?.ink?.slice(0, MAX_SAMPLES) ?? [],
       exactCanvas: forceFallback ? selected?.exact ?? null : null,
@@ -879,9 +886,16 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await sendBatch('1');
     }
     requested.push(...ids, ...(replay || spacingSpeed ? [] : [paidId]));
-    await page.waitForFunction((expected) => expected.every((id) =>
-      [...document.querySelectorAll('.yt-live-chat-overlay-live-region > p')]
-        .some((element) => element.dataset.messageId === id)), requested, { timeout: 15_000 });
+    await page.waitForFunction(({ expected, boundedStream }) => {
+      const accessibleIds = new Set([...document.querySelectorAll(
+        '.yt-live-chat-overlay-live-region > p')].map((element) => element.dataset.messageId));
+      // Each renderer mirrors at most ten active messages per update. The
+      // twelve-message stream is retained in the routed parser batch; selected
+      // messages are independently verified by canvas paint below.
+      return boundedStream
+        ? expected.filter((id) => accessibleIds.has(id)).length >= 2
+        : expected.every((id) => accessibleIds.has(id));
+    }, { expected: requested, boundedStream: spacingSpeed }, { timeout: 15_000 });
     if (replay) replayObservations.at11500 = await page.locator(
       '.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]',
     ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));

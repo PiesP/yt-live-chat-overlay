@@ -4,7 +4,7 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 describe('Windows placement timing probe', () => {
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
@@ -42,6 +42,20 @@ describe('Windows placement timing probe', () => {
       actualVelocityPxPerMs: 0.675 };
     expect(() => assertBacklogMotion(accelerated, 'worker')).toThrow(/extra burst/);
     expect(() => assertBacklogMotion(accelerated, 'worker', true)).not.toThrow();
+  });
+
+  it('keeps Canvas exact observations out of Worker-only timing fields', () => {
+    const canvas = { exact: { dispositions: [{ id: 'WINDOWS196_GAP0_A' }],
+      activeNow: [{ id: 'WINDOWS196_GAP0_A' }] } };
+    expect(summarizeExactWorkerProbe(canvas, 'main')).toEqual({
+      exactWorkerFrameMs: null, exactWorkerDrainMs: null, exactWorker: null,
+    });
+    const worker = { exact: { frames: [{ workMs: 2 }], drains: [{ workMs: 1 }],
+      dispositions: [], active: [] } };
+    expect(summarizeExactWorkerProbe(worker, 'worker')).toMatchObject({
+      exactWorkerFrameMs: { count: 1, p95: 2 },
+      exactWorkerDrainMs: { count: 1, p95: 1 },
+    });
   });
 
   it('adds a Canvas probe only at the expected packaged app entry', () => {
@@ -90,11 +104,13 @@ describe('Windows placement timing probe', () => {
     runInNewContext(script!, { __ytPlacementProbe: state,
       performance: { timeOrigin: 1000, now: () => 1 } });
     const exact = state.exact as { peaks: { pending: number; active: number };
-      dispositions: Array<{ id: string; laneHeight: number; travelDistancePx: number }> };
+      dispositions: Array<{ id: string; laneHeight: number; travelDistancePx: number;
+        burstSpeedMultiplier: number | null }> };
     expect(state.canvasSourceHooked).toBe(true);
     expect(exact.peaks).toEqual({ pending: 1, active: 1 });
     expect(exact.dispositions[0]).toMatchObject({ id: 'WINDOWS195_BACKLOG_LONG',
-      laneHeight: 34, travelDistancePx: 3580 });
+      laneHeight: 34, travelDistancePx: 3580, burstSpeedMultiplier: null });
+    expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
   });
 
   it('detects visible active rectangles that overlap after reflow', () => {

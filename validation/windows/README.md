@@ -106,8 +106,11 @@ The focused #195/#196 `worker-spacing-speed` and `main-spacing-speed` scenarios
 reuse this installed extension fixture. The page remains a 1280×720 watch
 fixture and records the actual video rectangle, logical viewport, DPR and canvas
 backing store. A bounded Japanese regular-comment stream runs at configured
-32px with a transparent normal background and enabled outline. Captures at
-Lane Gap 0 and 8 include sampled fill/outline ink and font, committed message
+32px with a transparent normal background and enabled outline. The fixture
+checks at least two accessible snippets because each renderer mirrors at most
+ten active messages per update; targeted canvas paint observations verify
+entry separately. Captures at Lane Gap 0 and 8 include sampled fill/outline
+ink and font, committed message
 height, the compiled page bundle's shared regular insets, lane height, slot
 count, actual y positions and closest occupied row
 pitch, plus active/queue peaks and drops. The default spread allocator can
