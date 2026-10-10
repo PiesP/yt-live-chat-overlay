@@ -338,9 +338,13 @@ describe('SettingsUiForm', () => {
       // A hidden pane has no DOM height. Reserve its newly painted Canvas
       // before the scheduled frame so opening it cannot use a stale safe zone.
       Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 0 });
+      form.populateForm(settings);
+      const oldCanvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
+      const oldStageHeight = Number.parseFloat(stage.style.blockSize);
       form.populateForm({ ...settings, outline: { ...settings.outline, widthPx: 3 } });
       const canvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
-      expect(canvasHeight).toBeGreaterThan(0);
+      expect(canvasHeight).toBeGreaterThan(oldCanvasHeight);
+      expect(Number.parseFloat(stage.style.blockSize)).toBeGreaterThan(oldStageHeight);
       expect(Number.parseFloat(stage.style.blockSize) * 0.25).toBeGreaterThanOrEqual(canvasHeight + 1);
       expect(animationFrames.size).toBe(1);
       Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 260 });
