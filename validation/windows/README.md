@@ -116,7 +116,7 @@ an assumed `laneHeight` formula. The Worker inset receipt is computed by that
 same compiled page helper used for serialization; Worker paint is observed
 separately through its image/ink samples. The existing settings dialog is exercised by
 keyboard on its slider, Done, Escape, reopen, preview row metadata and an
-extension-storage readback. The preview reports three rows and its reserved
+extension-storage readback. The preview reports two rows and its reserved
 pitch in `data-preview-rows`, `data-preview-row-height` and
 `data-preview-row-pitch` on the existing preview text element.
 

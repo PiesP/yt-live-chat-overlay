@@ -3,9 +3,10 @@
 
 import type { OverlaySettings } from '@app-types';
 import { t } from '@i18n/index';
-import { renderRegularMessage } from '@renderer/canvas/shared';
+import { renderRegularMessage, splitGraphemeClusters } from '@renderer/canvas/shared';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import {
   getRegularRowHeight,
   getRowContentOffset,
@@ -1326,6 +1327,20 @@ export class SettingsUiForm {
     };
     canvas.textContent = message.text;
     const outlineWidth = settings.outline.enabled ? settings.outline.widthPx : 0;
+    const availableWidth = element.parentElement?.getBoundingClientRect().width ?? 0;
+    const width = Math.max(1, Math.floor(availableWidth || 320));
+    const font = getFontString(settings.fontSize, settings.fontWeight, settings.fontFamily);
+    const textWidth = Math.max(
+      0,
+      width - 2 * getRegularCardInsets(settings.fontSize, outlineWidth).horizontal
+    );
+    if (measureTextWidth(message.text, font) > textWidth) {
+      const pieces = splitGraphemeClusters(message.text);
+      while (pieces.length && measureTextWidth(`${pieces.join('')}…`, font) > textWidth)
+        pieces.pop();
+      message.text = measureTextWidth('…', font) <= textWidth ? `${pieces.join('')}…` : '';
+      message.content = [{ type: 'text', content: message.text }];
+    }
     const measured = estimateMessageDimensions(
       message,
       settings.fontSize,
@@ -1349,9 +1364,7 @@ export class SettingsUiForm {
     const grid = getRowGridHeight(base, settings.laneSpacing);
     const pitch = getRowSlotCount(measured.height, grid, settings.laneSpacing) * grid;
     const offset = getRowContentOffset(measured.height, grid, settings.laneSpacing);
-    const height = offset + 2 * pitch + measured.height;
-    const availableWidth = element.parentElement?.getBoundingClientRect().width ?? 0;
-    const width = Math.max(1, Math.floor(availableWidth || 320));
+    const height = offset + pitch + measured.height;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.ceil(width * dpr);
     canvas.height = Math.ceil(height * dpr);
@@ -1359,7 +1372,7 @@ export class SettingsUiForm {
     canvas.dataset.dpr = String(dpr);
     canvas.style.inlineSize = '100%';
     canvas.style.blockSize = `${height}px`;
-    element.dataset.previewRows = '3';
+    element.dataset.previewRows = '2';
     element.dataset.previewRowHeight = String(measured.height);
     element.dataset.previewRowPitch = String(pitch);
     const ctx = canvas.getContext('2d');
@@ -1382,7 +1395,7 @@ export class SettingsUiForm {
     const noImages = { get: (): null => null };
     const getFont = (size: number): string =>
       getFontString(size, settings.fontWeight, settings.fontFamily);
-    for (let row = 0; row < 3; row++) {
+    for (let row = 0; row < 2; row++) {
       renderRegularMessage(
         ctx,
         message,

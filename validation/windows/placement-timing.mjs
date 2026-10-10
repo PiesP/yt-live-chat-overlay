@@ -1021,13 +1021,13 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assert.equal(await modal.locator('input[name="laneSpacing"]').inputValue(), '8');
       if (!comparisonOnly) await page.waitForFunction((before) => {
         const element = document.querySelector('.yt-chat-overlay-settings-font-preview-text');
-        return element?.dataset.previewRows === '3' &&
+        return element?.dataset.previewRows === '2' &&
           Number(element.dataset.previewRowPitch) > before;
       }, previewZero.rowPitch, { timeout: 5000 });
       const previewEight = await previewState();
       if (!comparisonOnly) {
-        assert.equal(previewZero.rows, '3', 'Settings preview did not draw three representative rows');
-        assert.equal(previewEight.rows, '3');
+        assert.equal(previewZero.rows, '2', 'Settings preview did not draw two representative rows');
+        assert.equal(previewEight.rows, '2');
         assert(previewEight.rowPitch > previewZero.rowPitch,
           'Settings preview did not respond to Lane Gap');
       }

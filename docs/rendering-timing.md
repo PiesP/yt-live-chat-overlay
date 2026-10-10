@@ -42,7 +42,7 @@ capacity or increase its pitch. Genuinely taller author, translation and paid
 content reserves `ceil((height + gap) / gridHeight)` slots. Its remaining discrete
 rounding space is centered around content, excluding the user gap. Reservations
 and reflow use the same rule. Spread still spans the full safe zone and may
-leave unused rows or future reservations. The settings preview paints three
+leave unused rows or future reservations. The settings preview paints two
 rows with the shared estimate, reservation and drawing code.
 
 Live entry pacing groups messages by queue priority and speed tier. Backlog
