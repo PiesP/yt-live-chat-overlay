@@ -5,6 +5,7 @@ import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 import { ReplayChatSource } from '@chat/source-replay';
 import * as youtubeApi from '@chat/youtube/api';
+import { ObservabilityReporter } from '@util/observability';
 
 // RuntimeManager requires getCurrentUrl, getSettings, isValidPage callbacks.
 // Tests verify constructor, settings access via backdoor, and health shape.
@@ -73,18 +74,19 @@ describe('RuntimeManager', () => {
       },
     });
     vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
-    const onMessagesDropped = vi.fn();
+    const observability = new ObservabilityReporter();
+    const onMessagesDropped = vi.spyOn(observability, 'onMessagesDropped');
     const rm = new RuntimeManager(createOpts());
     const internals = rm as unknown as {
       renderer: {
         setReplayMode: (enabled: boolean) => void;
-        observability: { onMessagesDropped: typeof onMessagesDropped };
+        observability: ObservabilityReporter;
       } | null;
       chatSource: ReplayChatSource | null;
       sessionGeneration: number;
       startChatSource: (signal: AbortSignal) => Promise<string>;
     };
-    internals.renderer = { setReplayMode: vi.fn(), observability: { onMessagesDropped } };
+    internals.renderer = { setReplayMode: vi.fn(), observability };
     const controller = new AbortController();
     expect(await internals.startChatSource(controller.signal)).toBe('started');
     const source = internals.chatSource;
@@ -92,6 +94,20 @@ describe('RuntimeManager', () => {
 
     source?.onLateDrop?.(2);
     expect(onMessagesDropped).toHaveBeenCalledWith(2, 'replay_late');
+    expect(observability.getMetrics()).toMatchObject({
+      totalReceived: 2,
+      totalDropped: 2,
+      dropRate: 1,
+    });
+
+    // The renderer counts the delivered messages through its own ingress path.
+    observability.onMessageReceived();
+    observability.onMessageReceived();
+    expect(observability.getMetrics()).toMatchObject({
+      totalReceived: 4,
+      totalDropped: 2,
+      dropRate: 0.5,
+    });
 
     internals.sessionGeneration += 1;
     source?.onLateDrop?.(1);
@@ -102,6 +118,11 @@ describe('RuntimeManager', () => {
     controller.abort();
     source?.onLateDrop?.(1);
     expect(onMessagesDropped).toHaveBeenCalledTimes(1);
+    expect(observability.getMetrics()).toMatchObject({
+      totalReceived: 4,
+      totalDropped: 2,
+      dropRate: 0.5,
+    });
   });
 
   it('accepts custom settings callback', () => {

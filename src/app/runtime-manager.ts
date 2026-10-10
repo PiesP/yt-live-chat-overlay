@@ -962,7 +962,9 @@ export class RuntimeManager {
         ) {
           return;
         }
-        this.renderer?.observability.onMessagesDropped(count, 'replay_late');
+        const observability = this.renderer?.observability;
+        observability?.onMessagesReceived(count);
+        observability?.onMessagesDropped(count, 'replay_late');
       };
     }
 

@@ -65,6 +65,30 @@ describe("ObservabilityReporter", () => {
     expect(metrics.dropRate).toBe(0.5);
   });
 
+  it("counts batched pre-render drops in the received denominator", () => {
+    reporter.onMessagesReceived(3);
+    reporter.onMessagesDropped(3, "replay_late");
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 3,
+      totalDropped: 3,
+      dropRate: 1,
+    });
+
+    reporter.onMessagesReceived(2);
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 5,
+      totalDropped: 3,
+      dropRate: 0.6,
+    });
+  });
+
+  it("ignores invalid received batch counts", () => {
+    for (const count of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      reporter.onMessagesReceived(count);
+    }
+    expect(reporter.getMetrics().totalReceived).toBe(0);
+  });
+
   it("computes zero drop rate when no messages received", () => {
     reporter.onMessageDropped("queue_priority");
     const metrics = reporter.getMetrics();
