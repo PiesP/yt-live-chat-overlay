@@ -3,6 +3,8 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { DRAIN_WORK_BUDGET_MS } from '@renderer/canvas/drain-batch';
+import type { MessageMotionPlan } from '@renderer/layout/message-schedule';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import {
   isValidControlMessage,
@@ -224,9 +226,204 @@ async function flushMicrotasks(turns = 4): Promise<void> {
   for (let turn = 0; turn < turns; turn++) await Promise.resolve();
 }
 
+interface TestPlacement {
+  laneIndex: number;
+  waitMs: number;
+  laneY: number;
+  slotCount: number;
+  verticalOffset: number;
+}
+
+interface AuthorAssetRendererState {
+  activeMessages: Array<{ id: string }>;
+  pendingQueue: WorkerMessage[];
+  messageById: Map<string, unknown>;
+  authorPhotoCache: unknown;
+  drainResumePriority: number | undefined;
+  drainCursors: Map<number, WorkerMessage>;
+  totalRendered: number;
+  totalDrops: number;
+  dropReasons: Record<string, number>;
+  isDestroyed: boolean;
+  animFrameId: number | null;
+  activateMessage(
+    message: WorkerMessage, now: number, placement: TestPlacement, batchIndex: number,
+    previousStaggerDelayMs: number, speedTier: number, width: number, height: number,
+    motion?: MessageMotionPlan
+  ): number;
+  findPlacement(height: number, speedTier: number, now: number, strategy: string): TestPlacement | null;
+  checkCollision(
+    placement: TestPlacement, message: WorkerMessage, speedTier: number, batchIndex: number,
+    previousStaggerDelayMs: number, now: number, width: number, motion?: MessageMotionPlan
+  ): boolean;
+  prefetchImages(urls: string[], cache: unknown, ownerId: string): Promise<void>;
+}
+
+const AUTHOR_ASSET_FRAME_LIMIT = 3;
+const AUTHOR_ASSET_WORK_CASES = [
+  DRAIN_WORK_BUDGET_MS - 0.001,
+  DRAIN_WORK_BUDGET_MS,
+  DRAIN_WORK_BUDGET_MS + 0.001,
+];
+const hiddenAuthorSettings: OverlaySettings = {
+  ...DEFAULT_SETTINGS,
+  queueMaxSize: 50,
+  showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false, superChat: false },
+};
+const regularAuthorMessage: ChatMessage = {
+  id: 'asset-regular', text: 'regular', content: [{ type: 'text', content: 'regular' }],
+  timestamp: 1, kind: 'text', authorType: 'normal', author: 'regular author',
+  authorPhotoUrl: 'https://yt3.ggpht.com/regular-author.png',
+};
+const paidAuthorMessage: ChatMessage = {
+  id: 'asset-paid', text: 'paid', content: [{ type: 'text', content: 'paid' }],
+  timestamp: 1, kind: 'superchat', authorType: 'normal', author: 'paid author',
+  authorPhotoUrl: 'https://yt3.ggpht.com/paid-author.png',
+  superChat: { amount: '$5', tier: 'blue' },
+};
+const authorAssetIds = [regularAuthorMessage.id, paidAuthorMessage.id];
+
+function createAuthorAssetFixture(
+  manager: RenderWorkerManager,
+  worker: TestWorker,
+  renderer: WorkerRenderer,
+  clock: { now: number; frames: number },
+  elapsedWorkMs: number
+) {
+  const state = renderer as unknown as AuthorAssetRendererState;
+  const prefetch = vi.spyOn(state, 'prefetchImages').mockResolvedValue(undefined);
+  const findPlacement = vi.spyOn(state, 'findPlacement');
+  const checkCollision = vi.spyOn(state, 'checkCollision');
+  const originalActivate = state.activateMessage.bind(renderer);
+  const activate = vi.spyOn(state, 'activateMessage').mockImplementation((...args) => {
+    const result = originalActivate(...args);
+    // Preserve real activation and prewarming; charge work before the next budget check.
+    if (args[0].id === paidAuthorMessage.id) clock.now += elapsedWorkMs;
+    return result;
+  });
+  coupleWorker(worker, renderer);
+  postMessage.mockImplementation((message: unknown) => {
+    worker.emitMessage(message);
+    // Real Worker delivery is asynchronous. Install the manager's listener before ACK.
+    if ((message as { type?: string }).type === 'ack') {
+      queueMicrotask(() => worker.acknowledgeDestroy());
+    }
+  });
+
+  const diagnostics = () => JSON.stringify({
+    expectedIds: authorAssetIds,
+    activeIds: state.activeMessages.map(({ id }) => id),
+    pendingIds: state.pendingQueue.map(({ id }) => id),
+    now: clock.now, frames: clock.frames, queuedFrames: scheduledAnimationFrames.length,
+    resumePriority: state.drainResumePriority ?? null,
+    totalRendered: state.totalRendered, totalDrops: state.totalDrops, dropReasons: state.dropReasons,
+  });
+  const isReady = () => authorAssetIds.every((id) =>
+    state.activeMessages.some((message) => message.id === id) &&
+    !state.pendingQueue.some((message) => message.id === id)
+  );
+  const nextFrame = () => {
+    const frame = scheduledAnimationFrames.shift();
+    if (!frame) throw new Error(`Missing author-asset RAF callback: ${diagnostics()}`);
+    clock.now += 16;
+    clock.frames++;
+    frame(clock.now);
+  };
+  const waitUntilActive = async () => {
+    for (let frame = 0; frame < AUTHOR_ASSET_FRAME_LIMIT && !isReady(); frame++) {
+      nextFrame();
+      await flushMicrotasks();
+    }
+    if (!isReady()) {
+      throw new Error(`Author-asset readiness frame limit (${AUTHOR_ASSET_FRAME_LIMIT}): ${diagnostics()}`);
+    }
+    expect(state.activeMessages.map(({ id }) => id).sort()).toEqual([...authorAssetIds].sort());
+    expect(state.pendingQueue).toHaveLength(0);
+  };
+  return {
+    manager, worker, renderer, state, prefetch, activate, findPlacement, checkCollision,
+    clock, nextFrame, waitUntilActive,
+    async sendPair() {
+      expect(manager.sendToWorker(regularAuthorMessage, regularAuthorMessage.id)).toBe(true);
+      expect(manager.sendToWorker(paidAuthorMessage, paidAuthorMessage.id)).toBe(true);
+      await flushMicrotasks();
+    },
+    async showAuthors() {
+      manager.updateSettings({
+        ...hiddenAuthorSettings,
+        showAuthor: { ...hiddenAuthorSettings.showAuthor, normal: true, superChat: true },
+      });
+      await flushMicrotasks();
+    },
+    restoreSpies() {
+      activate.mockRestore();
+      checkCollision.mockRestore();
+      findPlacement.mockRestore();
+      prefetch.mockRestore();
+    },
+  };
+}
+
+type AuthorAssetFixture = ReturnType<typeof createAuthorAssetFixture>;
+
+async function withAuthorAssetFixture(
+  elapsedWorkMs: number,
+  body: (fixture: AuthorAssetFixture) => Promise<void>
+): Promise<void> {
+  // Own timers only inside this fixture; RAF and promise delivery remain manually driven.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  const clock = { now: 1_000, frames: 0 };
+  const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+  const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+  let manager: RenderWorkerManager | undefined;
+  let worker: TestWorker | undefined;
+  let renderer: WorkerRenderer | undefined;
+  let fixture: AuthorAssetFixture | undefined;
+  try {
+    ({ manager, worker } = initializedManager(
+      hiddenAuthorSettings, (message) => (message.kind === 'superchat' ? 100 : 0)
+    ));
+    renderer = initializedRenderer(hiddenAuthorSettings);
+    fixture = createAuthorAssetFixture(manager, worker, renderer, clock, elapsedWorkMs);
+    await body(fixture);
+  } finally {
+    try {
+      manager?.destroy();
+      await flushMicrotasks(); // Deliver the coupled destroy ACK before disconnecting the bridge.
+      if (renderer && !(renderer as unknown as AuthorAssetRendererState).isDestroyed) {
+        renderer.handleMessage({ data: { type: 'destroy' } } as MessageEvent);
+      }
+      if (worker) expect(worker.terminate).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      worker?.postMessage.mockReset();
+      if (worker) TestWorker.instances.splice(TestWorker.instances.indexOf(worker), 1);
+      postMessage.mockReset();
+      scheduledAnimationFrames.length = 0;
+      fixture?.restoreSpies();
+      randomSpy.mockRestore();
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  }
+}
+
+function expectAuthorRequests(fixture: AuthorAssetFixture, messages: ChatMessage[]): void {
+  // Assert request intent and exact owner/cache routing, without an incidental call order.
+  expect(fixture.prefetch).toHaveBeenCalledTimes(messages.length);
+  for (const [, cache] of fixture.prefetch.mock.calls) {
+    expect(cache).toBe(fixture.state.authorPhotoCache);
+  }
+  for (const message of messages) {
+    expect(fixture.prefetch).toHaveBeenCalledWith(
+      [message.authorPhotoUrl], fixture.state.authorPhotoCache, message.id
+    );
+  }
+}
+
 describe('Worker renderer state synchronization', () => {
   beforeEach(() => {
-    postMessage.mockClear();
+    postMessage.mockReset();
     TestWorker.instances.length = 0;
     scheduledAnimationFrames.length = 0;
   });
@@ -611,54 +808,149 @@ describe('Worker renderer state synchronization', () => {
     postMessage.mockImplementation(() => undefined);
   });
 
-  it('refreshes visible regular and SuperChat author assets when settings toggle', async () => {
-    const hiddenSettings: OverlaySettings = {
-      ...DEFAULT_SETTINGS,
-      queueMaxSize: 50,
-      showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false, superChat: false },
-    };
-    const { manager, worker } = initializedManager(
-      hiddenSettings,
-      (message) => (message.kind === 'superchat' ? 100 : 0)
-    );
-    const renderer = initializedRenderer(hiddenSettings);
-    coupleWorker(worker, renderer);
-    const prefetch = vi.fn(async (_urls: string[]) => undefined);
-    (renderer as unknown as { prefetchImages: typeof prefetch }).prefetchImages = prefetch;
-    const regular: ChatMessage = {
-      id: 'asset-regular', text: 'regular', content: [{ type: 'text', content: 'regular' }],
-      timestamp: 1, kind: 'text', authorType: 'normal', author: 'regular author',
-      authorPhotoUrl: 'https://yt3.ggpht.com/regular-author.png',
-    };
-    const paid: ChatMessage = {
-      id: 'asset-paid', text: 'paid', content: [{ type: 'text', content: 'paid' }],
-      timestamp: 1, kind: 'superchat', authorType: 'normal', author: 'paid author',
-      authorPhotoUrl: 'https://yt3.ggpht.com/paid-author.png',
-      superChat: { amount: '$5', tier: 'blue' },
-    };
-    manager.sendToWorker(regular, regular.id);
-    manager.sendToWorker(paid, paid.id);
-    await flushMicrotasks();
-    scheduledAnimationFrames.shift()?.(performance.now());
-    expect(prefetch).not.toHaveBeenCalled();
+  it.each(AUTHOR_ASSET_WORK_CASES)(
+    'refreshes active regular and SuperChat author assets when settings toggle (paid work %sms)',
+    async (elapsedWorkMs) => {
+      await withAuthorAssetFixture(elapsedWorkMs, async (fixture) => {
+        await fixture.sendPair();
+        await fixture.waitUntilActive();
+        expect(fixture.clock.frames).toBe(elapsedWorkMs < DRAIN_WORK_BUDGET_MS ? 1 : 2);
+        expect(fixture.prefetch).not.toHaveBeenCalled();
 
-    manager.updateSettings({
-      ...hiddenSettings,
-      showAuthor: { ...hiddenSettings.showAuthor, normal: true, superChat: true },
-    });
-    await flushMicrotasks();
-    expect(prefetch.mock.calls.map(([urls]) => urls)).toEqual([
-      [regular.authorPhotoUrl],
-      [paid.authorPhotoUrl],
-    ]);
+        await fixture.showAuthors();
+        expectAuthorRequests(fixture, [regularAuthorMessage, paidAuthorMessage]);
 
-    prefetch.mockClear();
-    manager.updateSettings(hiddenSettings);
-    await flushMicrotasks();
-    expect(prefetch).not.toHaveBeenCalled();
-    manager.destroy();
-    postMessage.mockImplementation(() => undefined);
-  });
+        fixture.prefetch.mockClear();
+        fixture.manager.updateSettings(hiddenAuthorSettings);
+        await flushMicrotasks();
+        expect(fixture.prefetch).not.toHaveBeenCalled();
+      });
+    }
+  );
+
+  it.each(AUTHOR_ASSET_WORK_CASES)(
+    'resumes author assets after bounded Worker draining (paid work %sms)',
+    async (elapsedWorkMs) => {
+      await withAuthorAssetFixture(elapsedWorkMs, async (fixture) => {
+        await fixture.sendPair();
+        fixture.nextFrame();
+        const deferred = elapsedWorkMs >= DRAIN_WORK_BUDGET_MS;
+        const attemptedIds = fixture.activate.mock.calls.map(([message]) => message.id);
+        expect(attemptedIds).toEqual(deferred ? [paidAuthorMessage.id] : [
+          paidAuthorMessage.id, regularAuthorMessage.id,
+        ]);
+        expect(fixture.state.activeMessages.map(({ id }) => id)).toEqual(attemptedIds);
+        expect(fixture.state.pendingQueue.map(({ id }) => id)).toEqual(
+          deferred ? [regularAuthorMessage.id] : []
+        );
+        expect(fixture.state.drainResumePriority).toBe(deferred ? 0 : undefined);
+        expect(fixture.state.drainCursors.has(0)).toBe(!deferred);
+        expect(fixture.findPlacement).toHaveBeenCalledTimes(deferred ? 1 : 2);
+        expect(fixture.findPlacement.mock.results.every(({ value }) =>
+          value !== null && value.waitMs === 0
+        )).toBe(true);
+        expect(fixture.checkCollision.mock.results.map(({ value }) => value)).toEqual(
+          deferred ? [true] : [true, true]
+        );
+        expect([...fixture.state.messageById.keys()].sort()).toEqual([...authorAssetIds].sort());
+        expect(fixture.state.totalDrops).toBe(0);
+        expect(fixture.prefetch).not.toHaveBeenCalled();
+
+        await fixture.showAuthors();
+        if (deferred) {
+          expectAuthorRequests(fixture, [paidAuthorMessage]);
+          // The original single-frame preparation cannot satisfy its two-resource assertion.
+          expect(() => expectAuthorRequests(fixture, [regularAuthorMessage, paidAuthorMessage]))
+            .toThrow();
+          expect(fixture.state.pendingQueue[0]).toMatchObject({
+            id: regularAuthorMessage.id, actionType: 'replace',
+            authorPhotoUrl: regularAuthorMessage.authorPhotoUrl,
+          });
+          await flushMicrotasks(20);
+          expect(fixture.state.pendingQueue.map(({ id }) => id)).toEqual([regularAuthorMessage.id]);
+          expectAuthorRequests(fixture, [paidAuthorMessage]);
+          fixture.nextFrame();
+          await flushMicrotasks();
+        }
+        expectAuthorRequests(fixture, [regularAuthorMessage, paidAuthorMessage]);
+        expect(fixture.activate.mock.calls.map(([message]) => message.id)).toEqual([
+          paidAuthorMessage.id, regularAuthorMessage.id,
+        ]);
+        expect(fixture.checkCollision.mock.results.map(({ value }) => value)).toEqual([true, true]);
+        expect(fixture.state.activeMessages.map(({ id }) => id).sort()).toEqual([...authorAssetIds].sort());
+        expect(fixture.state.pendingQueue).toHaveLength(0);
+        expect([...fixture.state.messageById.keys()].sort()).toEqual([...authorAssetIds].sort());
+        expect(fixture.state.totalRendered).toBe(2);
+        expect(fixture.state.totalDrops).toBe(0);
+      });
+    }
+  );
+
+  it.each(['body failure', 'readiness frame limit', 'missing frame'] as const)(
+    'cleans author-asset fixtures after %s and keeps the next fixture independent',
+    async (failure) => {
+      const originalNow = performance.now;
+      const originalRandom = Math.random;
+      let failedFixture: AuthorAssetFixture | undefined;
+      const run = withAuthorAssetFixture(DRAIN_WORK_BUDGET_MS, async (fixture) => {
+        failedFixture = fixture;
+        await fixture.sendPair();
+        expect(vi.getTimerCount()).toBeGreaterThan(0);
+        if (failure === 'body failure') {
+          expect('injected assertion failure').toBe('successful body');
+        } else if (failure === 'missing frame') {
+          scheduledAnimationFrames.length = 0;
+          await fixture.waitUntilActive();
+        } else {
+          // Keep legitimate pending work unready without replacing the activation algorithm.
+          fixture.renderer.handleMessage({ data: { type: 'setPaused', paused: true } } as MessageEvent);
+          const pausedFrame = scheduledAnimationFrames.shift();
+          if (!pausedFrame) throw new Error('Expected paused fixture frame');
+          const frame: FrameRequestCallback = (timestamp) => {
+            pausedFrame(timestamp);
+            scheduledAnimationFrames.push(frame);
+          };
+          scheduledAnimationFrames.push(frame);
+          await fixture.waitUntilActive();
+        }
+      });
+      if (failure === 'body failure') {
+        await expect(run).rejects.toThrow('injected assertion failure');
+      } else if (failure === 'missing frame') {
+        await expect(run).rejects.toThrow(/Missing author-asset RAF callback:.*"frames":0/);
+      } else {
+        await expect(run).rejects.toThrow(
+          /readiness frame limit \(3\):.*"expectedIds":\["asset-regular","asset-paid"\].*"activeIds":\[\].*"pendingIds":.*"now":1048,"frames":3.*"totalDrops":0/
+        );
+      }
+      if (!failedFixture) throw new Error('Failure fixture was not created');
+      expect(failedFixture.worker.terminate).toHaveBeenCalledTimes(1);
+      expect(failedFixture.state).toMatchObject({
+        isDestroyed: true, animFrameId: null, activeMessages: [], pendingQueue: [],
+      });
+      expect(failedFixture.state.messageById.size).toBe(0);
+      expect(failedFixture.worker.postMessage.getMockImplementation()).toBeUndefined();
+      expect(postMessage.getMockImplementation()).toBeUndefined();
+      expect(scheduledAnimationFrames).toHaveLength(0);
+      expect(TestWorker.instances).toHaveLength(0);
+      expect(performance.now).toBe(originalNow);
+      expect(Math.random).toBe(originalRandom);
+      expect(vi.isFakeTimers()).toBe(false);
+
+      const failedWorker = failedFixture.worker;
+      await withAuthorAssetFixture(0, async (fresh) => {
+        expect(fresh.worker).not.toBe(failedWorker);
+        expect(fresh.clock).toEqual({ now: 1_000, frames: 0 });
+        expect(fresh.state.activeMessages).toHaveLength(0);
+        expect(fresh.state.pendingQueue).toHaveLength(0);
+        expect(fresh.prefetch).not.toHaveBeenCalled();
+        await fresh.sendPair();
+        await fresh.waitUntilActive();
+        await fresh.showAuthors();
+        expectAuthorRequests(fresh, [regularAuthorMessage, paidAuthorMessage]);
+      });
+    }
+  );
 
   it('preserves untracked replay semantics through serialization and backpressure', async () => {
     const { manager, observability, worker } = initializedManager();
