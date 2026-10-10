@@ -32,12 +32,16 @@ describe('Windows placement timing probe', () => {
     const motion = { id: 'WINDOWS195_BACKLOG_LONG', kind: 'activated', isBacklog: true,
       width: 2200, durationMs: 7160, travelDistancePx: 3580,
       burstSpeedMultiplier: 1.35, actualVelocityPxPerMs: 0.5 };
-    expect(() => assertBacklogMotion(motion)).not.toThrow();
-    expect(() => assertBacklogMotion({ ...motion, durationMs: 5000 })).toThrow(/clamped/);
+    expect(() => assertBacklogMotion(motion, 'worker')).not.toThrow();
+    expect(() => assertBacklogMotion({ ...motion, burstSpeedMultiplier: null }, 'worker'))
+      .toThrow(/finite burst multiplier/);
+    expect(() => assertBacklogMotion({ ...motion, burstSpeedMultiplier: null }, 'main'))
+      .not.toThrow();
+    expect(() => assertBacklogMotion({ ...motion, durationMs: 5000 }, 'worker')).toThrow(/clamped/);
     const accelerated = { ...motion, durationMs: 3580 / 0.675,
       actualVelocityPxPerMs: 0.675 };
-    expect(() => assertBacklogMotion(accelerated)).toThrow(/extra burst/);
-    expect(() => assertBacklogMotion(accelerated, true)).not.toThrow();
+    expect(() => assertBacklogMotion(accelerated, 'worker')).toThrow(/extra burst/);
+    expect(() => assertBacklogMotion(accelerated, 'worker', true)).not.toThrow();
   });
 
   it('adds a Canvas probe only at the expected packaged app entry', () => {

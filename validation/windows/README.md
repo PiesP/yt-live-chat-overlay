@@ -135,12 +135,14 @@ shape fails the scenario. Worker instrumentation uses the existing Blob
 prefix/suffix guard. These additive probes can affect timings, so the recorded
 frame work is diagnostic rather than a general performance claim.
 
-For a baseline comparison using the **same reviewed probe revision**, set
-`YT_PLACEMENT_COMPARISON_ONLY=1` in the guest runner environment. Its receipt
+For a baseline comparison, make a baseline-only harness commit that changes
+`const comparisonOnly = false` to `true` in `chrome-install.mjs`. Keep the
+`placement-timing.mjs` probe bytes identical to the candidate harness and
+record both source and bundle hashes with the receipts. The baseline receipt
 sets `comparisonOnly: true`; it still requires the real parser, renderer,
 Backlog activation, unclamped geometry and source guards, while allowing the
-old two-slot row and extra Worker burst acceleration. The candidate run leaves
-the variable unset and applies strict spacing and speed assertions. Preserve
+old two-slot row and extra Worker burst acceleration. The candidate commit
+keeps the constant `false` and applies strict spacing and speed assertions. Preserve
 both attempts and their source, bundle and probe hashes outside Git. Do not
 interpret a `comparisonOnly` pass as a fix or substitute it for candidate
 acceptance. The ordinary real-YouTube smoke retains its existing route and

@@ -303,12 +303,15 @@ export function measureClosestRowPitch(messages, prefix = 'WINDOWS196_GAP0_') {
   return pitches.length ? Math.min(...pitches) : null;
 }
 
-export function assertBacklogMotion(disposition, comparisonOnly = false) {
+export function assertBacklogMotion(disposition, renderer, comparisonOnly = false) {
   assert(disposition?.kind === 'activated' && disposition.isBacklog === true,
     'Long parser-ingress message was not activated as Backlog');
   assert(disposition.width > 1870, 'Backlog text did not produce unclamped travel geometry');
-  assert(disposition.burstSpeedMultiplier > 1 || disposition.burstSpeedMultiplier === null,
-    'Worker did not receive a burst multiplier above one');
+  assert(renderer === 'worker' || renderer === 'main', 'Unknown renderer for Backlog motion');
+  const burstMultiplier = disposition.burstSpeedMultiplier;
+  assert((renderer === 'main' && burstMultiplier === null) ||
+    (Number.isFinite(burstMultiplier) && burstMultiplier > 1),
+  'Worker did not receive a finite burst multiplier above one');
   assert(disposition.durationMs > 5000 && disposition.durationMs < 30000,
     'Backlog duration was clamped, so this cannot verify speed policy');
   assert(Number.isFinite(disposition.travelDistancePx) &&
@@ -956,7 +959,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       'Long parser-ingress Backlog message did not activate within 30 seconds');
       const long = backlog.exact.dispositions.find((entry) => entry.id === TOKENS[17]
         && entry.kind === 'activated');
-      assertBacklogMotion(long, comparisonOnly);
+      assertBacklogMotion(long, forceFallback ? 'main' : 'worker', comparisonOnly);
       phaseObservations.push({ phase: 'backlog-burst', motion: long,
         config: backlog.exact.config, queue: backlog.stats,
         dispositions: backlog.exact.dispositions.filter((entry) => entry.id.startsWith('WINDOWS195_')) });
