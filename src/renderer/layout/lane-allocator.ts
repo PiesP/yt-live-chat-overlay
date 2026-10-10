@@ -6,11 +6,11 @@ import { SPEED_TIER } from '@renderer/constants';
 import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   buildLaneHeap,
+  commitPlacementShared,
   computeLaneY,
   computeOccupancyMs,
   findPlacementShared,
   heapSiftDown,
-  heapUpdateLane,
   resetBatchShared,
 } from '@renderer/layout/lane-shared';
 import { getFontString, measureTextHeight } from '@renderer/text-measure';
@@ -64,16 +64,16 @@ export interface LaneAllocatorSnapshot {
 }
 
 /**
- * Top-first lane scheduler with tiered-speed lane allocation.
+ * Lane scheduler with tiered-speed lane allocation.
  *
- * Fills lanes from the top of the screen down using a three-phase strategy
+ * Selects a lane using a three-phase strategy
  * that naturally groups messages with similar speeds together:
  *
- *   1. Phase 1 (zero-wait, speed-filtered): return the first lane with
+ *   1. Phase 1 (zero-wait, speed-filtered): select a lane with
  *      waitMs === 0 that also passes the speed-tier compatibility check.
  *      Messages skip lanes with incompatible speed-tier content.
- *      During a burst this distributes across all lanes: msg1 → lane 0,
- *      msg2 → lane 1, ..., msgN → lane N-1.
+ *      Spread mode samples across the full safe zone; fixed modes prefer
+ *      their configured top or bottom edge.
  *
  *   2. Phase 2 (speed-matched): when all lanes are busy, prefer lanes
  *      that already have same-tier content. Messages cluster with their
@@ -81,14 +81,13 @@ export interface LaneAllocatorSnapshot {
  *      partitions.
  *
  *   3. Phase 3 (fastest-free): when no speed-matched lane is available,
- *      return the topmost busy lane (shortest wait) for all message types.
- *      Speed-isolated headway scaling in checkPlacement() prevents visual
- *      overtaking when a fast message shares a lane with a slower one.
+ *      choose the shortest acceptable wait even across incompatible tiers.
+ *      An exact collision check must validate the resulting placement.
  *
  * Supports:
  *   - Precision exit-time occupancy for multi-message lane sharing
  *   - Adaptive headway gap (8% of msg width, 16-60px clamp)
- *   - Velocity-aware durationMin (via computeScrollDuration)
+ *   - Minimum readability duration (via computeScrollDuration)
  */
 export class LaneAllocator {
   /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
@@ -99,11 +98,8 @@ export class LaneAllocator {
   private numLanes = 0;
 
   /**
-   * Set of lane indices that collided with an active message in the current
-   * batch. Updated via markCollision() from renderer-canvas.ts checkPlacement.
-   * Cleared on resetBatch(). When a lane is in this set, allocateSingleLane
-   * skips it and tries the next lane down, avoiding repeated collisions on
-   * the same lane within a single frame.
+   * Candidate-local exclusions. Cleared before evaluating each new message;
+   * retries of that message retain the exclusions.
    */
   private collidedLanes: Set<number> = new Set();
 
@@ -303,23 +299,16 @@ export class LaneAllocator {
     entryOffsetPx = 0
   ): void {
     const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth, entryOffsetPx);
-    const nextAvailable = startTime + occupancyMs;
-    const startIdx = placement.laneIndex;
-
-    // Track speed-tier visibility per lane so subsequent allocations
-    // can group messages by speed tier. Uses durationMs (full on-screen
-    // time) rather than occupancyMs to prevent cross-tier overtaking.
-    const until = startTime + durationMs;
-    for (let offset = 0; offset < placement.slotCount; offset++) {
-      const slotIdx = startIdx + offset;
-      this.speedTierLanes.set(slotIdx, { tier: speedTier, until });
-    }
-
-    // Update all slots occupied by this message with the SAME available time.
-    for (let offset = 0; offset < placement.slotCount; offset++) {
-      const slotIdx = startIdx + offset;
-      this.updateLane(slotIdx, nextAvailable);
-    }
+    const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
+    commitPlacementShared(
+      state,
+      placement.laneIndex,
+      placement.slotCount,
+      startTime,
+      occupancyMs,
+      durationMs,
+      speedTier
+    );
   }
 
   // ── Batch control ─────────────────────────────────────────────────────
@@ -364,6 +353,11 @@ export class LaneAllocator {
     this.collidedLanes.add(laneIndex);
   }
 
+  /** Begin evaluating another message without carrying prior candidate failures. */
+  clearCandidateExclusions(): void {
+    this.collidedLanes.clear();
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────
 
   /**
@@ -394,11 +388,6 @@ export class LaneAllocator {
    *
 
   /** Get the available-at time for a lane by its index. */
-
-  /** Update a lane's available time in the heap. */
-  private updateLane(laneIndex: number, newAvailableAt: number): void {
-    heapUpdateLane(this.heap, this.indexMap, laneIndex, newAvailableAt);
-  }
 
   /** Shift all lane timers and speed-tier tracking by a fixed offset. */
   shiftAll(offsetMs: number): void {

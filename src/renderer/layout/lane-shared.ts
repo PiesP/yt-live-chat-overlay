@@ -320,7 +320,7 @@ export function resetBatchShared(state: LaneAllocationState, now: number): void 
 }
 
 /**
- * Commit a placement: update speed-tier tracking and heap occupancy.
+ * Commit a placement: retain the latest lane clearance and tier lifetime.
  * For multi-slot messages, all occupied lanes are updated.
  */
 export function commitPlacementShared(
@@ -337,8 +337,14 @@ export function commitPlacementShared(
 
   for (let s = 0; s < slotCount; s++) {
     const idx = laneIndex + s;
-    state.speedTierLanes.set(idx, { tier: speedTier, until });
-    heapUpdateLane(state.heap, state.indexMap, idx, nextAvailable);
+    const previous = state.speedTierLanes.get(idx);
+    if (!previous || until >= previous.until) {
+      state.speedTierLanes.set(idx, { tier: speedTier, until });
+    }
+    const existingAvailable = heapGetSlotAvailableAt(state.heap, state.indexMap, idx);
+    if (existingAvailable !== undefined) {
+      heapUpdateLane(state.heap, state.indexMap, idx, Math.max(existingAvailable, nextAvailable));
+    }
   }
 }
 
