@@ -222,7 +222,7 @@ export function summarizeSamples(values) {
 
 export function findOverlappingActivePair(messages, width, height) {
   const visible = messages.filter((item) => item.x < width && item.x + item.width > 0 &&
-    item.y < height && item.y + item.height > 0);
+    item.y < height && item.y + item.height > 0 && item.visibleNow !== false);
   for (let left = 0; left < visible.length; left++) {
     for (let right = left + 1; right < visible.length; right++) {
       const a = visible[left];
@@ -375,7 +375,10 @@ function attachWorkerRendererProbe(renderer) {
       exact.activeNow = this.activeMessages.filter((message) => isFixture(message.id))
         .slice(0, 100).map((message) => ({ id: message.id, atEpochMs: epochNow(),
           x: message.x, y: message.y, width: message.width, height: message.height,
-          laneIndex: message.laneIndex }));
+          laneIndex: message.laneIndex,
+          startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
+          visibleNow: performance.now() >= message.startTime + message.pausedDuration &&
+            performance.now() < message.startTime + message.pausedDuration + message.duration }));
       if (exact.frames.length % 10 === 0) {
         for (const message of exact.activeNow) bounded(exact.active, message);
       }
@@ -584,13 +587,17 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     originalSettings = await page.evaluate((danmakuMode) => {
       const settings = window.__ytChatOverlay.getSettings();
       const overrides = { danmakuMode,
-        outline: { ...settings.outline, enabled: false }, showDebugOverlay: true };
-      window.__ytChatOverlay.applySettings(overrides);
-      return Object.fromEntries([
+        outline: { ...settings.outline, enabled: false }, showDebugOverlay: true,
+        fontSize: 32, laneSpacing: 0, safeTop: 0, safeBottom: 0,
+        maxConcurrentMessages: 300, queueMaxSize: 200,
+        ignoreReducedMotion: false, translationEnabled: false };
+      const previous = structuredClone(Object.fromEntries([
         ...Object.keys(overrides), 'safeTop', 'safeBottom', 'fontSize', 'laneSpacing',
         'maxConcurrentMessages', 'queueMaxSize', 'staggerMaxDelayMs',
         'staggerMediumDelayMs', 'ignoreReducedMotion', 'translationEnabled',
-      ].map((key) => [key, settings[key]]));
+      ].map((key) => [key, settings[key]])));
+      window.__ytChatOverlay.applySettings(overrides);
+      return previous;
     }, replay ? 'scroll' : mode);
     await page.waitForFunction((worker) => {
       const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
@@ -675,7 +682,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     }
     if (transition === 'safe-density') {
       const baseline = await workerSnapshot();
-      await page.setViewportSize({ width: 960, height: 640 });
+      await page.setViewportSize({ width: 800, height: 600 });
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0.15,
         safeBottom: 0.25, fontSize: 40, laneSpacing: 10, maxConcurrentMessages: 30 }));
       await sendBatch('2');
@@ -815,6 +822,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     if (originalSettings && !page.isClosed()) {
       await page.evaluate((settings) => window.__ytChatOverlay?.applySettings(settings),
         originalSettings).catch(() => {});
+      await page.waitForTimeout(350).catch(() => {});
     }
     await page.close();
   }

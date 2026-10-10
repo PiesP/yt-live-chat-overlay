@@ -68,7 +68,10 @@ fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
 scenario uses intercepted fixture traffic rather than a live chat account.
 
 Installed Edge extension runs also execute `placement-timing.mjs` after the
-ordinary fixture, in separate task-owned pages. One page observes the actual
+ordinary fixture, in separate task-owned pages. These pages select a 32px font
+and full safe zone initially, then restore a cloned prior settings snapshot.
+A geometry sample marks future reservations separately from currently visible
+messages; a reserved fixed rectangle is not an already painted overlap. One page observes the actual
 packaged OffscreenCanvas Worker; the other makes
 `transferControlToOffscreen()` fail before transfer so the application takes its
 normal Canvas fallback. Both pages use the normal extension, chat response
