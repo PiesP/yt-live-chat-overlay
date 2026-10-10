@@ -190,20 +190,24 @@ export function computeAdaptiveStaggerLimit(
  * Compute all activation-time motion values from one pure policy shared by
  * the main-thread and Worker renderers.
  *
- * Temporal gaps are cumulative within a batch. Viewport entry also depends on
- * the horizontal offset and actual velocity, and batches have separate cursors.
+ * Optional entry effects share one bounded window: temporal delay consumes it
+ * first, then horizontal offset uses the remainder at the actual velocity.
+ * The caller retains the last committed geometric entry per source/priority/
+ * tier group across drains. We preserve that order when its entry still fits
+ * in this window. A long lane wait can be overtaken so it cannot block free
+ * lanes in the same or another group. Replay bypasses optional entry effects.
  */
 export function computeMessageMotionPlan(input: MessageMotionPlanInput): MessageMotionPlan {
   const isScrolling = input.mode === 'scroll' || input.mode === 'reverse';
-  const batchIndex = Math.max(0, Math.floor(input.batchIndex));
-  const horizontalStaggerPx = isScrolling
-    ? Math.min(HORIZONTAL_STAGGER_MAX, batchIndex * HORIZONTAL_STAGGER_PER_STEP)
-    : 0;
-  const staggerLimitMs = computeAdaptiveStaggerLimit(
-    input.queueDepth,
-    input.maxStaggerDelayMs,
-    input.mediumStaggerDelayMs
-  );
+  const rawSequence = input.entrySequence ?? input.batchIndex;
+  const batchIndex = Number.isFinite(rawSequence) ? Math.max(0, Math.floor(rawSequence)) : 0;
+  const staggerLimitMs = input.isReplay
+    ? 0
+    : computeAdaptiveStaggerLimit(
+        input.queueDepth,
+        input.maxStaggerDelayMs,
+        input.mediumStaggerDelayMs
+      );
 
   let staggerDelayMs = 0;
   if (batchIndex > 0 && staggerLimitMs > 0) {
@@ -218,6 +222,35 @@ export function computeMessageMotionPlan(input: MessageMotionPlanInput): Message
   const screenWidth = Number.isFinite(input.screenWidth) ? Math.max(0, input.screenWidth) : 0;
   const messageWidth = Number.isFinite(input.messageWidth) ? Math.max(0, input.messageWidth) : 0;
   const exitPaddingPx = Number.isFinite(input.exitPaddingPx) ? Math.max(0, input.exitPaddingPx) : 0;
+  const durationMultiplier = Number.isFinite(input.durationMultiplier)
+    ? Math.max(0, input.durationMultiplier)
+    : 1;
+  const baselineTravelDistancePx = screenWidth + messageWidth + exitPaddingPx;
+  const baselineDurationMs = isScrolling
+    ? computeScrollDuration(
+        baselineTravelDistancePx,
+        input.velocityPxPerSec,
+        input.scrollDurationMinMs,
+        input.scrollDurationMaxMs,
+        exitPaddingPx
+      ) * durationMultiplier
+    : 0;
+  // Adding offset cannot reduce travelDistance / finalDuration under the
+  // duration clamps, so the zero-offset velocity conservatively bounds entry.
+  const baselineVelocityPxPerMs =
+    baselineDurationMs > 0 ? baselineTravelDistancePx / baselineDurationMs : 0;
+  const remainingEntryBudgetMs = Math.max(0, staggerLimitMs - staggerDelayMs);
+  const desiredHorizontalOffsetPx = Math.min(
+    HORIZONTAL_STAGGER_MAX,
+    batchIndex * HORIZONTAL_STAGGER_PER_STEP
+  );
+  const horizontalStaggerPx =
+    isScrolling && baselineVelocityPxPerMs > 0
+      ? Math.min(
+          desiredHorizontalOffsetPx,
+          Math.floor(remainingEntryBudgetMs * baselineVelocityPxPerMs)
+        )
+      : 0;
 
   let startX: number;
   if (input.mode === 'scroll') {
@@ -240,13 +273,37 @@ export function computeMessageMotionPlan(input: MessageMotionPlanInput): Message
         exitPaddingPx
       )
     : input.topBottomDurationMs;
-  const durationMultiplier = Number.isFinite(input.durationMultiplier)
-    ? Math.max(0, input.durationMultiplier)
-    : 1;
   const durationMs = baseDurationMs * durationMultiplier;
   const placementWaitMs = Number.isFinite(input.placementWaitMs)
     ? Math.max(0, input.placementWaitMs)
     : 0;
+  let startTime = input.now + placementWaitMs + staggerDelayMs;
+  let geometry = motionGeometry(
+    input.mode,
+    startTime,
+    startX,
+    messageWidth,
+    screenWidth,
+    durationMs,
+    exitPaddingPx
+  );
+  const previousEntry = input.previousViewportEntryTime;
+  if (staggerLimitMs > 0 && previousEntry !== undefined && Number.isFinite(previousEntry)) {
+    const entryFloor = Math.min(previousEntry, input.now + placementWaitMs + staggerLimitMs);
+    const entryDelayMs = Math.max(0, entryFloor - geometry.viewportEntryTime);
+    if (entryDelayMs > 0) {
+      startTime += entryDelayMs;
+      geometry = motionGeometry(
+        input.mode,
+        startTime,
+        startX,
+        messageWidth,
+        screenWidth,
+        durationMs,
+        exitPaddingPx
+      );
+    }
+  }
 
   return {
     mode: input.mode,
@@ -254,19 +311,11 @@ export function computeMessageMotionPlan(input: MessageMotionPlanInput): Message
     horizontalStaggerPx,
     staggerLimitMs,
     staggerDelayMs,
-    startTime: input.now + placementWaitMs + staggerDelayMs,
+    startTime,
     startX,
     durationMs,
     screenWidthPx: screenWidth,
     messageWidthPx: messageWidth,
-    ...motionGeometry(
-      input.mode,
-      input.now + placementWaitMs + staggerDelayMs,
-      startX,
-      messageWidth,
-      screenWidth,
-      durationMs,
-      exitPaddingPx
-    ),
+    ...geometry,
   };
 }
