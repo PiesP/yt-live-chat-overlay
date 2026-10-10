@@ -3,6 +3,9 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
+import { ReplayChatSource } from '@chat/source-replay';
+import * as youtubeApi from '@chat/youtube/api';
+import { ObservabilityReporter } from '@util/observability';
 
 // RuntimeManager requires getCurrentUrl, getSettings, isValidPage callbacks.
 // Tests verify constructor, settings access via backdoor, and health shape.
@@ -45,6 +48,7 @@ function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings
 describe('RuntimeManager', () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   const createOpts = (overrides: { url?: string; settings?: OverlaySettings; valid?: boolean } = {}) => ({
@@ -55,6 +59,70 @@ describe('RuntimeManager', () => {
 
   it('constructs without throwing', () => {
     expect(() => new RuntimeManager(createOpts())).not.toThrow();
+  });
+
+  it('attributes late replay drops only to the current session', async () => {
+    vi.spyOn(youtubeApi, 'bootstrapChatSession').mockResolvedValue({
+      status: 'ready',
+      data: {
+        videoId: 'video',
+        isReplay: true,
+        clientContext: {},
+        clientNameHeader: 'WEB',
+        ytcfg: {},
+        initialContinuation: { continuation: 'initial' },
+      },
+    });
+    vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
+    const observability = new ObservabilityReporter();
+    const onMessagesDropped = vi.spyOn(observability, 'onMessagesDropped');
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      renderer: {
+        setReplayMode: (enabled: boolean) => void;
+        observability: ObservabilityReporter;
+      } | null;
+      chatSource: ReplayChatSource | null;
+      sessionGeneration: number;
+      startChatSource: (signal: AbortSignal) => Promise<string>;
+    };
+    internals.renderer = { setReplayMode: vi.fn(), observability };
+    const controller = new AbortController();
+    expect(await internals.startChatSource(controller.signal)).toBe('started');
+    const source = internals.chatSource;
+    expect(source).toBeInstanceOf(ReplayChatSource);
+
+    source?.onLateDrop?.(2);
+    expect(onMessagesDropped).toHaveBeenCalledWith(2, 'replay_late');
+    expect(observability.getMetrics()).toMatchObject({
+      totalReceived: 2,
+      totalDropped: 2,
+      dropRate: 1,
+    });
+
+    // The renderer counts the delivered messages through its own ingress path.
+    observability.onMessageReceived();
+    observability.onMessageReceived();
+    expect(observability.getMetrics()).toMatchObject({
+      totalReceived: 4,
+      totalDropped: 2,
+      dropRate: 0.5,
+    });
+
+    internals.sessionGeneration += 1;
+    source?.onLateDrop?.(1);
+    internals.sessionGeneration -= 1;
+    internals.chatSource = null;
+    source?.onLateDrop?.(1);
+    internals.chatSource = source;
+    controller.abort();
+    source?.onLateDrop?.(1);
+    expect(onMessagesDropped).toHaveBeenCalledTimes(1);
+    expect(observability.getMetrics()).toMatchObject({
+      totalReceived: 4,
+      totalDropped: 2,
+      dropRate: 0.5,
+    });
   });
 
   it('accepts custom settings callback', () => {

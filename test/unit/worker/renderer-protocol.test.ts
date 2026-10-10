@@ -54,11 +54,13 @@ vi.spyOn(performance, 'now').mockReturnValue(10000);
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
+import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
 import {
   getBidiLayoutCacheUsage,
   resolveTextDirection,
 } from '@renderer/canvas/bidi-layout';
-import type { WorkerMessage } from '@renderer/worker/types';
+import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
+import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -133,6 +135,127 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
   );
   return renderer;
 }
+
+describe('Worker reservation safety', () => {
+  it('budgets failed placement work and rotates through all priority groups', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const renderer = initializeRenderer();
+    const internals = renderer as unknown as {
+      pendingQueue: WorkerMessage[];
+      drainCursors: Map<number, WorkerMessage>;
+      findPlacement: ReturnType<typeof vi.fn>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    internals.pendingQueue.push(...[200, 100, 0].map((priority) => makeWorkerMessage({ id: `priority-${priority}`, priority })));
+    internals.findPlacement = vi.fn(() => { clock += 2; return null; });
+    internals.drainQueue(0, 640, 360);
+    expect(internals.findPlacement.mock.calls.map((args) => args[1])).toHaveLength(2);
+    // Pending identity cursors, rather than dequeues, retain every failure.
+    expect(internals.pendingQueue).toHaveLength(3);
+    expect([...internals.drainCursors.keys()]).toEqual([200, 100]);
+    internals.drainQueue(16, 640, 360);
+    expect(internals.findPlacement).toHaveBeenCalledTimes(4);
+    expect(internals.drainCursors.get(0)?.id).toBe('priority-0');
+    expect(internals.pendingQueue).toHaveLength(3);
+  });
+
+  function setup(mode: 'scroll' | 'reverse' | 'top' = 'scroll', reducedMotion = false) {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const renderer = initializeRenderer({
+      danmakuMode: mode, reducedMotion, speedPxPerSec: 350,
+      scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
+      outlineWidthPx: 0, outlineOpacity: 0,
+    });
+    const internals = renderer as unknown as {
+      laneHeap: [number, number][];
+      laneIndexToHeapIndex: Map<number, number>;
+      numLanes: number; laneHeight: number; logicalHeight: number;
+      activeMessages: ActiveMessage[];
+      pendingQueue: WorkerMessage[];
+      totalDrops: number;
+      dropReasons: { oversized: number; reflow_capacity: number };
+      drainQueue(now: number, width: number, height: number): void;
+      reflowActiveMessages(): void;
+    };
+    internals.laneHeap = [[0, 0], [1, 0]];
+    internals.laneIndexToHeapIndex = new Map([[0, 0], [1, 1]]);
+    internals.numLanes = 2;
+    internals.laneHeight = 20;
+    internals.logicalHeight = 40;
+    for (const id of ['first', 'short', 'long']) {
+      internals.pendingQueue.push({
+        id, text: id, content: [{ type: 'text', content: id }],
+        priority: 0, isBacklog: false, kind: 'text', authorType: 'normal',
+        width: id === 'short' ? 100 : 600, height: 20,
+      });
+    }
+    return { renderer, internals };
+  }
+
+  it.each(['scroll', 'reverse'] as const)('checks future reservations and uses an alternative lane in %s', (mode) => {
+    const { internals } = setup(mode);
+    internals.drainQueue(0, 640, 40);
+    expect(internals.activeMessages).toHaveLength(3);
+    const short = internals.activeMessages.find((m) => m.id === 'short');
+    const long = internals.activeMessages.find((m) => m.id === 'long');
+    expect(short?.startTime).toBeGreaterThan(0);
+    expect(long?.laneIndex).not.toBe(short?.laneIndex);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+        expect(motionPlansCollide(motionPlanFromMessage(a, mode, 640, 100), motionPlanFromMessage(b, mode, 640, 100), 0.08, 0)).toBe(false);
+      }
+    }
+  });
+
+  it('preserves future starts and resolves fixed capacity when reflow shrinks the lane range', () => {
+    const { internals } = setup('top');
+    internals.drainQueue(0, 640, 40);
+    const futureStarts = new Map(internals.activeMessages.map((m) => [m.id, m.startTime]));
+    expect([...futureStarts.values()].some((time) => time > 0)).toBe(true);
+    internals.numLanes = 1;
+    internals.logicalHeight = 20;
+    internals.reflowActiveMessages();
+    expect(internals.totalDrops).toBe(1);
+    expect(internals.dropReasons.reflow_capacity).toBe(1);
+    expect(internals.activeMessages).toHaveLength(2);
+    expect(internals.activeMessages.every((m) => m.startTime === futureStarts.get(m.id))).toBe(true);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b) continue;
+        expect(motionPlansCollide(motionPlanFromMessage(a, 'top', 640, 100), motionPlanFromMessage(b, 'top', 640, 100), 0.08, 0)).toBe(false);
+      }
+    }
+  });
+
+  it('labels an active message that becomes taller than the viewport on reflow', () => {
+    const { internals } = setup('top');
+    internals.drainQueue(0, 640, 40);
+    const first = internals.activeMessages[0];
+    expect(first).toBeDefined();
+    if (!first) return;
+    first.height = 10_000;
+    internals.reflowActiveMessages();
+    expect(internals.dropReasons.oversized).toBe(1);
+  });
+
+  it('reconciles a live reduced-motion preference change before drawing', () => {
+    const { renderer, internals } = setup();
+    internals.drainQueue(0, 640, 40);
+    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { reducedMotion: true } }));
+    expect(internals.activeMessages.every((m) => m.motion?.mode === 'top' && m.x === Math.floor((640 - m.width) / 2))).toBe(true);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+        expect(a.motion && b.motion && motionPlansCollide(a.motion, b.motion, 0.08, 0)).toBe(false);
+      }
+    }
+    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { ignoreReducedMotion: true } }));
+    expect(internals.activeMessages.every((m) => m.motion?.mode === 'scroll')).toBe(true);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -670,6 +793,7 @@ describe('Worker message protocol', () => {
         drainQueue: (now: number, width: number, height: number) => void;
         pendingQueue: WorkerMessage[];
         totalDrops: number;
+        dropReasons: { oversized: number };
       };
       const oversized = makeWorkerMessage({ height: 10_000 });
 
@@ -678,6 +802,7 @@ describe('Worker message protocol', () => {
 
       expect(internals.pendingQueue).toHaveLength(0);
       expect(internals.totalDrops).toBe(1);
+      expect(internals.dropReasons.oversized).toBe(1);
     });
 
     it('does not count transient placement failures as drops or starve later candidates', () => {
@@ -1172,13 +1297,15 @@ describe('Worker message protocol', () => {
       postMessageSpy.mockClear();
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 7 }));
 
-      expect(postMessageSpy).toHaveBeenCalledWith({
+      expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
         type: 'messageSnapshot',
         requestId: 7,
+        epoch: 0,
         activeMessageIds: [],
         pendingMessageIds: ['pending-message'],
         processedBatchSequence: 0,
-      });
+        motionSnapshot: expect.objectContaining({ activeMotions: [] }),
+      }));
     });
 
     it('uses the pending array as the single queue cursor while preserving every snapshot id', () => {
@@ -1191,13 +1318,63 @@ describe('Worker message protocol', () => {
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 8 }));
 
       expect(renderer).not.toHaveProperty('pendingQueueOffset');
-      expect(postMessageSpy).toHaveBeenCalledWith({
+      expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
         type: 'messageSnapshot',
         requestId: 8,
+        epoch: 0,
         activeMessageIds: [],
         pendingMessageIds: ['pending-first', 'pending-second'],
         processedBatchSequence: 0,
+        motionSnapshot: expect.objectContaining({ activeMotions: [] }),
+      }));
+    });
+
+    it('snapshots the actual active timeline with a frozen clock during pause', () => {
+      vi.spyOn(performance, 'now').mockReturnValue(10_000);
+      const renderer = initializeRenderer();
+      renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [makeWorkerMessage({ id: 'future-active', trackDrops: false })],
+      }));
+      const internals = renderer as unknown as {
+        drainQueue(now: number, width: number, height: number): void;
+        activeMessages: ActiveMessage[];
+      };
+      internals.drainQueue(10_000, 640, 360);
+      const active = internals.activeMessages[0];
+      expect(active).toBeDefined();
+      if (!active) return;
+      active.startTime = 10_500;
+      active.fadeStartTime = 10_450;
+      active.pausedDuration = 300;
+      renderer.handleMessage(makeEvent({ type: 'setUserPaused', paused: true }));
+      vi.spyOn(performance, 'now').mockReturnValue(10_600);
+
+      postMessageSpy.mockClear();
+      renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 9, epoch: 0 }));
+      const snapshot = postMessageSpy.mock.calls.at(-1)?.[0] as {
+        type: string; epoch: number; motionSnapshot: {
+          effectiveNowEpochMs: number; capturedAtEpochMs: number; isPaused: boolean;
+          viewportWidthPx: number; exitPaddingPx: number;
+          activeMotions: Array<{ id: string; trackDrops?: boolean; startEpochMs: number; fadeStartEpochMs: number;
+            startX: number; durationMs: number; laneIndex: number }>;
+        };
+      };
+      expect(snapshot.epoch).toBe(0);
+      expect(isValidWorkerMessageSnapshot(snapshot)).toBe(true);
+      expect(snapshot.motionSnapshot).toMatchObject({
+        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+        effectiveNowEpochMs: performance.timeOrigin + 10_000,
+        capturedAtEpochMs: performance.timeOrigin + 10_600,
       });
+      expect(snapshot.motionSnapshot.activeMotions).toEqual([
+        expect.objectContaining({
+          id: active.id, startX: active.startX, durationMs: active.duration,
+          trackDrops: false,
+          laneIndex: active.laneIndex,
+          startEpochMs: performance.timeOrigin + 10_800,
+          fadeStartEpochMs: performance.timeOrigin + 10_750,
+        }),
+      ]);
     });
 
     it('keeps only the latest translation per id and reflows once per bounded frame batch', () => {

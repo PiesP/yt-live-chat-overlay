@@ -37,49 +37,6 @@ export function computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number):
   );
 }
 
-export interface EntryHeadwayInput {
-  activeWidthPx: number;
-  headwayGapRatio: number;
-  activeTravelDistancePx: number;
-  activeDurationMs: number;
-  activeElapsedMs: number;
-  incomingTravelDistancePx: number;
-  incomingDurationMs: number;
-}
-
-/**
- * Compute the entry clearance needed to prevent a faster incoming comment
- * from catching an active comment before the latter leaves the viewport.
- */
-export function computeRequiredEntryHeadwayPx(input: EntryHeadwayInput): number {
-  const baseHeadwayPx = computeBaseHeadwayPx(input.activeWidthPx, input.headwayGapRatio);
-  const motionValues = [
-    input.activeTravelDistancePx,
-    input.activeDurationMs,
-    input.activeElapsedMs,
-    input.incomingTravelDistancePx,
-    input.incomingDurationMs,
-  ];
-  if (
-    motionValues.some((value) => !Number.isFinite(value)) ||
-    input.activeTravelDistancePx < 0 ||
-    input.incomingTravelDistancePx < 0 ||
-    input.activeDurationMs <= 0 ||
-    input.incomingDurationMs <= 0
-  ) {
-    return baseHeadwayPx;
-  }
-
-  const activeVelocityPxPerMs = input.activeTravelDistancePx / input.activeDurationMs;
-  const incomingVelocityPxPerMs = input.incomingTravelDistancePx / input.incomingDurationMs;
-  const remainingActiveMs = Math.max(0, input.activeDurationMs - input.activeElapsedMs);
-  const catchUpDistancePx = Math.max(
-    0,
-    (incomingVelocityPxPerMs - activeVelocityPxPerMs) * remainingActiveMs
-  );
-  return Math.ceil(baseHeadwayPx + catchUpDistancePx);
-}
-
 /** Speed tiers within 1 level of each other can share lanes. */
 export function areSpeedTiersCompatible(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1;
@@ -320,7 +277,7 @@ export function resetBatchShared(state: LaneAllocationState, now: number): void 
 }
 
 /**
- * Commit a placement: update speed-tier tracking and heap occupancy.
+ * Commit a placement: retain the latest lane clearance and tier lifetime.
  * For multi-slot messages, all occupied lanes are updated.
  */
 export function commitPlacementShared(
@@ -337,8 +294,14 @@ export function commitPlacementShared(
 
   for (let s = 0; s < slotCount; s++) {
     const idx = laneIndex + s;
-    state.speedTierLanes.set(idx, { tier: speedTier, until });
-    heapUpdateLane(state.heap, state.indexMap, idx, nextAvailable);
+    const previous = state.speedTierLanes.get(idx);
+    if (!previous || until >= previous.until) {
+      state.speedTierLanes.set(idx, { tier: speedTier, until });
+    }
+    const existingAvailable = heapGetSlotAvailableAt(state.heap, state.indexMap, idx);
+    if (existingAvailable !== undefined) {
+      heapUpdateLane(state.heap, state.indexMap, idx, Math.max(existingAvailable, nextAvailable));
+    }
   }
 }
 
@@ -375,7 +338,8 @@ export function findPlacementShared(
   maxWaitMs: number,
   speedTier: number,
   random: () => number = Math.random,
-  strategy: LaneSelectionStrategy = 'spread'
+  strategy: LaneSelectionStrategy = 'spread',
+  exactMotionValidation = false
 ): { laneIndex: number; waitMs: number } | null {
   if (state.heap.length === 0) return null;
   const slotCount = Math.max(1, Math.ceil(msgHeight / laneHeight));
@@ -383,7 +347,7 @@ export function findPlacementShared(
   if (numLanes <= 0) return null;
 
   if (slotCount <= 1) {
-    return allocateSingleLaneShared(
+    const tiered = allocateSingleLaneShared(
       state,
       now,
       0,
@@ -393,6 +357,19 @@ export function findPlacementShared(
       random,
       strategy
     );
+    if (tiered || !exactMotionValidation) return tiered;
+    // Tier summaries are a grouping preference. A renderer that validates
+    // every reservation can safely consider an otherwise available lane.
+    let best: { laneIndex: number; waitMs: number } | null = null;
+    for (let offset = 0; offset < numLanes; offset++) {
+      const laneIndex = laneAtOffset(offset, numLanes - 1, strategy);
+      if (state.collidedLanes.has(laneIndex)) continue;
+      const available = heapGetSlotAvailableAt(state.heap, state.indexMap, laneIndex, numLanes);
+      if (available === undefined) continue;
+      const waitMs = Math.max(0, Math.ceil(available - now));
+      if (waitMs <= maxWaitMs && (!best || waitMs < best.waitMs)) best = { laneIndex, waitMs };
+    }
+    return best;
   }
 
   // Multi-slot: scan for contiguous block

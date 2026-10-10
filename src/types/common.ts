@@ -27,6 +27,8 @@ export type DropReason =
   | 'queue_replaced'
   | 'collision'
   | 'oversized'
+  | 'reflow_capacity'
+  | 'replay_late'
   | 'temporarily_unavailable'
   | 'worker_backpressure';
 /** Backlog injection modes */

@@ -16,17 +16,23 @@ import {
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
 import type {
+  WorkerActiveMotion,
   WorkerBatchReceipt,
   WorkerClearStateAck,
   WorkerErrorMessage,
   WorkerMessageSnapshot,
+  WorkerMotionSnapshot,
   WorkerStatsMessage,
 } from './types';
+import { WORKER_DROP_REASONS } from './types';
 
 export const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
 const MAX_STATS_MESSAGE_IDS =
   resolveLimits('queueMaxSize').max + resolveLimits('maxConcurrentMessages').max;
 const SUPPORTED_LANE_DENSITY_FACTORS = new Set([0.5, 0.75, 1]);
+const MAX_SNAPSHOT_GEOMETRY_PX = 1_000_000;
+const MAX_SNAPSHOT_LANES = 16_384;
+const MAX_SNAPSHOT_DURATION_MS = 1_000_000;
 const BLOCKED_CONFIG_KEYS = ['__proto__', 'constructor', 'prototype'] as const;
 const RESOURCE_CONFIG_KEYS = [
   'maxConcurrentMessages',
@@ -107,6 +113,21 @@ function isSafeConfig(value: unknown): value is Record<string, unknown> {
 /** Validate cumulative state sent from the renderer Worker to the main thread. */
 export function isValidWorkerStatsMessage(value: unknown): value is WorkerStatsMessage {
   if (!isRecord(value) || value.type !== 'stats') return false;
+  if (Object.hasOwn(value, 'dropReasons')) {
+    if (!isRecord(value.dropReasons)) return false;
+    const entries = Object.entries(value.dropReasons);
+    if (entries.length > WORKER_DROP_REASONS.length) return false;
+    let reasonTotal = 0;
+    for (const [reason, count] of entries) {
+      if (
+        !WORKER_DROP_REASONS.some((known) => known === reason) ||
+        !isNonNegativeSafeInteger(count)
+      )
+        return false;
+      reasonTotal += count;
+    }
+    if (reasonTotal !== value.totalDrops) return false;
+  }
   return (
     isNonNegativeSafeInteger(value.activeMessages) &&
     isNonNegativeSafeInteger(value.pendingQueueDepth) &&
@@ -146,6 +167,72 @@ export function isValidWorkerClearStateAck(value: unknown): value is WorkerClear
   return isRecord(value) && value.type === 'clearStateAck' && isNonNegativeSafeInteger(value.epoch);
 }
 
+function isValidActiveMotion(value: unknown): value is WorkerActiveMotion {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    (!hasOwn(value, 'trackDrops') || typeof value.trackDrops === 'boolean') &&
+    (value.mode === 'scroll' ||
+      value.mode === 'reverse' ||
+      value.mode === 'top' ||
+      value.mode === 'bottom') &&
+    isFiniteNumber(value.startX) &&
+    Math.abs(value.startX) <= MAX_SNAPSHOT_GEOMETRY_PX &&
+    isPositiveFiniteNumber(value.width) &&
+    value.width <= MAX_SNAPSHOT_GEOMETRY_PX &&
+    isPositiveFiniteNumber(value.height) &&
+    value.height <= MAX_SNAPSHOT_GEOMETRY_PX &&
+    isFiniteNumber(value.y) &&
+    Math.abs(value.y) <= MAX_SNAPSHOT_GEOMETRY_PX &&
+    isNonNegativeSafeInteger(value.laneIndex) &&
+    value.laneIndex <= MAX_SNAPSHOT_LANES &&
+    isNonNegativeSafeInteger(value.laneSlotCount) &&
+    value.laneSlotCount > 0 &&
+    value.laneSlotCount <= MAX_SNAPSHOT_LANES &&
+    isPositiveFiniteNumber(value.durationMs) &&
+    value.durationMs <= MAX_SNAPSHOT_DURATION_MS &&
+    isFiniteNonNegative(value.startEpochMs) &&
+    value.startEpochMs <= Number.MAX_SAFE_INTEGER &&
+    isFiniteNonNegative(value.fadeStartEpochMs) &&
+    value.fadeStartEpochMs <= Number.MAX_SAFE_INTEGER &&
+    isNonNegativeSafeInteger(value.speedTier) &&
+    value.speedTier <= 3
+  );
+}
+
+function isValidMotionSnapshot(
+  value: unknown,
+  activeMessageIds: readonly string[]
+): value is WorkerMotionSnapshot {
+  if (
+    !isRecord(value) ||
+    !isFiniteNonNegative(value.capturedAtEpochMs) ||
+    value.capturedAtEpochMs > Number.MAX_SAFE_INTEGER ||
+    !isFiniteNonNegative(value.effectiveNowEpochMs) ||
+    value.effectiveNowEpochMs > Number.MAX_SAFE_INTEGER ||
+    value.effectiveNowEpochMs > value.capturedAtEpochMs ||
+    typeof value.isPaused !== 'boolean' ||
+    !isFiniteNonNegative(value.viewportWidthPx) ||
+    value.viewportWidthPx > MAX_SNAPSHOT_GEOMETRY_PX ||
+    !isFiniteNonNegative(value.exitPaddingPx) ||
+    value.exitPaddingPx > MAX_SNAPSHOT_GEOMETRY_PX ||
+    !Array.isArray(value.activeMotions) ||
+    value.activeMotions.length > activeMessageIds.length ||
+    value.activeMotions.length > MAX_STATS_MESSAGE_IDS
+  )
+    return false;
+  const activeIds = new Set(activeMessageIds);
+  const seen = new Set<string>();
+  for (const motion of value.activeMotions) {
+    if (!isValidActiveMotion(motion) || !activeIds.has(motion.id) || seen.has(motion.id)) {
+      return false;
+    }
+    seen.add(motion.id);
+  }
+  return true;
+}
+
 /** Validate a requested Worker message snapshot and its processing watermark. */
 export function isValidWorkerMessageSnapshot(value: unknown): value is WorkerMessageSnapshot {
   return (
@@ -154,7 +241,11 @@ export function isValidWorkerMessageSnapshot(value: unknown): value is WorkerMes
     isNonNegativeSafeInteger(value.requestId) &&
     isBoundedMessageIdArray(value.activeMessageIds) &&
     isBoundedMessageIdArray(value.pendingMessageIds) &&
-    isNonNegativeSafeInteger(value.processedBatchSequence)
+    isNonNegativeSafeInteger(value.processedBatchSequence) &&
+    (!hasOwn(value, 'epoch') || isNonNegativeSafeInteger(value.epoch)) &&
+    (!hasOwn(value, 'motionSnapshot') ||
+      (isNonNegativeSafeInteger(value.epoch) &&
+        isValidMotionSnapshot(value.motionSnapshot, value.activeMessageIds)))
   );
 }
 
@@ -219,7 +310,8 @@ export function isValidControlMessage(value: unknown): boolean {
       return (
         typeof value.requestId === 'number' &&
         Number.isSafeInteger(value.requestId) &&
-        value.requestId >= 0
+        value.requestId >= 0 &&
+        (!hasOwn(value, 'epoch') || isNonNegativeSafeInteger(value.epoch))
       );
     case 'destroy':
       return true;

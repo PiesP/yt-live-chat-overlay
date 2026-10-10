@@ -3,9 +3,49 @@ import {
   commitDrainBatch,
   createDrainBatch,
   recordDrainResult,
+  selectDrainCandidates,
+  nextDrainPriority,
 } from '@renderer/canvas/drain-batch';
 
 describe('Canvas drain batch bookkeeping', () => {
+  it('rotates beyond repeated failures without losing or reordering the queue', () => {
+    const queue = Array.from({ length: 90 }, (_, id) => ({ id, priority: 0 }));
+    const cursors = new Map<number, (typeof queue)[number]>();
+    const attempted = new Set<number>();
+    for (let frame = 0; frame < 3; frame++) {
+      const candidates = selectDrainCandidates(queue, (m) => m.priority, cursors);
+      expect(candidates).toHaveLength(32);
+      for (const message of candidates) {
+        attempted.add(message.id);
+        cursors.set(message.priority, message);
+      }
+    }
+    expect(attempted.size).toBe(90);
+    expect(queue.map((m) => m.id)).toEqual(Array.from({ length: 90 }, (_, id) => id));
+  });
+
+  it('visits high priority first and resumes another group after a time-budget interruption', () => {
+    const queue = [...Array.from({ length: 40 }, (_, id) => ({ id, priority: 100 })), { id: 40, priority: 0 }];
+    const priorityOf = (m: (typeof queue)[number]) => m.priority;
+    const first = selectDrainCandidates(queue, priorityOf, new Map());
+    expect(first[0]?.priority).toBe(100);
+    expect(first.at(-1)?.priority).toBe(0);
+    const resume = nextDrainPriority(first, priorityOf, 100);
+    const next = selectDrainCandidates(queue, priorityOf, new Map(), 32, resume);
+    expect(next[0]?.id).toBe(40);
+    expect(next[1]?.priority).toBe(100);
+  });
+
+  it('advances after the last attempted group when a frame can afford two of three groups', () => {
+    const queue = [{ priority: 200 }, { priority: 100 }, { priority: 0 }];
+    const priorityOf = (m: (typeof queue)[number]) => m.priority;
+    const first = selectDrainCandidates(queue, priorityOf, new Map());
+    const resume = nextDrainPriority(first, priorityOf, 100);
+    expect(resume).toBe(0);
+    const next = selectDrainCandidates(queue, priorityOf, new Map(), 32, resume);
+    expect(next.map(priorityOf)).toEqual([0, 200, 100]);
+  });
+
   it('records placed, oversized, and transient results without reordering', () => {
     const messages = ['placed-a', 'oversized', 'transient', 'placed-b'];
     const batch = createDrainBatch(messages);

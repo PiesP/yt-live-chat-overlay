@@ -38,6 +38,12 @@ import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limi
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { resetBidiLayoutCaches, type TextDirection } from '@renderer/canvas/bidi-layout';
+import {
+  DRAIN_MAX_ATTEMPTS,
+  DRAIN_WORK_BUDGET_MS,
+  nextDrainPriority,
+  selectDrainCandidates,
+} from '@renderer/canvas/drain-batch';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
@@ -76,19 +82,32 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
 import { getAuthorNameMaxWidth, getRegularCardInsets } from '@renderer/layout/card-layout';
+import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   buildLaneHeap,
   commitPlacementShared,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
-  computeRequiredEntryHeadwayPx,
   findPlacementShared,
   type LaneAllocationState,
   resetBatchShared,
   shiftLaneTimersShared,
 } from '@renderer/layout/lane-shared';
-import { computeMessageMotionPlan } from '@renderer/layout/message-schedule';
+import {
+  applyReflowMotion,
+  previousMotionPlan,
+  reconcileMessagePlacements,
+  reflowMotionPlan,
+} from '@renderer/layout/message-reflow';
+import {
+  computeMessageMotionPlan,
+  type MessageMotionPlan,
+  messageXAtElapsed,
+  motionPlanFromMessage,
+  motionPlansCollide,
+  resolveEffectiveMotionMode,
+} from '@renderer/layout/message-schedule';
 import { resolveRequiredRenderAssets } from '@renderer/render-assets';
 import {
   computeAgeFadeRate,
@@ -99,7 +118,6 @@ import {
 import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
 import {
-  computeScrollDuration,
   DEFAULT_FONT_FAMILY,
   DEFAULT_TEXT_COLOR,
   rendererLayout,
@@ -112,6 +130,8 @@ import type {
   ActiveMessage,
   WorkerConfig,
   WorkerContentSegment,
+  WorkerDropReason,
+  WorkerDropReasonCounts,
   WorkerMessage,
   WorkerMessageGeometry,
   WorkerStatsMessage,
@@ -408,6 +428,9 @@ function renderPaidCardWorker(
 }
 
 export class WorkerRenderer {
+  private readonly entryPacing = new EntryPacingState();
+  private readonly drainCursors = new Map<number, WorkerMessage>();
+  private drainResumePriority: number | undefined;
   private ctx: OffscreenCanvasRenderingContext2D | null = null;
   private canvas: OffscreenCanvas | null = null;
   private config: WorkerConfig | null = null;
@@ -458,6 +481,7 @@ export class WorkerRenderer {
   private fontMetricsCache = new Map<string, { height: number }>();
   private activeMessages: ActiveMessage[] = [];
   private activeMessagesByLane = new Map<number, ActiveMessage[]>();
+  private readonly collisionScratch = new Set<ActiveMessage>();
   private pendingQueue: WorkerMessage[] = [];
   private pendingQueueSortNeeded = false;
   private laneHeap: [number, number][] = [];
@@ -471,6 +495,12 @@ export class WorkerRenderer {
   /** Cumulative messages placed into the active render set for this Worker instance. */
   private totalRendered = 0;
   private totalDrops = 0;
+  private readonly dropReasons: WorkerDropReasonCounts = {
+    queue_priority: 0,
+    queue_replaced: 0,
+    oversized: 0,
+    reflow_capacity: 0,
+  };
   private processedBatchSequence = 0;
   private currentEpoch = 0;
   private readonly pendingTranslations = new Map<
@@ -685,9 +715,25 @@ export class WorkerRenderer {
           }
           case 'updateConfig':
             if (this.config) {
-              const prevMode = this.config.danmakuMode;
-              const previousTranslationGeneration = this.config.translationGeneration;
               const nextConfig = data.config as Partial<WorkerConfig>;
+              const motionPolicyKeys = [
+                'danmakuMode',
+                'reducedMotion',
+                'ignoreReducedMotion',
+                'speedPxPerSec',
+                'scrollDurationMinMs',
+                'scrollDurationMaxMs',
+                'topBottomDurationMs',
+                'modOwnerDurationMultiplier',
+                'depthFarSpeedMul',
+                'depthNearSpeedMul',
+                'backlogSpeedMultiplier',
+                'exitPaddingPx',
+              ] as const;
+              const motionPolicyChanged = motionPolicyKeys.some(
+                (key) => nextConfig[key] !== undefined && nextConfig[key] !== this.config?.[key]
+              );
+              const previousTranslationGeneration = this.config.translationGeneration;
               const geometryChanged =
                 (nextConfig.fontSize !== undefined &&
                   nextConfig.fontSize !== this.config.fontSize) ||
@@ -766,19 +812,7 @@ export class WorkerRenderer {
                 this.initLanes(this.logicalWidth, this.logicalHeight);
                 this.reflowActiveMessages();
               }
-              // Issue 4: When danmakuMode changes, active messages have positions
-              // computed for the old mode — reflow them into the new mode layout
-              // instead of clearing state (which loses all active messages).
-              // The worker's reflowActiveMessages() recomputes startX, x, and
-              // duration based on this.config.danmakuMode, matching the main
-              // thread Canvas2D behavior.
-              if (
-                data.config &&
-                (data.config as WorkerConfig).danmakuMode !== undefined &&
-                (data.config as WorkerConfig).danmakuMode !== prevMode
-              ) {
-                this.reflowActiveMessages();
-              }
+              if (motionPolicyChanged && !geometryChanged) this.reflowActiveMessages();
             }
             break;
           case 'setPaused': {
@@ -845,15 +879,42 @@ export class WorkerRenderer {
             }
             break;
           }
-          case 'snapshotMessages':
+          case 'snapshotMessages': {
+            const capturedNow = performance.now();
+            const origin = performance.timeOrigin;
+            const motionSnapshot = {
+              capturedAtEpochMs: origin + capturedNow,
+              effectiveNowEpochMs: origin + (this.pauseStartTime ?? capturedNow),
+              isPaused: this.pauseStartTime !== null,
+              viewportWidthPx: this.logicalWidth,
+              exitPaddingPx: this.config?.exitPaddingPx ?? DEFAULT_SETTINGS.exitPaddingPx,
+              activeMotions: this.activeMessages.map((message) => ({
+                id: message.id,
+                trackDrops: message.trackDrops !== false,
+                mode: message.motion?.mode ?? this.effectiveMotionMode,
+                startX: message.startX,
+                width: message.width,
+                height: message.height,
+                y: message.y,
+                laneIndex: message.laneIndex,
+                laneSlotCount: message.laneSlotCount,
+                durationMs: message.duration,
+                startEpochMs: origin + message.startTime + message.pausedDuration,
+                fadeStartEpochMs: origin + message.fadeStartTime + message.pausedDuration,
+                speedTier: message.speedTier,
+              })),
+            };
             self.postMessage({
               type: 'messageSnapshot',
               requestId: data.requestId,
+              epoch: this.currentEpoch,
               activeMessageIds: this.activeMessages.map((message) => message.id),
               pendingMessageIds: this.pendingQueue.map((message) => message.id),
               processedBatchSequence: this.processedBatchSequence,
+              motionSnapshot,
             });
             break;
+          }
           case 'destroy':
             this.handleDestroy();
             break;
@@ -964,14 +1025,14 @@ export class WorkerRenderer {
         // entry from messageById and register the new one so
         // translation results can be matched.
         const evicted = this.pendingQueue[minIdx];
-        if (evicted) this.recordDrop(evicted);
+        if (evicted) this.recordDrop(evicted, 'queue_replaced');
         if (evicted) this.messageById.delete(evicted.id);
         this.pendingQueue[minIdx] = msg;
         this.messageById.set(msg.id, msg);
         this.pendingQueueSortNeeded = true;
         return true;
       } else {
-        this.recordDrop(msg);
+        this.recordDrop(msg, 'queue_priority');
         return false;
       }
     }
@@ -984,9 +1045,10 @@ export class WorkerRenderer {
     return true;
   }
 
-  private recordDrop(message: WorkerMessage): void {
-    if (message.trackDrops === false) return;
-    this.totalDrops = Math.min(Number.MAX_SAFE_INTEGER, this.totalDrops + 1);
+  private recordDrop(message: Pick<WorkerMessage, 'trackDrops'>, reason: WorkerDropReason): void {
+    if (message.trackDrops === false || this.totalDrops >= Number.MAX_SAFE_INTEGER) return;
+    this.totalDrops++;
+    this.dropReasons[reason]++;
   }
 
   /** Replace pending or active render state without creating a duplicate ID. */
@@ -1115,6 +1177,7 @@ export class WorkerRenderer {
           (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
         );
     WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
+    this.entryPacing.shift(pausedMs);
     this.pauseStartTime = null;
     this.pauseIncludesUserPause = false;
   }
@@ -1140,6 +1203,7 @@ export class WorkerRenderer {
       pendingQueueDepth: this.pendingQueue.length,
       totalRendered: this.totalRendered,
       totalDrops: this.totalDrops,
+      dropReasons: { ...this.dropReasons },
       processedBatchSequence: this.processedBatchSequence,
       laneUtilization,
       activeMessageIds: this.activeMessages.map((msg) => msg.id),
@@ -1169,6 +1233,9 @@ export class WorkerRenderer {
   }
 
   private handleDestroy(): void {
+    this.entryPacing.clear();
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
     this.isDestroyed = true;
     this.fetchGeneration++;
     for (const controller of this.fetchControllers) controller.abort();
@@ -1209,6 +1276,9 @@ export class WorkerRenderer {
    * preserving decoded-image and text-bitmap caches.
    */
   private handleClearState(epoch = this.currentEpoch): void {
+    this.entryPacing.clear();
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
     this.clearQueuedOwnedAssets();
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
@@ -1239,118 +1309,93 @@ export class WorkerRenderer {
 
   /** Reposition active messages and restore their lane reservations after resize. */
   private reflowActiveMessages(): void {
-    if (!this.config || this.numLanes <= 0) return;
-    const now = performance.now();
+    const config = this.config;
+    if (!config || this.numLanes <= 0) return;
+    const now = this.pauseStartTime ?? performance.now();
+    const mode = this.effectiveMotionMode;
+    const candidates = this.activeMessages.map((message) => {
+      const previous = previousMotionPlan(message, mode, this.logicalWidth, config.exitPaddingPx);
+      const next = computeMessageMotionPlan({
+        mode,
+        now,
+        batchIndex: 0,
+        previousStaggerDelayMs: 0,
+        queueDepth: 0,
+        staggerSample: 0,
+        maxStaggerDelayMs: 0,
+        mediumStaggerDelayMs: 0,
+        placementWaitMs: 0,
+        screenWidth: this.logicalWidth,
+        messageWidth: message.width,
+        velocityPxPerSec: this.getMessageVelocity(message, message.speedTier),
+        scrollDurationMinMs: config.scrollDurationMinMs,
+        scrollDurationMaxMs: config.scrollDurationMaxMs,
+        exitPaddingPx: config.exitPaddingPx,
+        topBottomDurationMs: config.topBottomDurationMs,
+        durationMultiplier:
+          message.authorType === 'moderator' || message.authorType === 'owner'
+            ? config.modOwnerDurationMultiplier
+            : 1,
+      });
+      return {
+        message,
+        laneIndex: message.laneIndex,
+        height: message.height,
+        motion: reflowMotionPlan(previous, next, now, config.exitPaddingPx),
+      };
+    });
+    const reconciled = reconcileMessagePlacements(candidates, {
+      laneCount: this.numLanes,
+      laneHeight: this.laneHeight,
+      viewportHeight: this.logicalHeight,
+      safeTop: config.safeTop,
+      mode: config.danmakuMode,
+      headwayGapRatio: config.headwayGapRatio,
+      now,
+    });
     this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
     this.speedTierLanes.clear();
     this.collidedLanes.clear();
     this.activeMessagesByLane.clear();
-
-    for (const msg of this.activeMessages) {
-      const requestedSlots = Math.max(1, Math.ceil(msg.height / this.laneHeight));
-      const slotCount = Math.min(requestedSlots, this.numLanes);
-      const laneIndex = Math.min(msg.laneIndex, Math.max(0, this.numLanes - slotCount));
-      msg.laneIndex = laneIndex;
-      msg.laneSlotCount = slotCount;
-      msg.laneArrayIndices.length = 0;
-      msg.y =
-        computeLaneY(laneIndex, this.logicalHeight, this.config.safeTop ?? 0, this.laneHeight) +
-        Math.floor((slotCount * this.laneHeight - msg.height) / 2);
-
-      const elapsed = Math.max(0, now - msg.startTime - msg.pausedDuration);
-      const progress = Math.min(1, elapsed * msg.invDuration);
-      const isScrolling =
-        this.config.danmakuMode === 'scroll' || this.config.danmakuMode === 'reverse';
-      let duration = this.config.topBottomDurationMs;
-      if (isScrolling) {
-        let speed = this.config.speedPxPerSec;
-        if (msg.speedTier === SPEED_TIER.FAR) {
-          speed = Math.max(30, speed * this.config.depthFarSpeedMul);
-        } else if (msg.speedTier === SPEED_TIER.NEAR) {
-          speed *= this.config.depthNearSpeedMul;
-        } else if (msg.speedTier === SPEED_TIER.BACKLOG) {
-          speed *= this.config.backlogSpeedMultiplier;
-        }
-        const totalDistance = this.logicalWidth + msg.width + this.config.exitPaddingPx;
-        duration = computeScrollDuration(
-          totalDistance,
-          speed,
-          this.config.scrollDurationMinMs,
-          this.config.scrollDurationMaxMs,
-          this.config.exitPaddingPx
-        );
-      }
-      if (msg.authorType === 'moderator' || msg.authorType === 'owner') {
-        duration *= this.config.modOwnerDurationMultiplier;
-      }
-      msg.duration = duration;
-      msg.invDuration = 1 / Math.max(1, duration);
-      msg.startTime = now - msg.pausedDuration - progress * duration;
-      if (isScrolling) {
-        if (this.config.danmakuMode === 'scroll') {
-          msg.startX = this.logicalWidth;
-          msg.x = msg.startX - progress * (msg.startX + msg.width + this.config.exitPaddingPx);
-        } else {
-          msg.startX = -msg.width;
-          msg.x =
-            msg.startX + progress * (this.logicalWidth - msg.startX + this.config.exitPaddingPx);
-        }
-      } else {
-        msg.x = (this.logicalWidth - msg.width) / 2;
-      }
-
-      addMessageToLaneIndex(this.activeMessagesByLane, msg, slotCount);
-
-      const remainingDuration = Math.max(1, duration * (1 - progress));
-      this.commitPlacement(
-        laneIndex,
-        slotCount,
+    this.activeMessages.length = 0;
+    this.entryPacing.clear();
+    for (const placement of reconciled.placements) {
+      const message = placement.message;
+      applyReflowMotion(message, placement.motion, now);
+      message.motion = placement.motion;
+      this.entryPacing.commit(
+        message.priority ?? 0,
+        message.speedTier,
         now,
-        remainingDuration,
-        msg.speedTier,
-        isScrolling ? msg.width : undefined
+        config.isReplayMode,
+        placement.motion
       );
+      message.laneIndex = placement.laneIndex;
+      message.laneSlotCount = placement.slotCount;
+      message.y = placement.y;
+      message.laneArrayIndices.length = 0;
+      this.activeMessages.push(message);
+      addMessageToLaneIndex(this.activeMessagesByLane, message, placement.slotCount);
+      this.commitPlacement(
+        placement.laneIndex,
+        placement.slotCount,
+        placement.motion.startTime,
+        placement.motion.durationMs,
+        message.speedTier,
+        placement.motion.isScrolling ? message.width : undefined,
+        placement.motion.horizontalStaggerPx
+      );
+    }
+    for (const dropped of reconciled.dropped) {
+      this.recordDrop(dropped.message, dropped.reason);
+      this.messageById.delete(dropped.message.id);
+      this.releaseQueuedAssetsForOwner(dropped.message.id);
+      this.pendingTranslations.delete(dropped.message.id);
     }
   }
 
-  /** Apply asynchronous geometry without jumping the message along its scroll path. */
+  /** Geometry is reconciled once after the bounded translation/configuration batch. */
   private applyActiveMessageGeometry(msg: ActiveMessage, width: number, height: number): void {
-    if (!this.config) {
-      msg.width = width;
-      msg.height = height;
-      return;
-    }
-    const isScrolling =
-      this.config.danmakuMode === 'scroll' || this.config.danmakuMode === 'reverse';
-    if (isScrolling) {
-      const now = performance.now();
-      let speed = this.config.speedPxPerSec;
-      if (msg.speedTier === SPEED_TIER.FAR) {
-        speed = Math.max(30, speed * this.config.depthFarSpeedMul);
-      } else if (msg.speedTier === SPEED_TIER.NEAR) {
-        speed *= this.config.depthNearSpeedMul;
-      } else if (msg.speedTier === SPEED_TIER.BACKLOG) {
-        speed *= this.config.backlogSpeedMultiplier;
-      }
-      const totalDistance = this.logicalWidth + width + this.config.exitPaddingPx;
-      let duration = computeScrollDuration(
-        totalDistance,
-        speed,
-        this.config.scrollDurationMinMs,
-        this.config.scrollDurationMaxMs,
-        this.config.exitPaddingPx
-      );
-      if (msg.authorType === 'moderator' || msg.authorType === 'owner') {
-        duration *= this.config.modOwnerDurationMultiplier;
-      }
-      const progress =
-        this.config.danmakuMode === 'scroll'
-          ? (this.logicalWidth - msg.x) / Math.max(1, totalDistance)
-          : (msg.x + width) / Math.max(1, totalDistance);
-      msg.duration = duration;
-      msg.invDuration = 1 / Math.max(1, duration);
-      msg.startTime = now - msg.pausedDuration - Math.max(0, Math.min(1, progress)) * duration;
-    }
     msg.width = width;
     msg.height = height;
   }
@@ -1393,7 +1438,8 @@ export class WorkerRenderer {
       maxWaitMs,
       speedTier,
       Math.random,
-      strategy
+      strategy,
+      true
     );
     if (!result) return null;
     const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
@@ -1441,6 +1487,14 @@ export class WorkerRenderer {
     shiftLaneTimersShared(state, ms);
   }
 
+  private get effectiveMotionMode(): WorkerConfig['danmakuMode'] {
+    return resolveEffectiveMotionMode(
+      this.config?.danmakuMode ?? 'scroll',
+      this.config?.reducedMotion ?? false,
+      this.config?.ignoreReducedMotion ?? false
+    );
+  }
+
   private activateMessage(
     msg: WorkerMessage,
     now: number,
@@ -1455,34 +1509,39 @@ export class WorkerRenderer {
     previousStaggerDelayMs: number,
     speedTier: number,
     screenWidth: number,
-    _screenHeight: number
+    _screenHeight: number,
+    precomputedMotion?: MessageMotionPlan
   ): number {
     if (!this.config) return previousStaggerDelayMs;
-    const mode = this.config.danmakuMode;
+    const mode = this.effectiveMotionMode;
     const speed = this.getMessageVelocity(msg, speedTier);
     const durationMultiplier =
       msg.authorType === 'moderator' || msg.authorType === 'owner'
         ? this.config.modOwnerDurationMultiplier
         : 1;
-    const motion = computeMessageMotionPlan({
-      mode,
-      now,
-      batchIndex,
-      previousStaggerDelayMs,
-      queueDepth: this.pendingQueue.length,
-      staggerSample: WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
-      maxStaggerDelayMs: this.config.staggerMaxDelayMs,
-      mediumStaggerDelayMs: this.config.staggerMediumDelayMs,
-      placementWaitMs: placement.waitMs,
-      screenWidth,
-      messageWidth: msg.width,
-      velocityPxPerSec: speed,
-      scrollDurationMinMs: this.config.scrollDurationMinMs,
-      scrollDurationMaxMs: this.config.scrollDurationMaxMs,
-      exitPaddingPx: this.config.exitPaddingPx,
-      topBottomDurationMs: this.config.topBottomDurationMs,
-      durationMultiplier,
-    });
+    const motion =
+      precomputedMotion ??
+      computeMessageMotionPlan({
+        mode,
+        now,
+        batchIndex,
+        ...this.entryPacing.input(msg.priority, speedTier, now, this.config.isReplayMode),
+        isReplay: this.config.isReplayMode,
+        previousStaggerDelayMs,
+        queueDepth: this.pendingQueue.length,
+        staggerSample: WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
+        maxStaggerDelayMs: this.config.staggerMaxDelayMs,
+        mediumStaggerDelayMs: this.config.staggerMediumDelayMs,
+        placementWaitMs: placement.waitMs,
+        screenWidth,
+        messageWidth: msg.width,
+        velocityPxPerSec: speed,
+        scrollDurationMinMs: this.config.scrollDurationMinMs,
+        scrollDurationMaxMs: this.config.scrollDurationMaxMs,
+        exitPaddingPx: this.config.exitPaddingPx,
+        topBottomDurationMs: this.config.topBottomDurationMs,
+        durationMultiplier,
+      });
     const slotCount = placement.slotCount;
     const laneY = placement.laneY + placement.verticalOffset;
     const authorColor =
@@ -1493,6 +1552,7 @@ export class WorkerRenderer {
           DEFAULT_TEXT_COLOR;
     const am: ActiveMessage = {
       id: msg.id,
+      motion,
       x: motion.startX,
       y: laneY,
       startX: motion.startX,
@@ -1512,6 +1572,10 @@ export class WorkerRenderer {
       ghostText: getDisplayText(msg.content ?? []),
       content: msg.content ?? [],
     };
+    am.priority = msg.priority;
+    am.isBacklog = msg.isBacklog;
+    if (msg.burstSpeedMultiplier !== undefined) am.burstSpeedMultiplier = msg.burstSpeedMultiplier;
+    if (msg.trackDrops !== undefined) am.trackDrops = msg.trackDrops;
     if (msg.authorType !== undefined) am.authorType = msg.authorType;
     if (msg.kind !== undefined) am.kind = msg.kind;
     if (msg.translatedText !== undefined) {
@@ -1537,6 +1601,7 @@ export class WorkerRenderer {
       motion.horizontalStaggerPx
     );
     this.activeMessages.push(am);
+    this.entryPacing.commit(msg.priority, speedTier, now, this.config.isReplayMode, motion);
     this.totalRendered = Math.min(Number.MAX_SAFE_INTEGER, this.totalRendered + 1);
     // Register in per-lane index for O(lanes) collision checks (Issue 7).
     addMessageToLaneIndex(this.activeMessagesByLane, am, slotCount);
@@ -1559,7 +1624,10 @@ export class WorkerRenderer {
     }
   }
 
-  private getMessageVelocity(msg: WorkerMessage, speedTier: number): number {
+  private getMessageVelocity(
+    msg: Pick<WorkerMessage, 'burstSpeedMultiplier'>,
+    speedTier: number
+  ): number {
     if (!this.config) return 1;
     let speed = this.config.speedPxPerSec;
     if (msg.burstSpeedMultiplier && msg.burstSpeedMultiplier > 1) speed *= msg.burstSpeedMultiplier;
@@ -1676,22 +1744,15 @@ export class WorkerRenderer {
         msg._prevX = msg.x;
         msg._prevY = msg.y;
       }
-      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
-      const isReducedMotionActive = this.config.reducedMotion && !this.config.ignoreReducedMotion;
-      if (mode === 'scroll') {
-        if (!isReducedMotionActive) {
-          msg.x = msg.startX - progress * (msg.startX + msg.width + this.config.exitPaddingPx);
-        } else {
-          msg.x = Math.max(0, (this.logicalWidth - msg.width) / 2);
-        }
-      } else if (mode === 'reverse') {
-        if (!isReducedMotionActive) {
-          msg.x =
-            msg.startX + progress * (this.logicalWidth - msg.startX + this.config.exitPaddingPx);
-        } else {
-          msg.x = Math.max(0, (this.logicalWidth - msg.width) / 2);
-        }
-      }
+      msg.x = messageXAtElapsed(
+        this.effectiveMotionMode,
+        msg.startX,
+        msg.width,
+        width,
+        this.config.exitPaddingPx,
+        elapsed,
+        msg.duration
+      );
       const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
       const opacity = this.opacityConfig
         ? computeMessageOpacity(
@@ -2002,103 +2063,87 @@ export class WorkerRenderer {
     batchIndex: number,
     previousStaggerDelayMs: number,
     now: number,
-    screenWidth: number
+    screenWidth: number,
+    precomputedMotion?: MessageMotionPlan
   ): boolean {
     if (!this.config) return true;
-    const mode = this.config.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const newTop = placement.laneY + placement.verticalOffset;
-    const newBottom = newTop + entry.height;
-    const durationMultiplier =
-      entry.authorType === 'moderator' || entry.authorType === 'owner'
-        ? this.config.modOwnerDurationMultiplier
-        : 1;
-    const incomingMotion = computeMessageMotionPlan({
-      mode,
+    const mode = this.effectiveMotionMode;
+    const motion =
+      precomputedMotion ??
+      this.planQueuedMessage(
+        entry,
+        newSpeedTier,
+        batchIndex,
+        previousStaggerDelayMs,
+        now,
+        screenWidth,
+        placement.waitMs,
+        0
+      );
+    if (!motion) return false;
+    const top = placement.laneY + placement.verticalOffset;
+    this.collisionScratch.clear();
+    const scanEnd = placement.laneIndex + placement.slotCount;
+    for (let lane = placement.laneIndex - 1; lane <= scanEnd; lane++) {
+      for (const active of this.activeMessagesByLane.get(lane) ?? []) {
+        this.collisionScratch.add(active);
+      }
+    }
+    let collision = false;
+    for (const active of this.collisionScratch) {
+      if (active.y + active.height <= top || active.y >= top + entry.height) continue;
+      if (
+        motionPlansCollide(
+          motion,
+          motionPlanFromMessage(active, mode, screenWidth, this.config.exitPaddingPx),
+          this.config.headwayGapRatio,
+          now
+        )
+      ) {
+        collision = true;
+        break;
+      }
+    }
+    this.collisionScratch.clear();
+    if (collision) this.markCollidedLanes(placement.laneIndex, placement.slotCount);
+    return !collision;
+  }
+
+  private planQueuedMessage(
+    entry: WorkerMessage,
+    speedTier: number,
+    batchIndex: number,
+    previousStaggerDelayMs: number,
+    now: number,
+    screenWidth: number,
+    placementWaitMs: number,
+    staggerSample: number
+  ): MessageMotionPlan | null {
+    if (!this.config) return null;
+    return computeMessageMotionPlan({
+      mode: this.effectiveMotionMode,
       now,
       batchIndex,
+      ...this.entryPacing.input(entry.priority, speedTier, now, this.config.isReplayMode),
+      isReplay: this.config.isReplayMode,
       previousStaggerDelayMs,
       queueDepth: this.pendingQueue.length,
-      staggerSample: 0,
+      staggerSample,
       maxStaggerDelayMs: this.config.staggerMaxDelayMs,
       mediumStaggerDelayMs: this.config.staggerMediumDelayMs,
-      placementWaitMs: placement.waitMs,
+      placementWaitMs,
       screenWidth,
       messageWidth: entry.width,
-      velocityPxPerSec: this.getMessageVelocity(entry, newSpeedTier),
+      velocityPxPerSec: this.getMessageVelocity(entry, speedTier),
       scrollDurationMinMs: this.config.scrollDurationMinMs,
       scrollDurationMaxMs: this.config.scrollDurationMaxMs,
       exitPaddingPx: this.config.exitPaddingPx,
       topBottomDurationMs: this.config.topBottomDurationMs,
-      durationMultiplier,
+      durationMultiplier:
+        entry.authorType === 'moderator' || entry.authorType === 'owner'
+          ? this.config.modOwnerDurationMultiplier
+          : 1,
     });
-
-    // Issue 7: Lane-scoped collision scan via activeMessagesByLane.
-    // Scan the new message's lanes ± 1 for adjacent overlap, instead of
-    // iterating all active messages (O(n) → O(lanes · avgMsgsPerLane)).
-    const adjacentMessages: ActiveMessage[] = [];
-    const scanStart = placement.laneIndex - 1;
-    const scanEnd = placement.laneIndex + placement.slotCount;
-    for (let li = scanStart; li <= scanEnd; li++) {
-      const laneMsgs = this.activeMessagesByLane.get(li);
-      if (laneMsgs) {
-        for (const m of laneMsgs) adjacentMessages.push(m);
-      }
-    }
-
-    // Scan newest-first for early collision exit
-    for (let i = adjacentMessages.length - 1; i >= 0; i--) {
-      const active = adjacentMessages[i];
-      if (!active) continue;
-      const activeElapsed = now - active.startTime - active.pausedDuration;
-      if (activeElapsed < 0) continue;
-      if (active.y + active.height <= newTop || active.y >= newBottom) continue;
-      if (isScrolling) {
-        const activeTravelDistance =
-          mode === 'scroll'
-            ? active.startX + active.width + this.config.exitPaddingPx
-            : screenWidth - active.startX + this.config.exitPaddingPx;
-        const headwayPx = computeRequiredEntryHeadwayPx({
-          activeWidthPx: active.width,
-          headwayGapRatio: this.config.headwayGapRatio,
-          activeTravelDistancePx: activeTravelDistance,
-          activeDurationMs: active.duration,
-          activeElapsedMs: activeElapsed,
-          incomingTravelDistancePx: incomingMotion.travelDistancePx,
-          incomingDurationMs: incomingMotion.durationMs,
-        });
-        const activeProgress = Math.min(1, Math.max(0, activeElapsed * active.invDuration));
-        if (mode === 'scroll') {
-          if (
-            active.startX -
-              activeProgress * (active.startX + active.width + this.config.exitPaddingPx) +
-              active.width >
-            screenWidth - headwayPx
-          ) {
-            this.markCollidedLanes(placement.laneIndex, placement.slotCount);
-            return false;
-          }
-        } else {
-          // reverse mode: messages enter from left, travel right.
-          // Collision: the active message's LEFT edge must have cleared
-          // the left-side entry zone (+ headway gap) before a new message
-          // can enter the same lane.
-          const activeX =
-            active.startX +
-            activeProgress * (screenWidth - active.startX + this.config.exitPaddingPx);
-          if (activeX < headwayPx) {
-            this.markCollidedLanes(placement.laneIndex, placement.slotCount);
-            return false;
-          }
-        }
-      } else {
-        if (activeElapsed < active.duration) {
-          this.markCollidedLanes(placement.laneIndex, placement.slotCount);
-          return false;
-        }
-      }
-    }
-    return true;
   }
 
   /** Issue 6: Mark all lanes occupied by a multi-slot message, not just the start lane. */
@@ -2111,20 +2156,40 @@ export class WorkerRenderer {
   private drainQueue(now: number, width: number, height: number): void {
     if (!this.config) return;
     this.sortPendingQueueIfNeeded();
+    const t0 = performance.now();
+    const candidates = selectDrainCandidates(
+      this.pendingQueue,
+      (entry) => entry.priority,
+      this.drainCursors,
+      DRAIN_MAX_ATTEMPTS,
+      this.drainResumePriority
+    );
+    this.drainResumePriority = undefined;
+    let attempts = 0;
+    let lastPriority = 0;
     let batchIndex = 0;
     let staggerCursorMs = 0;
     const committed = new Set<WorkerMessage>();
-    for (let i = 0; i < this.pendingQueue.length; i++) {
-      const entry = this.pendingQueue[i];
-      if (!entry) continue;
+    for (const entry of candidates) {
       if (this.activeMessages.length >= this.config.maxConcurrentMessages) break;
+      if (attempts > 0 && performance.now() - t0 >= DRAIN_WORK_BUDGET_MS) {
+        this.drainResumePriority = nextDrainPriority(
+          candidates,
+          (entry) => entry.priority,
+          lastPriority
+        );
+        break;
+      }
+      this.drainCursors.set(entry.priority, entry);
+      lastPriority = entry.priority;
+      attempts++;
       const speedTier = getSpeedTier(entry, this.config);
       const requiredSlots = Math.max(1, Math.ceil(entry.height / this.laneHeight));
       if (requiredSlots > this.numLanes) {
         // A message taller than the viewport can never obtain a contiguous
         // block. Treat it as a permanent drop instead of retrying it every
         // frame and keeping the Worker render loop alive indefinitely.
-        this.recordDrop(entry);
+        this.recordDrop(entry, 'oversized');
         this.messageById.delete(entry.id);
         committed.add(entry);
         continue;
@@ -2135,25 +2200,51 @@ export class WorkerRenderer {
           : this.config.danmakuMode === 'bottom'
             ? 'bottom'
             : 'spread';
-      const placement = this.findPlacement(entry.height, speedTier, now, laneStrategy);
-      if (!placement) {
-        continue;
+      this.collidedLanes.clear();
+      const staggerSample = WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0] ?? 0;
+      let placed = false;
+      for (let attempt = 0; attempt < Math.min(this.numLanes, 8); attempt++) {
+        const placement = this.findPlacement(entry.height, speedTier, now, laneStrategy);
+        if (!placement) break;
+        const motion = this.planQueuedMessage(
+          entry,
+          speedTier,
+          batchIndex,
+          staggerCursorMs,
+          now,
+          width,
+          placement.waitMs,
+          staggerSample
+        );
+        if (!motion) break;
+        if (
+          !this.checkCollision(
+            placement,
+            entry,
+            speedTier,
+            batchIndex,
+            staggerCursorMs,
+            now,
+            width,
+            motion
+          )
+        )
+          continue;
+        staggerCursorMs = this.activateMessage(
+          entry,
+          now,
+          placement,
+          batchIndex,
+          staggerCursorMs,
+          speedTier,
+          width,
+          height,
+          motion
+        );
+        placed = true;
+        break;
       }
-      if (
-        !this.checkCollision(placement, entry, speedTier, batchIndex, staggerCursorMs, now, width)
-      ) {
-        continue;
-      }
-      staggerCursorMs = this.activateMessage(
-        entry,
-        now,
-        placement,
-        batchIndex,
-        staggerCursorMs,
-        speedTier,
-        width,
-        height
-      );
+      if (!placed) continue;
       batchIndex++;
       committed.add(entry);
 

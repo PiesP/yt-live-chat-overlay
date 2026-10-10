@@ -32,7 +32,15 @@ import {
   isValidWorkerStatsMessage,
   MAX_ADD_MESSAGES_PER_BATCH,
 } from './protocol-guards';
-import type { WorkerBatchReceipt, WorkerMessageGeometry, WorkerStatsMessage } from './types';
+import type {
+  WorkerActiveMotion,
+  WorkerBatchReceipt,
+  WorkerDropReasonCounts,
+  WorkerMessageGeometry,
+  WorkerMotionSnapshot,
+  WorkerStatsMessage,
+} from './types';
+import { WORKER_DROP_REASONS } from './types';
 
 type DimensionResult = { width: number; height: number };
 type TranslatedDimensionResult = DimensionResult & { translationHeight: number };
@@ -46,6 +54,14 @@ export interface WorkerInitResult {
 export interface WorkerRecoveryMessage {
   message: ChatMessage;
   trackDrops: boolean;
+  /** Present only for a validated, current-epoch active Worker message. */
+  activeMotion?: WorkerRecoveryMotion;
+}
+
+export interface WorkerRecoveryMotion
+  extends WorkerActiveMotion,
+    Omit<WorkerMotionSnapshot, 'activeMotions'> {
+  epoch: number;
 }
 
 interface RetainedWorkerMessage extends WorkerRecoveryMessage {
@@ -160,6 +176,7 @@ export class RenderWorkerManager {
   private _laneUtilization = 0;
   private lastWorkerTotalRendered = 0;
   private lastWorkerTotalDrops = 0;
+  private lastWorkerDropReasons: WorkerDropReasonCounts | null = null;
   private lastWorkerProcessedBatchSequence = 0;
   private lastWorkerReceiptSequence = 0;
   private latestWorkerPendingDepth = 0;
@@ -184,6 +201,7 @@ export class RenderWorkerManager {
   private readonly deferredIngress: DeferredWorkerMessage[] = [];
   private messageSnapshotRequest: {
     requestId: number;
+    epoch: number;
     knownMessages: Map<string, RetainedWorkerMessage>;
     resolve: (messages: WorkerRecoveryMessage[]) => void;
     timer: ReturnType<typeof setTimeout>;
@@ -482,12 +500,22 @@ export class RenderWorkerManager {
             if (!request || request.requestId !== data.requestId) break;
             clearTimeout(request.timer);
             this.messageSnapshotRequest = null;
+            if (request.epoch !== this.currentEpoch) {
+              request.resolve([]);
+              break;
+            }
+            if (data.epoch !== undefined && data.epoch !== request.epoch) {
+              request.resolve(this.takeKnownMessages(request.knownMessages));
+              break;
+            }
             request.resolve(
               this.takeSnapshotMessages(
                 data.activeMessageIds,
                 data.pendingMessageIds,
                 data.processedBatchSequence,
-                request.knownMessages
+                request.knownMessages,
+                data.epoch === request.epoch ? data.motionSnapshot : undefined,
+                request.epoch
               )
             );
             break;
@@ -1081,16 +1109,19 @@ export class RenderWorkerManager {
         const request = this.messageSnapshotRequest;
         if (!request || request.requestId !== requestId) return;
         this.messageSnapshotRequest = null;
-        resolve(this.takeKnownMessages(request.knownMessages));
+        resolve(
+          request.epoch === this.currentEpoch ? this.takeKnownMessages(request.knownMessages) : []
+        );
       }, timeoutMs);
       this.messageSnapshotRequest = {
         requestId,
+        epoch: this.currentEpoch,
         knownMessages,
         resolve,
         timer,
       };
       try {
-        worker.postMessage({ type: 'snapshotMessages', requestId });
+        worker.postMessage({ type: 'snapshotMessages', requestId, epoch: this.currentEpoch });
       } catch {
         clearTimeout(timer);
         this.messageSnapshotRequest = null;
@@ -1127,7 +1158,9 @@ export class RenderWorkerManager {
       const request = this.messageSnapshotRequest;
       clearTimeout(request.timer);
       this.messageSnapshotRequest = null;
-      request.resolve(this.takeKnownMessages(request.knownMessages));
+      request.resolve(
+        request.epoch === this.currentEpoch ? this.takeKnownMessages(request.knownMessages) : []
+      );
     }
     this.batchFlushScheduled = false;
     const pendingBatch = this.pendingBatch.splice(0);
@@ -1189,11 +1222,23 @@ export class RenderWorkerManager {
   }
 
   private applyWorkerStats(stats: WorkerStatsMessage): void {
+    const previousReasonCounts = this.lastWorkerDropReasons;
+    const reasonCounts: WorkerDropReasonCounts | null = stats.dropReasons
+      ? {
+          queue_priority: stats.dropReasons.queue_priority ?? 0,
+          queue_replaced: stats.dropReasons.queue_replaced ?? 0,
+          oversized: stats.dropReasons.oversized ?? 0,
+          reflow_capacity: stats.dropReasons.reflow_capacity ?? 0,
+        }
+      : null;
     if (
       stats.totalRendered < this.lastWorkerTotalRendered ||
       stats.totalDrops < this.lastWorkerTotalDrops ||
       stats.processedBatchSequence < this.lastWorkerProcessedBatchSequence ||
-      stats.processedBatchSequence > this.nextBatchSequence
+      stats.processedBatchSequence > this.nextBatchSequence ||
+      (reasonCounts !== null &&
+        previousReasonCounts !== null &&
+        WORKER_DROP_REASONS.some((reason) => reasonCounts[reason] < previousReasonCounts[reason]))
     ) {
       log.debug('renderer.worker.stats-regressed-or-ahead');
       return;
@@ -1218,9 +1263,24 @@ export class RenderWorkerManager {
 
     const dropDelta = stats.totalDrops - this.lastWorkerTotalDrops;
     if (dropDelta > 0) {
-      this.deps.observability.onMessagesDropped(dropDelta);
+      if (reasonCounts && (previousReasonCounts || this.lastWorkerTotalDrops === 0)) {
+        const deltas = WORKER_DROP_REASONS.map((reason) => ({
+          reason,
+          count: reasonCounts[reason] - (previousReasonCounts?.[reason] ?? 0),
+        }));
+        if (deltas.reduce((sum, entry) => sum + entry.count, 0) === dropDelta) {
+          for (const { reason, count } of deltas) {
+            if (count > 0) this.deps.observability.onMessagesDropped(count, reason);
+          }
+        } else {
+          this.deps.observability.onMessagesDropped(dropDelta);
+        }
+      } else {
+        this.deps.observability.onMessagesDropped(dropDelta);
+      }
     }
     this.lastWorkerTotalDrops = stats.totalDrops;
+    this.lastWorkerDropReasons = reasonCounts;
     this.lastWorkerProcessedBatchSequence = stats.processedBatchSequence;
     this.lastWorkerActiveMessageIds = new Set(stats.activeMessageIds);
     this.lastWorkerPendingMessageIds = new Set(stats.pendingMessageIds);
@@ -1287,6 +1347,7 @@ export class RenderWorkerManager {
     this._laneUtilization = 0;
     this.lastWorkerTotalRendered = 0;
     this.lastWorkerTotalDrops = 0;
+    this.lastWorkerDropReasons = null;
     this.lastWorkerProcessedBatchSequence = 0;
     this.lastWorkerReceiptSequence = 0;
     this.latestWorkerPendingDepth = 0;
@@ -1316,11 +1377,16 @@ export class RenderWorkerManager {
     activeIds: readonly string[],
     pendingIds: readonly string[],
     processedBatchSequence: number,
-    knownMessages: ReadonlyMap<string, RetainedWorkerMessage>
+    knownMessages: ReadonlyMap<string, RetainedWorkerMessage>,
+    motionSnapshot: WorkerMotionSnapshot | undefined,
+    epoch: number
   ): WorkerRecoveryMessage[] {
     const messages: WorkerRecoveryMessage[] = [];
     const activeIdSet = new Set(activeIds);
     const pendingIdSet = new Set(pendingIds);
+    const activeMotionById = new Map(
+      motionSnapshot?.activeMotions.map((motion) => [motion.id, motion])
+    );
     for (const [id, retained] of knownMessages) {
       if (retained.locallyDeferred) {
         const deferredIndex = this.deferredIngress.findIndex(
@@ -1337,12 +1403,26 @@ export class RenderWorkerManager {
         pendingIdSet.has(id) ||
         retained.batchSequence > processedBatchSequence
       ) {
+        const motion = activeIdSet.has(id) ? activeMotionById.get(id) : undefined;
         messages.push({
           message: retained.message,
           trackDrops:
             retained.trackDrops &&
             !activeIdSet.has(id) &&
             (pendingIdSet.has(id) || retained.batchSequence > processedBatchSequence),
+          ...(motion && motionSnapshot
+            ? {
+                activeMotion: {
+                  ...motion,
+                  capturedAtEpochMs: motionSnapshot.capturedAtEpochMs,
+                  effectiveNowEpochMs: motionSnapshot.effectiveNowEpochMs,
+                  isPaused: motionSnapshot.isPaused,
+                  viewportWidthPx: motionSnapshot.viewportWidthPx,
+                  exitPaddingPx: motionSnapshot.exitPaddingPx,
+                  epoch,
+                },
+              }
+            : {}),
         });
       }
       if (this.sentMessages.get(id) === retained) {

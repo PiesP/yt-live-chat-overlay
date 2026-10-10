@@ -67,6 +67,79 @@ response. `profile.mjs` records the fixture sizes and network-event tolerance;
 fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
 scenario uses intercepted fixture traffic rather than a live chat account.
 
+Installed Edge extension runs also execute `placement-timing.mjs` after the
+ordinary fixture, in separate task-owned pages. These pages select a 32px font
+and full safe zone initially, then restore a cloned prior settings snapshot.
+A geometry sample marks future reservations separately from currently visible
+messages; a reserved fixed rectangle is not an already painted overlap. One page observes the actual
+packaged OffscreenCanvas Worker; the other makes
+`transferControlToOffscreen()` fail before transfer so the application takes its
+normal Canvas fallback. Both pages use the normal extension, chat response
+parser, runtime, and renderer with routed, bounded text and paid-card messages.
+The Worker page prefixes and suffixes a probe around the page-origin Blob built
+from the packaged Worker source. The original Worker code runs between them;
+the suffix attaches to the renderer instance only when the emitted handler
+matches the expected shape. Bundle drift fails the fixture. The probe records
+bounded exact Worker render/drain durations, queue residence for fixture IDs,
+placement and collision rejection counts, active-message coordinates, work
+before the first overlay clear, fixture text ink bounds, first sampled nonzero-alpha draw, committed geometric entry,
+Worker queue receipts, and a screenshot. It does not change production source
+or add application telemetry. The Canvas page records draw data on the main
+thread. Ink bounds use backing-store pixels, including the canvas transform.
+Observed draw samples require nonzero canvas alpha and include fade and frame
+quantization; they do not establish a human readability threshold. Paid body
+ink has its own fixture token and must enter the viewport in both renderer paths; committed geometric
+entry is recorded separately from the final motion plan or the baseline
+committed constant-speed path. Replay accessibility entry also records video
+time minus source offset. The first-entry clock is
+`performance.timeOrigin + performance.now()` in each realm; compare only samples
+from the same run and inspect any clock disagreement before interpreting a
+cross-realm latency. `preClearWorkMs` includes drain and cleanup, so it is a
+work proxy; `exactWorkerDrainMs` is the wrapped drain method's duration. Text
+ink rectangles exclude paid card backgrounds and do not by themselves prove
+reservation safety. Collision rejection counts are attempted placements, not
+distinct dropped messages. Final drops retain the production reason; baseline
+reasons are inferred from the calling phase and unknown drops remain `other`.
+The probe forwards every production method argument and respects `trackDrops`.
+
+For issue #193 performance comparison, run baseline and final source in the
+same prepared VM, installed Edge version, profile mode, viewport, fixture, and
+probe revision. Retain both source and bundle hashes and compare the reported
+first-entry latencies and frame-work percentiles alongside Worker queue receipts
+and screenshots. Report absent draw samples or Worker startup as unverified;
+do not infer a performance gain from a single screenshot or a formula change.
+The replay fixture holds video time at 10000, 10001, and 11500 ms and checks
+the corresponding accessibility entries using routed replay continuation
+actions. Separate installed Worker pages exercise top and bottom placement,
+system reduced motion on/off and its user override on/off on existing active
+messages, checking their effective motion and visible non-overlap; active viewport resize,
+safe-zone/font/lane-density
+shrink and expansion, and a queue cap of 50 with active cap of 30. The
+congestion page requires an observed pending depth of at least 50 and an
+activation with zero temporal and geometric entry delay at that depth.
+Exact frame/drain samples reset immediately before this bounded pressure batch
+to prevent initial idle frames from consuming the sample cap. A single 50-message batch uses
+unique fixture authors, a 16px font and the full safe zone to keep initial
+lane utilization below the existing backlog throttle. It remains within the
+runtime live-batch boundary; the setting itself does not prove
+queue pressure. The translation page sends one bounded test-only
+`updateTranslation` through the production Worker protocol for a fixture ID,
+checks active geometry reflow, then sends a bounded removal update. It does not prove translation-provider
+availability. Each variant records its own status; any failed assertion makes
+the installed Edge fixture fail. The pages are synthetic parser/runtime checks
+until run in the prepared VM.
+
+For every supplied public URL, the installed browser observer checks startup,
+real video pause/resume and an in-range seek, then navigates to the next URL
+(or reloads when only one URL is supplied) and checks chat, Canvas, and the
+renderer again. No site response or chat content is substituted. The receipt
+labels live versus replay from the site's chat renderer and retains a separate
+status and bounded provider/access reason for each page. Two or more public
+URLs in an Edge extension run must cover both live and replay plus cross-watch
+navigation; blocked chat, login/consent, unavailable playback, missing seek
+range, and unknown chat mode remain `unverified` rather than a pass. Without
+public URLs, this real-site tier is untested even if the synthetic fixture passes.
+
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
 motion override without changing its saved representation. It retains settings

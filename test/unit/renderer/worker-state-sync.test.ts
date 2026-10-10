@@ -245,6 +245,21 @@ describe('Worker renderer state synchronization', () => {
     }
   });
 
+  it('accepts consistent known drop reasons and rejects malformed counters', () => {
+    expect(isValidWorkerStatsMessage({
+      ...validStats(), dropReasons: { queue_priority: 1, oversized: 2 },
+    })).toBe(true);
+    for (const dropReasons of [
+      { queue_priority: 2 },
+      { queue_priority: -1, oversized: 4 },
+      { queue_priority: 1, oversized: Number.NaN },
+      { unknown_reason: 3 },
+      { queue_priority: Number.MAX_SAFE_INTEGER, oversized: 1 },
+    ]) {
+      expect(isValidWorkerStatsMessage({ ...validStats(), dropReasons })).toBe(false);
+    }
+  });
+
   it('accepts only bounded batch receipts and clear-state fence acknowledgements', () => {
     const receipt = {
       type: 'batchReceipt', epoch: 2, batchSequence: 7, pendingQueueDepth: 50,
@@ -323,6 +338,7 @@ describe('Worker renderer state synchronization', () => {
     for (let frame = 0; frame < 60; frame++) internals.renderFrame();
 
     expect(latestStats()?.totalDrops).toBe(1);
+    expect(latestStats()?.dropReasons).toMatchObject({ queue_priority: 1, queue_replaced: 0 });
   });
 
   it('does not report replay overflow or oversized work as observed drops', () => {
@@ -341,6 +357,9 @@ describe('Worker renderer state synchronization', () => {
     for (let frame = 0; frame < 60; frame++) internals.renderFrame();
 
     expect(latestStats()?.totalDrops).toBe(0);
+    expect(latestStats()?.dropReasons).toMatchObject({
+      queue_priority: 0, queue_replaced: 0, oversized: 0, reflow_capacity: 0,
+    });
   });
 
   it('attributes queue displacement to the message that was actually discarded', () => {
@@ -379,6 +398,7 @@ describe('Worker renderer state synchronization', () => {
       },
     } as MessageEvent);
     expect((trackedQueue as unknown as { totalDrops: number }).totalDrops).toBe(1);
+    expect((trackedQueue as unknown as { dropReasons: { queue_replaced: number } }).dropReasons.queue_replaced).toBe(1);
   });
 
   it('publishes a final empty state before its idle render loop stops', () => {
@@ -422,6 +442,40 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.activeMessageCount).toBe(2);
     expect(manager.laneUtilization).toBe(0.75);
 
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('reports reason-specific cumulative deltas without double counting repeats', () => {
+    const { manager, observability, worker } = initializedManager();
+    const first = {
+      ...validStats(), totalDrops: 2,
+      dropReasons: { queue_priority: 1, oversized: 1 },
+    };
+    worker.emitMessage(first);
+    worker.emitMessage(first);
+    worker.emitMessage({
+      ...first, totalDrops: 4,
+      dropReasons: { queue_priority: 1, oversized: 2, reflow_capacity: 1 },
+    });
+    expect(observability.onMessagesDropped.mock.calls).toEqual([
+      [1, 'queue_priority'], [1, 'oversized'],
+      [1, 'oversized'], [1, 'reflow_capacity'],
+    ]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('keeps mixed legacy stats unlabeled until a reason baseline is established', () => {
+    const { manager, observability, worker } = initializedManager();
+    worker.emitMessage({ ...validStats(), totalDrops: 2 });
+    worker.emitMessage({ ...validStats(), totalDrops: 3,
+      dropReasons: { queue_priority: 2, oversized: 1 } });
+    worker.emitMessage({ ...validStats(), totalDrops: 4,
+      dropReasons: { queue_priority: 3, oversized: 1 } });
+    expect(observability.onMessagesDropped.mock.calls).toEqual([
+      [2], [1], [1, 'queue_priority'],
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -822,6 +876,68 @@ describe('Worker renderer state synchronization', () => {
       processedBatchSequence: 2,
     });
     await expect(secondSnapshot).resolves.toEqual([]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('attaches validated active motion only to the retained current-epoch message', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'active-motion', text: 'active motion',
+      content: [{ type: 'text', content: 'active motion' }],
+      timestamp: 1, kind: 'text', authorType: 'normal',
+    };
+    expect(manager.sendToWorker(message, message.id)).toBe(true);
+    await Promise.resolve();
+    const snapshot = manager.snapshotMessages(1_000);
+    const request = worker.postMessage.mock.calls
+      .map(([value]) => value as { type?: string; requestId?: number; epoch?: number })
+      .findLast((value) => value.type === 'snapshotMessages');
+    expect(request?.epoch).toBe(0);
+    const activeMotion = {
+      id: message.id, mode: 'scroll', startX: 640, width: 100, height: 20,
+      y: 20, laneIndex: 1, laneSlotCount: 1, durationMs: 5_000,
+      startEpochMs: 11_000, fadeStartEpochMs: 10_900, speedTier: 1,
+    };
+    worker.emitMessage({
+      type: 'messageSnapshot', requestId: request?.requestId, epoch: 0,
+      activeMessageIds: [message.id], pendingMessageIds: [], processedBatchSequence: 1,
+      motionSnapshot: {
+        capturedAtEpochMs: 10_600, effectiveNowEpochMs: 10_000,
+        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+        activeMotions: [activeMotion],
+      },
+    });
+    await expect(snapshot).resolves.toEqual([{
+      message, trackDrops: false,
+      activeMotion: {
+        ...activeMotion, epoch: 0,
+        capturedAtEpochMs: 10_600, effectiveNowEpochMs: 10_000,
+        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+      },
+    }]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('uses explicit ID-only requeue when the Worker snapshot epoch is stale', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'stale-motion', text: 'stale motion',
+      content: [{ type: 'text', content: 'stale motion' }],
+      timestamp: 1, kind: 'text', authorType: 'normal',
+    };
+    manager.sendToWorker(message, message.id);
+    await Promise.resolve();
+    const snapshot = manager.snapshotMessages(1_000);
+    const request = worker.postMessage.mock.calls
+      .map(([value]) => value as { type?: string; requestId?: number })
+      .findLast((value) => value.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot', requestId: request?.requestId, epoch: 1,
+      activeMessageIds: [message.id], pendingMessageIds: [], processedBatchSequence: 1,
+    });
+    await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });

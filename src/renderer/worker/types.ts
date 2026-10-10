@@ -8,8 +8,9 @@
  * the boundary between type definitions and rendering logic.
  */
 
-import type { FontWeight } from '@app-types';
+import type { DanmakuMode, DropReason, FontWeight } from '@app-types';
 import type { CardConfigWorker } from '@renderer/card-config';
+import type { MessageMotionPlan } from '@renderer/layout/motion-types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -213,12 +214,23 @@ export interface WorkerMessageGeometry {
 }
 
 /** Periodic cumulative state reported by the renderer Worker. */
+export const WORKER_DROP_REASONS = [
+  'queue_priority',
+  'queue_replaced',
+  'oversized',
+  'reflow_capacity',
+] as const satisfies readonly DropReason[];
+export type WorkerDropReason = (typeof WORKER_DROP_REASONS)[number];
+export type WorkerDropReasonCounts = Record<WorkerDropReason, number>;
+
 export interface WorkerStatsMessage {
   type: 'stats';
   activeMessages: number;
   pendingQueueDepth: number;
   totalRendered: number;
   totalDrops: number;
+  /** Optional cumulative, reason-specific counters; their sum equals totalDrops. */
+  dropReasons?: Partial<WorkerDropReasonCounts>;
   /** Highest addMessages batch fully admitted by this Worker instance. */
   processedBatchSequence: number;
   laneUtilization: number;
@@ -234,12 +246,50 @@ export interface WorkerErrorMessage {
 export interface WorkerMessageSnapshot {
   type: 'messageSnapshot';
   requestId: number;
+  /** Absent only in older ID-only fixtures. Motion data always carries an epoch. */
+  epoch?: number;
   activeMessageIds: string[];
   pendingMessageIds: string[];
   processedBatchSequence: number;
+  motionSnapshot?: WorkerMotionSnapshot;
+}
+
+/** The exact active geometry and timeline at the Worker fallback boundary. */
+export interface WorkerActiveMotion {
+  id: string;
+  /** Original drop-accounting disposition, independent of recovery requeue. */
+  trackDrops?: boolean;
+  mode: DanmakuMode;
+  startX: number;
+  width: number;
+  height: number;
+  y: number;
+  laneIndex: number;
+  laneSlotCount: number;
+  durationMs: number;
+  /** performance.timeOrigin + startTime + completed pausedDuration. */
+  startEpochMs: number;
+  fadeStartEpochMs: number;
+  speedTier: number;
+}
+
+export interface WorkerMotionSnapshot {
+  capturedAtEpochMs: number;
+  /** Paused snapshots use the frozen animation clock. */
+  effectiveNowEpochMs: number;
+  isPaused: boolean;
+  viewportWidthPx: number;
+  exitPaddingPx: number;
+  activeMotions: WorkerActiveMotion[];
 }
 
 export interface ActiveMessage {
+  burstSpeedMultiplier?: number;
+  trackDrops?: boolean;
+  priority?: number;
+  isBacklog?: boolean;
+  /** Last committed geometry, retained for resize and mode transitions. */
+  motion?: MessageMotionPlan;
   id: string;
   x: number;
   y: number;

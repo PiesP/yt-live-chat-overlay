@@ -16,6 +16,8 @@ import { LanguageDetectorService } from '@translation/language-detector';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
+import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { messageXAtTime, motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -71,6 +73,83 @@ function makeMessage(id: string, text: string): ChatMessage {
     authorType: 'normal',
   };
 }
+
+describe('Canvas reservation safety', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function setup(mode: OverlaySettings['danmakuMode'] = 'scroll') {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 640, height: 40 };
+    const renderer = new CanvasRenderer(overlay, makeSettings({
+      danmakuMode: mode, speedPxPerSec: 350, scrollDurationMinMs: 5000,
+      scrollDurationMaxMs: 30000, exitPaddingPx: 100, headwayGapRatio: 0.08,
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+    }));
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      reducedMotion: boolean;
+      pausedAt: number | null;
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      drainQueue(now: number): void;
+      reflowActiveMessages(dimensions: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.restore({
+      heap: [[0, 0], [1, 0]], indexMap: { 0: 0, 1: 1 },
+      laneHeight: 20, laneCount: 2, speedTierLanes: {},
+    });
+    internals.estimateDimensions = (message) => ({ width: message.id === 'short' ? 100 : 600, height: 20 });
+    return { renderer, internals };
+  }
+
+  it.each(['scroll', 'reverse'] as const)('validates future reservations and chooses a safe alternative in %s', (mode) => {
+    const { renderer, internals } = setup(mode);
+    for (const id of ['first', 'short', 'long']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(0);
+    expect(internals.activeMessages).toHaveLength(3);
+    const short = internals.activeMessages.find((m) => m.message.id === 'short');
+    const long = internals.activeMessages.find((m) => m.message.id === 'long');
+    expect(short?.startTime).toBeGreaterThan(0);
+    expect(long?.laneIndex).not.toBe(short?.laneIndex);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+        expect(motionPlansCollide(motionPlanFromMessage(a, mode, 640, 100), motionPlanFromMessage(b, mode, 640, 100), 0.08, 0)).toBe(false);
+      }
+    }
+    renderer.destroy();
+  });
+
+  it('reserves centered reduced-motion rectangles for their full displayed lifetime', () => {
+    const { renderer, internals } = setup();
+    internals.reducedMotion = true;
+    for (const id of ['first', 'short', 'long']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(0);
+    const sameLane = internals.activeMessages.filter((m) => m.laneIndex === 0);
+    expect(sameLane).toHaveLength(2);
+    const [first, second] = sameLane;
+    expect(second && first && second.startTime >= first.startTime + first.duration).toBe(true);
+    for (const message of internals.activeMessages) {
+      expect(message.motion?.isScrolling).toBe(false);
+      expect(message.motion && messageXAtTime(message.motion, message.startTime + 600)).toBe(Math.floor((640 - message.width) / 2));
+    }
+    renderer.destroy();
+  });
+
+  it('rebuilds reservations at the frozen pause clock before resume shifts timers', () => {
+    const { renderer, internals } = setup();
+    internals.pausedAt = 1000;
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    internals.reflowActiveMessages({ width: 640, height: 40 });
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 1000)).toBe(true);
+    internals.laneAllocator.shiftAll(9000);
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(true);
+    renderer.destroy();
+  });
+});
 
 describe('CanvasRenderer', () => {
   let overlay: Overlay;
@@ -1201,6 +1280,63 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it.each([false, true])('restores Worker progress and future reservations across fallback (paused=%s)', async (paused) => {
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings({
+      speedPxPerSec: 350, scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
+      exitPaddingPx: 100, headwayGapRatio: 0.08,
+    }));
+    const internals = renderer as unknown as {
+      activeMessages: CanvasMessage[];
+      pendingQueue: { toArray(): ChatMessage[] };
+      fallbackInProgress: boolean;
+      workerManager: { snapshotMessages(): Promise<WorkerRecoveryMessage[]>; destroy(): void; setActive(active: boolean): void };
+      replaceCanvas(): boolean;
+      startRenderLoop(): void;
+    };
+    if (paused) renderer.pause();
+    vi.spyOn(internals, 'replaceCanvas').mockReturnValue(true);
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
+    const origin = performance.timeOrigin;
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
+      ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
+        message: makeMessage(`active-${laneIndex}`, 'active'), trackDrops: false,
+        activeMotion: {
+          id: `active-${laneIndex}`, mode: 'scroll', startX: 640,
+          width: 100, height: 20, y: laneIndex * 20, laneIndex, laneSlotCount: 1,
+          durationMs: 5000, startEpochMs: origin + start, fadeStartEpochMs: origin + start,
+          speedTier: 1, epoch: 0, capturedAtEpochMs: origin + 1000,
+          effectiveNowEpochMs: origin + 1000, isPaused: paused,
+          viewportWidthPx: 640, exitPaddingPx: 100,
+        },
+      })),
+      { message: makeMessage('pending-only', 'pending'), trackDrops: true },
+    ]);
+    clock = 1500;
+    renderer.fallbackToMainThread('controlled-snapshot');
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+    expect(internals.activeMessages).toHaveLength(2);
+    expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
+    const [visible, future] = internals.activeMessages;
+    expect(visible?.startTime).toBe(0);
+    expect(future?.startTime).toBe(2000);
+    const effectiveNow = paused ? 1000 : 1500;
+    expect(visible?.x).toBeCloseTo(640 - effectiveNow * (840 / 5000));
+    expect(future?.x).toBe(640);
+    expect(rendered).not.toHaveBeenCalled();
+    if (paused) {
+      clock = 5000;
+      renderer.resume();
+      expect(visible?.pausedDuration).toBe(4000);
+      expect(future && future.startTime + future.pausedDuration).toBe(6000);
+    }
+    renderer.destroy();
+  });
+
   it('keeps failed canvas recovery unhealthy and retries without losing buffered ingress', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -1359,6 +1495,58 @@ describe('CanvasRenderer', () => {
     };
 
     expect(await runDrain(true)).toEqual(await runDrain(false));
+  });
+
+  it('bounds failed sync attempts and eventually reaches a placeable message beyond the prefix', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 1280, height: 720 };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    for (let index = 0; index < 80; index++) {
+      internals.pendingQueue.enqueue(makeMessage(`${index}`, 'bounded'), 0);
+    }
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => ({
+      placed: message.id === '79', oversized: false,
+    }));
+    for (let frame = 0; frame < 3; frame++) {
+      const before = internals.placeQueuedMessage.mock.calls.length;
+      internals.drainQueue(frame * 16);
+      expect(internals.placeQueuedMessage.mock.calls.length - before).toBeLessThanOrEqual(32);
+    }
+    expect(internals.pendingQueue.toArray()).toHaveLength(79);
+    expect(internals.pendingQueue.toArray().some((message) => message.id === '79')).toBe(false);
+    renderer.destroy();
+  });
+
+  it('counts failed collision work against the time budget and lets a lower priority group progress', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 1280, height: 720 };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    for (let index = 0; index < 40; index++) {
+      internals.pendingQueue.enqueue({ ...makeMessage(`paid-${index}`, 'paid'), kind: 'superchat' }, 100);
+    }
+    internals.pendingQueue.enqueue(makeMessage('normal', 'normal'), 0);
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => {
+      clock += 5;
+      return { placed: message.id === 'normal', oversized: false };
+    });
+    internals.drainQueue(0);
+    expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
+    expect(internals.placeQueuedMessage.mock.calls[0]?.[0].id).toBe('paid-0');
+    internals.drainQueue(16);
+    expect(internals.placeQueuedMessage.mock.calls[1]?.[0].id).toBe('normal');
+    expect(internals.pendingQueue.toArray()).toHaveLength(40);
+    renderer.destroy();
   });
 
   it('aborts async drain after destruction when the shared 8ms budget yields', async () => {

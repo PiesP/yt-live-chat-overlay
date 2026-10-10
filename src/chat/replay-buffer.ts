@@ -21,17 +21,16 @@ interface BufferedReplayMessage {
 
 const MAX_BUFFERED_REPLAY_MESSAGES = 3000;
 const MAX_BUFFERED_REPLAY_BYTES = 8 * 1024 * 1024;
-// H2: Widened from 300ms to 2000ms. The original 300ms tolerance dropped
-// messages after any frame hitch during replay playback, causing visible
-// chat gaps. At 2s, messages slightly behind position are still forwarded
-// to the renderer (which clips them to the current position anyway).
-const REPLAY_EMIT_TOLERANCE_MS = 2000;
+// A frame hitch may make a due message arrive slightly late. This allowance
+// applies only behind video time; future messages remain buffered until due.
+const REPLAY_LATE_TOLERANCE_MS = 2000;
 
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
   private bufferOffset = 0;
   private seenIds = new Set<string>();
   private activeEstimatedBytes = 0;
+  private lateDropCount = 0;
 
   /** True when the buffer has no unconsumed messages. */
   get isEmpty(): boolean {
@@ -151,7 +150,7 @@ export class ReplayBuffer {
    * Flush messages whose video offset has been reached.
    *
    * Collects up to `maxBatch` messages where `offsetMs <= currentOffsetMs`.
-   * Past messages (too far behind) are silently dropped.
+   * Past messages (too far behind) are dropped and counted.
    * Messages still in the future stay in the buffer.
    */
   flushUpTo(currentOffsetMs: number, maxBatch: number): ChatMessage[] {
@@ -163,8 +162,8 @@ export class ReplayBuffer {
       const next = this.buffer[this.bufferOffset];
       if (!next) break;
 
-      // Future messages — stop, they're not ready yet
-      if (next.offsetMs > currentOffsetMs + REPLAY_EMIT_TOLERANCE_MS) break;
+      // Prefetch may buffer future messages, but video time owns eligibility.
+      if (next.offsetMs > currentOffsetMs) break;
 
       // Advance offset instead of shift()
       this.bufferOffset++;
@@ -177,8 +176,9 @@ export class ReplayBuffer {
         this.seenIds.delete(next.message.id);
       }
 
-      // Too far in the past — drop silently
-      if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
+      // Too far in the past — count only messages consumed by this flush.
+      if (next.offsetMs < currentOffsetMs - REPLAY_LATE_TOLERANCE_MS) {
+        this.lateDropCount = Math.min(Number.MAX_SAFE_INTEGER, this.lateDropCount + 1);
         continue;
       }
 
@@ -190,12 +190,20 @@ export class ReplayBuffer {
     return batch;
   }
 
+  /** Return and reset late drops consumed since the previous read. */
+  takeLateDropCount(): number {
+    const count = this.lateDropCount;
+    this.lateDropCount = 0;
+    return count;
+  }
+
   /** Clear all buffered messages (e.g. on seek). */
   clear(): void {
     this.buffer = [];
     this.bufferOffset = 0;
     this.seenIds.clear();
     this.activeEstimatedBytes = 0;
+    this.lateDropCount = 0;
   }
 
   /**

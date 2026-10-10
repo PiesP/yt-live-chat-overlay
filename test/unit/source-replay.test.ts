@@ -101,6 +101,132 @@ describe('ReplayChatSource', () => {
     expect(pending).toEqual([]);
   });
 
+  it('drains only reached video offsets after visibility recovery', () => {
+    const internals = source as unknown as {
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean } | null;
+    };
+    const playback = vi.spyOn(internals, 'getPlaybackSnapshot');
+    internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
+    internals.replayBuffer.insert(makeReplayMessage('just-future', 10_001), 10_001);
+    internals.replayBuffer.insert(makeReplayMessage('prefetched', 11_500), 11_500);
+
+    playback.mockReturnValue(null);
+    expect(source.drainPendingMessages()).toEqual([]);
+    playback.mockReturnValue({ offsetMs: 10_000, paused: true });
+    expect(source.drainPendingMessages()).toEqual([]);
+    playback.mockReturnValue({ offsetMs: 10_000, paused: false });
+    source.setPauseReason('visibility', true);
+    expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['due']);
+    expect(source.drainPendingMessages()).toEqual([]);
+    playback.mockReturnValue({ offsetMs: 10_001, paused: false });
+    source.setPauseReason('video', true);
+    expect(source.drainPendingMessages()).toEqual([]);
+    source.setPauseReason('video', false);
+    expect(source.drainPendingMessages().map((message) => message.id)).toEqual([
+      'just-future',
+    ]);
+    source.setPauseReason('visibility', false);
+    playback.mockReturnValue({ offsetMs: 11_500, paused: false });
+    expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['prefetched']);
+  });
+
+  it('reports late drops from an empty visibility drain without consuming future messages', () => {
+    const onLateDrop = vi.fn();
+    source.onLateDrop = onLateDrop;
+    const internals = source as unknown as {
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+    };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 10_000, paused: false });
+    internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
+    internals.replayBuffer.insert(makeReplayMessage('future', 10_001), 10_001);
+
+    expect(source.drainPendingMessages()).toEqual([]);
+    expect(onLateDrop).toHaveBeenCalledOnce();
+    expect(onLateDrop).toHaveBeenCalledWith(1);
+    expect(source.drainPendingMessages()).toEqual([]);
+    expect(onLateDrop).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps display delivery running when the late-drop observer throws', () => {
+    const received = vi.fn();
+    source.onLateDrop = () => {
+      throw new Error('observer failed');
+    };
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      flushReplayBuffer: (playback: { offsetMs: number; paused: boolean }) => void;
+    };
+    internals.callback = received;
+    internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
+    internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
+
+    expect(() => internals.flushReplayBuffer({ offsetMs: 10_000, paused: false })).not.toThrow();
+    expect(received).toHaveBeenCalledOnce();
+  });
+
+  it('reports late drops when a display flush emits no messages', () => {
+    const received = vi.fn();
+    const onLateDrop = vi.fn();
+    source.onLateDrop = onLateDrop;
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      flushReplayBuffer: (playback: { offsetMs: number; paused: boolean }) => void;
+    };
+    internals.callback = received;
+    internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
+
+    internals.flushReplayBuffer({ offsetMs: 10_000, paused: false });
+    expect(received).not.toHaveBeenCalled();
+    expect(onLateDrop).toHaveBeenCalledOnce();
+    expect(onLateDrop).toHaveBeenCalledWith(1);
+  });
+
+  it('displays only due replay messages across pause, rate changes, and a delayed frame', async () => {
+    vi.useFakeTimers();
+    const received: string[] = [];
+    let playback = { offsetMs: 10_000, paused: false };
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      startCooperativeLoop: () => void;
+    };
+    internals.callback = (messages) => {
+      received.push(
+        ...(Array.isArray(messages) ? messages : [messages]).flatMap((msg) =>
+          msg.id ? [msg.id] : []
+        )
+      );
+    };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockImplementation(() => playback);
+    internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
+    internals.replayBuffer.insert(makeReplayMessage('just-future', 10_001), 10_001);
+    internals.replayBuffer.insert(makeReplayMessage('prefetched', 11_500), 11_500);
+
+    internals.startCooperativeLoop();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(received).toEqual(['due']);
+
+    playback = { offsetMs: 10_001, paused: true };
+    await vi.advanceTimersByTimeAsync(100);
+    expect(received).toEqual(['due']);
+
+    playback = { offsetMs: 10_001, paused: false };
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(received).toEqual(['due', 'just-future']);
+
+    // A faster playback rate and an event-loop hitch both advance video time
+    // before the next display tick. Eligibility uses that new video position.
+    playback = { offsetMs: 11_500, paused: false };
+    await vi.advanceTimersByTimeAsync(20);
+    expect(received).toEqual(['due', 'just-future', 'prefetched']);
+    source.stop();
+  });
+
   it('throttles continuation prefetches independently of fast render ticks', () => {
     const internals = source as unknown as {
       prefetchContinuation: InnertubeContinuationData | null;
@@ -545,6 +671,7 @@ describe('ReplayChatSource', () => {
       replayMode: 'continuation' | null;
       replayContinuation: InnertubeContinuationData | null;
       replayFallbackLastOffsetMs: number;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
       requestReplayPayload: (
         continuation: InnertubeContinuationData,
         signal?: AbortSignal
@@ -562,6 +689,10 @@ describe('ReplayChatSource', () => {
     internals.replayMode = 'continuation';
     internals.replayContinuation = progressedContinuation;
     internals.replayFallbackLastOffsetMs = 1_800_000;
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 300_000,
+      paused: false,
+    });
     const requestReplayPayload = vi
       .spyOn(internals, 'requestReplayPayload')
       .mockResolvedValueOnce({
@@ -704,7 +835,7 @@ describe('ReplayChatSource', () => {
         continuations: [{ liveChatReplayContinuationData: { continuation: 'next' } }],
       })
       .mockResolvedValueOnce({
-        actions: [makeReplayAction('current', 16_000)],
+        actions: [makeReplayAction('current', 19_000)],
         continuations: [{ liveChatReplayContinuationData: { continuation: 'later' } }],
       });
 

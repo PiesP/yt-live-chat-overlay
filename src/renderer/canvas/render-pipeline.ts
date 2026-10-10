@@ -36,6 +36,7 @@ import {
 } from '@renderer/constants';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { messageXAtElapsed, resolveEffectiveMotionMode } from '@renderer/layout/message-schedule';
 import { getMessagePriority } from '@renderer/message-priority';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
@@ -235,25 +236,20 @@ export function cleanupAndBucketStage(
       msg._prevX = msg.x;
       msg._prevY = msg.y;
     }
-    const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
-
-    if (mode === 'scroll') {
-      if (!ctx.isReducedMotionActive) {
-        const travelDistance = msg.startX + msg.width + ctx.settings.exitPaddingPx;
-        msg.x = msg.startX - progress * travelDistance;
-      } else {
-        // Reduced motion: place message at a fixed visible position (no scrolling)
-        msg.x = Math.max(0, (dims.width - msg.width) / 2);
-      }
-    } else if (mode === 'reverse') {
-      if (!ctx.isReducedMotionActive) {
-        const travelDistance = dims.width - msg.startX + ctx.settings.exitPaddingPx;
-        msg.x = msg.startX + progress * travelDistance;
-      } else {
-        // Reduced motion: place message at a fixed visible position (no scrolling)
-        msg.x = Math.max(0, (dims.width - msg.width) / 2);
-      }
-    }
+    const effectiveMode = resolveEffectiveMotionMode(
+      ctx.settings.danmakuMode,
+      ctx.isReducedMotionActive,
+      false
+    );
+    msg.x = messageXAtElapsed(
+      effectiveMode,
+      msg.startX,
+      msg.width,
+      dims.width,
+      ctx.settings.exitPaddingPx,
+      elapsed,
+      msg.duration
+    );
 
     // Fade-in starts from fadeStartTime, independent of position timeline.
     const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;

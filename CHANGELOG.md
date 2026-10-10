@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Comment placement** — Check future reservations and actual scrolling speeds in both Canvas and Worker rendering. Reduced-motion comments reserve their stationary lifetime, and resizing or translated text reconciles positions with an explicit capacity-drop policy.
+- **Replay and entry timing** — Keep prefetched comments pending until their video timestamp, carry bounded entry spacing across frames, and limit collision-search work while retaining messages that can be retried. Worker fallback preserves validated progress and future reservations. Existing settings remain compatible; no reset or migration is required.
+
 ## [0.45.4] - 2026-10-09
 
 ### Fixed
