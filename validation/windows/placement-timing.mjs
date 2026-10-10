@@ -437,7 +437,7 @@ export function measureAllocationRowPitch(messages, prefix = 'WINDOWS196_GAP0_')
 export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
   const result = { pitchPx: null, status: 'unknown', reason: null,
     frameId: frame?.frameId ?? null, includedIds: [], excluded: [], unknownIds: [],
-    japaneseVisibleIds: [] };
+    japaneseVisibleIds: [], japaneseVisibleRowOriginsPx: [] };
   const unknown = (reason, id) => {
     result.reason = reason;
     if (id) result.unknownIds.push(id);
@@ -469,6 +469,7 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
     draw.id.startsWith(prefix) && !tracked.some((row) => row.id === draw.id));
   if (unmatchedDraw) return unknown('draw_without_active_row', unmatchedDraw.id);
   const visible = [];
+  const japaneseRows = new Set();
   for (const row of tracked) {
     if (ids.has(row.id)) return unknown('duplicate_active_id', row.id);
     ids.add(row.id);
@@ -519,8 +520,10 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
     result.includedIds.push(row.id);
     if (painted.some((draw) => draw.japanese?.text && intersects(draw.japanese.rect))) {
       result.japaneseVisibleIds.push(row.id);
+      japaneseRows.add(row.y);
     }
   }
+  result.japaneseVisibleRowOriginsPx = [...japaneseRows].toSorted((a, b) => a - b);
   const ys = [...new Set(visible.map((row) => row.y))].toSorted((a, b) => a - b);
   const pitches = ys.slice(1).map((y, index) => y - ys[index]).filter((pitch) => pitch > 0);
   if (pitches.length === 0) {
@@ -1198,7 +1201,9 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
           snapshot = await issueSnapshot();
           visibleRowPitch = measureVisibleRowPitch(snapshot.renderFrame, prefix);
           if (visibleRowPitch.status === 'measured' &&
-            visibleRowPitch.japaneseVisibleIds.length >= 2) return { snapshot, visibleRowPitch };
+            visibleRowPitch.japaneseVisibleRowOriginsPx.length >= 2) {
+            return { snapshot, visibleRowPitch };
+          }
           await page.waitForTimeout(250);
         }
         assert.fail(`No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`);

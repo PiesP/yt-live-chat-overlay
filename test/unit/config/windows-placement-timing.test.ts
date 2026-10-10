@@ -54,7 +54,17 @@ describe('Windows placement timing probe', () => {
     expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
       includedIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
       excluded: [{ id: 'WINDOWS196_GAP0_C', reason: 'offscreen_row' }],
-      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'] });
+      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+      japaneseVisibleRowOriginsPx: [0, 88] });
+    const sameJapaneseRow = measureVisibleRowPitch({ ...frame,
+      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 0),
+        row('WINDOWS196_GAP0_C', 10, 88)],
+      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 0),
+        { ...draw('WINDOWS196_GAP0_C', 88), japanese: null }] });
+    expect(sameJapaneseRow).toMatchObject({ status: 'measured', pitchPx: 88,
+      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+      japaneseVisibleRowOriginsPx: [0] });
+    expect(sameJapaneseRow.japaneseVisibleRowOriginsPx).toHaveLength(1);
     expect(measureVisibleRowPitch({ ...frame, active: frame.active.slice(0, 1),
       draws: frame.draws.slice(0, 1) }))
       .toMatchObject({ status: 'insufficient', pitchPx: null });
@@ -319,11 +329,11 @@ describe('Windows placement timing probe', () => {
     expect(nativeDraws).toBeGreaterThan(0);
     if (renderer === 'main') {
       expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
-        japaneseVisibleIds: [idA, idB] });
+        japaneseVisibleIds: [idA, idB], japaneseVisibleRowOriginsPx: [0, 88] });
       runInNewContext('fixtureRenderer.paint = false; fixtureRenderer.renderFrame();', sandbox);
     } else {
       expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
-        japaneseVisibleIds: [idA, idB] });
+        japaneseVisibleIds: [idA, idB], japaneseVisibleRowOriginsPx: [0, 88] });
       runInNewContext('sample.paint = false; sample.renderFrame();', sandbox);
     }
     const next = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
