@@ -97,6 +97,7 @@ export class ObservabilityReporter {
   /** Add a validated batch of received messages in constant time. */
   onMessagesReceived(count: number): void {
     if (!Number.isSafeInteger(count) || count <= 0) return;
+    this.resetExpiredMetricWindow();
     this.metrics.totalReceived = Math.min(
       Number.MAX_SAFE_INTEGER,
       this.metrics.totalReceived + count
@@ -129,6 +130,7 @@ export class ObservabilityReporter {
   /** Add a validated batch of dropped messages in constant time. */
   onMessagesDropped(count: number, reason?: DropReason): void {
     if (!Number.isSafeInteger(count) || count <= 0) return;
+    this.resetExpiredMetricWindow();
     this.metrics.totalDropped = Math.min(
       Number.MAX_SAFE_INTEGER,
       this.metrics.totalDropped + count
@@ -223,6 +225,12 @@ export class ObservabilityReporter {
   }
 
   private refreshDerivedMetrics(): void {
+    this.resetExpiredMetricWindow();
+    this.metrics.dropRate =
+      this.totalReceivedInWindow > 0 ? this.totalDroppedInWindow / this.totalReceivedInWindow : 0;
+  }
+
+  private resetExpiredMetricWindow(): void {
     const now = Date.now();
     const elapsed = now - this.windowStartTime;
     if (elapsed >= ObservabilityReporter.METRIC_WINDOW_MS) {
@@ -230,8 +238,6 @@ export class ObservabilityReporter {
       this.totalReceivedInWindow = 0;
       this.windowStartTime = now;
     }
-    this.metrics.dropRate =
-      this.totalReceivedInWindow > 0 ? this.totalDroppedInWindow / this.totalReceivedInWindow : 0;
   }
 
   // --- Debug overlay ---

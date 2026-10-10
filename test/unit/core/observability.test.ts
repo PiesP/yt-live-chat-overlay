@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObservabilityReporter } from "@util/observability";
 
 describe("ObservabilityReporter", () => {
@@ -7,6 +7,10 @@ describe("ObservabilityReporter", () => {
 
   beforeEach(() => {
     reporter = new ObservabilityReporter(false);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ═══════════════════════════════════════════════════════════
@@ -79,6 +83,36 @@ describe("ObservabilityReporter", () => {
       totalReceived: 5,
       totalDropped: 3,
       dropRate: 0.6,
+    });
+  });
+
+  it("keeps an all-late batch in the new window after idle expiry without a HUD tick", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 60_000);
+
+    reporter.onMessagesReceived(3);
+    reporter.onMessagesDropped(3, "replay_late");
+
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 3,
+      totalDropped: 3,
+      dropRate: 1,
+    });
+  });
+
+  it("keeps ordinary drops in the new window after idle expiry", () => {
+    vi.useFakeTimers();
+    reporter.onMessageReceived();
+    reporter.onMessageDropped("queue_priority");
+    vi.setSystemTime(Date.now() + 60_000);
+
+    reporter.onMessageReceived();
+    reporter.onMessageDropped("queue_priority");
+
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 2,
+      totalDropped: 2,
+      dropRate: 1,
     });
   });
 
