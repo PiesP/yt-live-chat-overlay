@@ -102,6 +102,52 @@ distinct dropped messages. Final drops retain the production reason; baseline
 reasons are inferred from the calling phase and unknown drops remain `other`.
 The probe forwards every production method argument and respects `trackDrops`.
 
+The focused #195/#196 `worker-spacing-speed` and `main-spacing-speed` scenarios
+reuse this installed extension fixture. The page remains a 1280×720 watch
+fixture and records the actual video rectangle, logical viewport, DPR and canvas
+backing store. A bounded Japanese regular-comment stream runs at configured
+32px with a transparent normal background and enabled outline. Captures at
+Lane Gap 0 and 8 include sampled fill/outline ink and font, committed message
+height, the compiled page bundle's shared regular insets, lane height, slot
+count, actual y positions and closest occupied row
+pitch, plus active/queue peaks and drops. The default spread allocator can
+leave legitimate empty lanes; the receipt reports observed adjacent pitch, not
+an assumed `laneHeight` formula. The Worker inset receipt is computed by that
+same compiled page helper used for serialization; Worker paint is observed
+separately through its image/ink samples. The existing settings dialog is exercised by
+keyboard on its slider, Done, Escape, reopen, preview row metadata and an
+extension-storage readback. The preview reports three rows and its reserved
+pitch in `data-preview-rows`, `data-preview-row-height` and
+`data-preview-row-pitch` on the existing preview text element.
+
+The speed phase routes 51 chat actions through the normal response parser to
+trigger Backlog injection, then 20 ordinary actions through the same parser to
+raise the burst detector. One Backlog message has long Japanese text so its
+committed duration remains between the configured 5–30 second bounds. The
+receipt keeps its serialized burst multiplier (Worker), committed travel
+distance, actual velocity, duration, geometric entry/exit, queue residence,
+resize/spacing reflow and pause/resume observations. An observed Worker error
+event exercises the application's recovery into Canvas; public YouTube traffic
+is never altered. A private source-bound probe is inserted into the packaged
+`page-script.js` closure before its ordinary `main()` call to observe Canvas
+internals. The original app source executes intact; a changed closure/class
+shape fails the scenario. Worker instrumentation uses the existing Blob
+prefix/suffix guard. These additive probes can affect timings, so the recorded
+frame work is diagnostic rather than a general performance claim.
+
+For a baseline comparison, make a baseline-only harness commit that changes
+`const comparisonOnly = false` to `true` in `chrome-install.mjs`. Keep the
+`placement-timing.mjs` probe bytes identical to the candidate harness and
+record both source and bundle hashes with the receipts. The baseline receipt
+sets `comparisonOnly: true`; it still requires the real parser, renderer,
+Backlog activation, unclamped geometry and source guards, while allowing the
+old two-slot row and extra Worker burst acceleration. The candidate commit
+keeps the constant `false` and applies strict spacing and speed assertions. Preserve
+both attempts and their source, bundle and probe hashes outside Git. Do not
+interpret a `comparisonOnly` pass as a fix or substitute it for candidate
+acceptance. The ordinary real-YouTube smoke retains its existing route and
+scope.
+
 For issue #193 performance comparison, run baseline and final source in the
 same prepared VM, installed Edge version, profile mode, viewport, fixture, and
 probe revision. Retain both source and bundle hashes and compare the reported
