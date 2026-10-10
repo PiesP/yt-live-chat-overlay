@@ -261,3 +261,58 @@ jobs:
       - name: No relevant changes
         if: ${{ needs.quality.result == 'success' && needs.changes.result == 'success' && needs.changes.outputs.build != 'true' }}
         run: echo "Build inputs are unchanged; the required check succeeds without setup."
+
+  maintenance-artifact-upload:
+    name: Temporary maintenance artifact upload
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Create bounded synthetic handoff
+        env:
+          FIXTURE_ROOT: ${{ runner.temp }}/maintenance-handoff
+        run: |
+          mkdir "$FIXTURE_ROOT"
+          printf '%s\n' 'maintenance-handoff-v1' > "$FIXTURE_ROOT/payload.txt"
+          cd "$FIXTURE_ROOT"
+          sha256sum payload.txt > checksums.txt
+      - name: Upload exact synthetic artifact
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maintenance-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/maintenance-handoff/
+          if-no-files-found: error
+          retention-days: 1
+
+  maintenance-artifact-download:
+    name: Temporary maintenance artifact download
+    if: github.event_name == 'pull_request'
+    needs: maintenance-artifact-upload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download exact synthetic artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.maintenance-artifact-upload.outputs.artifact-id }}
+          path: ${{ runner.temp }}/maintenance-received
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+      - name: Verify handoff identity and bytes
+        env:
+          RECEIVED_ROOT: ${{ runner.temp }}/maintenance-received
+        run: |
+          cd "$RECEIVED_ROOT"
+          test "$(find . -type f | wc -l)" -eq 2
+          sha256sum --check checksums.txt
+          printf '%s\n' 'maintenance-handoff-v1' | cmp - payload.txt
