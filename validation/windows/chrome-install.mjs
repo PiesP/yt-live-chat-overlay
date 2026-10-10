@@ -129,8 +129,50 @@ async function installUserscript(context, id, root, output) {
   }
 }
 
+/** Select an in-range move that differs materially from current playback. */
+export function selectPublicSeekTarget({ currentTime, start, end }) {
+  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
+  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
+  if (Math.abs(forward - currentTime) >= 1) return forward;
+  const backward = Math.max(start + 1, currentTime - 3);
+  return Math.abs(backward - currentTime) >= 1 ? backward : null;
+}
+
+async function readPublicPageState(page) {
+  return page.evaluate(() => {
+    const initialData = window.ytInitialData;
+    let renderer = initialData?.contents?.twoColumnWatchNextResults
+      ?.conversationBar?.liveChatRenderer;
+    if (!renderer && initialData && typeof initialData === 'object') {
+      const pending = [initialData];
+      const seen = new Set();
+      for (let visited = 0; pending.length && visited < 1000; visited++) {
+        const value = pending.pop();
+        if (!value || typeof value !== 'object' || seen.has(value)) continue;
+        seen.add(value);
+        if (value.liveChatRenderer?.continuations) {
+          renderer = value.liveChatRenderer;
+          break;
+        }
+        for (const child of Object.values(value)) {
+          if (child && typeof child === 'object') pending.push(child);
+        }
+      }
+    }
+    const href = location.href;
+    return {
+      chatMode: renderer ? renderer.isReplay === true ? 'replay' : 'live' : 'unknown',
+      chatRendererFound: Boolean(renderer),
+      playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
+      loginRedirect: /accounts\.google\.com/.test(href),
+      consentRedirect: /consent\.(youtube|google)\.com/.test(href),
+    };
+  }).catch(() => ({ chatMode: 'unknown', chatRendererFound: false,
+    playabilityStatus: null, loginRedirect: false, consentRedirect: false }));
+}
+
 /** Observe a real watch page without supplying application code or site responses. */
-async function inspectLivePage(context, url, output, index, installation) {
+async function inspectLivePage(context, url, output, index, installation, nextUrl = url) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
   const pageErrors = [];
@@ -157,7 +199,7 @@ async function inspectLivePage(context, url, output, index, installation) {
     deadlineCleanup = page.screenshot({ path: join(output, screenshot), timeout: 3000 })
       .then(() => { observation.screenshot = screenshot; }, () => {})
       .finally(() => page.close().catch(() => {}));
-  }, 60_000);
+  }, 120_000);
   try {
     observation.phase = 'navigation';
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
@@ -197,12 +239,95 @@ async function inspectLivePage(context, url, output, index, installation) {
     ));
     Object.assign(observation, validateLiveRenderer(observation.renderer, installation,
       workerDiagnostics, observation.installedBridgeReady));
+    const pageState = await readPublicPageState(page);
+    observation.chatMode = pageState.chatMode;
+    observation.provider = pageState;
+    observation.workflow = { startup: { status: 'passed', chatMode: observation.chatMode,
+      renderedMessages: observation.renderedMessages } };
+    observation.phase = 'pause';
+    observation.workflow.pause = await page.locator('video').first().evaluate((video) => {
+      video.pause();
+      return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
+    });
+    observation.phase = 'resume';
+    observation.workflow.resume = await page.locator('video').first().evaluate(async (video) => {
+      try { await video.play(); } catch { return { status: 'unverified', reason: 'play-rejected' }; }
+      return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
+    });
+    observation.phase = 'seek';
+    const seekRange = await page.locator('video').first().evaluate((video) => {
+      if (!video.seekable.length) return null;
+      const last = video.seekable.length - 1;
+      return { currentTime: video.currentTime, start: video.seekable.start(last),
+        end: video.seekable.end(last) };
+    });
+    const target = seekRange && selectPublicSeekTarget(seekRange);
+    if (target === null) {
+      observation.workflow.seek = { status: 'unverified', reason: 'seek-range-unavailable',
+        range: seekRange };
+    } else {
+      observation.workflow.seek = await page.locator('video').first().evaluate(async (video, seekTo) => {
+        const completed = new Promise((resolve) => {
+          const timeout = setTimeout(() => resolve(false), 8000);
+          video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(true); }, { once: true });
+        });
+        video.currentTime = seekTo;
+        const seeked = await completed;
+        return { status: seeked && Math.abs(video.currentTime - seekTo) < 2 ? 'passed' : 'unverified',
+          reason: seeked ? null : 'seeked-event-timeout', target: seekTo,
+          currentTime: video.currentTime };
+      }, target);
+    }
+    observation.phase = 'navigation-transition';
+    const diagnosticStart = workerDiagnostics.length;
+    await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
+    await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached', timeout: 20_000 });
+    await page.waitForFunction(() =>
+      document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
+    undefined, { timeout: 30_000 });
+    const nextPageState = await readPublicPageState(page);
+    const nextRendererText = await page.locator('#yt-chat-overlay-debug').innerText();
+    const nextRenderer = nextRendererText.includes('Render: n/a') ? 'worker' : 'main';
+    const nextBridgeReady = await page.evaluate(() => Boolean(
+      window.__ytExtensionBridge?.workerSupported === true &&
+      window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
+      window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
+    ));
+    const nextRendererPolicy = validateLiveRenderer(nextRenderer, installation,
+      workerDiagnostics.slice(diagnosticStart), nextBridgeReady);
+    observation.workflow.navigation = { status: nextPageState.chatMode === 'unknown' ? 'unverified' : 'passed',
+      reason: nextPageState.chatMode === 'unknown' ? 'chat-mode-unknown' : null,
+      kind: nextUrl === url ? 'reload' : 'cross-watch', chatMode: nextPageState.chatMode,
+      canvasAttached: true, renderer: nextRenderer,
+      installedBridgeReady: nextBridgeReady, ...nextRendererPolicy,
+      renderedMessages: await page.locator('.yt-live-chat-overlay-live-region > p').count() };
+    if (pageState.chatMode === 'unknown') {
+      observation.workflow.startup.status = 'unverified';
+      observation.workflow.startup.reason = 'chat-mode-unknown';
+    }
+    const failedStage = Object.entries(observation.workflow)
+      .find(([, stage]) => stage.status !== 'passed');
+    if (failedStage) {
+      observation.status = 'unverified';
+      observation.reason = `${failedStage[0]}-${failedStage[1].reason ?? 'state-not-observed'}`;
+      observation.phase = failedStage[0];
+      return observation;
+    }
     observation.status = 'passed';
     observation.phase = 'complete';
   } catch (error) {
     observation.status = 'unverified';
+    observation.provider = await readPublicPageState(page);
     observation.reason = deadlineReached ? 'live-url-deadline'
-      : error.name === 'TimeoutError' ? 'watch-page-or-chat-readiness-timeout' : 'navigation-or-render-error';
+      : observation.provider.loginRedirect ? 'provider-login-redirect'
+        : observation.provider.consentRedirect ? 'provider-consent-redirect'
+          : observation.provider.playabilityStatus && observation.provider.playabilityStatus !== 'OK'
+            ? 'provider-playability-unavailable'
+            : !observation.provider.chatRendererFound && observation.phase === 'chat'
+              ? 'provider-chat-renderer-unavailable'
+              : error.name === 'TimeoutError' ? `${observation.phase}-timeout`
+                : `${observation.phase}-error`;
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
@@ -357,7 +482,8 @@ export async function runChromeInstallation({
   let browserProcessId;
   let browserProcessIdentity;
   let primaryError;
-  const result = { installation, fixture: null, placementTiming: null, live: [], cleanup: {} };
+  const result = { installation, fixture: null, placementTiming: null,
+    live: [], liveWorkflowCoverage: null, cleanup: {} };
   try {
     context = await chromium.launchPersistentContext(profile, {
       channel: browserName,
@@ -398,7 +524,20 @@ export async function runChromeInstallation({
         'Installed Edge placement or replay fixture did not satisfy its observations');
     }
     for (const [index, url] of liveUrls.entries()) {
-      result.live.push(await inspectLivePage(context, url, output, index, installation));
+      const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
+      result.live.push(await inspectLivePage(context, url, output, index, installation, nextUrl));
+    }
+    if (liveUrls.length > 0) {
+      const observedModes = [...new Set(result.live.map((item) => item.chatMode))];
+      const crossWatch = result.live.some((item) => item.workflow?.navigation?.kind === 'cross-watch' &&
+        item.workflow.navigation.status === 'passed');
+      result.liveWorkflowCoverage = { observedModes, crossWatch,
+        status: observedModes.includes('live') && observedModes.includes('replay') && crossWatch &&
+          result.live.every((item) => item.status === 'passed') ? 'complete' : 'partial' };
+      if (browserName === 'msedge' && installation === 'extension' && liveUrls.length >= 2) {
+        assert.equal(result.liveWorkflowCoverage.status, 'complete',
+          'Public live and replay workflow coverage is incomplete');
+      }
     }
     requireLiveSuccess(result.live);
     return result;

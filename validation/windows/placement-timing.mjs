@@ -9,8 +9,22 @@ const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows193Placement';
 const TOKENS = [
   'WINDOWS193_SHORT', 'WINDOWS193_LONG', 'WINDOWS193_REVERSE',
   'WINDOWS193_REPLAY_DUE', 'WINDOWS193_REPLAY_NEXT', 'WINDOWS193_REPLAY_FUTURE',
+  'WINDOWS193_REDUCED', 'WINDOWS193_OVERRIDE', 'WINDOWS193_TRANSITION',
+  'WINDOWS193_EXPANDED', 'WINDOWS193_OVERRIDE_OFF', 'WINDOWS193_SYSTEM_OFF',
 ];
 const MAX_SAMPLES = 240;
+
+export const PLACEMENT_SCENARIOS = Object.freeze([
+  { name: 'worker-scroll', forceFallback: false, mode: 'scroll' },
+  { name: 'main-reverse', forceFallback: true, mode: 'reverse' },
+  { name: 'worker-top', forceFallback: false, mode: 'top' },
+  { name: 'worker-bottom', forceFallback: false, mode: 'bottom' },
+  { name: 'worker-reduced-toggle', forceFallback: false, mode: 'scroll', transition: 'reduced' },
+  { name: 'worker-safe-density', forceFallback: false, mode: 'scroll', transition: 'safe-density' },
+  { name: 'worker-congestion', forceFallback: false, mode: 'scroll', transition: 'congestion' },
+  { name: 'worker-translation', forceFallback: false, mode: 'scroll', transition: 'translation' },
+  { name: 'worker-replay', forceFallback: false, mode: 'replay' },
+]);
 
 function installProbeRuntime(options) {
   const MAX_SAMPLES = 240;
@@ -116,7 +130,7 @@ function installProbeRuntime(options) {
         }
       }
       if (event.data?.type === 'ytPlacementFlush') {
-        scope.postMessage({ type: 'ytPlacementProbe', sample: {
+        scope.postMessage({ type: 'ytPlacementProbe', requestId: event.data.requestId, sample: {
           frames: state.frames, bounds: state.bounds, firstEntry: state.firstEntry,
           ingress: state.ingress, exact: state.exact, overflow: state.overflow,
         } });
@@ -158,7 +172,10 @@ function installProbeRuntime(options) {
           record.stats.push({ atEpochMs: epochNow(), activeMessages, pendingQueueDepth,
             totalRendered, totalDrops });
         }
-        if (event.data?.type === 'ytPlacementProbe') record.sample = event.data.sample;
+        if (event.data?.type === 'ytPlacementProbe') {
+          record.sample = event.data.sample;
+          record.flushId = event.data.requestId;
+        }
       });
       const nativePostMessage = worker.postMessage.bind(worker);
       worker.postMessage = (message, transfer) => {
@@ -183,6 +200,22 @@ export function summarizeSamples(values) {
     p95: samples[Math.ceil(samples.length * 0.95) - 1], max: samples.at(-1) };
 }
 
+export function findOverlappingActivePair(messages, width, height) {
+  const visible = messages.filter((item) => item.x < width && item.x + item.width > 0 &&
+    item.y < height && item.y + item.height > 0);
+  for (let left = 0; left < visible.length; left++) {
+    for (let right = left + 1; right < visible.length; right++) {
+      const a = visible[left];
+      const b = visible[right];
+      if (a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 &&
+          a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1) {
+        return [a.id, b.id];
+      }
+    }
+  }
+  return null;
+}
+
 export function workerProbePrelude(tokens = TOKENS) {
   return `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: true, tokens })});\n`;
 }
@@ -198,7 +231,7 @@ export function workerProbeSuffix(source, attachProbeSource = attachWorkerRender
 function attachWorkerRendererProbe(renderer) {
   const state = globalThis.__ytPlacementProbe;
   if (!state || !renderer || typeof renderer.drainQueue !== 'function') return;
-  const exact = { frames: [], drains: [], dispositions: [], active: [],
+  const exact = { frames: [], drains: [], dispositions: [], active: [], activeNow: [], config: null,
     collisionRejects: 0, placementMisses: 0, drops: {}, overflow: 0 };
   state.exact = exact;
   const queuedAt = new Map();
@@ -230,7 +263,10 @@ function attachWorkerRendererProbe(renderer) {
       bounded(exact.dispositions, { id: message.id, kind: 'activated',
         queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
         atEpochMs: epochNow(), laneIndex: active?.laneIndex ?? null,
-        startX: active?.startX ?? null, durationMs: active?.duration ?? null });
+        startX: active?.startX ?? null, durationMs: active?.duration ?? null,
+        pendingDepth: this.pendingQueue.length,
+        staggerDelayMs: active?.motion?.staggerDelayMs ?? null,
+        isScrolling: active?.motion?.isScrolling ?? null });
       queuedAt.delete(message.id);
     }
     return result;
@@ -284,11 +320,20 @@ function attachWorkerRendererProbe(renderer) {
     try { return nativeFrame.apply(this, args); }
     finally {
       bounded(exact.frames, { atEpochMs: epochNow(), workMs: performance.now() - startedAt });
-      for (const message of this.activeMessages) {
-        if (!isFixture(message.id)) continue;
-        bounded(exact.active, { id: message.id, atEpochMs: epochNow(),
+      exact.config = { mode: this.config?.danmakuMode ?? null,
+        reducedMotion: this.config?.reducedMotion ?? null,
+        ignoreReducedMotion: this.config?.ignoreReducedMotion ?? null,
+        translationGeneration: this.config?.translationGeneration ?? null,
+        safeTop: this.config?.safeTop ?? null, safeBottom: this.config?.safeBottom ?? null,
+        maxConcurrentMessages: this.config?.maxConcurrentMessages ?? null,
+        queueMaxSize: this.config?.queueMaxSize ?? null,
+        logicalWidth: this.logicalWidth, logicalHeight: this.logicalHeight };
+      exact.activeNow = this.activeMessages.filter((message) => isFixture(message.id))
+        .slice(0, 100).map((message) => ({ id: message.id, atEpochMs: epochNow(),
           x: message.x, y: message.y, width: message.width, height: message.height,
-          laneIndex: message.laneIndex });
+          laneIndex: message.laneIndex }));
+      if (exact.frames.length % 10 === 0) {
+        for (const message of exact.activeNow) bounded(exact.active, message);
       }
     }
   };
@@ -312,11 +357,12 @@ function replayResponse(actions, continuation = 'windows193-seek') {
   } } };
 }
 
-async function runScenario({ context, root, output, extensionId, forceFallback, mode }) {
+async function runScenario({ context, root, output, extensionId, name, forceFallback, mode, transition }) {
   const page = await context.newPage();
   const requested = [];
   let originalSettings;
-  let fixtureDelivered = false;
+  const deliveredBatches = new Set();
+  const phaseObservations = [];
   let replayRequests = 0;
   const replay = mode === 'replay';
   const replayObservations = {};
@@ -331,6 +377,18 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
   const replayActions = replay ? [10_000, 10_001, 11_500].map((offsetMs, index) => ({
     replayChatItemAction: { videoOffsetTimeMsec: offsetMs, actions: [actions[index]] },
   })) : [];
+  const batches = new Map([
+    ['1', actions],
+    ['2', transition === 'congestion'
+      ? Array.from({ length: 80 }, (_, index) => messageAction(
+        `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
+      : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
+        'Bounded transition fixture')]],
+    ['3', [messageAction(transition === 'reduced' ? TOKENS[7] : TOKENS[9],
+      'Bounded second transition fixture')]],
+    ['4', [messageAction(TOKENS[10], 'Reduced-motion override disabled')]],
+    ['5', [messageAction(TOKENS[11], 'System reduced motion disabled')]],
+  ]);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   const html = preview.replace(
     '<div class="player-inner">Video Player Placeholder</div>',
@@ -338,8 +396,89 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
   ).replace('</body>', '<div id="chat"><yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer></div></body>');
   assert.notEqual(html, preview, 'Placement fixture video was not installed');
   const workerPrelude = workerProbePrelude();
+  const screenshot = `placement-${name}.png`;
+  let screenshotCaptured = false;
+  const sendBatch = async (batch) => {
+    await page.evaluate(async (key) => {
+      if (key === '1') {
+        window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
+      }
+      const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=${key}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      });
+      if (!response.ok) throw new Error('Placement fixture request failed');
+      await response.json();
+    }, batch);
+    assert(deliveredBatches.has(batch), `Scoped placement batch ${batch} was not intercepted`);
+  };
+  const workerSnapshot = async () => {
+    const requestId = await page.evaluate(() => {
+      const probe = window.__ytPlacementProbe;
+      const id = (probe.flushSequence ?? 0) + 1;
+      probe.flushSequence = id;
+      for (const record of probe.workers) record.worker.postMessage({ type: 'ytPlacementFlush', requestId: id });
+      return id;
+    });
+    await page.waitForFunction((id) => window.__ytPlacementProbe.workers
+      .some((record) => record.ready && record.flushId === id), requestId, { timeout: 5000 });
+    return page.evaluate(() => window.__ytPlacementProbe.workers
+      .find((record) => record.ready)?.sample?.exact ?? null);
+  };
+  const waitForWorkerEntry = (id) => page.waitForFunction((messageId) =>
+    Number.isFinite(window.__ytPlacementProbe.workers.find((record) => record.ready)
+      ?.sample?.firstEntry?.[messageId]), id, { timeout: 10_000 });
+  const captureProbe = async () => {
+    if (page.isClosed()) return null;
+    await page.evaluate(() => {
+      for (const record of window.__ytPlacementProbe?.workers ?? []) {
+        record.worker.postMessage({ type: 'ytPlacementFlush' });
+      }
+    });
+    await page.waitForTimeout(100);
+    return page.evaluate(() => {
+      const probe = window.__ytPlacementProbe;
+      if (!probe) return null;
+      return { sourcePrefixed: probe.sourcePrefixed, sourceHooked: probe.sourceHooked,
+        requestAtEpochMs: probe.requestAtEpochMs,
+        frames: probe.frames, bounds: probe.bounds, firstEntry: probe.firstEntry,
+        ingress: probe.ingress, overflow: probe.overflow,
+        workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })) };
+    });
+  };
+  const probeResult = (raw) => {
+    const selected = raw && (forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample);
+    const ingress = forceFallback ? Object.fromEntries(ids.map((id) => [id, raw?.requestAtEpochMs]))
+      : raw?.ingress ?? {};
+    return { renderer: forceFallback ? 'main' : 'worker', name, mode,
+      phases: phaseObservations, ids: requested,
+      replayRequests: replay ? replayRequests : null,
+      replayBoundaries: replay ? replayObservations : null,
+      deliveredBatches: [...deliveredBatches],
+      sourcePrefixed: raw?.sourcePrefixed ?? false, sourceHooked: raw?.sourceHooked ?? false,
+      workerReady: raw?.workers.some((worker) => worker.ready) ?? false,
+      firstEntryLatencyMs: Object.fromEntries(ids.map((id) => [id,
+        selected?.firstEntry?.[id] !== undefined && ingress[id] !== undefined
+          ? selected.firstEntry[id] - ingress[id] : null])),
+      firstEntryAtEpochMs: selected?.firstEntry ?? {},
+      frameWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.workMs) ?? []),
+      preClearWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.preClearMs) ?? []),
+      exactWorkerFrameMs: selected?.exact
+        ? summarizeSamples(selected.exact.frames.map((frame) => frame.workMs)) : null,
+      exactWorkerDrainMs: selected?.exact
+        ? summarizeSamples(selected.exact.drains.map((drain) => drain.workMs)) : null,
+      exactWorker: selected?.exact ? { ...selected.exact,
+        dispositions: selected.exact.dispositions.slice(0, MAX_SAMPLES),
+        active: selected.exact.active.slice(0, MAX_SAMPLES),
+      } : null,
+      bounds: selected?.bounds?.slice(0, MAX_SAMPLES) ?? [],
+      queueStats: raw?.workers.flatMap((worker) => worker.stats) ?? [],
+      sampleOverflow: selected?.overflow ?? null,
+      screenshot: screenshotCaptured ? screenshot : null,
+    };
+  };
   try {
     await page.setViewportSize({ width: 1280, height: 720 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
       if (url.protocol === 'chrome-extension:' && url.hostname === extensionId) return route.continue();
@@ -350,10 +489,11 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
           json: replayResponse(replayRequests === 2 ? replayActions : []) });
       }
       if (url.hostname === 'www.youtube.com' && url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')) {
-        const deliver = url.searchParams.has('windows193') && !fixtureDelivered;
-        if (deliver) fixtureDelivered = true;
+        const batch = url.searchParams.get('windows193');
+        const deliver = batch && batches.has(batch) && !deliveredBatches.has(batch);
+        if (deliver) deliveredBatches.add(batch);
         return route.fulfill({ status: 200, contentType: 'application/json',
-          json: chatResponse(deliver ? actions : []) });
+          json: chatResponse(deliver ? batches.get(batch) : []) });
       }
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
         return route.fulfill({ status: 200, contentType: 'text/html', body: html });
@@ -389,10 +529,14 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
       { timeout: 15_000 });
     originalSettings = await page.evaluate((danmakuMode) => {
       const settings = window.__ytChatOverlay.getSettings();
-      window.__ytChatOverlay.applySettings({ danmakuMode,
-        outline: { ...settings.outline, enabled: false }, showDebugOverlay: true });
-      return { danmakuMode: settings.danmakuMode, outline: settings.outline,
-        showDebugOverlay: settings.showDebugOverlay };
+      const overrides = { danmakuMode,
+        outline: { ...settings.outline, enabled: false }, showDebugOverlay: true };
+      window.__ytChatOverlay.applySettings(overrides);
+      return Object.fromEntries([
+        ...Object.keys(overrides), 'safeTop', 'safeBottom', 'fontSize', 'laneSpacing',
+        'maxConcurrentMessages', 'queueMaxSize', 'staggerMaxDelayMs',
+        'staggerMediumDelayMs', 'ignoreReducedMotion', 'translationEnabled',
+      ].map((key) => [key, settings[key]]));
     }, replay ? 'scroll' : mode);
     await page.waitForFunction((worker) => {
       const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
@@ -420,15 +564,7 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
         'A replay message appeared before 11500ms');
       await page.evaluate(() => window.__ytPlacementSetVideoTime(11.5));
     } else {
-      await page.evaluate(async () => {
-        window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
-        const response = await fetch('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=1', {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
-        });
-        if (!response.ok) throw new Error('Placement fixture request failed');
-        await response.json();
-      });
-      assert(fixtureDelivered, 'Scoped placement API fixture was not intercepted');
+      await sendBatch('1');
     }
     requested.push(...ids, ...(replay ? [] : [paidId]));
     await page.waitForFunction((expected) => expected.every((id) =>
@@ -443,54 +579,173 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
         : probe.firstEntry;
       return expected.every((id) => Number.isFinite(firstEntry?.[id]));
     }, { expected: ids, worker: !forceFallback }, { timeout: 10_000 });
-    const screenshot = `placement-${forceFallback ? 'main' : 'worker'}-${mode}.png`;
+
+    if (transition === 'reduced') {
+      const baseline = await workerSnapshot();
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await sendBatch('2');
+      await page.waitForFunction((id) => document.querySelector(
+        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[6]);
+      await waitForWorkerEntry(TOKENS[6]);
+      const reduced = await workerSnapshot();
+      assert.equal(reduced.config.reducedMotion, true);
+      assert(reduced.dispositions.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === false),
+        'Reduced-motion message was not activated in fixed mode');
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ ignoreReducedMotion: true }));
+      await sendBatch('3');
+      await page.waitForFunction((id) => document.querySelector(
+        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[7]);
+      await waitForWorkerEntry(TOKENS[7]);
+      const override = await workerSnapshot();
+      assert.equal(override.config.ignoreReducedMotion, true);
+      assert(override.dispositions.some((entry) => entry.id === TOKENS[7] && entry.isScrolling === true),
+        'Reduced-motion override did not restore scrolling');
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ ignoreReducedMotion: false }));
+      await sendBatch('4');
+      await waitForWorkerEntry(TOKENS[10]);
+      const restored = await workerSnapshot();
+      assert.equal(restored.config.ignoreReducedMotion, false);
+      assert(restored.dispositions.some((entry) => entry.id === TOKENS[10] &&
+        entry.isScrolling === false), 'Disabling override did not restore reduced motion');
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await sendBatch('5');
+      await waitForWorkerEntry(TOKENS[11]);
+      const systemOff = await workerSnapshot();
+      assert.equal(systemOff.config.reducedMotion, false);
+      assert(systemOff.dispositions.some((entry) => entry.id === TOKENS[11] &&
+        entry.isScrolling === true), 'System reduced-motion off did not restore scrolling');
+      phaseObservations.push({ phase: 'initial', config: baseline.config },
+        { phase: 'reduced', config: reduced.config }, { phase: 'override', config: override.config },
+        { phase: 'override-off', config: restored.config },
+        { phase: 'system-off', config: systemOff.config });
+    }
+    if (transition === 'safe-density') {
+      const baseline = await workerSnapshot();
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0.15,
+        safeBottom: 0.25, fontSize: 40, laneSpacing: 10, maxConcurrentMessages: 30 }));
+      await sendBatch('2');
+      await page.waitForFunction((id) => document.querySelector(
+        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[8]);
+      await waitForWorkerEntry(TOKENS[8]);
+      const compact = await workerSnapshot();
+      assert.equal(compact.config.safeTop, 0.15);
+      assert.equal(compact.config.safeBottom, 0.25);
+      assert.equal(compact.config.maxConcurrentMessages, 30);
+      const active = compact.activeNow.filter((entry) => entry.id === TOKENS[8]);
+      assert(active.length > 0, 'Safe-zone transition produced no active geometry');
+      assert(active.some((entry) => entry.y >= compact.config.logicalHeight * 0.15 &&
+        entry.y + entry.height <= compact.config.logicalHeight * 0.75),
+      'Transition message escaped the shrunken safe zone');
+      assert.equal(findOverlappingActivePair(compact.activeNow,
+        compact.config.logicalWidth, compact.config.logicalHeight), null,
+      'Messages overlapped after safe-zone and density shrink');
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0,
+        safeBottom: 0, fontSize: 32, laneSpacing: 0, maxConcurrentMessages: 300 }));
+      await sendBatch('3');
+      await page.waitForFunction((id) => document.querySelector(
+        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[9]);
+      await waitForWorkerEntry(TOKENS[9]);
+      const expanded = await workerSnapshot();
+      assert.equal(expanded.config.safeTop, 0);
+      assert.equal(expanded.config.safeBottom, 0);
+      assert(expanded.activeNow.some((entry) => entry.id === TOKENS[9]),
+        'Expanded safe zone produced no active geometry');
+      assert.equal(findOverlappingActivePair(expanded.activeNow,
+        expanded.config.logicalWidth, expanded.config.logicalHeight), null,
+      'Messages overlapped after safe-zone expansion');
+      phaseObservations.push({ phase: 'initial', config: baseline.config },
+        { phase: 'compact', config: compact.config, active: active.at(-1) },
+        { phase: 'expanded', config: expanded.config,
+          active: expanded.activeNow.filter((entry) => entry.id === TOKENS[9]).at(-1) });
+    }
+    if (transition === 'congestion') {
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ maxConcurrentMessages: 30,
+        queueMaxSize: 50, staggerMaxDelayMs: 200, staggerMediumDelayMs: 80 }));
+      await sendBatch('2');
+      await page.waitForTimeout(500);
+      const congested = await workerSnapshot();
+      const peakPending = Math.max(0, ...congested.drains.map((drain) => drain.pendingBefore));
+      assert.equal(congested.config.maxConcurrentMessages, 30);
+      assert.equal(congested.config.queueMaxSize, 50);
+      assert(peakPending >= 50, `No-stagger pressure was not reached: pending ${peakPending}`);
+      assert(congested.dispositions.some((entry) => entry.kind === 'activated' &&
+        entry.pendingDepth >= 50 && entry.staggerDelayMs === 0),
+      'No activation used the queue-pressure zero-stagger path');
+      assert(congested.drains.every((drain) => drain.activeAfter <= 30));
+      phaseObservations.push({ phase: 'congested', config: congested.config, peakPending,
+        zeroStaggerActivations: congested.dispositions.filter((entry) =>
+          entry.kind === 'activated' && entry.pendingDepth >= 50 &&
+          entry.staggerDelayMs === 0).length });
+    }
+    if (transition === 'translation') {
+      const before = await workerSnapshot();
+      const active = before.activeNow.find((entry) => entry.id === TOKENS[0]);
+      assert(active, 'Translation fixture message has no active geometry');
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ translationEnabled: true }));
+      const enabled = await workerSnapshot();
+      assert(Number.isInteger(enabled.config.translationGeneration));
+      await page.evaluate(({ id, width, height, generation }) => {
+        const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+        record.worker.postMessage({ type: 'updateTranslation', id,
+          translatedText: 'Fixture translation only', width, height,
+          translationHeight: 32, translationGeneration: generation });
+      }, { id: TOKENS[0], width: active.width + 80, height: active.height + 32,
+        generation: enabled.config.translationGeneration });
+      await page.waitForFunction(({ id, width }) => window.__ytPlacementProbe.workers
+        .find((record) => record.ready)?.sample?.exact?.activeNow
+        ?.some((entry) => entry.id === id && entry.width >= width),
+      { id: TOKENS[0], width: active.width + 80 }, { timeout: 10_000 });
+      const translated = await workerSnapshot();
+      const translatedActive = translated.activeNow.find((entry) => entry.id === TOKENS[0]);
+      assert(translatedActive && translatedActive.width >= active.width + 80 &&
+        translatedActive.height >= active.height + 32,
+      'Injected production translation protocol did not reflow active geometry');
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ translationEnabled: false }));
+      const disabled = await workerSnapshot();
+      await page.evaluate(({ id, width, height, generation }) => {
+        const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+        record.worker.postMessage({ type: 'updateTranslation', id, translatedText: null,
+          width, height, translationHeight: 0, translationGeneration: generation });
+      }, { id: TOKENS[0], width: active.width, height: active.height,
+        generation: disabled.config.translationGeneration });
+      await page.waitForFunction(({ id, width, height }) => window.__ytPlacementProbe.workers
+        .find((record) => record.ready)?.sample?.exact?.activeNow
+        ?.some((entry) => entry.id === id && entry.width === width && entry.height === height),
+      { id: TOKENS[0], width: active.width, height: active.height }, { timeout: 10_000 });
+      const reverted = await workerSnapshot();
+      phaseObservations.push({ phase: 'before', active },
+        { phase: 'translated', config: translated.config, active: translatedActive,
+          provenance: 'test-injected production Worker protocol' },
+        { phase: 'translation-off', config: reverted.config,
+          active: reverted.activeNow.find((entry) => entry.id === TOKENS[0]) });
+    }
     await page.screenshot({ path: join(output, screenshot), animations: 'disabled' });
-    await page.evaluate(() => {
-      for (const record of window.__ytPlacementProbe.workers) {
-        record.worker.postMessage({ type: 'ytPlacementFlush' });
-      }
-    });
-    await page.waitForTimeout(100);
-    const raw = await page.evaluate(() => {
-      const probe = window.__ytPlacementProbe;
-      return { sourcePrefixed: probe.sourcePrefixed, sourceHooked: probe.sourceHooked,
-        requestAtEpochMs: probe.requestAtEpochMs,
-        frames: probe.frames, bounds: probe.bounds, firstEntry: probe.firstEntry,
-        ingress: probe.ingress, overflow: probe.overflow,
-        workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })) };
-    });
+    screenshotCaptured = true;
+    const raw = await captureProbe();
     const selected = forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample;
     assert(forceFallback || raw.sourcePrefixed, 'Packaged Worker source was not instrumented');
     assert(forceFallback || raw.sourceHooked, 'Packaged Worker renderer shape changed');
     assert(forceFallback || raw.workers.some((worker) => worker.ready), 'Real Worker did not become ready');
     assert(selected && selected.frames.length > 0, 'No overlay frames were observed');
     assert(forceFallback || selected.exact?.drains?.length > 0, 'No exact Worker drains were observed');
-    const ingress = forceFallback ? { ...Object.fromEntries(ids.map((id) => [id, raw.requestAtEpochMs])) }
-      : raw.ingress;
-    const firstEntryLatencyMs = Object.fromEntries(ids.map((id) => [id,
-      selected.firstEntry[id] !== undefined && ingress[id] !== undefined
-        ? selected.firstEntry[id] - ingress[id] : null]));
-    return { renderer: forceFallback ? 'main' : 'worker', mode, ids: requested,
-      replayRequests: replay ? replayRequests : null,
-      replayBoundaries: replay ? replayObservations : null,
-      sourcePrefixed: raw.sourcePrefixed, sourceHooked: raw.sourceHooked,
-      workerReady: raw.workers.some((worker) => worker.ready),
-      firstEntryLatencyMs, firstEntryAtEpochMs: selected.firstEntry,
-      frameWorkMs: summarizeSamples(selected.frames.map((frame) => frame.workMs)),
-      preClearWorkMs: summarizeSamples(selected.frames.map((frame) => frame.preClearMs)),
-      exactWorkerFrameMs: selected.exact
-        ? summarizeSamples(selected.exact.frames.map((frame) => frame.workMs)) : null,
-      exactWorkerDrainMs: selected.exact
-        ? summarizeSamples(selected.exact.drains.map((drain) => drain.workMs)) : null,
-      exactWorker: selected.exact ? { ...selected.exact,
-        dispositions: selected.exact.dispositions.slice(0, MAX_SAMPLES),
-        active: selected.exact.active.slice(0, MAX_SAMPLES),
-      } : null,
-      bounds: selected.bounds.slice(0, MAX_SAMPLES),
-      queueStats: raw.workers.flatMap((worker) => worker.stats),
-      sampleOverflow: selected.overflow,
-      screenshot,
-    };
+    if (mode === 'top' || mode === 'bottom') {
+      assert.equal(selected.exact.config.mode, mode);
+      assert(selected.exact.activeNow.some((entry) => ids.includes(entry.id)),
+        `No ${mode} message remained active for placement geometry`);
+      assert.equal(findOverlappingActivePair(selected.exact.activeNow,
+        selected.exact.config.logicalWidth, selected.exact.config.logicalHeight), null,
+      `${mode} active messages overlapped`);
+    }
+    return { status: 'passed', ...probeResult(raw) };
+  } catch (error) {
+    if (!screenshotCaptured && !page.isClosed()) {
+      screenshotCaptured = await page.screenshot({ path: join(output, screenshot),
+        animations: 'disabled', timeout: 3000 }).then(() => true, () => false);
+    }
+    const raw = await captureProbe().catch(() => null);
+    return { status: 'failed', ...probeResult(raw),
+      errorType: error instanceof Error ? error.name : typeof error,
+      assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null };
   } finally {
     if (originalSettings && !page.isClosed()) {
       await page.evaluate((settings) => window.__ytChatOverlay?.applySettings(settings),
@@ -503,17 +758,13 @@ async function runScenario({ context, root, output, extensionId, forceFallback, 
 /** Installed Edge: run the same application/parser paths with Worker and forced Canvas fallback. */
 export async function runPlacementTimingFixture({ context, root, output, extensionId }) {
   const scenarios = [];
-  for (const scenario of [
-    { forceFallback: false, mode: 'scroll' },
-    { forceFallback: true, mode: 'reverse' },
-    { forceFallback: false, mode: 'replay' },
-  ]) {
+  for (const scenario of PLACEMENT_SCENARIOS) {
     try {
-      scenarios.push({ status: 'passed',
-        ...await runScenario({ context, root, output, extensionId, ...scenario }) });
+      scenarios.push(await runScenario({ context, root, output, extensionId, ...scenario }));
     } catch (error) {
       scenarios.push({ status: 'failed', renderer: scenario.forceFallback ? 'main' : 'worker',
-        mode: scenario.mode, errorType: error instanceof Error ? error.name : typeof error,
+        name: scenario.name, mode: scenario.mode,
+        errorType: error instanceof Error ? error.name : typeof error,
         assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null });
     }
   }

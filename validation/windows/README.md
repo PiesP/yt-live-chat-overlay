@@ -99,8 +99,28 @@ and screenshots. Report absent draw samples or Worker startup as unverified;
 do not infer a performance gain from a single screenshot or a formula change.
 The replay fixture holds video time at 10000, 10001, and 11500 ms and checks
 the corresponding accessibility entries using routed replay continuation
-actions. It remains a synthetic parser/runtime check. Alternate fixed and
-reduced-motion states and real-site playback need separate VM observations.
+actions. Separate installed Worker pages exercise top and bottom placement,
+system reduced motion on/off and its user override on/off, safe-zone/font/lane-density
+shrink and expansion, and a queue cap of 50 with active cap of 30. The
+congestion page requires an observed pending depth of at least 50 and an
+activation with zero stagger at that depth; the setting itself does not prove
+queue pressure. The translation page sends one bounded test-only
+`updateTranslation` through the production Worker protocol for a fixture ID,
+checks active geometry reflow, then sends a bounded removal update. It does not prove translation-provider
+availability. Each variant records its own status; any failed assertion makes
+the installed Edge fixture fail. The pages are synthetic parser/runtime checks
+until run in the prepared VM.
+
+For every supplied public URL, the installed browser observer checks startup,
+real video pause/resume and an in-range seek, then navigates to the next URL
+(or reloads when only one URL is supplied) and checks chat, Canvas, and the
+renderer again. No site response or chat content is substituted. The receipt
+labels live versus replay from the site's chat renderer and retains a separate
+status and bounded provider/access reason for each page. Two or more public
+URLs in an Edge extension run must cover both live and replay plus cross-watch
+navigation; blocked chat, login/consent, unavailable playback, missing seek
+range, and unknown chat mode remain `unverified` rather than a pass. Without
+public URLs, this real-site tier is untested even if the synthetic fixture passes.
 
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing

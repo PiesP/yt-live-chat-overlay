@@ -10,7 +10,8 @@ import * as chromeInstallModule from '../../../validation/windows/chrome-install
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.mjs';
 
-const { cleanupChromeInstallation, enableDeveloperMode, readOwnedBrowserProcessId, requireLiveSuccess } =
+const { cleanupChromeInstallation, enableDeveloperMode, readOwnedBrowserProcessId,
+  requireLiveSuccess, selectPublicSeekTarget } =
   chromeInstallModule;
 
 const roots: string[] = [];
@@ -30,6 +31,13 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('selects a real seek movement only from a usable public media range', () => {
+    expect(selectPublicSeekTarget({ currentTime: 10, start: 0, end: 100 })).toBe(13);
+    expect(selectPublicSeekTarget({ currentTime: 99, start: 0, end: 100 })).toBe(96);
+    expect(selectPublicSeekTarget({ currentTime: 10, start: 8, end: 11 })).toBeNull();
+    expect(selectPublicSeekTarget({ currentTime: NaN, start: 0, end: 100 })).toBeNull();
+  });
+
   it('uses the visible Edge switch and its checked property, while keeping Chrome controls', async () => {
     for (const browserName of ['msedge', 'chrome']) {
       const visible = { checked: browserName === 'chrome', getAttribute: () => 'false' };
