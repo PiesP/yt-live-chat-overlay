@@ -644,6 +644,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     if (transition === 'reduced') {
       const baseline = await workerSnapshot();
       await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.waitForFunction(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
+        ?.sample?.exact?.config?.reducedMotion === true, undefined, { timeout: 10_000 });
       await sendBatch('2');
       await page.waitForFunction((id) => document.querySelector(
         `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[6]);
@@ -663,6 +665,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assert(restored.activeNow.some((entry) => entry.id === TOKENS[6] &&
         entry.isScrolling === false), 'Disabling override did not restore reduced motion');
       await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.waitForFunction(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
+        ?.sample?.exact?.config?.reducedMotion === false, undefined, { timeout: 10_000 });
       const systemOff = await workerSnapshot();
       assert.equal(systemOff.config.reducedMotion, false);
       assert(systemOff.activeNow.some((entry) => entry.id === TOKENS[6] &&
