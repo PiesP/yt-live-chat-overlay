@@ -952,6 +952,18 @@ export class RuntimeManager {
     if (chatSource instanceof ReplayChatSource && this.renderer) {
       this.renderer.setReplayMode(true);
       chatSource.onSeek = () => this.handleReplaySeek();
+      const generation = this.sessionGeneration;
+      chatSource.onLateDrop = (count) => {
+        if (
+          signal.aborted ||
+          this.chatSource !== chatSource ||
+          this.sessionGeneration !== generation ||
+          this.isDisposedState
+        ) {
+          return;
+        }
+        this.renderer?.observability.onMessagesDropped(count, 'replay_late');
+      };
     }
 
     // Seed bootstrap data from factory call to avoid duplicate watch page fetch
