@@ -104,11 +104,13 @@ describe('Windows placement timing probe', () => {
     runInNewContext(script!, { __ytPlacementProbe: state,
       performance: { timeOrigin: 1000, now: () => 1 } });
     const exact = state.exact as { peaks: { pending: number; active: number };
-      dispositions: Array<{ id: string; laneHeight: number; travelDistancePx: number }> };
+      dispositions: Array<{ id: string; laneHeight: number; travelDistancePx: number;
+        burstSpeedMultiplier: number | null }> };
     expect(state.canvasSourceHooked).toBe(true);
     expect(exact.peaks).toEqual({ pending: 1, active: 1 });
     expect(exact.dispositions[0]).toMatchObject({ id: 'WINDOWS195_BACKLOG_LONG',
-      laneHeight: 34, travelDistancePx: 3580 });
+      laneHeight: 34, travelDistancePx: 3580, burstSpeedMultiplier: null });
+    expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
   });
 
   it('detects visible active rectangles that overlap after reflow', () => {

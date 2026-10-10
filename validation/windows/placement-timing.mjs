@@ -550,6 +550,7 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
       const motion = active?.motion;
       bounded({ id: message.id, kind: 'activated', atEpochMs: performance.timeOrigin + performance.now(),
         isBacklog: message.isBacklog === true, laneIndex: active?.laneIndex ?? null,
+        burstSpeedMultiplier: null,
         laneSpacing: this.settings.laneSpacing, fontSize: this.settings.fontSize,
         width: active?.width ?? null, height: active?.height ?? null, y: active?.y ?? null,
         laneHeight: this.laneAllocator.getLaneHeight(), slotCount: active?.slotCount ?? null,
