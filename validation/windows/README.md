@@ -79,17 +79,23 @@ the suffix attaches to the renderer instance only when the emitted handler
 matches the expected shape. Bundle drift fails the fixture. The probe records
 bounded exact Worker render/drain durations, queue residence for fixture IDs,
 placement and collision rejection counts, active-message coordinates, work
-before the first overlay clear, fixture text ink bounds, first viewport entry,
+before the first overlay clear, fixture text ink bounds, first sampled visible ink, committed geometric entry,
 Worker queue receipts, and a screenshot. It does not change production source
 or add application telemetry. The Canvas page records draw data on the main
-thread. The first-entry clock is
+thread. Ink bounds use backing-store pixels, including the canvas transform.
+Visible ink samples include fade and frame quantization; committed geometric
+entry is recorded separately from the final motion plan or the baseline
+committed constant-speed path. Replay accessibility entry also records video
+time minus source offset. The first-entry clock is
 `performance.timeOrigin + performance.now()` in each realm; compare only samples
 from the same run and inspect any clock disagreement before interpreting a
 cross-realm latency. `preClearWorkMs` includes drain and cleanup, so it is a
 work proxy; `exactWorkerDrainMs` is the wrapped drain method's duration. Text
 ink rectangles exclude paid card backgrounds and do not by themselves prove
 reservation safety. Collision rejection counts are attempted placements, not
-distinct dropped messages; unknown drops remain labeled `other`.
+distinct dropped messages. Final drops retain the production reason; baseline
+reasons are inferred from the calling phase and unknown drops remain `other`.
+The probe forwards every production method argument and respects `trackDrops`.
 
 For issue #193 performance comparison, run baseline and final source in the
 same prepared VM, installed Edge version, profile mode, viewport, fixture, and
@@ -103,7 +109,8 @@ actions. Separate installed Worker pages exercise top and bottom placement,
 system reduced motion on/off and its user override on/off, safe-zone/font/lane-density
 shrink and expansion, and a queue cap of 50 with active cap of 30. The
 congestion page requires an observed pending depth of at least 50 and an
-activation with zero stagger at that depth; the setting itself does not prove
+activation with zero stagger at that depth. A single 50-message batch uses
+unique fixture authors and remains within the runtime live-batch boundary; the setting itself does not prove
 queue pressure. The translation page sends one bounded test-only
 `updateTranslation` through the production Worker protocol for a fixture ID,
 checks active geometry reflow, then sends a bounded removal update. It does not prove translation-provider
