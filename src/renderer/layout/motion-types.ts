@@ -7,7 +7,13 @@ export interface MessageMotionPlanInput {
   mode: DanmakuMode;
   now: number;
   batchIndex: number;
+  /** Bounded per-group sequence, independent of the current drain partition. */
+  entrySequence?: number | undefined;
   previousStaggerDelayMs: number;
+  /** Last committed geometric entry in this source/priority/tier group. */
+  previousViewportEntryTime?: number | undefined;
+  /** Replay source time takes precedence over optional visual staggering. */
+  isReplay?: boolean;
   queueDepth: number;
   /** Positive exponential-distribution sample, normally read from the shared LUT. */
   staggerSample: number;
@@ -37,6 +43,7 @@ export interface MessageMotionPlan {
   screenWidthPx: number;
   messageWidthPx: number;
   actualVelocityPxPerMs: number;
+  /** Geometry crossing the viewport edge, independent of opacity or fade. */
   viewportEntryTime: number;
   visibleExitTime: number;
   endTime: number;

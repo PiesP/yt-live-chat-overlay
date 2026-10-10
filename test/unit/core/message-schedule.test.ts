@@ -67,7 +67,7 @@ describe('committed motion and lane safety', () => {
       const a = computeMessageMotionPlan({
         ...baseInput, mode, now: 0, screenWidth: 640, messageWidth: 100,
         batchIndex: 1, previousStaggerDelayMs: 0, staggerSample: 1,
-        maxStaggerDelayMs: 200, mediumStaggerDelayMs: 100,
+        maxStaggerDelayMs: 1_200, mediumStaggerDelayMs: 1_200,
         placementWaitMs: firstLane!.waitMs, velocityPxPerSec: 350,
         scrollDurationMinMs: 5_000, scrollDurationMaxMs: 30_000,
       });
@@ -79,7 +79,7 @@ describe('committed motion and lane safety', () => {
       const b = computeMessageMotionPlan({
         ...baseInput, mode, now: 0, screenWidth: 640, messageWidth: 600,
         batchIndex: 2, previousStaggerDelayMs: a.staggerDelayMs, staggerSample: 1,
-        maxStaggerDelayMs: 200, mediumStaggerDelayMs: 100,
+        maxStaggerDelayMs: 1_200, mediumStaggerDelayMs: 1_200,
         placementWaitMs: secondLane!.waitMs, velocityPxPerSec: 350,
         scrollDurationMinMs: 5_000, scrollDurationMaxMs: 30_000,
       });
@@ -140,6 +140,107 @@ describe('committed motion and lane safety', () => {
 });
 
 describe('computeMessageMotionPlan', () => {
+  it('bounds the old 200px plus 150ms double-delay example at low load', () => {
+    const first = computeMessageMotionPlan({ ...baseInput, now: 0, batchIndex: 0 });
+    const later = computeMessageMotionPlan({ ...baseInput, now: 0, batchIndex: 5,
+      entrySequence: 5, previousStaggerDelayMs: 120, staggerSample: 1 });
+
+    expect(first.viewportEntryTime).toBe(0);
+    expect(later.staggerDelayMs).toBe(145);
+    expect(later.horizontalStaggerPx).toBeGreaterThan(0);
+    expect(later.horizontalStaggerPx).toBeLessThan(200);
+    expect(later.viewportEntryTime).toBeLessThanOrEqual(200);
+    expect(later.viewportEntryTime).toBeLessThan(1_150);
+    expect(later.viewportEntryTime).toBeGreaterThan(later.startTime);
+    expect(later.viewportEntryTime).toBeCloseTo(
+      later.startTime + later.horizontalStaggerPx / later.actualVelocityPxPerMs
+    );
+  });
+
+  it('keeps a group entry cursor across drain partitions within the optional window', () => {
+    const timeline = [0, 0, 0, 16, 16, 16];
+    const run = (partition: number[]): number[] => {
+      let previousViewportEntryTime: number | undefined;
+      let previousStaggerDelayMs = 0;
+      return timeline.map((now, index) => {
+        if (index > 0 && partition[index] === 0) previousStaggerDelayMs = 0;
+        const plan = computeMessageMotionPlan({
+          ...baseInput, now, batchIndex: partition[index] ?? 0,
+          entrySequence: index, previousViewportEntryTime,
+          previousStaggerDelayMs, staggerSample: 1,
+        });
+        previousViewportEntryTime = plan.viewportEntryTime;
+        previousStaggerDelayMs = plan.staggerDelayMs;
+        return plan.viewportEntryTime;
+      });
+    };
+    const singleDrain = run([0, 1, 2, 3, 4, 5]);
+    const splitDrain = run([0, 1, 2, 0, 1, 2]);
+
+    expect(singleDrain.every((entry, index) => index === 0 || entry >= singleDrain[index - 1]!))
+      .toBe(true);
+    expect(splitDrain.every((entry, index) => index === 0 || entry >= splitDrain[index - 1]!))
+      .toBe(true);
+    expect(splitDrain.every((entry, index) => entry <= timeline[index]! + 200)).toBe(true);
+    expect(splitDrain[3]).toBeGreaterThan(16);
+  });
+
+  it('allows bounded overtaking when an earlier lane wait exceeds the entry window', () => {
+    const delayed = computeMessageMotionPlan({ ...baseInput, now: 0, batchIndex: 0,
+      placementWaitMs: 1_000 });
+    const follower = computeMessageMotionPlan({ ...baseInput, now: 16, batchIndex: 0,
+      previousViewportEntryTime: delayed.viewportEntryTime });
+
+    expect(follower.viewportEntryTime).toBe(16 + follower.staggerLimitMs);
+    expect(follower.viewportEntryTime).toBeLessThan(delayed.viewportEntryTime);
+  });
+
+  it.each([29, 30, 31, 49, 50])(
+    'compacts both entry effects at queue depth %i',
+    (queueDepth) => {
+      const plan = computeMessageMotionPlan({ ...baseInput, now: 0, queueDepth,
+        batchIndex: 5, previousStaggerDelayMs: 0, staggerSample: 1 });
+      expect(plan.viewportEntryTime).toBeLessThanOrEqual(plan.staggerLimitMs);
+      if (queueDepth === 50) {
+        expect(plan.staggerDelayMs).toBe(0);
+        expect(plan.horizontalStaggerPx).toBe(0);
+        expect(plan.viewportEntryTime).toBe(0);
+      }
+    }
+  );
+
+  it('reduces the spatial entry offset through queue-pressure boundaries', () => {
+    const offsets = [29, 30, 31, 49, 50].map((queueDepth) =>
+      computeMessageMotionPlan({ ...baseInput, now: 0, queueDepth,
+        batchIndex: 5, previousStaggerDelayMs: 0, staggerSample: 1 }).horizontalStaggerPx
+    );
+    expect(offsets[0]).toBeGreaterThanOrEqual(offsets[1]!);
+    expect(offsets[1]).toBeGreaterThanOrEqual(offsets[2]!);
+    expect(offsets[2]).toBeGreaterThan(offsets[3]!);
+    expect(offsets[0]).toBeGreaterThan(offsets[4]!);
+    expect(offsets[4]).toBe(0);
+  });
+
+  it('disables both effects and the group cursor when staggering is off', () => {
+    const plan = computeMessageMotionPlan({ ...baseInput, now: 100, batchIndex: 5,
+      maxStaggerDelayMs: 0, mediumStaggerDelayMs: 0,
+      previousViewportEntryTime: 1_000 });
+    expect(plan).toMatchObject({
+      staggerLimitMs: 0, staggerDelayMs: 0, horizontalStaggerPx: 0,
+      startTime: 100, viewportEntryTime: 100,
+    });
+  });
+
+  it('gives replay due time precedence over optional visual entry effects', () => {
+    const plan = computeMessageMotionPlan({ ...baseInput, now: 100, batchIndex: 5,
+      entrySequence: 5, isReplay: true, previousViewportEntryTime: 1_000,
+      previousStaggerDelayMs: 150 });
+    expect(plan).toMatchObject({
+      staggerLimitMs: 0, staggerDelayMs: 0, horizontalStaggerPx: 0,
+      startTime: 100, viewportEntryTime: 100,
+    });
+  });
+
   it('keeps the first committed message immediate', () => {
     expect(computeMessageMotionPlan(baseInput)).toMatchObject({
       staggerDelayMs: 0,
@@ -180,8 +281,10 @@ describe('computeMessageMotionPlan', () => {
   });
 
   it('shares constant-velocity entry geometry for both scrolling directions', () => {
-    const scroll = computeMessageMotionPlan({ ...baseInput, batchIndex: 2 });
-    const reverse = computeMessageMotionPlan({ ...baseInput, mode: 'reverse', batchIndex: 2 });
+    const scroll = computeMessageMotionPlan({ ...baseInput, batchIndex: 2,
+      maxStaggerDelayMs: 1_000, mediumStaggerDelayMs: 1_000 });
+    const reverse = computeMessageMotionPlan({ ...baseInput, mode: 'reverse', batchIndex: 2,
+      maxStaggerDelayMs: 1_000, mediumStaggerDelayMs: 1_000 });
 
     expect(scroll).toMatchObject({
       horizontalStaggerPx: 80,
