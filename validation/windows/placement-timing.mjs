@@ -1003,14 +1003,24 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       phaseObservations.push({ phase: 'pause-resume',
         pauseStart: atPauseStart, paused: atPauseEnd,
         resumed: resumed.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 0 }));
       await page.locator('.player-wrapper').evaluate((element) => {
         element.style.maxWidth = '1000px';
       });
       await page.setViewportSize({ width: 1100, height: 700 });
-      await page.waitForTimeout(350);
+      await page.waitForFunction(({ width, height }) => {
+        const video = document.querySelector('video')?.getBoundingClientRect();
+        return video && video.width > width && video.height > height;
+      }, { width: resumed.exact.config.logicalWidth,
+        height: resumed.exact.config.logicalHeight }, { timeout: 5000 });
+      const grown = await issueSnapshot();
+      assertBacklogReflow(resumed.exact, grown.exact, TOKENS[17]);
+      phaseObservations.push({ phase: 'resize-expanded', config: grown.exact.config,
+        active: grown.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
+      await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 0 }));
       const reflow = await issueSnapshot();
       assertBacklogReflow(resumed.exact, reflow.exact, TOKENS[17]);
+      assert.equal(reflow.exact.config.laneSpacing, 0,
+        'Lane Gap update did not reach the resized renderer');
       phaseObservations.push({ phase: 'reflow', config: reflow.exact.config,
         active: reflow.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
       if (!forceFallback) {

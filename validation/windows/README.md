@@ -127,7 +127,8 @@ The speed phase routes 51 chat actions through the normal response parser to
 trigger Backlog injection, then four ordinary actions through the same parser
 to raise the burst detector without crowding the subsequent reflow. The fixture
 grows its video player from the initial 860px CSS cap to 1000px during resize
-and requires the logical video dimensions to grow. One Backlog message has
+and requires the logical video dimensions to grow before setting Lane Gap 0.
+One Backlog message has
 long Japanese text so its committed duration remains between the configured
 5–30 second bounds. The receipt keeps its serialized burst multiplier
 (Worker), committed travel distance, actual velocity, duration, geometric entry/exit, queue residence,
