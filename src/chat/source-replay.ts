@@ -90,25 +90,16 @@ export class ReplayChatSource extends ChatSource {
   private prefetchNextAllowedAt = 0;
   private prefetchGeneration = 0;
   private prefetchBudgetSuspended = false;
-  /**
-   * Drain all buffered replay messages regardless of their offset.
-   *
-   * Returns every unconsumed message currently in the buffer (sorted by
-   * offsetMs) and clears the buffer. Used by RuntimeManager when returning
-   * from a hidden tab — accumulated messages are routed through the
-   * backlog controller for gradual emission instead of bursting.
-   *
-   * Returns an empty array when the buffer has no pending messages.
-   */
+  /** Drain reached replay messages for the runtime's visibility backlog. */
   drainPendingMessages(): ChatMessage[] {
-    // Drain messages at or near current playback position + a small
-    // forward buffer (5s). Future messages remain in the buffer for
-    // normal flushUpTo() emission when their offset arrives, preserving
-    // time ordering instead of dumping all prefetched messages at once.
     const playback = this.getPlaybackSnapshot();
-    const currentOffsetMs = playback?.offsetMs;
-    const maxOffsetMs = currentOffsetMs != null ? currentOffsetMs + 5000 : undefined;
-    return this.replayBuffer.drainUpTo(maxOffsetMs);
+    if (!playback || playback.paused || (this.isPaused && !this.isVisibilityOnlyPause())) {
+      return [];
+    }
+    // Use the same due-time and late-drop policy as normal display. Prefetch
+    // remains buffered even though the backlog controller does not inspect
+    // videoOffsetMs before handing a message to the renderer.
+    return this.replayBuffer.flushUpTo(playback.offsetMs, this.replayBuffer.messageCount);
   }
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
@@ -171,7 +162,7 @@ export class ReplayChatSource extends ChatSource {
       const isPlaying = playback && !playback.paused;
       if (!this.isPaused && isPlaying) {
         this.markActivity();
-        this.flushReplayBuffer(playback.offsetMs);
+        this.flushReplayBuffer(playback);
       }
 
       const hasPendingFlushes = !this.replayBuffer.isEmpty;
@@ -468,7 +459,7 @@ export class ReplayChatSource extends ChatSource {
           // during the fetch, discard stale data to avoid emitting messages
           // from an outdated seek position.
           if (gen !== this.seekGeneration) return;
-          this.flushReplayBuffer(offsetMs);
+          this.flushReplayBuffer();
           if (seekSuccess) {
             this.startPrefetch();
           }
@@ -552,7 +543,7 @@ export class ReplayChatSource extends ChatSource {
         if (generation !== this.seekGeneration) {
           return false;
         }
-        this.flushReplayBuffer(currentOffsetMs);
+        this.flushReplayBuffer();
         return seeded;
       }
 
@@ -598,7 +589,7 @@ export class ReplayChatSource extends ChatSource {
         if (!fetched) break;
         batchesFetched += 1;
       }
-      this.flushReplayBuffer(currentOffsetMs);
+      this.flushReplayBuffer();
       return true;
     } catch (error: unknown) {
       if (generation !== this.seekGeneration) {
@@ -708,7 +699,7 @@ export class ReplayChatSource extends ChatSource {
       batchesFetched += 1;
     }
 
-    this.flushReplayBuffer(offsetMs);
+    this.flushReplayBuffer();
     return true;
   }
 
@@ -719,10 +710,13 @@ export class ReplayChatSource extends ChatSource {
    * visual clumping — same-timestamp messages spread naturally across
    * multiple frames (~16ms each) for a smooth stream.
    */
-  private flushReplayBuffer(currentOffsetMs: number): void {
-    if (!this.callback) return;
+  private flushReplayBuffer(playback = this.getPlaybackSnapshot()): void {
+    if (!this.callback || this.isPaused) return;
+    // Async callers re-read video time after fetches and seeks. The display
+    // loop passes its current snapshot to avoid a second DOM lookup per tick.
+    if (!playback || playback.paused) return;
 
-    const batch = this.replayBuffer.flushUpTo(currentOffsetMs, RAF_FLUSH_BATCH_SIZE);
+    const batch = this.replayBuffer.flushUpTo(playback.offsetMs, RAF_FLUSH_BATCH_SIZE);
 
     if (batch.length === 0) return;
     this.emitBatch(batch, false);

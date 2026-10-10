@@ -21,11 +21,9 @@ interface BufferedReplayMessage {
 
 const MAX_BUFFERED_REPLAY_MESSAGES = 3000;
 const MAX_BUFFERED_REPLAY_BYTES = 8 * 1024 * 1024;
-// H2: Widened from 300ms to 2000ms. The original 300ms tolerance dropped
-// messages after any frame hitch during replay playback, causing visible
-// chat gaps. At 2s, messages slightly behind position are still forwarded
-// to the renderer (which clips them to the current position anyway).
-const REPLAY_EMIT_TOLERANCE_MS = 2000;
+// A frame hitch may make a due message arrive slightly late. This allowance
+// applies only behind video time; future messages remain buffered until due.
+const REPLAY_LATE_TOLERANCE_MS = 2000;
 
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
@@ -163,8 +161,8 @@ export class ReplayBuffer {
       const next = this.buffer[this.bufferOffset];
       if (!next) break;
 
-      // Future messages — stop, they're not ready yet
-      if (next.offsetMs > currentOffsetMs + REPLAY_EMIT_TOLERANCE_MS) break;
+      // Prefetch may buffer future messages, but video time owns eligibility.
+      if (next.offsetMs > currentOffsetMs) break;
 
       // Advance offset instead of shift()
       this.bufferOffset++;
@@ -178,7 +176,7 @@ export class ReplayBuffer {
       }
 
       // Too far in the past — drop silently
-      if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
+      if (next.offsetMs < currentOffsetMs - REPLAY_LATE_TOLERANCE_MS) {
         continue;
       }
 
