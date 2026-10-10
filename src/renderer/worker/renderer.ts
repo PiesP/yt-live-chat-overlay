@@ -861,15 +861,41 @@ export class WorkerRenderer {
             }
             break;
           }
-          case 'snapshotMessages':
+          case 'snapshotMessages': {
+            const capturedNow = performance.now();
+            const origin = performance.timeOrigin;
+            const motionSnapshot = {
+              capturedAtEpochMs: origin + capturedNow,
+              effectiveNowEpochMs: origin + (this.pauseStartTime ?? capturedNow),
+              isPaused: this.pauseStartTime !== null,
+              viewportWidthPx: this.logicalWidth,
+              exitPaddingPx: this.config?.exitPaddingPx ?? DEFAULT_SETTINGS.exitPaddingPx,
+              activeMotions: this.activeMessages.map((message) => ({
+                id: message.id,
+                mode: message.motion?.mode ?? this.effectiveMotionMode,
+                startX: message.startX,
+                width: message.width,
+                height: message.height,
+                y: message.y,
+                laneIndex: message.laneIndex,
+                laneSlotCount: message.laneSlotCount,
+                durationMs: message.duration,
+                startEpochMs: origin + message.startTime + message.pausedDuration,
+                fadeStartEpochMs: origin + message.fadeStartTime + message.pausedDuration,
+                speedTier: message.speedTier,
+              })),
+            };
             self.postMessage({
               type: 'messageSnapshot',
               requestId: data.requestId,
+              epoch: this.currentEpoch,
               activeMessageIds: this.activeMessages.map((message) => message.id),
               pendingMessageIds: this.pendingQueue.map((message) => message.id),
               processedBatchSequence: this.processedBatchSequence,
+              motionSnapshot,
             });
             break;
+          }
           case 'destroy':
             this.handleDestroy();
             break;

@@ -826,6 +826,68 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it('attaches validated active motion only to the retained current-epoch message', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'active-motion', text: 'active motion',
+      content: [{ type: 'text', content: 'active motion' }],
+      timestamp: 1, kind: 'text', authorType: 'normal',
+    };
+    expect(manager.sendToWorker(message, message.id)).toBe(true);
+    await Promise.resolve();
+    const snapshot = manager.snapshotMessages(1_000);
+    const request = worker.postMessage.mock.calls
+      .map(([value]) => value as { type?: string; requestId?: number; epoch?: number })
+      .findLast((value) => value.type === 'snapshotMessages');
+    expect(request?.epoch).toBe(0);
+    const activeMotion = {
+      id: message.id, mode: 'scroll', startX: 640, width: 100, height: 20,
+      y: 20, laneIndex: 1, laneSlotCount: 1, durationMs: 5_000,
+      startEpochMs: 11_000, fadeStartEpochMs: 10_900, speedTier: 1,
+    };
+    worker.emitMessage({
+      type: 'messageSnapshot', requestId: request?.requestId, epoch: 0,
+      activeMessageIds: [message.id], pendingMessageIds: [], processedBatchSequence: 1,
+      motionSnapshot: {
+        capturedAtEpochMs: 10_600, effectiveNowEpochMs: 10_000,
+        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+        activeMotions: [activeMotion],
+      },
+    });
+    await expect(snapshot).resolves.toEqual([{
+      message, trackDrops: false,
+      activeMotion: {
+        ...activeMotion, epoch: 0,
+        capturedAtEpochMs: 10_600, effectiveNowEpochMs: 10_000,
+        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+      },
+    }]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('uses explicit ID-only requeue when the Worker snapshot epoch is stale', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'stale-motion', text: 'stale motion',
+      content: [{ type: 'text', content: 'stale motion' }],
+      timestamp: 1, kind: 'text', authorType: 'normal',
+    };
+    manager.sendToWorker(message, message.id);
+    await Promise.resolve();
+    const snapshot = manager.snapshotMessages(1_000);
+    const request = worker.postMessage.mock.calls
+      .map(([value]) => value as { type?: string; requestId?: number })
+      .findLast((value) => value.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot', requestId: request?.requestId, epoch: 1,
+      activeMessageIds: [message.id], pendingMessageIds: [], processedBatchSequence: 1,
+    });
+    await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
   it('keeps a receipted batch recoverable until stats or snapshot observes it', async () => {
     const { manager, worker } = initializedManager();
     const message: ChatMessage = {

@@ -639,6 +639,37 @@ describe('renderer worker protocol guards', () => {
     ).toBe(false);
   });
 
+  it('validates bounded, unique active motion for IDs in the same snapshot epoch', () => {
+    const motion = {
+      id: 'active', mode: 'scroll', startX: 640, width: 120, height: 24,
+      y: 20, laneIndex: 1, laneSlotCount: 1, durationMs: 5_000,
+      startEpochMs: 1_000, fadeStartEpochMs: 1_000, speedTier: 1,
+    };
+    const motionSnapshot = {
+      capturedAtEpochMs: 1_500, effectiveNowEpochMs: 1_400,
+      isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+      activeMotions: [motion],
+    };
+    const valid = validSnapshot({ epoch: 2, activeMessageIds: ['active'], motionSnapshot });
+    expect(isValidWorkerMessageSnapshot(valid)).toBe(true);
+    expect(isValidWorkerMessageSnapshot(validSnapshot({
+      activeMessageIds: ['active'], motionSnapshot,
+    }))).toBe(false);
+    expect(isValidWorkerMessageSnapshot({ ...valid,
+      motionSnapshot: { ...motionSnapshot, activeMotions: [motion, motion] },
+    })).toBe(false);
+    expect(isValidWorkerMessageSnapshot({ ...valid,
+      motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, id: 'unknown' }] },
+    })).toBe(false);
+    expect(isValidWorkerMessageSnapshot({ ...valid,
+      motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, durationMs: NaN }] },
+    })).toBe(false);
+    expect(isValidWorkerMessageSnapshot({ ...valid,
+      motionSnapshot: { ...motionSnapshot, effectiveNowEpochMs: 1_600 },
+    })).toBe(false);
+    expect(isValidWorkerMessageSnapshot(validSnapshot())).toBe(true);
+  });
+
   it('requires every snapshot identity field with safe integer counters', () => {
     for (const invalid of [
       { ...validSnapshot(), requestId: -1 },
