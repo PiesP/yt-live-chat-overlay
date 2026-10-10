@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObservabilityReporter } from "@util/observability";
 
 describe("ObservabilityReporter", () => {
@@ -7,6 +7,10 @@ describe("ObservabilityReporter", () => {
 
   beforeEach(() => {
     reporter = new ObservabilityReporter(false);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ═══════════════════════════════════════════════════════════
@@ -63,6 +67,60 @@ describe("ObservabilityReporter", () => {
     expect(metrics.totalRendered).toBe(3);
     expect(metrics.totalDropped).toBe(2);
     expect(metrics.dropRate).toBe(0.5);
+  });
+
+  it("counts batched pre-render drops in the received denominator", () => {
+    reporter.onMessagesReceived(3);
+    reporter.onMessagesDropped(3, "replay_late");
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 3,
+      totalDropped: 3,
+      dropRate: 1,
+    });
+
+    reporter.onMessagesReceived(2);
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 5,
+      totalDropped: 3,
+      dropRate: 0.6,
+    });
+  });
+
+  it("keeps an all-late batch in the new window after idle expiry without a HUD tick", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 60_000);
+
+    reporter.onMessagesReceived(3);
+    reporter.onMessagesDropped(3, "replay_late");
+
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 3,
+      totalDropped: 3,
+      dropRate: 1,
+    });
+  });
+
+  it("keeps ordinary drops in the new window after idle expiry", () => {
+    vi.useFakeTimers();
+    reporter.onMessageReceived();
+    reporter.onMessageDropped("queue_priority");
+    vi.setSystemTime(Date.now() + 60_000);
+
+    reporter.onMessageReceived();
+    reporter.onMessageDropped("queue_priority");
+
+    expect(reporter.getMetrics()).toMatchObject({
+      totalReceived: 2,
+      totalDropped: 2,
+      dropRate: 1,
+    });
+  });
+
+  it("ignores invalid received batch counts", () => {
+    for (const count of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      reporter.onMessagesReceived(count);
+    }
+    expect(reporter.getMetrics().totalReceived).toBe(0);
   });
 
   it("computes zero drop rate when no messages received", () => {
