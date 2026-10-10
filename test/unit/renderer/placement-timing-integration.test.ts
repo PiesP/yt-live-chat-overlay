@@ -76,8 +76,14 @@ class CoupledWorker {
 function makeMessage(id: string, offsetMs: number): ChatMessage {
   return {
     id, text: id, content: [{ type: 'text', content: id }], kind: 'text',
-    authorType: 'normal', timestamp: Date.now(), videoOffsetMs: offsetMs,
+    author: id, authorType: 'normal', timestamp: Date.now(), videoOffsetMs: offsetMs,
   };
+}
+
+function makeLiveMessage(id: string): ChatMessage {
+  const message = makeMessage(id, 0);
+  delete message.videoOffsetMs;
+  return message;
 }
 
 interface Harness {
@@ -92,12 +98,17 @@ interface Harness {
   frame(now: number): void;
   active(): Array<{
     id: string; laneIndex: number; startTime: number; duration: number;
-    x: number; y: number; width: number; motion: NonNullable<CanvasMessage['motion']>;
+    x: number; y: number; width: number; height: number;
+    motion: NonNullable<CanvasMessage['motion']>;
   }>;
   close(): void;
 }
 
-function createHarness(mode: 'main' | 'worker', clock: { now: number }): Harness {
+function createHarness(
+  mode: 'main' | 'worker',
+  clock: { now: number },
+  settingsOverrides: Partial<OverlaySettings> = {}
+): Harness {
   const settings: OverlaySettings = {
     ...DEFAULT_SETTINGS,
     fontSize: 20, speedPxPerSec: 350, laneSpacing: 0,
@@ -106,6 +117,7 @@ function createHarness(mode: 'main' | 'worker', clock: { now: number }): Harness
     staggerMaxDelayMs: 100, staggerMediumDelayMs: 50,
     scrollDurationMinMs: 5_000, scrollDurationMaxMs: 30_000,
     exitPaddingPx: 100, headwayGapRatio: 0.08,
+    ...settingsOverrides,
   };
   const mainContext = makeContext();
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() =>
@@ -185,7 +197,7 @@ function createHarness(mode: 'main' | 'worker', clock: { now: number }): Harness
           return {
             id: message.id, laneIndex: message.laneIndex, startTime: message.startTime,
             duration: message.duration, x: message.x, y: message.y,
-            width: message.width, motion: message.motion,
+            width: message.width, height: message.height, motion: message.motion,
           };
         });
       }
@@ -195,7 +207,8 @@ function createHarness(mode: 'main' | 'worker', clock: { now: number }): Harness
         return {
           id: message.message.id ?? '', laneIndex: message.laneIndex,
           startTime: message.startTime, duration: message.duration,
-          x: message.x, y: message.y, width: message.width, motion: message.motion,
+          x: message.x, y: message.y, width: message.width, height: message.height,
+          motion: message.motion,
         };
       });
     },
@@ -211,7 +224,7 @@ function createHarness(mode: 'main' | 'worker', clock: { now: number }): Harness
   return harness;
 }
 
-describe('Replay placement through source, runtime and renderer', () => {
+describe('Placement through source, runtime and renderer', () => {
   let harness: Harness | null = null;
   const clock = { now: 10_000 };
 
@@ -335,4 +348,107 @@ describe('Replay placement through source, runtime and renderer', () => {
     expect(worker.drops).toBe(main.drops);
     expect(worker.drops).toBe(0);
   });
+
+  it.each(['main', 'worker'] as const)(
+    'retains the %s live entry cursor after a frame boundary',
+    async (mode) => {
+      vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+      vi.spyOn(Math, 'random').mockReturnValue(0.25);
+      harness = createHarness(mode, clock);
+      harness.renderer.setReplayMode(false);
+      harness.renderer.addMessage(makeLiveMessage('seed-one'));
+      harness.renderer.addMessage(makeLiveMessage('seed-two'));
+      await Promise.resolve();
+      harness.frame(10_000);
+      const seed = harness.active().find((message) => message.id === 'seed-two');
+      expect(seed).toBeDefined();
+      expect(seed?.motion.viewportEntryTime).toBeGreaterThan(10_000);
+
+      clock.now = 10_001;
+      harness.renderer.addMessage(makeLiveMessage('next-frame'));
+      await Promise.resolve();
+      harness.frame(10_001);
+      const next = harness.active().find((message) => message.id === 'next-frame');
+      expect(next).toBeDefined();
+      expect(next?.motion.viewportEntryTime).toBeGreaterThanOrEqual(
+        seed?.motion.viewportEntryTime ?? Number.POSITIVE_INFINITY
+      );
+      expect(next?.motion.viewportEntryTime).toBeLessThanOrEqual(10_001 + 98);
+      expect(next?.motion.staggerLimitMs).toBe(98);
+      expect(harness.active().length).toBe(3);
+    }
+  );
+
+  const pressureCases = [
+    { depth: 29, limit: 52 }, { depth: 30, limit: 50 },
+    { depth: 31, limit: 48 }, { depth: 49, limit: 3 },
+    { depth: 50, limit: 0 }, { depth: 51, limit: 0 },
+  ];
+
+  it.each(pressureCases.flatMap(({ depth, limit }) =>
+    (['main', 'worker'] as const).map((mode) => ({ mode, depth, limit }))
+  ))('bounds $mode live entry at queue depth $depth', async ({ mode, depth, limit }) => {
+    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+    vi.spyOn(Math, 'random').mockReturnValue(0.25);
+    harness = createHarness(mode, clock);
+    harness.renderer.setReplayMode(false);
+    for (let index = 0; index < depth; index++) {
+      harness.renderer.addMessage(makeLiveMessage(`live-${index}`));
+    }
+    await Promise.resolve();
+    harness.frame(10_000);
+
+    const active = harness.active();
+    expect(active.length).toBeGreaterThan(0);
+    expect(active.length).toBeLessThanOrEqual(32);
+    const first = active.find((message) => message.id === 'live-0');
+    expect(first?.motion.staggerLimitMs).toBe(limit);
+    expect(first?.motion.viewportEntryTime).toBeGreaterThanOrEqual(10_000);
+    expect(first?.motion.viewportEntryTime).toBeLessThanOrEqual(10_000 + limit);
+    for (const message of active) {
+      const plan = message.motion;
+      const horizontalDelay = plan.horizontalStaggerPx / plan.actualVelocityPxPerMs;
+      expect(plan.staggerLimitMs).toBe(limit);
+      expect(plan.staggerDelayMs + horizontalDelay).toBeLessThanOrEqual(limit + 0.001);
+      if (limit === 0) {
+        expect(plan.staggerDelayMs).toBe(0);
+        expect(plan.horizontalStaggerPx).toBe(0);
+      }
+    }
+    for (const [index, left] of active.entries()) {
+      for (const right of active.slice(index + 1)) {
+        if (left.y + left.height <= right.y || right.y + right.height <= left.y) continue;
+        expect(motionPlansCollide(left.motion, right.motion, 0.08, 10_000)).toBe(false);
+      }
+    }
+
+    if (depth > 32) {
+      expect(harness.renderer.getQueueLength()).toBeGreaterThanOrEqual(depth - 32);
+      harness.frame(30_000);
+      expect(harness.active().some((message) => message.id === 'live-32')).toBe(true);
+    }
+  });
+
+  it.each(['main', 'worker'] as const)(
+    'removes temporal and horizontal live staggering when %s delay settings are zero',
+    async (mode) => {
+      vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+      vi.spyOn(Math, 'random').mockReturnValue(0.25);
+      harness = createHarness(mode, clock, {
+        staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
+      });
+      harness.renderer.setReplayMode(false);
+      harness.renderer.addMessage(makeLiveMessage('zero-one'));
+      harness.renderer.addMessage(makeLiveMessage('zero-two'));
+      await Promise.resolve();
+      harness.frame(10_000);
+      for (const message of harness.active()) {
+        expect(message.motion.staggerLimitMs).toBe(0);
+        expect(message.motion.staggerDelayMs).toBe(0);
+        expect(message.motion.horizontalStaggerPx).toBe(0);
+        expect(message.motion.viewportEntryTime).toBe(message.startTime);
+      }
+      expect(harness.active().length).toBe(2);
+    }
+  );
 });
