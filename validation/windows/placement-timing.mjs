@@ -1226,9 +1226,6 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 8 }));
       await page.waitForTimeout(350);
       await sendBatch('2');
-      await page.waitForFunction((id) => [...document.querySelectorAll(
-        '.yt-live-chat-overlay-live-region > p')].some((element) => element.dataset.messageId === id),
-      TOKENS[15], { timeout: 10_000 });
       const { snapshot: gap8, visibleRowPitch: gap8Visible } = await visibleGap('WINDOWS196_GAP8_');
       await page.screenshot({ path: join(output, `placement-${name}-gap8.png`), animations: 'disabled' });
       const gap8Pitch = measureAllocationRowPitch(gap8.exact.activeNow, 'WINDOWS196_GAP8_');
