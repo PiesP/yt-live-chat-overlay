@@ -130,6 +130,12 @@ function installProbeRuntime(options) {
           if (ids.has(message.id)) state.ingress[message.id] ??= epochNow();
         }
       }
+      if (event.data?.type === 'ytPlacementResetSamples' && state.exact) {
+        state.exact.frames.length = 0;
+        state.exact.drains.length = 0;
+        state.exact.active.length = 0;
+        state.exact.samplesScope = 'congestion phase';
+      }
       if (event.data?.type === 'ytPlacementFlush') {
         scope.postMessage({ type: 'ytPlacementProbe', requestId: event.data.requestId, sample: {
           frames: state.frames, bounds: state.bounds, firstEntry: state.firstEntry,
@@ -273,14 +279,7 @@ function attachWorkerRendererProbe(renderer) {
     const result = nativeActivate.call(this, message, ...args);
     if (isFixture(message.id)) {
       const active = this.activeMessages.find((entry) => entry.id === message.id);
-      bounded(exact.dispositions, { id: message.id, kind: 'activated',
-        queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
-        atEpochMs: epochNow(), laneIndex: active?.laneIndex ?? null,
-        startX: active?.startX ?? null, durationMs: active?.duration ?? null,
-        pendingDepth: this.pendingQueue.length,
-        staggerDelayMs: active?.motion?.staggerDelayMs ?? null,
-        isScrolling: active?.motion?.isScrolling ?? null,
-        geometricEntryAtEpochMs: active?.motion
+      const geometricEntryAtEpochMs = active?.motion
           ? performance.timeOrigin + active.motion.viewportEntryTime
           : (() => {
             if (!active || !this.config || !Number.isFinite(this.logicalWidth) ||
@@ -296,7 +295,19 @@ function attachWorkerRendererProbe(renderer) {
               : Math.max(0, active.startX - this.logicalWidth);
             return performance.timeOrigin + active.startTime + active.pausedDuration +
               (distance === 0 ? 0 : distance / velocity);
-          })(),
+          })();
+      const placementWaitMs = args[1]?.waitMs ?? 0;
+      bounded(exact.dispositions, { id: message.id, kind: 'activated',
+        queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
+        atEpochMs: epochNow(), laneIndex: active?.laneIndex ?? null,
+        startX: active?.startX ?? null, durationMs: active?.duration ?? null,
+        pendingDepth: this.pendingQueue.length,
+        staggerDelayMs: active?.motion?.staggerDelayMs ??
+          Math.max(0, active.startTime - args[0] - placementWaitMs),
+        isScrolling: active?.motion?.isScrolling ?? null,
+        geometricEntryAtEpochMs, placementWaitMs,
+        optionalEntryDelayMs: geometricEntryAtEpochMs === null ? null
+          : geometricEntryAtEpochMs - performance.timeOrigin - args[0] - placementWaitMs,
         geometricEntryProvenance: active?.motion ? 'committed motion plan' : 'committed baseline path' });
       queuedAt.delete(message.id);
     }
@@ -701,6 +712,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     if (transition === 'congestion') {
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ maxConcurrentMessages: 30,
         queueMaxSize: 50, staggerMaxDelayMs: 200, staggerMediumDelayMs: 80 }));
+      await page.evaluate(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
+        .worker.postMessage({ type: 'ytPlacementResetSamples' }));
       await sendBatch('2');
       await page.waitForTimeout(500);
       const congested = await workerSnapshot();
@@ -709,8 +722,9 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assert.equal(congested.config.queueMaxSize, 50);
       assert(peakPending >= 50, `No-stagger pressure was not reached: pending ${peakPending}`);
       assert(congested.dispositions.some((entry) => entry.kind === 'activated' &&
-        entry.pendingDepth >= 50 && entry.staggerDelayMs === 0),
-      'No activation used the queue-pressure zero-stagger path');
+        entry.pendingDepth >= 50 && entry.staggerDelayMs === 0 &&
+        Math.abs(entry.optionalEntryDelayMs) < 1),
+      'Queue pressure did not remove both temporal and geometric entry delay');
       assert(congested.drains.every((drain) => drain.activeAfter <= 30));
       phaseObservations.push({ phase: 'congested', config: congested.config, peakPending,
         zeroStaggerActivations: congested.dispositions.filter((entry) =>

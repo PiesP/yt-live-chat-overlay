@@ -109,7 +109,9 @@ actions. Separate installed Worker pages exercise top and bottom placement,
 system reduced motion on/off and its user override on/off, safe-zone/font/lane-density
 shrink and expansion, and a queue cap of 50 with active cap of 30. The
 congestion page requires an observed pending depth of at least 50 and an
-activation with zero stagger at that depth. A single 50-message batch uses
+activation with zero temporal and geometric entry delay at that depth.
+Exact frame/drain samples reset immediately before this bounded pressure batch
+to prevent initial idle frames from consuming the sample cap. A single 50-message batch uses
 unique fixture authors and remains within the runtime live-batch boundary; the setting itself does not prove
 queue pressure. The translation page sends one bounded test-only
 `updateTranslation` through the production Worker protocol for a fixture ID,
