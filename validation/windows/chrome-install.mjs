@@ -138,7 +138,7 @@ export function selectPublicSeekTarget({ currentTime, start, end }) {
   return Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
-async function readPublicPageState(page) {
+export async function readPublicPageState(page) {
   return page.evaluate(() => {
     const initialData = window.ytInitialData;
     let renderer = initialData?.contents?.twoColumnWatchNextResults
@@ -159,13 +159,13 @@ async function readPublicPageState(page) {
         }
       }
     }
-    const href = location.href;
+    const hostname = new URL(location.href).hostname;
     return {
       chatMode: renderer ? renderer.isReplay === true ? 'replay' : 'live' : 'unknown',
       chatRendererFound: Boolean(renderer),
       playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
-      loginRedirect: /accounts\.google\.com/.test(href),
-      consentRedirect: /consent\.(youtube|google)\.com/.test(href),
+      loginRedirect: hostname === 'accounts.google.com',
+      consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com',
     };
   }).catch(() => ({ chatMode: 'unknown', chatRendererFound: false,
     playabilityStatus: null, loginRedirect: false, consentRedirect: false }));

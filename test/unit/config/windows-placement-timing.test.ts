@@ -59,7 +59,7 @@ describe('Windows placement timing probe', () => {
   });
 
   it.each([1, 2])('associates a cached bitmap with viewport bounds at scale %s', (scale) => {
-    const listeners: Record<string, (event: { data: unknown }) => void> = {};
+    const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
     const messages: Array<{ type: string; sample?: { firstEntry: Record<string, number>; bounds: unknown[] } }> = [];
     const overlay = { width: 640 * scale, height: 360 * scale };
     const bitmap = { width: 100, height: 24 };
@@ -79,7 +79,7 @@ describe('Windows placement timing probe', () => {
       OffscreenCanvasRenderingContext2D: FakeContext,
       performance: { timeOrigin: 1000, now: () => now++ },
       requestAnimationFrame: (callback: (time: number) => void) => callback(0),
-      addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
+      addEventListener: (type: string, listener: (event: { origin: string; data: unknown }) => void) => {
         listeners[type] = listener;
       },
       postMessage: (message: { type: string; sample?: { firstEntry: Record<string, number>; bounds: unknown[] } }) => {
@@ -87,8 +87,8 @@ describe('Windows placement timing probe', () => {
       },
     };
     runInNewContext(workerProbePrelude(['WINDOWS193_SHORT']), sandbox);
-    listeners.message?.({ data: { type: 'init', canvas: overlay } });
-    listeners.message?.({ data: { type: 'addMessages', messages: [{ id: 'WINDOWS193_SHORT' }] } });
+    listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
+    listeners.message?.({ origin: '', data: { type: 'addMessages', messages: [{ id: 'WINDOWS193_SHORT' }] } });
     sandbox.requestAnimationFrame(() => {
       const cache = new FakeContext(bitmap);
       cache.fillText('WINDOWS193_SHORT', 0, 0);
@@ -99,7 +99,9 @@ describe('Windows placement timing probe', () => {
       display.globalAlpha = 1;
       display.drawImage(bitmap, 500, 20, 100, 24);
     });
-    listeners.message?.({ data: { type: 'ytPlacementFlush' } });
+    listeners.message?.({ origin: 'https://attacker.example', data: { type: 'ytPlacementFlush' } });
+    expect(messages).toHaveLength(0);
+    listeners.message?.({ origin: '', data: { type: 'ytPlacementFlush' } });
 
     const sample = messages.at(-1)?.sample;
     expect(sample?.firstEntry.WINDOWS193_SHORT).toBeGreaterThan(1000);
@@ -124,7 +126,7 @@ describe('Windows placement timing probe', () => {
     expect(workerProbeSuffix(`${source}\n//# sourceMappingURL=renderer.js.map`)).toBeNull();
     const suffix = workerProbeSuffix(source);
     expect(suffix).toContain('(sample)');
-    const listeners: Record<string, (event: { data: unknown }) => void> = {};
+    const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
     const messages: Array<{ sample?: { exact?: {
       drops: Record<string, number>;
       drains: unknown[]; frames: unknown[]; dispositions: Array<{ queueResidenceMs: number }>;
@@ -133,7 +135,7 @@ describe('Windows placement timing probe', () => {
     const sandbox = {
       performance: { timeOrigin: 1000, now: () => now++ },
       requestAnimationFrame: (_callback: (time: number) => void) => 1,
-      addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
+      addEventListener: (type: string, listener: (event: { origin: string; data: unknown }) => void) => {
         listeners[type] = listener;
       },
       postMessage: (message: { sample?: { exact?: {
@@ -146,7 +148,7 @@ describe('Windows placement timing probe', () => {
     runInNewContext(`sample.enqueueMessage({ id: 'WINDOWS193_SHORT' }); sample.renderFrame();
       sample.recordDrop({ id: 'WINDOWS193_DROP' }, 'reflow_capacity');
       sample.recordDrop({ id: 'WINDOWS193_UNTRACKED', trackDrops: false }, 'oversized');`, sandbox);
-    listeners.message?.({ data: { type: 'ytPlacementFlush' } });
+    listeners.message?.({ origin: '', data: { type: 'ytPlacementFlush' } });
     const exact = messages.at(-1)?.sample?.exact;
     expect(exact?.drains).toHaveLength(1);
     expect(exact?.frames).toHaveLength(1);

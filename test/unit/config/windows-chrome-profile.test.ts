@@ -4,6 +4,7 @@
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as chromeInstallModule from '../../../validation/windows/chrome-install.mjs';
@@ -11,7 +12,7 @@ import * as chromeInstallModule from '../../../validation/windows/chrome-install
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.mjs';
 
 const { cleanupChromeInstallation, enableDeveloperMode, readOwnedBrowserProcessId,
-  requireLiveSuccess, selectPublicSeekTarget } =
+  readPublicPageState, requireLiveSuccess, selectPublicSeekTarget } =
   chromeInstallModule;
 
 const roots: string[] = [];
@@ -31,6 +32,21 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it.each([
+    ['https://accounts.google.com/ServiceLogin', true, false],
+    ['https://consent.youtube.com/', false, true],
+    ['https://consent.google.com/', false, true],
+    ['https://www.youtube.com/watch?v=fixture&next=https://accounts.google.com/', false, false],
+    ['https://www.youtube.com/watch?v=fixture&next=https://consent.youtube.com/', false, false],
+    ['https://accounts.google.com.attacker.example/', false, false],
+    ['https://consent.youtube.com.attacker.example/', false, false],
+  ])('classifies redirect hosts without matching URL content: %s', async (href, loginRedirect, consentRedirect) => {
+    const page = { evaluate: async (read: () => unknown) => runInNewContext(`(${read})()`, {
+      window: {}, location: { href }, URL,
+    }) };
+    expect(await readPublicPageState(page)).toMatchObject({ loginRedirect, consentRedirect });
+  });
+
   it('selects a real seek movement only from a usable public media range', () => {
     expect(selectPublicSeekTarget({ currentTime: 10, start: 0, end: 100 })).toBe(13);
     expect(selectPublicSeekTarget({ currentTime: 99, start: 0, end: 100 })).toBe(96);

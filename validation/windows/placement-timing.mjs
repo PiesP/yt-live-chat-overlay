@@ -125,6 +125,8 @@ function installProbeRuntime(options) {
   });
   if (options.worker) {
     scope.addEventListener('message', (event) => {
+      // Dedicated Worker messages come only from their owner and have an empty origin.
+      if (event.origin !== '') return;
       if (event.data?.type === 'init') state.canvas = event.data.canvas;
       if (event.data?.type === 'addMessages') {
         for (const message of event.data.messages ?? []) {
