@@ -826,7 +826,7 @@ export const SETTINGS_UI_STYLES = `
         border-top: 1px solid ${uiColors.border};
       }
 
-      /* ── Two-message Canvas settings preview ── */
+      /* ── Two-row Canvas settings preview ── */
       .yt-chat-overlay-settings-font-preview {
         background: ${uiColors.background};
         border: 1px solid ${uiColors.border};
