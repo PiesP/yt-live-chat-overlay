@@ -1440,6 +1440,58 @@ describe('CanvasRenderer', () => {
     expect(await runDrain(true)).toEqual(await runDrain(false));
   });
 
+  it('bounds failed sync attempts and eventually reaches a placeable message beyond the prefix', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 1280, height: 720 };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    for (let index = 0; index < 80; index++) {
+      internals.pendingQueue.enqueue(makeMessage(`${index}`, 'bounded'), 0);
+    }
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => ({
+      placed: message.id === '79', oversized: false,
+    }));
+    for (let frame = 0; frame < 3; frame++) {
+      const before = internals.placeQueuedMessage.mock.calls.length;
+      internals.drainQueue(frame * 16);
+      expect(internals.placeQueuedMessage.mock.calls.length - before).toBeLessThanOrEqual(32);
+    }
+    expect(internals.pendingQueue.toArray()).toHaveLength(79);
+    expect(internals.pendingQueue.toArray().some((message) => message.id === '79')).toBe(false);
+    renderer.destroy();
+  });
+
+  it('counts failed collision work against the time budget and lets a lower priority group progress', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 1280, height: 720 };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    for (let index = 0; index < 40; index++) {
+      internals.pendingQueue.enqueue({ ...makeMessage(`paid-${index}`, 'paid'), kind: 'superchat' }, 100);
+    }
+    internals.pendingQueue.enqueue(makeMessage('normal', 'normal'), 0);
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => {
+      clock += 5;
+      return { placed: message.id === 'normal', oversized: false };
+    });
+    internals.drainQueue(0);
+    expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
+    expect(internals.placeQueuedMessage.mock.calls[0]?.[0].id).toBe('paid-0');
+    internals.drainQueue(16);
+    expect(internals.placeQueuedMessage.mock.calls[1]?.[0].id).toBe('normal');
+    expect(internals.pendingQueue.toArray()).toHaveLength(40);
+    renderer.destroy();
+  });
+
   it('aborts async drain after destruction when the shared 8ms budget yields', async () => {
     (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
       width: 1280,

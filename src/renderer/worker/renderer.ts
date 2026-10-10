@@ -38,6 +38,12 @@ import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limi
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { resetBidiLayoutCaches, type TextDirection } from '@renderer/canvas/bidi-layout';
+import {
+  DRAIN_MAX_ATTEMPTS,
+  DRAIN_WORK_BUDGET_MS,
+  nextDrainPriority,
+  selectDrainCandidates,
+} from '@renderer/canvas/drain-batch';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
@@ -76,6 +82,7 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
 import { getAuthorNameMaxWidth, getRegularCardInsets } from '@renderer/layout/card-layout';
+import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   buildLaneHeap,
@@ -419,6 +426,9 @@ function renderPaidCardWorker(
 }
 
 export class WorkerRenderer {
+  private readonly entryPacing = new EntryPacingState();
+  private readonly drainCursors = new Map<number, WorkerMessage>();
+  private drainResumePriority: number | undefined;
   private ctx: OffscreenCanvasRenderingContext2D | null = null;
   private canvas: OffscreenCanvas | null = null;
   private config: WorkerConfig | null = null;
@@ -1131,6 +1141,7 @@ export class WorkerRenderer {
           (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
         );
     WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
+    this.entryPacing.shift(pausedMs);
     this.pauseStartTime = null;
     this.pauseIncludesUserPause = false;
   }
@@ -1185,6 +1196,9 @@ export class WorkerRenderer {
   }
 
   private handleDestroy(): void {
+    this.entryPacing.clear();
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
     this.isDestroyed = true;
     this.fetchGeneration++;
     for (const controller of this.fetchControllers) controller.abort();
@@ -1225,6 +1239,9 @@ export class WorkerRenderer {
    * preserving decoded-image and text-bitmap caches.
    */
   private handleClearState(epoch = this.currentEpoch): void {
+    this.entryPacing.clear();
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
     this.clearQueuedOwnedAssets();
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
@@ -1304,10 +1321,18 @@ export class WorkerRenderer {
     this.collidedLanes.clear();
     this.activeMessagesByLane.clear();
     this.activeMessages.length = 0;
+    this.entryPacing.clear();
     for (const placement of reconciled.placements) {
       const message = placement.message;
       applyReflowMotion(message, placement.motion, now);
       message.motion = placement.motion;
+      this.entryPacing.commit(
+        (message as ActiveMessage & { priority?: number }).priority ?? 0,
+        message.speedTier,
+        now,
+        config.isReplayMode,
+        placement.motion
+      );
       message.laneIndex = placement.laneIndex;
       message.laneSlotCount = placement.slotCount;
       message.y = placement.y;
@@ -1463,6 +1488,8 @@ export class WorkerRenderer {
         mode,
         now,
         batchIndex,
+        ...this.entryPacing.input(msg.priority, speedTier, now, this.config.isReplayMode),
+        isReplay: this.config.isReplayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.length,
         staggerSample: WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
@@ -1508,6 +1535,7 @@ export class WorkerRenderer {
       ghostText: getDisplayText(msg.content ?? []),
       content: msg.content ?? [],
     };
+    Object.assign(am, { priority: msg.priority, isBacklog: msg.isBacklog });
     if (msg.burstSpeedMultiplier !== undefined) am.burstSpeedMultiplier = msg.burstSpeedMultiplier;
     if (msg.trackDrops !== undefined) am.trackDrops = msg.trackDrops;
     if (msg.authorType !== undefined) am.authorType = msg.authorType;
@@ -1535,6 +1563,7 @@ export class WorkerRenderer {
       motion.horizontalStaggerPx
     );
     this.activeMessages.push(am);
+    this.entryPacing.commit(msg.priority, speedTier, now, this.config.isReplayMode, motion);
     this.totalRendered = Math.min(Number.MAX_SAFE_INTEGER, this.totalRendered + 1);
     // Register in per-lane index for O(lanes) collision checks (Issue 7).
     addMessageToLaneIndex(this.activeMessagesByLane, am, slotCount);
@@ -2057,6 +2086,8 @@ export class WorkerRenderer {
       mode: this.effectiveMotionMode,
       now,
       batchIndex,
+      ...this.entryPacing.input(entry.priority, speedTier, now, this.config.isReplayMode),
+      isReplay: this.config.isReplayMode,
       previousStaggerDelayMs,
       queueDepth: this.pendingQueue.length,
       staggerSample,
@@ -2087,13 +2118,33 @@ export class WorkerRenderer {
   private drainQueue(now: number, width: number, height: number): void {
     if (!this.config) return;
     this.sortPendingQueueIfNeeded();
+    const t0 = performance.now();
+    const candidates = selectDrainCandidates(
+      this.pendingQueue,
+      (entry) => entry.priority,
+      this.drainCursors,
+      DRAIN_MAX_ATTEMPTS,
+      this.drainResumePriority
+    );
+    this.drainResumePriority = undefined;
+    let attempts = 0;
+    let lastPriority = 0;
     let batchIndex = 0;
     let staggerCursorMs = 0;
     const committed = new Set<WorkerMessage>();
-    for (let i = 0; i < this.pendingQueue.length; i++) {
-      const entry = this.pendingQueue[i];
-      if (!entry) continue;
+    for (const entry of candidates) {
       if (this.activeMessages.length >= this.config.maxConcurrentMessages) break;
+      if (attempts > 0 && performance.now() - t0 >= DRAIN_WORK_BUDGET_MS) {
+        this.drainResumePriority = nextDrainPriority(
+          candidates,
+          (entry) => entry.priority,
+          lastPriority
+        );
+        break;
+      }
+      this.drainCursors.set(entry.priority, entry);
+      lastPriority = entry.priority;
+      attempts++;
       const speedTier = getSpeedTier(entry, this.config);
       const requiredSlots = Math.max(1, Math.ceil(entry.height / this.laneHeight));
       if (requiredSlots > this.numLanes) {

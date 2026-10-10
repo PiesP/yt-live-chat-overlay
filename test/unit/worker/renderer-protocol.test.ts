@@ -136,6 +136,29 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
 }
 
 describe('Worker reservation safety', () => {
+  it('budgets failed placement work and rotates through all priority groups', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const renderer = initializeRenderer();
+    const internals = renderer as unknown as {
+      pendingQueue: WorkerMessage[];
+      drainCursors: Map<number, WorkerMessage>;
+      findPlacement: ReturnType<typeof vi.fn>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    internals.pendingQueue.push(...[200, 100, 0].map((priority) => makeWorkerMessage({ id: `priority-${priority}`, priority })));
+    internals.findPlacement = vi.fn(() => { clock += 2; return null; });
+    internals.drainQueue(0, 640, 360);
+    expect(internals.findPlacement.mock.calls.map((args) => args[1])).toHaveLength(2);
+    // Pending identity cursors, rather than dequeues, retain every failure.
+    expect(internals.pendingQueue).toHaveLength(3);
+    expect([...internals.drainCursors.keys()]).toEqual([200, 100]);
+    internals.drainQueue(16, 640, 360);
+    expect(internals.findPlacement).toHaveBeenCalledTimes(4);
+    expect(internals.drainCursors.get(0)?.id).toBe('priority-0');
+    expect(internals.pendingQueue).toHaveLength(3);
+  });
+
   function setup(mode: 'scroll' | 'reverse' | 'top' = 'scroll', reducedMotion = false) {
     vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(Math, 'random').mockReturnValue(0);

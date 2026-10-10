@@ -12,14 +12,10 @@
  * Extends RendererBase for shared state machine, rate limiting, burst
  * detection, and lane allocation.
  *
- * Stagger delay: messages in the same drainQueue batch are given an
- * exponentially-distributed time offset (0-200ms) before they start
- * scrolling. This spreads simultaneous entries across time, preventing
- * the visual clumping that occurs when multiple messages enter from the
- * right edge in the same frame. During the stagger period the message
- * sits at the start position (right edge) but is not rendered. The lane
- * allocator reservation is unaffected — the lane is locked from the
- * actual commit time, not the visual start time.
+ * Temporal and horizontal entry effects share one pressure-dependent window.
+ * Instance-owned priority/tier cursors carry geometric entry across frames;
+ * replay bypasses optional staggering. Collision checks and lane commits use
+ * the exact plan subsequently drawn, including future starts and entry offsets.
  */
 
 import type { Overlay } from '@app/overlay';
@@ -46,8 +42,12 @@ import {
 import {
   commitDrainBatch,
   createDrainBatch,
+  DRAIN_MAX_ATTEMPTS,
+  DRAIN_WORK_BUDGET_MS,
   type DrainBatch,
+  nextDrainPriority,
   recordDrainResult,
+  selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
 import { addMessageToLaneIndex, fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
@@ -75,6 +75,7 @@ import {
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
 } from '@renderer/constants';
+import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
 import {
   applyReflowMotion,
@@ -137,6 +138,9 @@ interface FallbackIngressEntry {
 }
 
 export class CanvasRenderer extends RendererBase {
+  private readonly entryPacing = new EntryPacingState();
+  private readonly drainCursors = new Map<number, ChatMessage>();
+  private drainResumePriority: number | undefined;
   private canvas: HTMLCanvasElement | null = null;
   private statusActionButton: HTMLButtonElement | null = null;
   /** Set to true during onDestroy() — checked after async awaits in drainQueueAsync. */
@@ -613,10 +617,18 @@ export class CanvasRenderer extends RendererBase {
     this.laneAllocator.reset(dimensions, now);
     this.activeMessagesByLane.clear();
     this.activeMessages.length = 0;
+    this.entryPacing.clear();
     for (const placement of reconciled.placements) {
       const message = placement.message;
       applyReflowMotion(message, placement.motion, now);
       message.motion = placement.motion;
+      this.entryPacing.commit(
+        CanvasRenderer.getMessagePriority(message.message),
+        message.speedTier,
+        now,
+        this.replayMode,
+        placement.motion
+      );
       message.laneIndex = placement.laneIndex;
       message.slotCount = placement.slotCount;
       message.y = placement.y;
@@ -1021,6 +1033,8 @@ export class CanvasRenderer extends RendererBase {
       const msg = this.pendingQueue.dequeue();
       if (msg) messages.push(msg);
     }
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
     return messages;
   }
 
@@ -1028,11 +1042,14 @@ export class CanvasRenderer extends RendererBase {
   override clearActiveMessages(): void {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
+    this.entryPacing.clear();
   }
 
   /** Clear pending queue (used by overlay refresh). */
   override clearPendingQueue(): void {
     this.pendingQueue.clear();
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
   }
 
   /**
@@ -1500,14 +1517,36 @@ export class CanvasRenderer extends RendererBase {
       // single frame), dequeued messages beyond the limit were permanently lost
       // — removed from the queue but never added to retryQueue.
       //
-      // Now, we snapshot the queue via toArray(), try to place every message,
+      // Snapshot the queue and try a bounded, rotating set of candidates,
       // and only remove (removeAll) those that were successfully placed.
       // Messages that fail placement stay in the queue for the next frame.
       // This guarantees zero message loss from internal queue management.
-      const batch = createDrainBatch(this.pendingQueue.toArray());
+      const batch = createDrainBatch(
+        selectDrainCandidates(
+          this.pendingQueue.toArray(),
+          CanvasRenderer.getMessagePriority,
+          this.drainCursors,
+          DRAIN_MAX_ATTEMPTS,
+          this.drainResumePriority
+        )
+      );
+      this.drainResumePriority = undefined;
+      let attempts = 0;
+      let lastPriority = 0;
 
       for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
+        if (attempts > 0 && performance.now() - t0 >= DRAIN_WORK_BUDGET_MS) {
+          this.drainResumePriority = nextDrainPriority(
+            batch.candidates,
+            CanvasRenderer.getMessagePriority,
+            lastPriority
+          );
+          break;
+        }
+        lastPriority = CanvasRenderer.getMessagePriority(msg);
+        this.drainCursors.set(lastPriority, msg);
+        attempts++;
 
         const result = this.placeQueuedMessage(
           msg,
@@ -1544,11 +1583,18 @@ export class CanvasRenderer extends RendererBase {
       const dims = this.overlay.getDimensions();
       if (!dims) return;
 
-      const batch = createDrainBatch(this.pendingQueue.toArray());
+      const batch = createDrainBatch(
+        selectDrainCandidates(
+          this.pendingQueue.toArray(),
+          CanvasRenderer.getMessagePriority,
+          this.drainCursors
+        )
+      );
       let lastYield = performance.now();
 
       for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
+        this.drainCursors.set(CanvasRenderer.getMessagePriority(msg), msg);
 
         const currentDims = this.overlay.getDimensions();
         if (!currentDims) break;
@@ -1612,17 +1658,15 @@ export class CanvasRenderer extends RendererBase {
 
   /**
    * Check whether placing a new message at its target lane would cause
-   * visual overlap with any currently active (visible) message.
+   * visual overlap with any visible or future reservation.
    *
    * Returns pre-computed dimensions so callers can reuse them instead of
    * calling estimateDimensions again (avoids duplicate wrap calls for
    * 2-pass-wrapping messages like SuperChat).
    *
-   * For scrolling modes, overlap occurs when a new message enters from the
-   * right edge while an existing message in the same or adjacent lane has
-   * not yet fully exited from the left edge. We use the actual bounding
-   * boxes of active messages rather than the lane allocator's theoretical
-   * available-time, which can be inaccurate after pause/resume.
+   * Scrolling checks use actual velocity over the common visible interval,
+   * including duration clamps, author multipliers, and either direction.
+   * Lane timers select candidates; exact geometry validates their safety.
    *
    * For top/bottom modes, overlap occurs when an active message in the same
    * lane has not yet expired.
@@ -1695,6 +1739,13 @@ export class CanvasRenderer extends RendererBase {
         mode,
         now,
         batchIndex,
+        ...this.entryPacing.input(
+          CanvasRenderer.getMessagePriority(message),
+          speedTier,
+          now,
+          this.replayMode
+        ),
+        isReplay: this.replayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.size,
         staggerSample,
@@ -1787,6 +1838,13 @@ export class CanvasRenderer extends RendererBase {
         mode,
         now,
         batchIndex,
+        ...this.entryPacing.input(
+          CanvasRenderer.getMessagePriority(message),
+          speedTier,
+          now,
+          this.replayMode
+        ),
+        isReplay: this.replayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.size,
         staggerSample: CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
@@ -1810,6 +1868,13 @@ export class CanvasRenderer extends RendererBase {
       motion.isScrolling ? dims.width : undefined,
       speedTier,
       motion.horizontalStaggerPx
+    );
+    this.entryPacing.commit(
+      CanvasRenderer.getMessagePriority(message),
+      speedTier,
+      now,
+      this.replayMode,
+      motion
     );
 
     const translationGeneration = this.translationConfigurationGeneration;
@@ -2208,6 +2273,7 @@ export class CanvasRenderer extends RendererBase {
    * the next render frame via the merged cleanup pass.
    */
   protected override applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
+    this.entryPacing.shift(pausedMs);
     const now = performance.now();
     for (const msg of this.activeMessages) {
       if (preserveElapsed) {
@@ -2225,6 +2291,9 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected resetState(): void {
+    this.entryPacing.clear();
+    this.drainCursors.clear();
+    this.drainResumePriority = undefined;
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.fallbackIngressQueue.clear();

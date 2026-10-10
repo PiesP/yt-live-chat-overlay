@@ -15,6 +15,7 @@ import {
   findPlacementShared,
 } from '@renderer/layout/lane-shared';
 import type { LaneAllocationState } from '@renderer/layout/lane-shared';
+import { EntryPacingState } from '@renderer/layout/entry-pacing';
 
 const baseInput = {
   mode: 'scroll' as const,
@@ -35,6 +36,26 @@ const baseInput = {
   topBottomDurationMs: 4_000,
   durationMultiplier: 1,
 };
+
+describe('instance-owned entry pacing', () => {
+  it('carries committed geometric entry across drains and shifts or clears its deadline', () => {
+    const state = new EntryPacingState();
+    const first = computeMessageMotionPlan({ ...baseInput, batchIndex: 4, now: 0 });
+    state.commit(0, 1, 0, false, first);
+    const next = computeMessageMotionPlan({
+      ...baseInput, now: 16, batchIndex: 0, ...state.input(0, 1, 16, false),
+    });
+    expect(next.viewportEntryTime).toBeGreaterThanOrEqual(first.viewportEntryTime);
+    expect(next.viewportEntryTime - 16).toBeLessThanOrEqual(next.staggerLimitMs);
+    expect(state.input(100, 1, 16, false).previousViewportEntryTime).toBeUndefined();
+    expect(state.input(0, 2, 16, false).previousViewportEntryTime).toBeUndefined();
+    expect(state.input(0, 1, 16, true).previousViewportEntryTime).toBeUndefined();
+    state.shift(500);
+    expect(state.input(0, 1, 16, false).previousViewportEntryTime).toBe(first.viewportEntryTime + 500);
+    state.clear();
+    expect(state.input(0, 1, 16, false).entrySequence).toBeUndefined();
+  });
+});
 
 describe('computeAdaptiveStaggerLimit', () => {
   it('compacts the timing window continuously as queue pressure grows', () => {
