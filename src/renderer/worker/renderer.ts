@@ -1364,7 +1364,7 @@ export class WorkerRenderer {
       applyReflowMotion(message, placement.motion, now);
       message.motion = placement.motion;
       this.entryPacing.commit(
-        (message as ActiveMessage & { priority?: number }).priority ?? 0,
+        message.priority ?? 0,
         message.speedTier,
         now,
         config.isReplayMode,
@@ -1572,7 +1572,8 @@ export class WorkerRenderer {
       ghostText: getDisplayText(msg.content ?? []),
       content: msg.content ?? [],
     };
-    Object.assign(am, { priority: msg.priority, isBacklog: msg.isBacklog });
+    am.priority = msg.priority;
+    am.isBacklog = msg.isBacklog;
     if (msg.burstSpeedMultiplier !== undefined) am.burstSpeedMultiplier = msg.burstSpeedMultiplier;
     if (msg.trackDrops !== undefined) am.trackDrops = msg.trackDrops;
     if (msg.authorType !== undefined) am.authorType = msg.authorType;

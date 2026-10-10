@@ -2473,7 +2473,7 @@ export class CanvasRenderer extends RendererBase {
       {
         onActivated: (message) => {
           message.motion = motion;
-          message.trackDrops = entry.trackDrops;
+          message.trackDrops = saved.trackDrops ?? entry.trackDrops;
           message.fadeStartTime = fadeStartTime;
           message.slotCount = saved.laneSlotCount;
           this.activeMessages.push(message);
