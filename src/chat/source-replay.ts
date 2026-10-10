@@ -61,6 +61,9 @@ export class ReplayChatSource extends ChatSource {
   /** Notifies the runtime that all display state belongs to an old timeline. */
   onSeek?: () => void;
 
+  /** Reports due messages discarded because playback has passed their tolerance window. */
+  onLateDrop?: (count: number) => void;
+
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
   private replayContinuation: InnertubeContinuationData | null = null;
@@ -99,7 +102,9 @@ export class ReplayChatSource extends ChatSource {
     // Use the same due-time and late-drop policy as normal display. Prefetch
     // remains buffered even though the backlog controller does not inspect
     // videoOffsetMs before handing a message to the renderer.
-    return this.replayBuffer.flushUpTo(playback.offsetMs, this.replayBuffer.messageCount);
+    const batch = this.replayBuffer.flushUpTo(playback.offsetMs, this.replayBuffer.messageCount);
+    this.reportLateDrops();
+    return batch;
   }
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
@@ -717,9 +722,21 @@ export class ReplayChatSource extends ChatSource {
     if (!playback || playback.paused) return;
 
     const batch = this.replayBuffer.flushUpTo(playback.offsetMs, RAF_FLUSH_BATCH_SIZE);
+    this.reportLateDrops();
 
     if (batch.length === 0) return;
     this.emitBatch(batch, false);
+  }
+
+  private reportLateDrops(): void {
+    const count = this.replayBuffer.takeLateDropCount();
+    if (count > 0) {
+      try {
+        this.onLateDrop?.(count);
+      } catch {
+        // Observability must not interrupt replay delivery.
+      }
+    }
   }
 
   private appendReplayEvents(events: ChatEvent[], minimumOffsetMs: number): number {

@@ -131,6 +131,60 @@ describe('ReplayChatSource', () => {
     expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['prefetched']);
   });
 
+  it('reports late drops from an empty visibility drain without consuming future messages', () => {
+    const onLateDrop = vi.fn();
+    source.onLateDrop = onLateDrop;
+    const internals = source as unknown as {
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+    };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 10_000, paused: false });
+    internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
+    internals.replayBuffer.insert(makeReplayMessage('future', 10_001), 10_001);
+
+    expect(source.drainPendingMessages()).toEqual([]);
+    expect(onLateDrop).toHaveBeenCalledOnce();
+    expect(onLateDrop).toHaveBeenCalledWith(1);
+    expect(source.drainPendingMessages()).toEqual([]);
+    expect(onLateDrop).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps display delivery running when the late-drop observer throws', () => {
+    const received = vi.fn();
+    source.onLateDrop = () => {
+      throw new Error('observer failed');
+    };
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      flushReplayBuffer: (playback: { offsetMs: number; paused: boolean }) => void;
+    };
+    internals.callback = received;
+    internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
+    internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
+
+    expect(() => internals.flushReplayBuffer({ offsetMs: 10_000, paused: false })).not.toThrow();
+    expect(received).toHaveBeenCalledOnce();
+  });
+
+  it('reports late drops when a display flush emits no messages', () => {
+    const received = vi.fn();
+    const onLateDrop = vi.fn();
+    source.onLateDrop = onLateDrop;
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
+      flushReplayBuffer: (playback: { offsetMs: number; paused: boolean }) => void;
+    };
+    internals.callback = received;
+    internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
+
+    internals.flushReplayBuffer({ offsetMs: 10_000, paused: false });
+    expect(received).not.toHaveBeenCalled();
+    expect(onLateDrop).toHaveBeenCalledOnce();
+    expect(onLateDrop).toHaveBeenCalledWith(1);
+  });
+
   it('displays only due replay messages across pause, rate changes, and a delayed frame', async () => {
     vi.useFakeTimers();
     const received: string[] = [];

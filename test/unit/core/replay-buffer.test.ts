@@ -155,6 +155,8 @@ describe('ReplayBuffer', () => {
       // flushUpTo(7000): 1000 < 7000-2000=5000 → dropped (too far past)
       const result = buf.flushUpTo(7000, 10);
       expect(result.map((m) => m.id)).toEqual(['current']);
+      expect(buf.takeLateDropCount()).toBe(1);
+      expect(buf.takeLateDropCount()).toBe(0);
     });
 
     it('keeps the late boundary inclusive even after a frame hitch', () => {
@@ -169,6 +171,24 @@ describe('ReplayBuffer', () => {
       ]);
       expect(buf.flushUpTo(10_000, 10)).toEqual([]);
       expect(buf.messageCount).toBe(1);
+      expect(buf.takeLateDropCount()).toBe(1);
+    });
+
+    it('counts only consumed late messages and discards unread counts on clear', () => {
+      buf.insert(makeMsg('old-a', 1000), 1000);
+      buf.insert(makeMsg('old-b', 2000), 2000);
+      buf.insert(makeMsg('due', 8000), 8000);
+      buf.insert(makeMsg('future', 10_001), 10_001);
+
+      expect(buf.flushUpTo(10_000, 1).map((message) => message.id)).toEqual(['due']);
+      expect(buf.takeLateDropCount()).toBe(2);
+      expect(buf.flushUpTo(10_000, 1)).toEqual([]);
+      expect(buf.takeLateDropCount()).toBe(0);
+
+      buf.insert(makeMsg('another-old', 1000), 1000);
+      expect(buf.flushUpTo(10_000, 1)).toEqual([]);
+      buf.clear();
+      expect(buf.takeLateDropCount()).toBe(0);
     });
 
     it('allows a late-dropped message ID to be inserted again', () => {

@@ -30,6 +30,7 @@ export class ReplayBuffer {
   private bufferOffset = 0;
   private seenIds = new Set<string>();
   private activeEstimatedBytes = 0;
+  private lateDropCount = 0;
 
   /** True when the buffer has no unconsumed messages. */
   get isEmpty(): boolean {
@@ -149,7 +150,7 @@ export class ReplayBuffer {
    * Flush messages whose video offset has been reached.
    *
    * Collects up to `maxBatch` messages where `offsetMs <= currentOffsetMs`.
-   * Past messages (too far behind) are silently dropped.
+   * Past messages (too far behind) are dropped and counted.
    * Messages still in the future stay in the buffer.
    */
   flushUpTo(currentOffsetMs: number, maxBatch: number): ChatMessage[] {
@@ -175,8 +176,9 @@ export class ReplayBuffer {
         this.seenIds.delete(next.message.id);
       }
 
-      // Too far in the past — drop silently
+      // Too far in the past — count only messages consumed by this flush.
       if (next.offsetMs < currentOffsetMs - REPLAY_LATE_TOLERANCE_MS) {
+        this.lateDropCount = Math.min(Number.MAX_SAFE_INTEGER, this.lateDropCount + 1);
         continue;
       }
 
@@ -188,12 +190,20 @@ export class ReplayBuffer {
     return batch;
   }
 
+  /** Return and reset late drops consumed since the previous read. */
+  takeLateDropCount(): number {
+    const count = this.lateDropCount;
+    this.lateDropCount = 0;
+    return count;
+  }
+
   /** Clear all buffered messages (e.g. on seek). */
   clear(): void {
     this.buffer = [];
     this.bufferOffset = 0;
     this.seenIds.clear();
     this.activeEstimatedBytes = 0;
+    this.lateDropCount = 0;
   }
 
   /**
