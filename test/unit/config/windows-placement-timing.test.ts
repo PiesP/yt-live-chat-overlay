@@ -66,6 +66,7 @@ describe('Windows placement timing probe', () => {
     let now = 5;
     class FakeContext {
       canvas: typeof overlay;
+      globalAlpha = 1;
 
       constructor(canvas: typeof overlay) { this.canvas = canvas; }
       fillText(_text: string, _x: number, _y: number) {}
@@ -93,6 +94,9 @@ describe('Windows placement timing probe', () => {
       cache.fillText('WINDOWS193_SHORT', 0, 0);
       const display = new FakeContext(overlay);
       display.clearRect(0, 0, 640, 360);
+      display.globalAlpha = 0;
+      display.drawImage(bitmap, 500, 20, 100, 24);
+      display.globalAlpha = 1;
       display.drawImage(bitmap, 500, 20, 100, 24);
     });
     listeners.message?.({ data: { type: 'ytPlacementFlush' } });

@@ -79,11 +79,13 @@ the suffix attaches to the renderer instance only when the emitted handler
 matches the expected shape. Bundle drift fails the fixture. The probe records
 bounded exact Worker render/drain durations, queue residence for fixture IDs,
 placement and collision rejection counts, active-message coordinates, work
-before the first overlay clear, fixture text ink bounds, first sampled visible ink, committed geometric entry,
+before the first overlay clear, fixture text ink bounds, first sampled nonzero-alpha draw, committed geometric entry,
 Worker queue receipts, and a screenshot. It does not change production source
 or add application telemetry. The Canvas page records draw data on the main
 thread. Ink bounds use backing-store pixels, including the canvas transform.
-Visible ink samples include fade and frame quantization; committed geometric
+Observed draw samples require nonzero canvas alpha and include fade and frame
+quantization; they do not establish a human readability threshold. Paid body
+ink has its own fixture token and must enter the viewport in both renderer paths; committed geometric
 entry is recorded separately from the final motion plan or the baseline
 committed constant-speed path. Replay accessibility entry also records video
 time minus source offset. The first-entry clock is
@@ -106,13 +108,16 @@ do not infer a performance gain from a single screenshot or a formula change.
 The replay fixture holds video time at 10000, 10001, and 11500 ms and checks
 the corresponding accessibility entries using routed replay continuation
 actions. Separate installed Worker pages exercise top and bottom placement,
-system reduced motion on/off and its user override on/off, safe-zone/font/lane-density
+system reduced motion on/off and its user override on/off, active viewport resize,
+safe-zone/font/lane-density
 shrink and expansion, and a queue cap of 50 with active cap of 30. The
 congestion page requires an observed pending depth of at least 50 and an
 activation with zero temporal and geometric entry delay at that depth.
 Exact frame/drain samples reset immediately before this bounded pressure batch
 to prevent initial idle frames from consuming the sample cap. A single 50-message batch uses
-unique fixture authors and remains within the runtime live-batch boundary; the setting itself does not prove
+unique fixture authors, a 16px font and the full safe zone to keep initial
+lane utilization below the existing backlog throttle. It remains within the
+runtime live-batch boundary; the setting itself does not prove
 queue pressure. The translation page sends one bounded test-only
 `updateTranslation` through the production Worker protocol for a fixture ID,
 checks active geometry reflow, then sends a bounded removal update. It does not prove translation-provider
