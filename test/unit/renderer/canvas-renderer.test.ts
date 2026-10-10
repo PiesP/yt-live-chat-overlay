@@ -1280,12 +1280,19 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
-  it.each([false, true])('restores Worker progress and future reservations across fallback (paused=%s)', async (paused) => {
+  it.each([
+    { paused: false, backlog: false }, { paused: true, backlog: false },
+    { paused: false, backlog: true }, { paused: true, backlog: true },
+  ])('restores Worker progress and future reservations across fallback (paused=$paused, backlog=$backlog)', async ({ paused, backlog }) => {
     let clock = 1000;
+    const viewportWidth = backlog ? 1920 : 640;
+    const messageWidth = backlog ? 1980 : 100;
+    const durationMs = backlog ? 8000 : 5000;
     vi.spyOn(performance, 'now').mockImplementation(() => clock);
-    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: viewportWidth, height: 360 });
     const renderer = new CanvasRenderer(overlay, makeSettings({
-      speedPxPerSec: 350, scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
+      speedPxPerSec: backlog ? 250 : 350, backlogSpeedMultiplier: 2,
+      scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
       exitPaddingPx: 100, headwayGapRatio: 0.08,
     }));
     const internals = renderer as unknown as {
@@ -1294,6 +1301,7 @@ describe('CanvasRenderer', () => {
       fallbackInProgress: boolean;
       workerManager: { snapshotMessages(): Promise<WorkerRecoveryMessage[]>; destroy(): void; setActive(active: boolean): void };
       replaceCanvas(): boolean;
+      reflowActiveMessages(size: { width: number; height: number }): void;
       startRenderLoop(): void;
     };
     if (paused) renderer.pause();
@@ -1304,14 +1312,14 @@ describe('CanvasRenderer', () => {
     const origin = performance.timeOrigin;
     vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
       ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
-        message: makeMessage(`active-${laneIndex}`, 'active'), trackDrops: false,
+        message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog }, trackDrops: false,
         activeMotion: {
-          id: `active-${laneIndex}`, mode: 'scroll', startX: 640,
-          width: 100, height: 20, y: laneIndex * 20, laneIndex, laneSlotCount: 1,
-          durationMs: 5000, startEpochMs: origin + start, fadeStartEpochMs: origin + start,
-          speedTier: 1, epoch: 0, capturedAtEpochMs: origin + 1000,
+          id: `active-${laneIndex}`, mode: 'scroll', startX: viewportWidth,
+          width: messageWidth, height: 20, y: laneIndex * 20, laneIndex, laneSlotCount: 1,
+          durationMs, startEpochMs: origin + start, fadeStartEpochMs: origin + start,
+          speedTier: backlog ? 3 : 1, epoch: 0, capturedAtEpochMs: origin + 1000,
           effectiveNowEpochMs: origin + 1000, isPaused: paused,
-          viewportWidthPx: 640, exitPaddingPx: 100,
+          viewportWidthPx: viewportWidth, exitPaddingPx: 100,
         },
       })),
       { message: makeMessage('pending-only', 'pending'), trackDrops: true },
@@ -1325,8 +1333,16 @@ describe('CanvasRenderer', () => {
     expect(visible?.startTime).toBe(0);
     expect(future?.startTime).toBe(2000);
     const effectiveNow = paused ? 1000 : 1500;
-    expect(visible?.x).toBeCloseTo(640 - effectiveNow * (840 / 5000));
-    expect(future?.x).toBe(640);
+    expect(visible?.x).toBeCloseTo(viewportWidth - effectiveNow * ((viewportWidth + messageWidth + 100) / durationMs));
+    expect(future?.x).toBe(viewportWidth);
+    if (backlog) {
+      internals.reflowActiveMessages({ width: viewportWidth, height: 360 });
+      const reflowed = internals.activeMessages;
+      expect(reflowed).toHaveLength(2);
+      expect(reflowed.every((message) => message.duration === 8000 && message.speedTier === 3)).toBe(true);
+      expect(reflowed[0]?.startTime).toBe(0);
+      expect(reflowed[1]?.startTime).toBe(2000);
+    }
     expect(rendered).not.toHaveBeenCalled();
     if (paused) {
       clock = 5000;

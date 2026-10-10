@@ -75,6 +75,7 @@ import {
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
 } from '@renderer/constants';
+import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
 import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
 import {
@@ -2039,11 +2040,6 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
-  private getEffectiveBacklogSpeed(): number {
-    const speed = this.settings.speedPxPerSec * Math.max(1, this.settings.backlogSpeedMultiplier);
-    return Math.max(1, speed);
-  }
-
   /** Compute scroll speed for a given speed tier. */
   private getSpeedForTier(tier: number): number {
     const base = this.getEffectiveSpeedPxPerSec();
@@ -2053,7 +2049,10 @@ export class CanvasRenderer extends RendererBase {
       case SPEED_TIER.NEAR:
         return base * this.settings.depthNearSpeedMul;
       case SPEED_TIER.BACKLOG:
-        return this.getEffectiveBacklogSpeed();
+        return computeBacklogSpeed(
+          this.settings.speedPxPerSec,
+          this.settings.backlogSpeedMultiplier
+        );
       default:
         return base;
     }

@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Backlog speed parity** — Apply the dedicated Backlog multiplier without extra burst acceleration in both Canvas and Worker rendering, including pending messages and reflow.
 - **Comment placement** — Check future reservations and actual scrolling speeds in both Canvas and Worker rendering. Reduced-motion comments reserve their stationary lifetime, and resizing or translated text reconciles positions with an explicit capacity-drop policy.
 - **Replay and entry timing** — Keep prefetched comments pending until their video timestamp, carry bounded entry spacing across frames, and limit collision-search work while retaining messages that can be retried. Worker fallback preserves validated progress and future reservations. Existing settings remain compatible; no reset or migration is required.
 

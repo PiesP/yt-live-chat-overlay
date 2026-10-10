@@ -81,6 +81,7 @@ import {
   TRANSLATION_FONT_SCALE,
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
+import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
 import { getAuthorNameMaxWidth, getRegularCardInsets } from '@renderer/layout/card-layout';
 import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
@@ -1629,6 +1630,9 @@ export class WorkerRenderer {
     speedTier: number
   ): number {
     if (!this.config) return 1;
+    if (speedTier === SPEED_TIER.BACKLOG) {
+      return computeBacklogSpeed(this.config.speedPxPerSec, this.config.backlogSpeedMultiplier);
+    }
     let speed = this.config.speedPxPerSec;
     if (msg.burstSpeedMultiplier && msg.burstSpeedMultiplier > 1) speed *= msg.burstSpeedMultiplier;
     switch (speedTier) {
@@ -1636,8 +1640,6 @@ export class WorkerRenderer {
         return Math.max(30, speed * this.config.depthFarSpeedMul);
       case SPEED_TIER.NEAR:
         return speed * this.config.depthNearSpeedMul;
-      case SPEED_TIER.BACKLOG:
-        return speed * this.config.backlogSpeedMultiplier;
       default:
         return speed;
     }

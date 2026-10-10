@@ -349,6 +349,155 @@ describe('Placement through source, runtime and renderer', () => {
     expect(worker.drops).toBe(0);
   });
 
+  it.each([
+    { burst: 1, width: 1_980, mode: 'scroll', author: 'normal', duration: 8_000 },
+    { burst: 1.1, width: 1_980, mode: 'scroll', author: 'normal', duration: 8_000 },
+    { burst: 1.2, width: 1_980, mode: 'scroll', author: 'normal', duration: 8_000 },
+    { burst: 1.35, width: 1_980, mode: 'scroll', author: 'normal', duration: 8_000 },
+    { burst: 1.35, width: 1_980, mode: 'reverse', author: 'normal', duration: 8_000 },
+    { burst: 1.35, width: 200, mode: 'scroll', author: 'normal', duration: 5_000 },
+    { burst: 1.35, width: 1_980, mode: 'scroll', author: 'moderator', duration: 12_000 },
+    { burst: 1.35, width: 1_980, mode: 'scroll', author: 'owner', duration: 12_000 },
+  ] as const)(
+    'keeps Backlog motion aligned for burst $burst, $mode, width $width, $author',
+    async ({ burst, width, mode, author, duration }) => {
+      async function run(rendererMode: 'main' | 'worker') {
+        clock.now = 10_000;
+        dimensions.width = 1_920;
+        vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+        vi.spyOn(Math, 'random').mockReturnValue(0.25);
+        const current = createHarness(rendererMode, clock, {
+          speedPxPerSec: 250, backlogSpeedMultiplier: 2,
+          staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
+          danmakuMode: mode,
+        });
+        current.renderer.setReplayMode(false);
+        const internals = current.renderer as unknown as {
+          estimateDimensions(message: ChatMessage): { width: number; height: number };
+          getEffectiveSpeedPxPerSec(): number;
+        };
+        internals.estimateDimensions = () => ({ width, height: 20 });
+        internals.getEffectiveSpeedPxPerSec = () => 250 * burst;
+        current.renderer.addMessage({
+          ...makeLiveMessage('backlog'), isBacklog: true, authorType: author,
+        });
+        await Promise.resolve();
+        // The serialized burst sample is retained while this Backlog message waits.
+        internals.getEffectiveSpeedPxPerSec = () => 500;
+        current.frame(10_000);
+        const active = current.active().find((message) => message.id === 'backlog');
+        const dispatched = current.worker?.messages
+          .filter((message): message is { type: string; messages: Array<{ burstSpeedMultiplier: number }> } =>
+            typeof message === 'object' && message !== null &&
+            'type' in message && message.type === 'addMessages'
+          )
+          .flatMap((message) => message.messages);
+        clock.now = 11_000;
+        if (current.worker) {
+          (current.worker.backend as unknown as { reflowActiveMessages(): void })
+            .reflowActiveMessages();
+        } else {
+          (current.renderer as unknown as { reflowActiveMessages(size: typeof dimensions): void })
+            .reflowActiveMessages(dimensions);
+        }
+        const reflowed = current.active().find((message) => message.id === 'backlog');
+        current.close();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+        document.body.replaceChildren();
+        CoupledWorker.last = null;
+        return { active, reflowed, dispatched };
+      }
+
+      try {
+        const main = await run('main');
+        const worker = await run('worker');
+        expect(worker.dispatched?.[0]?.burstSpeedMultiplier).toBeCloseTo(burst);
+        expect(main.active?.motion.travelDistancePx).toBe(1_920 + width + 100);
+        expect(main.active?.motion.durationMs).toBe(duration);
+        expect(main.active?.motion.actualVelocityPxPerMs).toBe(
+          (1_920 + width + 100) / duration
+        );
+        expect(worker.active?.motion).toMatchObject({
+          durationMs: main.active?.motion.durationMs,
+          actualVelocityPxPerMs: main.active?.motion.actualVelocityPxPerMs,
+          viewportEntryTime: main.active?.motion.viewportEntryTime,
+          visibleExitTime: main.active?.motion.visibleExitTime,
+        });
+        expect(worker.reflowed?.motion).toMatchObject({
+          durationMs: main.reflowed?.motion.durationMs,
+          actualVelocityPxPerMs: main.reflowed?.motion.actualVelocityPxPerMs,
+          viewportEntryTime: main.reflowed?.motion.viewportEntryTime,
+          visibleExitTime: main.reflowed?.motion.visibleExitTime,
+        });
+      } finally {
+        dimensions.width = 640;
+      }
+    }
+  );
+
+  it.each(['scroll', 'reverse'] as const)(
+    'keeps a same-lane %s Backlog reservation after burst serialization',
+    async (motionMode) => {
+      async function run(rendererMode: 'main' | 'worker') {
+        clock.now = 10_000;
+        dimensions.width = 1_920;
+        dimensions.height = 25;
+        vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+        vi.spyOn(Math, 'random').mockReturnValue(0.25);
+        const current = createHarness(rendererMode, clock, {
+          danmakuMode: motionMode, speedPxPerSec: 250, backlogSpeedMultiplier: 2,
+          staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
+        });
+        current.renderer.setReplayMode(false);
+        const internals = current.renderer as unknown as {
+          estimateDimensions(message: ChatMessage): { width: number; height: number };
+          getEffectiveSpeedPxPerSec(): number;
+        };
+        internals.estimateDimensions = () => ({ width: 1_980, height: 20 });
+        internals.getEffectiveSpeedPxPerSec = () => 337.5;
+        for (const id of ['first', 'second']) {
+          current.renderer.addMessage({ ...makeLiveMessage(id), isBacklog: true });
+        }
+        await Promise.resolve();
+        current.frame(10_000);
+        const active = current.active().sort((left, right) => left.id.localeCompare(right.id));
+        current.close();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+        document.body.replaceChildren();
+        CoupledWorker.last = null;
+        return active;
+      }
+
+      try {
+        const main = await run('main');
+        const worker = await run('worker');
+        expect(main).toHaveLength(2);
+        expect(worker).toHaveLength(2);
+        const [mainFirst, mainSecond] = main;
+        const [workerFirst, workerSecond] = worker;
+        if (!mainFirst || !mainSecond || !workerFirst || !workerSecond) {
+          throw new Error('Expected two committed Backlog reservations per renderer');
+        }
+        expect(mainFirst.laneIndex).toBe(mainSecond.laneIndex);
+        expect(workerFirst.laneIndex).toBe(workerSecond.laneIndex);
+        expect(motionPlansCollide(mainFirst.motion, mainSecond.motion, 0.08, 10_000)).toBe(false);
+        expect(motionPlansCollide(workerFirst.motion, workerSecond.motion, 0.08, 10_000)).toBe(false);
+        expect(worker.map(({ id, laneIndex, motion }) => ({
+          id, laneIndex, startTime: motion.startTime,
+          entry: motion.viewportEntryTime, exit: motion.visibleExitTime,
+        }))).toEqual(main.map(({ id, laneIndex, motion }) => ({
+          id, laneIndex, startTime: motion.startTime,
+          entry: motion.viewportEntryTime, exit: motion.visibleExitTime,
+        })));
+      } finally {
+        dimensions.width = 640;
+        dimensions.height = 160;
+      }
+    }
+  );
+
   it.each(['main', 'worker'] as const)(
     'retains the %s live entry cursor after a frame boundary',
     async (mode) => {

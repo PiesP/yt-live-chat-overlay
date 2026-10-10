@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { getSpeedTier, type SpeedTierConfig } from '@renderer/canvas/speed-tier';
 import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
+import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
 import { SPEED_TIER } from '@renderer/constants';
 import type { ChatMessage } from '@app-types';
 
@@ -34,6 +35,14 @@ const topConfig: SpeedTierConfig = {
   depthLayersEnabled: true,
   danmakuMode: 'top',
 };
+
+describe('computeBacklogSpeed', () => {
+  it('uses the dedicated multiplier and preserves the minimum speed', () => {
+    expect(computeBacklogSpeed(250, 2)).toBe(500);
+    expect(computeBacklogSpeed(250, 0.5)).toBe(250);
+    expect(computeBacklogSpeed(0, 2)).toBe(1);
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // getSpeedTier

@@ -14,6 +14,15 @@ maximum duration limits apply next, followed by the moderator/owner duration
 multiplier. Safety uses total travel divided by this final duration. Equal speed
 tiers can therefore have different actual velocities.
 
+Backlog velocity is `max(1, baseSpeed * max(1, backlogMultiplier))` in both
+renderers, without additional burst acceleration. This retains the existing
+Canvas readability policy while correcting faster Worker Backlog messages.
+The Worker may serialize a burst multiplier for ordinary messages, but Backlog
+ignores it, including while pending. Speed settings become authoritative at
+placement and at deliberate resize, translation, or settings reflow. A committed
+motion plan keeps its velocity and reservation until collision-aware reflow;
+pause and recovery preserve its elapsed progress and future entry.
+
 Live entry pacing groups messages by queue priority and speed tier. Backlog
 messages retain their existing lower priority. Temporal delay and horizontal
 offset share the adaptive entry window. A group's previous geometric entry is

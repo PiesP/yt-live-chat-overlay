@@ -231,6 +231,18 @@ describe('Worker renderer state synchronization', () => {
     scheduledAnimationFrames.length = 0;
   });
 
+  it('retains ordinary burst acceleration while Backlog ignores serialized burst', () => {
+    const renderer = initializedRenderer({
+      ...DEFAULT_SETTINGS, speedPxPerSec: 250, backlogSpeedMultiplier: 2,
+    });
+    const { getMessageVelocity } = renderer as unknown as {
+      getMessageVelocity(message: Pick<WorkerMessage, 'burstSpeedMultiplier'>, tier: number): number;
+    };
+    const velocity = getMessageVelocity.bind(renderer);
+    expect(velocity({ burstSpeedMultiplier: 1.35 }, 1)).toBe(337.5);
+    expect(velocity({ burstSpeedMultiplier: 1.35 }, 3)).toBe(500);
+  });
+
   it('accepts only bounded, finite Worker stats', () => {
     expect(isValidWorkerStatsMessage(validStats())).toBe(true);
 
