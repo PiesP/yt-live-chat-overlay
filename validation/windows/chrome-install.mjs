@@ -517,8 +517,11 @@ export async function runChromeInstallation({
       installedContext: context, installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
     if (browserName === 'msedge' && installation === 'extension') {
+      const comparisonFlag = process.env.YT_PLACEMENT_COMPARISON_ONLY;
+      assert(comparisonFlag === undefined || comparisonFlag === '1',
+        'YT_PLACEMENT_COMPARISON_ONLY must be unset or 1');
       result.placementTiming = await runPlacementTimingFixture({
-        context, root, output, extensionId,
+        context, root, output, extensionId, comparisonOnly: comparisonFlag === '1',
       });
       assert.equal(result.placementTiming.status, 'passed',
         'Installed Edge placement or replay fixture did not satisfy its observations');
