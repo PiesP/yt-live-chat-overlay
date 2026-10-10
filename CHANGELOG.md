@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **Comment row spacing** — Compact transparent comments while retaining glyph, outline and photo safety. The existing Lane Gap slider adds predictable row separation, with a three-row preview and consistent configured text size in both renderers. Saved settings remain compatible.
+- **Comment row spacing** — Compact transparent comments while retaining glyph, outline and photo safety. The existing Lane Gap slider adds predictable row separation, with a two-row preview and consistent configured text size in both renderers. Saved settings remain compatible.
 
 - **Backlog speed parity** — Apply the dedicated Backlog multiplier without extra burst acceleration in both Canvas and Worker rendering, including pending messages and reflow.
 - **Comment placement** — Check future reservations and actual scrolling speeds in both Canvas and Worker rendering. Reduced-motion comments reserve their stationary lifetime, and resizing or translated text reconciles positions with an explicit capacity-drop policy.

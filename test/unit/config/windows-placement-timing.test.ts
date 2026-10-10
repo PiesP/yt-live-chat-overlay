@@ -4,7 +4,7 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, findOverlappingActivePair, instrumentCanvasPageScript, measureClosestRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureVisibleRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 describe('Windows placement timing probe', () => {
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
@@ -17,15 +17,109 @@ describe('Windows placement timing probe', () => {
     ]));
   });
 
-  it('measures occupied row pitch from drawn message positions', () => {
+  it('routes distinct Japanese message IDs to the zero-gap and eight-gap batches', () => {
+    const { gap0, gap8 } = spacingFixtureIds();
+    expect(gap0).toHaveLength(12);
+    expect(gap8).toHaveLength(12);
+    expect(gap0.every((id: string) => id.startsWith('WINDOWS196_GAP0_'))).toBe(true);
+    expect(gap8.every((id: string) => id.startsWith('WINDOWS196_GAP8_'))).toBe(true);
+    expect(new Set([...gap0, ...gap8]).size).toBe(24);
+  });
+
+  it('labels active-origin spacing as allocation pitch', () => {
     const messages = [
       { id: 'WINDOWS196_GAP0_A', y: 13, height: 32 },
       { id: 'WINDOWS196_GAP0_B', y: 51, height: 32 },
       { id: 'WINDOWS196_GAP0_00', y: 89, height: 32 },
       { id: 'unrelated', y: 14, height: 32 },
     ];
-    expect(measureClosestRowPitch(messages)).toBe(38);
-    expect(measureClosestRowPitch(messages.slice(0, 1))).toBeNull();
+    expect(measureAllocationRowPitch(messages)).toBe(38);
+    expect(measureAllocationRowPitch(messages.slice(0, 1))).toBeNull();
+  });
+
+  it.each(['main', 'worker'])('measures only two painted, eligible row origins in one %s frame', (renderer) => {
+    const row = (id: string, x: number, y: number) => ({ id, x, y, width: 100,
+      height: 32, startAtEpochMs: 900, endAtEpochMs: 1100 });
+    const draw = (id: string, top: number, alpha = 1, frameId = 7) => ({ id, frameId, alpha,
+      rect: { left: 10, top, right: 110, bottom: top + 32 },
+      japanese: { text: '東京', rect: { left: 10, top, right: 50, bottom: top + 32 } } });
+    const frame = { frameId: 7, complete: true, truncated: false,
+      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
+      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
+      config: { renderer, fontSize: 32, laneSpacing: 0 },
+      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 88),
+        row('WINDOWS196_GAP0_C', 810, 44)],
+      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 88),
+        draw('WINDOWS196_GAP0_C', 44)] };
+    expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
+      includedIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+      excluded: [{ id: 'WINDOWS196_GAP0_C', reason: 'offscreen_row' }],
+      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+      japaneseVisibleRowOriginsPx: [0, 88] });
+    const sameJapaneseRow = measureVisibleRowPitch({ ...frame,
+      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 0),
+        row('WINDOWS196_GAP0_C', 10, 88)],
+      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 0),
+        { ...draw('WINDOWS196_GAP0_C', 88), japanese: null }] });
+    expect(sameJapaneseRow).toMatchObject({ status: 'measured', pitchPx: 88,
+      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+      japaneseVisibleRowOriginsPx: [0] });
+    expect(sameJapaneseRow.japaneseVisibleRowOriginsPx).toHaveLength(1);
+    expect(measureVisibleRowPitch({ ...frame, active: frame.active.slice(0, 1),
+      draws: frame.draws.slice(0, 1) }))
+      .toMatchObject({ status: 'insufficient', pitchPx: null });
+    expect(measureVisibleRowPitch({ ...frame,
+      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 0)],
+      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 0)] }))
+      .toMatchObject({ status: 'insufficient', pitchPx: null });
+    expect(measureVisibleRowPitch({ ...frame, active: frame.active.map((entry) => ({
+      ...entry, x: 900,
+    })) })).toMatchObject({ status: 'insufficient', pitchPx: null });
+    expect(measureVisibleRowPitch({ ...frame, draws: [draw('WINDOWS196_GAP0_A', 0),
+      draw('WINDOWS196_GAP0_B', 10)] })).toMatchObject({ status: 'unknown', pitchPx: null,
+      reason: 'draw_row_mismatch' });
+    expect(measureVisibleRowPitch({ ...frame, draws: [...frame.draws,
+      draw('WINDOWS196_GAP0_MISSING', 132)] })).toMatchObject({ status: 'unknown',
+      pitchPx: null, reason: 'draw_without_active_row' });
+  });
+
+  it('excludes future, expired, undrawn and transparent rows, and rejects incoherent frames', () => {
+    const row = (id: string, y: number, start = 900, end = 1100) => ({ id, x: 10, y,
+      width: 100, height: 30, startAtEpochMs: start, endAtEpochMs: end });
+    const draw = (id: string, top: number, alpha = 1, frameId = 9) => ({ id, frameId, alpha,
+      rect: { left: 10, top, right: 110, bottom: top + 30 } });
+    const frame = { frameId: 9, complete: true, truncated: false,
+      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
+      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
+      config: { renderer: 'main', fontSize: 32, laneSpacing: 0 },
+      active: [row('WINDOWS196_GAP0_A', 0), row('WINDOWS196_GAP0_B', 88),
+        row('WINDOWS196_GAP0_FUTURE', 44, 1050, 1200),
+        row('WINDOWS196_GAP0_EXPIRED', 66, 850, 990),
+        row('WINDOWS196_GAP0_NODRAW', 132), row('WINDOWS196_GAP0_ZERO', 176)],
+      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 88),
+        draw('WINDOWS196_GAP0_FUTURE', 44), draw('WINDOWS196_GAP0_EXPIRED', 66),
+        draw('WINDOWS196_GAP0_ZERO', 176, 0)] };
+    expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
+      excluded: [
+        { id: 'WINDOWS196_GAP0_FUTURE', reason: 'future' },
+        { id: 'WINDOWS196_GAP0_EXPIRED', reason: 'expired' },
+        { id: 'WINDOWS196_GAP0_NODRAW', reason: 'no_current_frame_draw' },
+        { id: 'WINDOWS196_GAP0_ZERO', reason: 'zero_alpha' },
+      ] });
+    for (const bad of [
+      { ...frame, complete: false }, { ...frame, truncated: true },
+      { ...frame, logicalWidth: null }, { ...frame, finishedAtEpochMs: null },
+      { ...frame, draws: null }, { ...frame, config: {} },
+    ]) {
+      expect(measureVisibleRowPitch(bad)).toMatchObject({ status: 'unknown', pitchPx: null });
+    }
+    expect(measureVisibleRowPitch({ ...frame, draws: [draw('WINDOWS196_GAP0_A', 0, 1, 8),
+      draw('WINDOWS196_GAP0_B', 88)] })).toMatchObject({ status: 'unknown', pitchPx: null,
+      reason: 'draw_frame_mismatch' });
+    expect(measureVisibleRowPitch({ ...frame, active: [row('WINDOWS196_GAP0_A', 0, 1000.5),
+      row('WINDOWS196_GAP0_B', 88)], draws: frame.draws.slice(0, 2) }))
+      .toMatchObject({ status: 'unknown', pitchPx: null,
+      reason: 'eligibility_changed_during_frame' });
   });
 
   it('rejects clamped or burst-accelerated Backlog motion while retaining baseline comparison', () => {
@@ -110,7 +204,10 @@ describe('Windows placement timing probe', () => {
         renderer.enqueueMessage(message); renderer.placeQueuedMessage(message); renderer.renderFrame(); }
       main();
     })();`;
-    const state: Record<string, unknown> = {};
+    const state: Record<string, unknown> = {
+      beginRenderFrame: () => ({ frameId: 1, cleared: true }),
+      endRenderFrame: () => {},
+    };
     const script = instrumentCanvasPageScript(source.replace('      main();', '\tmain();'));
     expect(script).not.toBeNull();
     runInNewContext(script!, { __ytPlacementProbe: state,
@@ -123,6 +220,138 @@ describe('Windows placement timing probe', () => {
     expect(exact.dispositions[0]).toMatchObject({ id: 'WINDOWS195_BACKLOG_LONG',
       laneHeight: 34, travelDistancePx: 3580, burstSpeedMultiplier: null });
     expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
+  });
+
+  it.each(['main', 'worker'])('joins native %s draws and row origins in the same complete frame', (renderer) => {
+    const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
+    const overlay = { width: renderer === 'main' ? 800 : 1600,
+      height: renderer === 'main' ? 400 : 800, closest: () => ({}) };
+    const bitmapA = { width: 200, height: 50, closest: () => null };
+    const bitmapB = { width: 200, height: 50, closest: () => null };
+    let nativeDraws = 0;
+    let failNativeDraw = false;
+    let clock = 100;
+    class FakeContext {
+      canvas: { width: number; height: number; closest: () => object | null };
+      globalAlpha = 1;
+      font = 'bold 32px sans-serif';
+      lineWidth = 2;
+      constructor(canvas: { width: number; height: number; closest: () => object | null }) {
+        this.canvas = canvas;
+      }
+      fillText(_text: string, _x: number, _y: number) {
+        if (failNativeDraw) throw new Error('Native draw failed');
+        nativeDraws++;
+      }
+      strokeText(_text: string, _x: number, _y: number) { nativeDraws++; }
+      drawImage(..._args: unknown[]) { nativeDraws++; }
+      clearRect(..._args: number[]) {}
+      measureText(text: string) { return { width: text.length * 10, actualBoundingBoxLeft: 0,
+        actualBoundingBoxRight: text.length * 10,
+        actualBoundingBoxAscent: 20, actualBoundingBoxDescent: 5 }; }
+      getTransform() { return { a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }; }
+    }
+    const sandbox = { CanvasRenderingContext2D: FakeContext,
+      OffscreenCanvasRenderingContext2D: FakeContext, FakeContext, overlay, bitmapA, bitmapB,
+      self: undefined as unknown, performance: { timeOrigin: 1000, now: () => clock++ },
+      requestAnimationFrame: (_callback: (time: number) => void) => 1,
+      addEventListener: (type: string, listener: (event: { origin: string; data: unknown }) => void) => {
+        listeners[type] = listener;
+      },
+      postMessage: (_message: unknown) => {},
+      MutationObserver: class { observe() {} }, document: { querySelectorAll: () => [] },
+      Blob: class {}, Worker: class {}, HTMLCanvasElement: class {},
+    };
+    const idA = 'WINDOWS196_GAP0_A';
+    const idB = 'WINDOWS196_GAP0_B';
+    const active = `[{ id: '${idA}', x: 10, y: 0, width: 100, height: 32,
+      startTime: -100, pausedDuration: 0, duration: 1000 },
+      { id: '${idB}', x: 10, y: 88, width: 100, height: 32,
+      startTime: -100, pausedDuration: 0, duration: 1000 }]`;
+    if (renderer === 'main') {
+      const source = `(() => {
+        class RendererBase {}
+        function getRegularCardInsets() { return { vertical: 1 }; }
+        var CanvasRenderer = class CanvasRenderer extends RendererBase {
+          constructor() {
+            super(); this.ctx = new FakeContext(overlay); this.canvas = overlay;
+            this.settings = { fontSize: 32, laneSpacing: 0 }; this.activeMessages =
+              ${active}.map((entry) => ({ ...entry, message: { id: entry.id } }));
+            this.pendingQueue = { size: 0, toArray: () => [] };
+            this.laneAllocator = { getLaneHeight: () => 34, getLaneCount: () => 20 };
+            this.overlay = { getDimensions: () => ({ width: 800, height: 400 }) };
+          }
+          enqueueMessage() {} placeQueuedMessage() {} renderFrame() {
+            this.canvas.width = 1600; this.canvas.height = 800;
+            this.ctx.clearRect(0, 0, 800, 400);
+            if (this.paint) {
+              this.ctx.fillText('東京 ${idA}', 10, 25);
+              if (this.distortRatio) this.canvas.width = 1800;
+              this.ctx.fillText('東京 ${idB}', 10, 113);
+            }
+          }
+        };
+        function main() { globalThis.fixtureRenderer = new CanvasRenderer();
+          fixtureRenderer.paint = true; fixtureRenderer.renderFrame(); }
+\tmain();
+      })();`;
+      const script = instrumentCanvasPageScript(source);
+      expect(script).not.toBeNull();
+      runInNewContext(`${canvasProbePrelude({ tokens: [idA, idB] })}\n${script}`, sandbox);
+    } else {
+      const source = `var sample = {
+        ctx: new FakeContext(overlay), canvas: overlay,
+        config: { fontSize: 32, laneSpacing: 0 }, logicalWidth: 800, logicalHeight: 400,
+        activeMessages: ${active}, pendingQueue: [], numLanes: 20, laneHeight: 34,
+        enqueueMessage() {}, activateMessage() {}, recordDrop() {},
+        checkCollision() { return true; }, findPlacement() { return {}; }, drainQueue() {},
+        renderFrame() {
+          this.ctx.clearRect(0, 0, 800, 400);
+          if (this.paint) {
+            this.ctx.drawImage(bitmapA, 0, 0, 200, 50, 10, 5, 100, 25);
+            this.ctx.drawImage(bitmapB, 10, 93, 100, 25);
+          }
+        }, handleMessage() {},
+      }; self.onmessage=e=>{sample.handleMessage(e)};`;
+      const suffix = workerProbeSuffix(source);
+      expect(suffix).not.toBeNull();
+      runInNewContext(`self = globalThis; ${workerProbePrelude([idA, idB])}\n${source}${suffix}`, sandbox);
+      listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
+      runInNewContext(`new FakeContext(bitmapA).fillText('東京 ${idA}', 0, 20);
+        new FakeContext(bitmapB).fillText('東京 ${idB}', 0, 20);
+        sample.paint = true; sample.renderFrame();`, sandbox);
+      expect(nativeDraws).toBeGreaterThan(0);
+    }
+    const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+    expect(frame).toMatchObject({ frameId: 1, complete: true, logicalWidth: 800,
+      logicalHeight: 400, backingRatioX: 2, backingRatioY: 2 });
+    expect(frame.draws[0].rect).toMatchObject({ left: 10 });
+    expect(nativeDraws).toBeGreaterThan(0);
+    if (renderer === 'main') {
+      expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
+        japaneseVisibleIds: [idA, idB], japaneseVisibleRowOriginsPx: [0, 88] });
+      runInNewContext('fixtureRenderer.paint = false; fixtureRenderer.renderFrame();', sandbox);
+    } else {
+      expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
+        japaneseVisibleIds: [idA, idB], japaneseVisibleRowOriginsPx: [0, 88] });
+      runInNewContext('sample.paint = false; sample.renderFrame();', sandbox);
+    }
+    const next = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+    expect(next.frameId).toBe(2);
+    expect(next.draws).toHaveLength(0);
+    expect(measureVisibleRowPitch(next)).toMatchObject({ status: 'insufficient', pitchPx: null,
+      reason: 'fewer_than_two_distinct_visible_rows' });
+    if (renderer === 'main') {
+      runInNewContext('fixtureRenderer.paint = true; fixtureRenderer.distortRatio = true; fixtureRenderer.renderFrame();', sandbox);
+      const incoherent = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+      expect(incoherent.complete).toBe(false);
+      expect(measureVisibleRowPitch(incoherent)).toMatchObject({ status: 'unknown', pitchPx: null });
+      failNativeDraw = true;
+      expect(() => runInNewContext('fixtureRenderer.renderFrame();', sandbox))
+        .toThrow('Native draw failed');
+      const failedDraw = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+      expect(failedDraw).toMatchObject({ complete: false, draws: [] });
+    }
   });
 
   it('detects visible active rectangles that overlap after reflow', () => {
@@ -155,9 +384,23 @@ describe('Windows placement timing probe', () => {
       context: { newPage: async () => page }, root: process.cwd(), output: '/tmp', extensionId: 'fixture',
     });
     expect(result.status).toBe('failed');
+    expect(result.scenarios).toHaveLength(PLACEMENT_SCENARIOS.length);
     expect(result.scenarios[0]).toMatchObject({ status: 'failed', errorType: 'Error',
       frameWorkMs: { count: 1, p95: 4 }, exactWorkerDrainMs: { count: 1, p95: 1 },
       bounds: [{ id: 'WINDOWS193_SHORT' }], screenshot: 'placement-worker-scroll.png' });
+  });
+
+  it('accepts only explicit, known spacing scenario names for a narrow run', async () => {
+    const args = { context: {}, root: process.cwd(), output: '/tmp', extensionId: 'fixture' };
+    for (const options of [
+      { spacingOnly: true },
+      { spacingOnly: true, selectedScenarios: ['worker-scroll'] },
+      { selectedScenarios: ['unknown'] },
+      { selectedScenarios: ['worker-spacing-speed', 'worker-spacing-speed'] },
+      { selectedScenarios: [] },
+    ]) {
+      await expect(runPlacementTimingFixture({ ...args, ...options })).rejects.toThrow();
+    }
   });
 
   it('summarizes bounded, nonnegative frame samples without treating invalid values as work', () => {

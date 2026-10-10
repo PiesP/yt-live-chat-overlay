@@ -16,6 +16,7 @@ const TOKENS = [
   'WINDOWS196_GAP8_A', 'WINDOWS196_GAP8_B',
   'WINDOWS195_BACKLOG_LONG',
   ...Array.from({ length: 10 }, (_, index) => `WINDOWS196_GAP0_${String(index).padStart(2, '0')}`),
+  ...Array.from({ length: 10 }, (_, index) => `WINDOWS196_GAP8_${String(index).padStart(2, '0')}`),
 ];
 const MAX_SAMPLES = 240;
 
@@ -33,16 +34,22 @@ export const PLACEMENT_SCENARIOS = Object.freeze([
   { name: 'main-spacing-speed', forceFallback: true, mode: 'scroll', transition: 'spacing-speed' },
 ]);
 
+export function spacingFixtureIds() {
+  return { gap0: [...TOKENS.slice(13, 15), ...TOKENS.slice(18, 28)],
+    gap8: [...TOKENS.slice(15, 17), ...TOKENS.slice(28)] };
+}
+
 function installProbeRuntime(options) {
   const MAX_SAMPLES = 240;
   const scope = globalThis;
   const ids = new Set(options.tokens);
   const bitmapIds = new WeakMap();
   const bitmapInk = new WeakMap();
+  const frameContexts = new WeakMap();
   const state = {
     frames: [], bounds: [], ink: [], firstEntry: {}, ingress: {}, stats: [], workers: [],
     sourcePrefixed: false, sourceHooked: false, overflow: 0, ready: false, canvas: null,
-    frameCount: 0, reportCount: 0, videoEntry: {},
+    frameCount: 0, reportCount: 0, videoEntry: {}, renderFrameId: 0, latestRenderFrame: null,
   };
   scope.__ytPlacementProbe = state;
   const epochNow = () => performance.timeOrigin + performance.now();
@@ -50,21 +57,83 @@ function installProbeRuntime(options) {
   const overlayContext = (ctx) => options.worker
     ? ctx.canvas === state.canvas
     : Boolean(ctx.canvas?.closest?.('#yt-live-chat-overlay'));
-  const recordRect = (ctx, id, x, y, width, height, kind = 'image', ink = null) => {
-    if (!id || !overlayContext(ctx) || ctx.globalAlpha === 0 || width <= 0 || height <= 0) return;
+  const japaneseRun = (text, ctx, x, y) => {
+    const match = /[\u3040-\u30ff\u3400-\u9fff]+/u.exec(String(text));
+    if (!match) return null;
+    const startX = x + ctx.measureText(String(text).slice(0, match.index)).width;
+    const metrics = ctx.measureText(match[0]);
+    return { text: match[0], left: startX - (metrics.actualBoundingBoxLeft ?? 0),
+      top: y - metrics.actualBoundingBoxAscent,
+      width: (metrics.actualBoundingBoxLeft ?? 0) +
+        (metrics.actualBoundingBoxRight ?? metrics.width),
+      height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent };
+  };
+  const transformedRect = (ctx, x, y, width, height) => {
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
     const transform = ctx.getTransform();
     const points = [[x, y], [x + width, y], [x, y + height], [x + width, y + height]]
       .map(([px, py]) => ({
         x: transform.a * px + transform.c * py + transform.e,
         y: transform.b * px + transform.d * py + transform.f,
       }));
-    const bound = {
-      id, atEpochMs: epochNow(),
-      left: Math.min(...points.map((point) => point.x)),
+    return { left: Math.min(...points.map((point) => point.x)),
       top: Math.min(...points.map((point) => point.y)),
       right: Math.max(...points.map((point) => point.x)),
-      bottom: Math.max(...points.map((point) => point.y)),
-    };
+      bottom: Math.max(...points.map((point) => point.y)) };
+  };
+  const logicalRect = (rect, frame) => rect && frame?.backingRatioX > 0 &&
+    frame?.backingRatioY > 0 ? { left: rect.left / frame.backingRatioX,
+      top: rect.top / frame.backingRatioY, right: rect.right / frame.backingRatioX,
+      bottom: rect.bottom / frame.backingRatioY } : null;
+  state.beginRenderFrame = ({ ctx, logicalWidth, logicalHeight, config }) => {
+    const backingWidth = ctx?.canvas?.width ?? null;
+    const backingHeight = ctx?.canvas?.height ?? null;
+    const frame = { frameId: ++state.renderFrameId, startedAtEpochMs: epochNow(),
+      finishedAtEpochMs: null, complete: false, cleared: false, truncated: false,
+      logicalWidth, logicalHeight, backingWidth, backingHeight,
+      backingRatioX: backingWidth / logicalWidth, backingRatioY: backingHeight / logicalHeight,
+      config, active: [], draws: [] };
+    if (ctx) frameContexts.set(frame, ctx);
+    state.currentRenderFrame = frame;
+    return frame;
+  };
+  state.endRenderFrame = (frame, active) => {
+    frame.finishedAtEpochMs = epochNow();
+    const ctx = frameContexts.get(frame);
+    frame.backingWidth = ctx?.canvas?.width ?? null;
+    frame.backingHeight = ctx?.canvas?.height ?? null;
+    frame.backingRatioX = frame.backingWidth / frame.logicalWidth;
+    frame.backingRatioY = frame.backingHeight / frame.logicalHeight;
+    frame.complete = !frame.failed && frame.cleared && Number.isFinite(frame.backingRatioX) &&
+      frame.backingRatioX > 0 && Number.isFinite(frame.backingRatioY) && frame.backingRatioY > 0 &&
+      frame.config?.logicalWidth === frame.logicalWidth &&
+      frame.config?.logicalHeight === frame.logicalHeight &&
+      frame.draws.every((draw) => draw.backingRatioX === frame.backingRatioX &&
+        draw.backingRatioY === frame.backingRatioY);
+    if (active.length > MAX_SAMPLES) frame.truncated = true;
+    frame.active = active.slice(0, MAX_SAMPLES);
+    state.latestRenderFrame = frame;
+    if (state.currentRenderFrame === frame) state.currentRenderFrame = null;
+  };
+  const recordRect = (ctx, id, x, y, width, height, kind = 'image', ink = null) => {
+    if (!id || !overlayContext(ctx)) return;
+    const rect = transformedRect(ctx, x, y, width, height);
+    if (!rect) return;
+    const bound = { id, atEpochMs: epochNow(), ...rect };
+    const frame = state.currentRenderFrame;
+    if (frame && frame.draws.length < MAX_SAMPLES) {
+      const backingRatioX = ctx.canvas.width / frame.logicalWidth;
+      const backingRatioY = ctx.canvas.height / frame.logicalHeight;
+      const ratios = { backingRatioX, backingRatioY };
+      const japanese = ink?.japanese ?? null;
+      frame.draws.push({ id, frameId: frame.frameId, kind, alpha: ctx.globalAlpha,
+        ...ratios, rect: logicalRect(rect, ratios), japanese: japanese ? {
+          text: japanese.text,
+          rect: logicalRect(transformedRect(ctx, japanese.left, japanese.top,
+            japanese.width, japanese.height), ratios),
+        } : null });
+    } else if (frame) frame.truncated = true;
+    if (ctx.globalAlpha <= 0) return;
     if (state.bounds.length < MAX_SAMPLES) state.bounds.push(bound);
     else state.overflow++;
     if (ink) {
@@ -86,6 +155,7 @@ function installProbeRuntime(options) {
     const nativeFillText = prototype.fillText;
     prototype.fillText = function (text, x, y, ...rest) {
       const id = tokenIn(text);
+      const result = nativeFillText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
         bitmapIds.set(this.canvas, id);
         const metrics = this.measureText(text);
@@ -94,7 +164,14 @@ function installProbeRuntime(options) {
           top: y - metrics.actualBoundingBoxAscent,
           width: (metrics.actualBoundingBoxLeft ?? 0) +
             (metrics.actualBoundingBoxRight ?? metrics.width),
-          height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent } });
+          height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+          japanese: (() => {
+            const run = japaneseRun(text, this, x, y);
+            if (!run) return null;
+            const rect = transformedRect(this, run.left, run.top, run.width, run.height);
+            return rect ? { text: run.text, left: rect.left, top: rect.top,
+              width: rect.right - rect.left, height: rect.bottom - rect.top } : null;
+          })() } });
       }
       if (id && overlayContext(this)) {
         const metrics = this.measureText(text);
@@ -103,13 +180,15 @@ function installProbeRuntime(options) {
         recordRect(this, id, x - left,
           y - metrics.actualBoundingBoxAscent, left + right,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent, 'fill',
-          { font: this.font, lineWidth: this.lineWidth });
+          { font: this.font, lineWidth: this.lineWidth,
+            japanese: japaneseRun(text, this, x, y) });
       }
-      return nativeFillText.call(this, text, x, y, ...rest);
+      return result;
     };
     const nativeStrokeText = prototype.strokeText;
     prototype.strokeText = function (text, x, y, ...rest) {
       const id = tokenIn(text);
+      const result = nativeStrokeText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
         const metrics = this.measureText(text);
         const padding = this.lineWidth / 2;
@@ -119,7 +198,14 @@ function installProbeRuntime(options) {
           top: y - metrics.actualBoundingBoxAscent - padding,
           width: (metrics.actualBoundingBoxLeft ?? 0) +
             (metrics.actualBoundingBoxRight ?? metrics.width) + padding * 2,
-          height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2 } });
+          height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
+          japanese: (() => {
+            const run = japaneseRun(text, this, x, y);
+            if (!run) return null;
+            const rect = transformedRect(this, run.left, run.top, run.width, run.height);
+            return rect ? { text: run.text, left: rect.left, top: rect.top,
+              width: rect.right - rect.left, height: rect.bottom - rect.top } : null;
+          })() } });
       }
       if (id && overlayContext(this)) {
         const metrics = this.measureText(text);
@@ -130,28 +216,57 @@ function installProbeRuntime(options) {
           y - metrics.actualBoundingBoxAscent - padding,
           left + right + padding * 2,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
-          'stroke', { font: this.font, lineWidth: this.lineWidth });
+          'stroke', { font: this.font, lineWidth: this.lineWidth,
+            japanese: japaneseRun(text, this, x, y) });
       }
-      return nativeStrokeText.call(this, text, x, y, ...rest);
+      return result;
     };
     const nativeDrawImage = prototype.drawImage;
     prototype.drawImage = function (image, ...args) {
       const id = bitmapIds.get(image);
+      const result = nativeDrawImage.call(this, image, ...args);
       if (id && overlayContext(this)) {
         const destination = args.length === 2
           ? [args[0], args[1], image.width, image.height]
           : args.length === 4 ? args : args.slice(4, 8);
-        if (destination.length === 4) recordRect(this, id, ...destination,
-          'bitmap', { sourceInk: bitmapInk.get(image) ?? null });
+        if (destination.length === 4) {
+          const sourceInk = bitmapInk.get(image) ?? null;
+          const run = sourceInk?.fill?.japanese ?? sourceInk?.stroke?.japanese ?? null;
+          const [sourceX, sourceY, sourceWidth, sourceHeight] = args.length === 8
+            ? args.slice(0, 4) : [0, 0, image.width, image.height];
+          const [destX, destY, destWidth, destHeight] = destination;
+          const runLeft = run ? Math.max(run.left, sourceX) : 0;
+          const runTop = run ? Math.max(run.top, sourceY) : 0;
+          const runRight = run ? Math.min(run.left + run.width, sourceX + sourceWidth) : 0;
+          const runBottom = run ? Math.min(run.top + run.height, sourceY + sourceHeight) : 0;
+          const japanese = run && sourceWidth > 0 && sourceHeight > 0 &&
+            runRight > runLeft && runBottom > runTop ? {
+            text: run.text,
+            left: destX + (runLeft - sourceX) * destWidth / sourceWidth,
+            top: destY + (runTop - sourceY) * destHeight / sourceHeight,
+            width: (runRight - runLeft) * destWidth / sourceWidth,
+            height: (runBottom - runTop) * destHeight / sourceHeight,
+          } : null;
+          recordRect(this, id, ...destination, 'bitmap', { sourceInk, japanese });
+        }
       }
-      return nativeDrawImage.call(this, image, ...args);
+      return result;
     };
     const nativeClearRect = prototype.clearRect;
     prototype.clearRect = function (...args) {
+      const result = nativeClearRect.call(this, ...args);
+      const renderFrame = state.currentRenderFrame;
+      if (overlayContext(this) && renderFrame && args.length >= 4 &&
+        args[0] <= 0 && args[1] <= 0 &&
+        args[0] + args[2] >= renderFrame.logicalWidth &&
+        args[1] + args[3] >= renderFrame.logicalHeight) {
+        renderFrame.cleared = true;
+        renderFrame.draws.length = 0;
+      }
       if (overlayContext(this) && state.currentFrame && state.currentFrame.preClearMs === null) {
         state.currentFrame.preClearMs = performance.now() - state.currentFrame.startedAt;
       }
-      return nativeClearRect.call(this, ...args);
+      return result;
     };
   }
   const nativeRaf = scope.requestAnimationFrame.bind(scope);
@@ -169,7 +284,8 @@ function installProbeRuntime(options) {
         if (options.worker && state.frameCount % 30 === 0 && state.reportCount++ < 20) {
           scope.postMessage({ type: 'ytPlacementProbe', sample: {
             frames: state.frames, bounds: state.bounds, ink: state.ink, firstEntry: state.firstEntry,
-            ingress: state.ingress, exact: state.exact, overflow: state.overflow,
+            ingress: state.ingress, exact: state.exact, latestRenderFrame: state.latestRenderFrame,
+            overflow: state.overflow,
           } });
         }
       }
@@ -199,7 +315,8 @@ function installProbeRuntime(options) {
       if (event.data?.type === 'ytPlacementFlush') {
         scope.postMessage({ type: 'ytPlacementProbe', requestId: event.data.requestId, sample: {
           frames: state.frames, bounds: state.bounds, ink: state.ink, firstEntry: state.firstEntry,
-          ingress: state.ingress, exact: state.exact, overflow: state.overflow,
+          ingress: state.ingress, exact: state.exact, latestRenderFrame: state.latestRenderFrame,
+          overflow: state.overflow,
         } });
       }
     });
@@ -308,12 +425,115 @@ export function findOverlappingActivePair(messages, width, height) {
   return null;
 }
 
-export function measureClosestRowPitch(messages, prefix = 'WINDOWS196_GAP0_') {
+export function measureAllocationRowPitch(messages, prefix = 'WINDOWS196_GAP0_') {
   const ys = messages.filter((entry) => entry.id?.startsWith(prefix) &&
     Number.isFinite(entry.y) && Number.isFinite(entry.height))
     .map((entry) => entry.y).toSorted((a, b) => a - b);
   const pitches = ys.slice(1).map((y, index) => y - ys[index]).filter((pitch) => pitch > 0);
   return pitches.length ? Math.min(...pitches) : null;
+}
+
+/** One completed renderer frame, not a join of historical ink and a later active snapshot. */
+export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
+  const result = { pitchPx: null, status: 'unknown', reason: null,
+    frameId: frame?.frameId ?? null, includedIds: [], excluded: [], unknownIds: [],
+    japaneseVisibleIds: [], japaneseVisibleRowOriginsPx: [] };
+  const unknown = (reason, id) => {
+    result.reason = reason;
+    if (id) result.unknownIds.push(id);
+    return result;
+  };
+  if (!frame || !Number.isSafeInteger(frame.frameId) || frame.frameId <= 0 ||
+    frame.complete !== true || frame.truncated !== false ||
+    !Number.isFinite(frame.startedAtEpochMs) ||
+    !Number.isFinite(frame.finishedAtEpochMs) ||
+    frame.finishedAtEpochMs < frame.startedAtEpochMs ||
+    !Number.isFinite(frame.logicalWidth) || frame.logicalWidth <= 0 ||
+    !Number.isFinite(frame.logicalHeight) || frame.logicalHeight <= 0 ||
+    !Number.isFinite(frame.backingRatioX) || frame.backingRatioX <= 0 ||
+    !Number.isFinite(frame.backingRatioY) || frame.backingRatioY <= 0 ||
+    !['main', 'worker'].includes(frame.config?.renderer) ||
+    !Number.isFinite(frame.config?.fontSize) ||
+    !Number.isFinite(frame.config?.laneSpacing) ||
+    !Array.isArray(frame.active) || !Array.isArray(frame.draws)) {
+    return unknown('incomplete_or_unsupported_frame');
+  }
+  const intersects = (rect) => rect && [rect.left, rect.top, rect.right, rect.bottom]
+    .every(Number.isFinite) && rect.right > rect.left && rect.bottom > rect.top &&
+    rect.left < frame.logicalWidth && rect.right > 0 &&
+    rect.top < frame.logicalHeight && rect.bottom > 0;
+  const tracked = frame.active.filter((row) => typeof row?.id === 'string' &&
+    row.id.startsWith(prefix));
+  const ids = new Set();
+  const unmatchedDraw = frame.draws.find((draw) => typeof draw?.id === 'string' &&
+    draw.id.startsWith(prefix) && !tracked.some((row) => row.id === draw.id));
+  if (unmatchedDraw) return unknown('draw_without_active_row', unmatchedDraw.id);
+  const visible = [];
+  const japaneseRows = new Set();
+  for (const row of tracked) {
+    if (ids.has(row.id)) return unknown('duplicate_active_id', row.id);
+    ids.add(row.id);
+    if (![row.x, row.y, row.width, row.height, row.startAtEpochMs,
+      row.endAtEpochMs].every(Number.isFinite) || row.width <= 0 || row.height <= 0 ||
+      row.endAtEpochMs <= row.startAtEpochMs) return unknown('invalid_active_geometry_or_time', row.id);
+    if (frame.finishedAtEpochMs < row.startAtEpochMs) {
+      result.excluded.push({ id: row.id, reason: 'future' });
+      continue;
+    }
+    if (frame.startedAtEpochMs >= row.endAtEpochMs) {
+      result.excluded.push({ id: row.id, reason: 'expired' });
+      continue;
+    }
+    if (frame.startedAtEpochMs < row.startAtEpochMs ||
+      frame.finishedAtEpochMs >= row.endAtEpochMs) return unknown('eligibility_changed_during_frame', row.id);
+    const rowRect = { left: row.x, top: row.y,
+      right: row.x + row.width, bottom: row.y + row.height };
+    if (!intersects(rowRect)) {
+      result.excluded.push({ id: row.id, reason: 'offscreen_row' });
+      continue;
+    }
+    const draws = frame.draws.filter((draw) => draw?.id === row.id);
+    if (draws.some((draw) => draw.frameId !== frame.frameId)) {
+      return unknown('draw_frame_mismatch', row.id);
+    }
+    if (draws.length === 0) {
+      result.excluded.push({ id: row.id, reason: 'no_current_frame_draw' });
+      continue;
+    }
+    if (draws.some((draw) => !Number.isFinite(draw.alpha) || draw.alpha < 0 ||
+      draw.alpha > 1 || !draw.rect ||
+      ![draw.rect.left, draw.rect.top, draw.rect.right, draw.rect.bottom]
+        .every(Number.isFinite))) return unknown('invalid_draw_geometry_or_alpha', row.id);
+    if (draws.every((draw) => draw.alpha <= 0)) {
+      result.excluded.push({ id: row.id, reason: 'zero_alpha' });
+      continue;
+    }
+    const painted = draws.filter((draw) => draw.alpha > 0 && intersects(draw.rect));
+    if (painted.some((draw) => draw.rect.left >= rowRect.right ||
+      draw.rect.right <= rowRect.left || draw.rect.top >= rowRect.bottom ||
+      draw.rect.bottom <= rowRect.top)) return unknown('draw_row_mismatch', row.id);
+    if (painted.length === 0) {
+      result.excluded.push({ id: row.id, reason: 'offscreen_draw' });
+      continue;
+    }
+    visible.push(row);
+    result.includedIds.push(row.id);
+    if (painted.some((draw) => draw.japanese?.text && intersects(draw.japanese.rect))) {
+      result.japaneseVisibleIds.push(row.id);
+      japaneseRows.add(row.y);
+    }
+  }
+  result.japaneseVisibleRowOriginsPx = [...japaneseRows].toSorted((a, b) => a - b);
+  const ys = [...new Set(visible.map((row) => row.y))].toSorted((a, b) => a - b);
+  const pitches = ys.slice(1).map((y, index) => y - ys[index]).filter((pitch) => pitch > 0);
+  if (pitches.length === 0) {
+    result.status = 'insufficient';
+    result.reason = 'fewer_than_two_distinct_visible_rows';
+    return result;
+  }
+  result.status = 'measured';
+  result.pitchPx = Math.min(...pitches);
+  return result;
 }
 
 export function assertBacklogMotion(disposition, renderer, comparisonOnly = false) {
@@ -350,6 +570,13 @@ export function assertBacklogReflow(before, after, id) {
 
 export function workerProbePrelude(tokens = TOKENS) {
   return `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: true, tokens })});\n`;
+}
+
+export function canvasProbePrelude({ tokens = TOKENS, forceFallback = false,
+  workerPrelude = workerProbePrelude(tokens) } = {}) {
+  return `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
+    `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: false, tokens,
+      forceFallback, workerPrelude, attachProbeSource: attachWorkerRendererProbe.toString() })});`;
 }
 
 // The emitted Worker is a classic Blob script. The suffix runs in its lexical
@@ -482,7 +709,15 @@ function attachWorkerRendererProbe(renderer) {
   const nativeFrame = renderer.renderFrame;
   renderer.renderFrame = function (...args) {
     const startedAt = performance.now();
-    try { return nativeFrame.apply(this, args); }
+    const frame = state.beginRenderFrame({ ctx: this.ctx, logicalWidth: this.logicalWidth,
+      logicalHeight: this.logicalHeight, config: { renderer: 'worker',
+        fontSize: this.config?.fontSize ?? null, laneSpacing: this.config?.laneSpacing ?? null } });
+    let successful = false;
+    try {
+      const result = nativeFrame.apply(this, args);
+      successful = true;
+      return result;
+    }
     finally {
       bounded(exact.frames, { atEpochMs: epochNow(), workMs: performance.now() - startedAt });
       exact.config = { mode: this.config?.danmakuMode ?? null,
@@ -499,15 +734,25 @@ function attachWorkerRendererProbe(renderer) {
         queueMaxSize: this.config?.queueMaxSize ?? null,
         logicalWidth: this.logicalWidth, logicalHeight: this.logicalHeight,
         laneHeight: this.laneHeight, laneCount: this.numLanes };
-      exact.activeNow = this.activeMessages.filter((message) => isFixture(message.id))
+      const active = this.activeMessages.filter((message) => isFixture(message.id));
+      exact.activeNow = active
         .slice(0, 100).map((message) => ({ id: message.id, atEpochMs: epochNow(),
           x: message.x, y: message.y, width: message.width, height: message.height,
           slotCount: message.laneSlotCount, durationMs: message.duration,
           actualVelocityPxPerMs: message.motion?.actualVelocityPxPerMs ?? null,
           laneIndex: message.laneIndex, isScrolling: message.motion?.isScrolling ?? null,
           startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
+          endAtEpochMs: performance.timeOrigin + message.startTime +
+            message.pausedDuration + message.duration,
           visibleNow: performance.now() >= message.startTime + message.pausedDuration &&
             performance.now() < message.startTime + message.pausedDuration + message.duration }));
+      frame.failed = !successful;
+      frame.config = { ...frame.config, ...exact.config };
+      state.endRenderFrame(frame, active.map((message) => ({ id: message.id,
+        x: message.x, y: message.y, width: message.width, height: message.height,
+        startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
+        endAtEpochMs: performance.timeOrigin + message.startTime +
+          message.pausedDuration + message.duration })));
       if (exact.frames.length % 10 === 0) {
         for (const message of exact.activeNow) bounded(exact.active, message);
       }
@@ -592,7 +837,17 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
         };
       }
     }
-    try { return nativeFrame.apply(this, args); }
+    const dimsBefore = this.overlay.getDimensions();
+    const frame = state.beginRenderFrame({ ctx: this.ctx,
+      logicalWidth: dimsBefore?.width ?? null, logicalHeight: dimsBefore?.height ?? null,
+      config: { renderer: 'main', fontSize: this.settings.fontSize,
+        laneSpacing: this.settings.laneSpacing } });
+    let successful = false;
+    try {
+      const result = nativeFrame.apply(this, args);
+      successful = true;
+      return result;
+    }
     finally {
       exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
       exact.peaks.active = Math.max(exact.peaks.active, this.activeMessages.length);
@@ -603,11 +858,22 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
         outline: this.settings.outline, backgroundColors: this.settings.backgroundColors,
         logicalWidth: dims?.width ?? null, logicalHeight: dims?.height ?? null,
         laneHeight: this.laneAllocator.getLaneHeight(), laneCount: this.laneAllocator.getLaneCount() };
-      exact.activeNow = this.activeMessages.filter((entry) => isFixture(entry.message?.id))
+      const active = this.activeMessages.filter((entry) => isFixture(entry.message?.id));
+      exact.activeNow = active
         .slice(0, 100).map((entry) => ({ id: entry.message.id, x: entry.x, y: entry.y,
           width: entry.width, height: entry.height, laneIndex: entry.laneIndex,
           slotCount: entry.slotCount, durationMs: entry.motion?.durationMs ?? null,
-          actualVelocityPxPerMs: entry.motion?.actualVelocityPxPerMs ?? null }));
+          actualVelocityPxPerMs: entry.motion?.actualVelocityPxPerMs ?? null,
+          startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
+          endAtEpochMs: performance.timeOrigin + entry.startTime +
+            entry.pausedDuration + entry.duration }));
+      frame.failed = !successful;
+      frame.config = { ...frame.config, ...exact.config };
+      state.endRenderFrame(frame, active.map((entry) => ({ id: entry.message.id,
+        x: entry.x, y: entry.y, width: entry.width, height: entry.height,
+        startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
+        endAtEpochMs: performance.timeOrigin + entry.startTime +
+          entry.pausedDuration + entry.duration })));
     }
   };
 }
@@ -631,7 +897,7 @@ function replayResponse(actions, continuation = 'windows193-seek') {
 }
 
 async function runScenario({ context, root, output, extensionId, name, forceFallback, mode,
-  transition, comparisonOnly = false }) {
+  transition, comparisonOnly = false, spacingOnly = false }) {
   const page = await context.newPage();
   const requested = [];
   let originalSettings;
@@ -641,12 +907,12 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const replay = mode === 'replay';
   const spacingSpeed = transition === 'spacing-speed';
   const replayObservations = {};
-  const ids = replay ? TOKENS.slice(3, 6) : spacingSpeed ? [...TOKENS.slice(13, 15), ...TOKENS.slice(18)]
+  const ids = replay ? TOKENS.slice(3, 6) : spacingSpeed ? spacingFixtureIds().gap0
     : mode === 'reverse' ? [TOKENS[2]] : TOKENS.slice(0, 2);
   const paidId = 'WINDOWS193_PAID';
   const drawnIds = replay ? ids : spacingSpeed ? ids.slice(0, 2) : [...ids, paidId];
   const actions = ids.map((id) => messageAction(id, spacingSpeed
-    ? `${id} 東京の夜空にコメントが流れます` : id === TOKENS[1] ? `${id}_${'W'.repeat(100)}` : id));
+    ? `東京の夜空にコメントが流れます ${id}` : id === TOKENS[1] ? `${id}_${'W'.repeat(100)}` : id));
   if (!replay && !spacingSpeed) actions.push({ addChatItemAction: { item: { liveChatPaidMessageRenderer: {
     id: paidId, authorName: { simpleText: 'Fixture donor' },
     purchaseAmountText: { simpleText: '$5.00' },
@@ -657,8 +923,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   })) : [];
   const batches = new Map([
     ['1', actions],
-    ['2', spacingSpeed ? TOKENS.slice(15, 17).map((id) => messageAction(id,
-      `${id} 東京の夜空にコメントが流れます`)) : transition === 'congestion'
+    ['2', spacingSpeed ? spacingFixtureIds().gap8.map((id) => messageAction(id,
+      `東京の夜空にコメントが流れます ${id}`)) : transition === 'congestion'
       ? Array.from({ length: 50 }, (_, index) => messageAction(
         `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
       : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
@@ -743,6 +1009,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         canvas: overlay ? { width: overlay.width, height: overlay.height } : null,
         requestAtEpochMs: probe.requestAtEpochMs, videoEntry: probe.videoEntry,
         frames: probe.frames, bounds: probe.bounds, ink: probe.ink, exact: probe.exact,
+        latestRenderFrame: probe.latestRenderFrame,
         firstEntry: probe.firstEntry,
         ingress: probe.ingress, overflow: probe.overflow,
         workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })) };
@@ -778,6 +1045,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       ...summarizeExactWorkerProbe(selected, forceFallback ? 'main' : 'worker'),
       bounds: selected?.bounds?.slice(0, MAX_SAMPLES) ?? [],
       ink: selected?.ink?.slice(0, MAX_SAMPLES) ?? [],
+      latestRenderFrame: selected?.latestRenderFrame ?? null,
       exactCanvas: forceFallback ? selected?.exact ?? null : null,
       queueStats: raw?.workers.flatMap((worker) => worker.stats) ?? [],
       sampleOverflow: selected?.overflow ?? null,
@@ -812,10 +1080,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       }
       return route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by placement fixture' });
     });
-    await page.addInitScript({ content: `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n;(${installProbeRuntime.toString()})(${JSON.stringify({
-      worker: false, tokens: TOKENS, forceFallback, workerPrelude,
-      attachProbeSource: attachWorkerRendererProbe.toString(),
-    })});` });
+    await page.addInitScript({ content: canvasProbePrelude({ forceFallback, workerPrelude }) });
     await page.addInitScript((isReplay) => {
       const playback = { time: 10, paused: false };
       Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
@@ -925,14 +1190,30 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         assert.equal(selected.exact.config?.backgroundColors?.normal, '#00000000',
           'Japanese fixture did not keep a transparent normal background');
         return { exact: selected.exact, ink: selected.ink ?? [],
+          renderFrame: selected.latestRenderFrame ?? null,
           regularInsets: raw.regularInsets,
           stats: forceFallback ? selected.exact.peaks : raw.workers.flatMap((record) => record.stats) };
       };
-      const gap0 = await issueSnapshot();
+      const visibleGap = async (prefix) => {
+        let snapshot;
+        let visibleRowPitch;
+        for (let attempt = 0; attempt < 40; attempt++) {
+          snapshot = await issueSnapshot();
+          visibleRowPitch = measureVisibleRowPitch(snapshot.renderFrame, prefix);
+          if (visibleRowPitch.status === 'measured' &&
+            visibleRowPitch.japaneseVisibleRowOriginsPx.length >= 2) {
+            return { snapshot, visibleRowPitch };
+          }
+          await page.waitForTimeout(250);
+        }
+        assert.fail(`No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`);
+      };
+      const { snapshot: gap0, visibleRowPitch: gap0Visible } = await visibleGap('WINDOWS196_GAP0_');
       await page.screenshot({ path: join(output, `placement-${name}-gap0.png`), animations: 'disabled' });
-      const gap0Pitch = measureClosestRowPitch(gap0.exact.activeNow);
-      assert(gap0Pitch !== null, 'Gap-zero fixture did not activate distinct regular rows');
-      phaseObservations.push({ phase: 'gap0', pitchPx: gap0Pitch,
+      const gap0Pitch = measureAllocationRowPitch(gap0.exact.activeNow);
+      assert(gap0Pitch !== null, 'Gap-zero fixture did not allocate distinct regular rows');
+      phaseObservations.push({ phase: 'gap0', allocationPitchPx: gap0Pitch,
+        visibleRowPitch: gap0Visible, renderFrame: gap0.renderFrame,
         active: gap0.exact.activeNow, config: gap0.exact.config,
         dispositions: gap0.exact.dispositions, ink: gap0.ink,
         regularInsets: gap0.regularInsets, queue: gap0.stats });
@@ -945,25 +1226,34 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 8 }));
       await page.waitForTimeout(350);
       await sendBatch('2');
-      await page.waitForFunction((id) => [...document.querySelectorAll(
-        '.yt-live-chat-overlay-live-region > p')].some((element) => element.dataset.messageId === id),
-      TOKENS[15], { timeout: 10_000 });
-      const gap8 = await issueSnapshot();
+      const { snapshot: gap8, visibleRowPitch: gap8Visible } = await visibleGap('WINDOWS196_GAP8_');
       await page.screenshot({ path: join(output, `placement-${name}-gap8.png`), animations: 'disabled' });
-      const gap8Pitch = measureClosestRowPitch(gap8.exact.activeNow);
-      assert(gap8Pitch !== null, 'Gap-eight fixture lost the ordinary row sample');
+      const gap8Pitch = measureAllocationRowPitch(gap8.exact.activeNow, 'WINDOWS196_GAP8_');
+      assert(gap8Pitch !== null, 'Gap-eight fixture did not allocate distinct regular rows');
       assert.equal(gap8.exact.config.laneSpacing, 8);
       if (!comparisonOnly) {
-        assert(gap8Pitch >= gap0Pitch, 'Increasing Lane Gap reduced the actual regular row pitch');
+        assert(gap8Pitch >= gap0Pitch, 'Increasing Lane Gap reduced allocated row pitch');
+        assert(gap8Visible.pitchPx >= gap0Visible.pitchPx,
+          'Increasing Lane Gap reduced current-frame visible row pitch');
         const regular = gap0.exact.dispositions.filter((entry) =>
           entry.kind === 'activated' && entry.id.startsWith('WINDOWS196_GAP0_'));
         assert(regular.length >= 2 && regular.every((entry) => entry.slotCount === 1),
           'Compact transparent regular comments reserved extra baseline rows');
       }
-      phaseObservations.push({ phase: 'gap8', pitchPx: gap8Pitch,
+      phaseObservations.push({ phase: 'gap8', allocationPitchPx: gap8Pitch,
+        visibleRowPitch: gap8Visible, renderFrame: gap8.renderFrame,
         active: gap8.exact.activeNow, config: gap8.exact.config,
         dispositions: gap8.exact.dispositions, ink: gap8.ink,
         regularInsets: gap8.regularInsets, queue: gap8.stats });
+      if (spacingOnly) {
+        await page.screenshot({ path: join(output, screenshot), animations: 'disabled' });
+        screenshotCaptured = true;
+        const raw = await captureProbe();
+        assert(raw?.canvasSourceHooked && (forceFallback ||
+          (raw.sourcePrefixed && raw.sourceHooked && raw.workers.some((worker) => worker.ready))),
+        'Packaged renderer source probe was not attached');
+        return { status: 'passed', ...probeResult(raw) };
+      }
 
       await page.evaluate(() => window.__ytChatOverlay.applySettings({
         burstElevatedThreshold: 2, burstHighThreshold: 5,
@@ -1276,13 +1566,23 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
 
 /** Installed Edge: run the same application/parser paths with Worker and forced Canvas fallback. */
 export async function runPlacementTimingFixture({ context, root, output, extensionId,
-  comparisonOnly = false }) {
+  comparisonOnly = false, selectedScenarios, spacingOnly = false }) {
   assert.equal(typeof comparisonOnly, 'boolean');
+  assert.equal(typeof spacingOnly, 'boolean');
+  assert(selectedScenarios === undefined || (Array.isArray(selectedScenarios) &&
+    selectedScenarios.length > 0 && new Set(selectedScenarios).size === selectedScenarios.length &&
+    selectedScenarios.every((name) => PLACEMENT_SCENARIOS.some((scenario) => scenario.name === name))),
+  'Selected placement scenario names must be unique known names');
+  assert(!spacingOnly || selectedScenarios?.every((name) =>
+    ['worker-spacing-speed', 'main-spacing-speed'].includes(name)),
+  'Spacing-only execution requires explicit spacing scenario names');
+  const selected = selectedScenarios === undefined ? PLACEMENT_SCENARIOS
+    : PLACEMENT_SCENARIOS.filter((scenario) => selectedScenarios.includes(scenario.name));
   const scenarios = [];
-  for (const scenario of PLACEMENT_SCENARIOS) {
+  for (const scenario of selected) {
     try {
       scenarios.push(await runScenario({ context, root, output, extensionId,
-        comparisonOnly, ...scenario }));
+        comparisonOnly, spacingOnly, ...scenario }));
     } catch (error) {
       scenarios.push({ status: 'failed', renderer: scenario.forceFallback ? 'main' : 'worker',
         name: scenario.name, mode: scenario.mode,
@@ -1292,6 +1592,7 @@ export async function runPlacementTimingFixture({ context, root, output, extensi
     }
   }
   return { status: scenarios.every((scenario) => scenario.status === 'passed') ? 'passed' : 'failed',
-    scenarios, comparisonOnly, geometryScope: 'drawn text and outlined ink rectangles',
+    scenarios, comparisonOnly, selectedScenarios: selected.map((scenario) => scenario.name),
+    spacingOnly, geometryScope: 'historical ink rectangles and complete-frame visible row pitch',
     preClearScope: 'frame work before first overlay clear, including drain and cleanup' };
 }

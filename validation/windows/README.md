@@ -110,18 +110,30 @@ backing store. A bounded Japanese regular-comment stream runs at configured
 checks at least two accessible snippets because each renderer mirrors at most
 ten active messages per update; targeted canvas paint observations verify
 entry separately. Captures at Lane Gap 0 and 8 include sampled fill/outline
-ink and font, committed message
-height, the compiled page bundle's shared regular insets, lane height, slot
-count, actual y positions and closest occupied row
-pitch, plus active/queue peaks and drops. The default spread allocator can
-leave legitimate empty lanes; the receipt reports observed adjacent pitch, not
-an assumed `laneHeight` formula. The Worker inset receipt is computed by that
+ink and font, committed message height, the compiled page bundle's shared
+regular insets, lane height, slot count, actual y positions, allocation pitch,
+and current-frame visible row pitch, plus active/queue peaks and drops. The
+allocation pitch uses positive active row-origin differences and can include
+future or offscreen rows. Visible pitch uses distinct row origins that are
+time-eligible, onscreen, and joined by ID to successful positive-alpha draws
+in one completed frame. Each frame records its ID, start/end epoch, logical
+viewport, backing-store ratio, phase settings, active rows, normalized draw
+rectangles, and bounded Japanese glyph ink extents. A missing, incoherent, or
+truncated frame yields `null` with a reason; historical aggregate ink cannot
+fill that gap. The fixture waits for two Japanese glyph draws to intersect the
+logical viewport before each gap capture. The default spread allocator can
+leave legitimate empty lanes; neither pitch is an assumed `laneHeight`
+formula. The Worker inset receipt is computed by that
 same compiled page helper used for serialization; Worker paint is observed
 separately through its image/ink samples. The existing settings dialog is exercised by
 keyboard on its slider, Done, Escape, reopen, preview row metadata and an
 extension-storage readback. The preview reports two rows and its reserved
 pitch in `data-preview-rows`, `data-preview-row-height` and
 `data-preview-row-pitch` on the existing preview text element.
+
+An optional run can name only the two spacing scenarios and set
+`spacingOnly: true` to stop after the gap-8 capture. Default runs still
+exercise all eleven scenarios, including Backlog and recovery.
 
 The speed phase routes 51 chat actions through the normal response parser to
 trigger Backlog injection, then four ordinary actions through the same parser

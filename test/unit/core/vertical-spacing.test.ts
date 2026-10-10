@@ -122,12 +122,17 @@ describe('complete ordinary row geometry', () => {
     ] };
     const measured = estimateMessageDimensions(mixed, 32, false, 'bold', family);
     const ctx = canvas.getContext('2d');
+    const imageDraw = vi.spyOn(ctx, 'drawImage');
     const emojiCache = { get: () => emoji as unknown as CanvasImageSource };
     renderRegularMessage(ctx as unknown as AnyCanvasContext, mixed, 10, 20,
       { showAuthor: false, fontSize: 32, fontWeight: 'bold', fontFamily: family, color: '#ffffff',
         outlineWidthPx: 0, outlineOpacity: 0, backgroundColor: '#00000000', messageWidth: measured.width, messageHeight: measured.height },
-      noBitmap, noImages, () => false, emojiCache, () => true,
+      noBitmap, emojiCache, () => true, noImages, () => false,
       (size) => getFontString(size, 'bold', family), (text) => ctx.measureText(text).width);
+    const emojiDraw = imageDraw.mock.calls.find(([source]) => source === emoji);
+    expect(emojiDraw).toBeDefined();
+    expect(emojiDraw?.[3]).toBeGreaterThan(0);
+    expect(emojiDraw?.[4]).toBeGreaterThan(0);
     const [top, bottom] = inkBounds(canvas);
     expect(top).toBeGreaterThanOrEqual(20);
     expect(bottom).toBeLessThan(20 + measured.height);
