@@ -10,6 +10,7 @@
 
 import type { FontWeight } from '@app-types';
 import type { CardConfigWorker } from '@renderer/card-config';
+import type { MessageMotionPlan } from '@renderer/layout/motion-types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -240,6 +241,10 @@ export interface WorkerMessageSnapshot {
 }
 
 export interface ActiveMessage {
+  burstSpeedMultiplier?: number;
+  trackDrops?: boolean;
+  /** Last committed geometry, retained for resize and mode transitions. */
+  motion?: MessageMotionPlan;
   id: string;
   x: number;
   y: number;

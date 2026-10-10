@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage } from '@app-types';
+import type { MessageMotionPlan } from '@renderer/layout/motion-types';
 
 /**
  * Shared renderer constants — single source of truth for values used by both
@@ -147,6 +148,8 @@ export const EMPTY_CHAT_MESSAGE: ChatMessage = {
 
 /** Canvas-side message state used by the render loop. */
 export interface CanvasMessage {
+  /** Last committed geometry, retained for resize and mode transitions. */
+  motion?: MessageMotionPlan;
   message: ChatMessage;
   /** Position/animation start time (includes stagger delay). */
   startTime: number;

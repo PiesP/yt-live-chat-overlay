@@ -249,7 +249,8 @@ export class LaneAllocator {
     speedTier: number = SPEED_TIER.MID,
     now: number = performance.now(),
     strategy: LaneSelectionStrategy = 'spread',
-    random: () => number = Math.random
+    random: () => number = Math.random,
+    exactMotionValidation = false
   ): LanePlacement | null {
     const totalLanes = this.numLanes;
     if (totalLanes <= 0) return null;
@@ -266,7 +267,8 @@ export class LaneAllocator {
       this.options.scrollDurationMaxMs,
       speedTier,
       random,
-      strategy
+      strategy,
+      exactMotionValidation
     );
     if (!result) return null;
 

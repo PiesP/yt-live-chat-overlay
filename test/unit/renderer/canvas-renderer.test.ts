@@ -16,6 +16,8 @@ import { LanguageDetectorService } from '@translation/language-detector';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
+import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { messageXAtTime, motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -71,6 +73,71 @@ function makeMessage(id: string, text: string): ChatMessage {
     authorType: 'normal',
   };
 }
+
+describe('Canvas reservation safety', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function setup(mode: OverlaySettings['danmakuMode'] = 'scroll') {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 640, height: 40 };
+    const renderer = new CanvasRenderer(overlay, makeSettings({
+      danmakuMode: mode, speedPxPerSec: 350, scrollDurationMinMs: 5000,
+      scrollDurationMaxMs: 30000, exitPaddingPx: 100, headwayGapRatio: 0.08,
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+    }));
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      reducedMotion: boolean;
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      drainQueue(now: number): void;
+      reflowActiveMessages(dimensions: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.restore({
+      heap: [[0, 0], [1, 0]], indexMap: { 0: 0, 1: 1 },
+      laneHeight: 20, laneCount: 2, speedTierLanes: {},
+    });
+    internals.estimateDimensions = (message) => ({ width: message.id === 'short' ? 100 : 600, height: 20 });
+    return { renderer, internals };
+  }
+
+  it.each(['scroll', 'reverse'] as const)('validates future reservations and chooses a safe alternative in %s', (mode) => {
+    const { renderer, internals } = setup(mode);
+    for (const id of ['first', 'short', 'long']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(0);
+    expect(internals.activeMessages).toHaveLength(3);
+    const short = internals.activeMessages.find((m) => m.message.id === 'short');
+    const long = internals.activeMessages.find((m) => m.message.id === 'long');
+    expect(short?.startTime).toBeGreaterThan(0);
+    expect(long?.laneIndex).not.toBe(short?.laneIndex);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+        expect(motionPlansCollide(motionPlanFromMessage(a, mode, 640, 100), motionPlanFromMessage(b, mode, 640, 100), 0.08, 0)).toBe(false);
+      }
+    }
+    renderer.destroy();
+  });
+
+  it('reserves centered reduced-motion rectangles for their full displayed lifetime', () => {
+    const { renderer, internals } = setup();
+    internals.reducedMotion = true;
+    for (const id of ['first', 'short', 'long']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(0);
+    const sameLane = internals.activeMessages.filter((m) => m.laneIndex === 0);
+    expect(sameLane).toHaveLength(2);
+    const [first, second] = sameLane;
+    expect(second && first && second.startTime >= first.startTime + first.duration).toBe(true);
+    for (const message of internals.activeMessages) {
+      expect(message.motion?.isScrolling).toBe(false);
+      expect(message.motion && messageXAtTime(message.motion, message.startTime + 600)).toBe(Math.floor((640 - message.width) / 2));
+    }
+    renderer.destroy();
+  });
+});
 
 describe('CanvasRenderer', () => {
   let overlay: Overlay;

@@ -76,8 +76,19 @@ import {
   SPEED_TIER,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
-import { computeRequiredEntryHeadwayPx } from '@renderer/layout/lane-shared';
-import { computeMessageMotionPlan } from '@renderer/layout/message-schedule';
+import {
+  applyReflowMotion,
+  previousMotionPlan,
+  reconcileMessagePlacements,
+  reflowMotionPlan,
+} from '@renderer/layout/message-reflow';
+import {
+  computeMessageMotionPlan,
+  type MessageMotionPlan,
+  motionPlanFromMessage,
+  motionPlansCollide,
+  resolveEffectiveMotionMode,
+} from '@renderer/layout/message-schedule';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
 import {
@@ -98,7 +109,7 @@ import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
 import { DensityIndicator } from '@util/density-indicator';
-import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
+import { statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { MapCompatibleLruMap } from '@util/lru-map';
@@ -150,6 +161,8 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
+  /** Reused per candidate so multi-slot occupants are checked only once. */
+  private readonly collisionScratch = new Set<CanvasMessage>();
   private readonly pendingQueue = new HighFirstPriorityBucketQueue();
   /** Pending messages whose eventual permanent discard contributes to drop metrics. */
   private readonly trackedPendingMessages = new WeakSet<ChatMessage>();
@@ -528,6 +541,10 @@ export class CanvasRenderer extends RendererBase {
     this.reducedMotion = this.reducedMotionQuery.matches;
     this.reducedMotionListener = (e: MediaQueryListEvent) => {
       this.reducedMotion = e.matches;
+      if (!this.workerManager.isActive) {
+        const dimensions = this.overlay.getDimensions();
+        if (dimensions) this.reflowActiveMessages(dimensions);
+      }
       // Relay OS preference change to the Worker (workers lack matchMedia).
       if (this.workerManager.isActive) {
         this.workerManager.sendReducedMotion(e.matches as boolean);
@@ -545,59 +562,95 @@ export class CanvasRenderer extends RendererBase {
     const laneCount = this.laneAllocator.getLaneCount();
     const laneHeight = this.laneAllocator.getLaneHeight();
     if (laneCount <= 0 || laneHeight <= 0) return;
-
-    const now = performance.now();
-    const isScrolling =
-      this.settings.danmakuMode === 'scroll' || this.settings.danmakuMode === 'reverse';
+    // A preference/geometry change during a pause uses the frozen animation clock.
+    const now = this.pausedAt ?? performance.now();
+    const mode = this.effectiveMotionMode;
+    const candidates = this.activeMessages.map((message) => {
+      const previous = previousMotionPlan(
+        message,
+        mode,
+        dimensions.width,
+        this.settings.exitPaddingPx
+      );
+      const next = computeMessageMotionPlan({
+        mode,
+        now,
+        batchIndex: 0,
+        previousStaggerDelayMs: 0,
+        queueDepth: 0,
+        staggerSample: 0,
+        maxStaggerDelayMs: 0,
+        mediumStaggerDelayMs: 0,
+        placementWaitMs: 0,
+        screenWidth: dimensions.width,
+        messageWidth: message.width,
+        velocityPxPerSec: this.getSpeedForTier(message.speedTier),
+        scrollDurationMinMs: this.settings.scrollDurationMinMs,
+        scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
+        exitPaddingPx: this.settings.exitPaddingPx,
+        topBottomDurationMs: this.settings.topBottomDurationMs,
+        durationMultiplier:
+          message.message.authorType === 'moderator' || message.message.authorType === 'owner'
+            ? this.settings.modOwnerDurationMultiplier
+            : 1,
+      });
+      return {
+        message,
+        laneIndex: message.laneIndex,
+        height: message.height,
+        motion: reflowMotionPlan(previous, next, now, this.settings.exitPaddingPx),
+      };
+    });
+    const reconciled = reconcileMessagePlacements(candidates, {
+      laneCount,
+      laneHeight,
+      viewportHeight: dimensions.height,
+      safeTop: this.settings.safeTop,
+      mode: this.settings.danmakuMode,
+      headwayGapRatio: this.settings.headwayGapRatio,
+      now,
+    });
+    this.laneAllocator.reset(dimensions);
     this.activeMessagesByLane.clear();
-
-    for (const message of this.activeMessages) {
-      const requestedSlots = Math.max(1, Math.ceil(message.height / laneHeight));
-      const slotCount = Math.min(requestedSlots, laneCount);
-      const laneIndex = Math.min(message.laneIndex, Math.max(0, laneCount - slotCount));
-      message.laneIndex = laneIndex;
-      message.slotCount = slotCount;
-      message.y =
-        this.laneAllocator.getLaneY(laneIndex, dimensions.height) +
-        Math.floor((slotCount * laneHeight - message.height) / 2);
+    this.activeMessages.length = 0;
+    for (const placement of reconciled.placements) {
+      const message = placement.message;
+      applyReflowMotion(message, placement.motion, now);
+      message.motion = placement.motion;
+      message.laneIndex = placement.laneIndex;
+      message.slotCount = placement.slotCount;
+      message.y = placement.y;
       message.laneArrayIndices.length = 0;
-
-      const elapsed = Math.max(0, now - message.startTime - message.pausedDuration);
-      const progress = Math.min(1, elapsed * message.invDuration);
-      if (isScrolling) {
-        if (this.settings.danmakuMode === 'scroll') {
-          message.startX = dimensions.width;
-          message.x =
-            message.startX -
-            progress * (message.startX + message.width + this.settings.exitPaddingPx);
-        } else {
-          message.startX = -message.width;
-          message.x =
-            message.startX +
-            progress * (dimensions.width - message.startX + this.settings.exitPaddingPx);
-        }
-      } else {
-        message.x = (dimensions.width - message.width) / 2;
-      }
-
-      addMessageToLaneIndex(this.activeMessagesByLane, message, slotCount);
-
-      const remainingDuration = Math.max(1, message.duration - elapsed);
+      this.activeMessages.push(message);
+      addMessageToLaneIndex(this.activeMessagesByLane, message, placement.slotCount);
       this.laneAllocator.commitPlacement(
         {
-          laneIndex,
+          laneIndex: placement.laneIndex,
+          slotCount: placement.slotCount,
           waitMs: 0,
-          laneY: this.laneAllocator.getLaneY(laneIndex, dimensions.height),
-          slotCount,
+          laneY: placement.y,
           verticalOffset: 0,
         },
-        now,
-        remainingDuration,
-        isScrolling ? message.width : undefined,
-        isScrolling ? dimensions.width : undefined,
-        message.speedTier
+        placement.motion.startTime,
+        placement.motion.durationMs,
+        placement.motion.isScrolling ? message.width : undefined,
+        placement.motion.isScrolling ? dimensions.width : undefined,
+        message.speedTier,
+        placement.motion.horizontalStaggerPx
       );
     }
+    for (const dropped of reconciled.dropped) {
+      this.messageActivator.releaseMessage(dropped.message);
+      this.observability.onMessagesDropped(1, dropped.reason);
+    }
+  }
+
+  private get effectiveMotionMode(): OverlaySettings['danmakuMode'] {
+    return resolveEffectiveMotionMode(
+      this.settings.danmakuMode,
+      this.reducedMotion,
+      this.settings.ignoreReducedMotion
+    );
   }
 
   /** Effective reduced-motion: OS preference AND-ed with user override. */
@@ -1324,32 +1377,6 @@ export class CanvasRenderer extends RendererBase {
   ): boolean {
     const changed = message.width !== geometry.width || message.height !== geometry.height;
     if (changed) {
-      const dimensions = this.overlay.getDimensions();
-      const isScrolling =
-        this.settings.danmakuMode === 'scroll' || this.settings.danmakuMode === 'reverse';
-      if (dimensions && isScrolling) {
-        const now = performance.now();
-        const speed = this.getSpeedForTier(message.speedTier);
-        const totalDistance = dimensions.width + geometry.width + this.settings.exitPaddingPx;
-        let duration = computeScrollDuration(
-          totalDistance,
-          speed,
-          this.settings.scrollDurationMinMs,
-          this.settings.scrollDurationMaxMs,
-          this.settings.exitPaddingPx
-        );
-        if (message.message.authorType === 'moderator' || message.message.authorType === 'owner') {
-          duration *= this.settings.modOwnerDurationMultiplier;
-        }
-        const progress =
-          this.settings.danmakuMode === 'scroll'
-            ? (dimensions.width - message.x) / Math.max(1, totalDistance)
-            : (message.x + geometry.width) / Math.max(1, totalDistance);
-        message.duration = duration;
-        message.invDuration = 1 / Math.max(1, duration);
-        message.startTime =
-          now - message.pausedDuration - Math.max(0, Math.min(1, progress)) * duration;
-      }
       message.width = geometry.width;
       message.height = geometry.height;
     }
@@ -1426,7 +1453,8 @@ export class CanvasRenderer extends RendererBase {
       previousStaggerDelayMs,
       result.dimensions,
       result.speedTier,
-      dimensions
+      dimensions,
+      result.motion
     );
 
     if (
@@ -1611,6 +1639,7 @@ export class CanvasRenderer extends RendererBase {
         placement: LanePlacement;
         dimensions: { width: number; height: number };
         speedTier: number;
+        motion: MessageMotionPlan;
       }
     | {
         ok: false;
@@ -1623,8 +1652,7 @@ export class CanvasRenderer extends RendererBase {
       return { ok: false, reason: 'temporarily_unavailable' };
     }
 
-    const mode = this.settings.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const mode = this.effectiveMotionMode;
     const dimensions = this.estimateDimensions(message);
     const { height: msgHeight } = dimensions;
 
@@ -1640,141 +1668,82 @@ export class CanvasRenderer extends RendererBase {
       return { ok: false, reason: 'oversized' };
     }
 
-    // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
-    const laneStrategy = mode === 'top' ? 'top' : mode === 'bottom' ? 'bottom' : 'spread';
-    const placement = this.laneAllocator.findPlacement(
-      msgHeight,
-      dims,
-      speedTier,
-      now,
-      laneStrategy
-    );
-    if (!placement) {
-      this.observability.recordCollisionCheck(performance.now() - t0);
-      return { ok: false, reason: 'temporarily_unavailable' };
-    }
-
+    const configuredMode = this.settings.danmakuMode;
+    const laneStrategy =
+      configuredMode === 'top' ? 'top' : configuredMode === 'bottom' ? 'bottom' : 'spread';
+    // Exclusions belong to this message's geometry and velocity, never to later candidates.
+    this.laneAllocator.clearCandidateExclusions();
+    const staggerSample = CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0] ?? 0;
     const durationMultiplier =
       message.authorType === 'moderator' || message.authorType === 'owner'
         ? this.settings.modOwnerDurationMultiplier
         : 1;
-    const incomingMotion = computeMessageMotionPlan({
-      mode,
-      now,
-      batchIndex,
-      previousStaggerDelayMs,
-      queueDepth: this.pendingQueue.size,
-      staggerSample: 0,
-      maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
-      mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
-      placementWaitMs: placement.waitMs,
-      screenWidth: dims.width,
-      messageWidth: dimensions.width,
-      velocityPxPerSec: this.getSpeedForTier(speedTier),
-      scrollDurationMinMs: this.settings.scrollDurationMinMs,
-      scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
-      exitPaddingPx: this.settings.exitPaddingPx,
-      topBottomDurationMs: this.settings.topBottomDurationMs,
-      durationMultiplier,
-    });
 
-    const newLaneY = placement.laneY + placement.verticalOffset;
-
-    // Check active messages in the target lane and adjacent lanes (reverse/newest first).
-    // Lane-scoped scan: instead of O(all activeMessages), only check messages within
-    // vertical overlap range. For single-slot messages: laneIndex ± 1.
-    // For multi-slot messages: laneIndex-1 through laneIndex+slotCount covers all covered lanes.
-    const adjacentMessages: CanvasMessage[] = [];
-    const scanEnd = placement.laneIndex + placement.slotCount;
-    for (let li = placement.laneIndex - 1; li <= scanEnd; li++) {
-      const laneMsgs = this.activeMessagesByLane.get(li);
-      if (laneMsgs) {
-        for (const m of laneMsgs) adjacentMessages.push(m);
-      }
-    }
-    // Scan newest-first for early collision exit
-    for (let i = adjacentMessages.length - 1; i >= 0; i--) {
-      const active = adjacentMessages[i];
-      if (!active) continue;
-      const activeElapsed = now - active.startTime - active.pausedDuration;
-      if (activeElapsed < 0) continue; // not yet started
-
-      // Extent-based overlap check: active occupies [active.y, active.y + active.height],
-      // new message would occupy [newLaneY, newLaneY + dimensions.height].
-      // Skip if no vertical overlap between the extents.
-      if (active.y + active.height <= newLaneY || active.y >= newLaneY + dimensions.height)
-        continue;
-
-      if (isScrolling) {
-        // Horizontal overlap: the active message's right edge must have
-        // moved past the screen's RIGHT edge (not left) before a new
-        // message can enter. This allows multiple comments to share the
-        // same lane simultaneously — the new one enters from the right
-        // while the previous one is still visible on the left.
-        //
-        // The headway gap is speed-aware: when the new message is faster
-        // (backlog entering real-time lane), headway scales up by the
-        // speed multiplier so the slower message has more lead time,
-        // preventing the faster chaser from visually crossing through.
-        const travelDistance = active.startX + active.width + this.settings.exitPaddingPx;
-        const activeTravelDistance =
-          mode === 'scroll'
-            ? travelDistance
-            : dims.width - active.startX + this.settings.exitPaddingPx;
-        const headwayPx = computeRequiredEntryHeadwayPx({
-          activeWidthPx: active.width,
-          headwayGapRatio: this.settings.headwayGapRatio,
-          activeTravelDistancePx: activeTravelDistance,
-          activeDurationMs: active.duration,
-          activeElapsedMs: activeElapsed,
-          incomingTravelDistancePx: incomingMotion.travelDistancePx,
-          incomingDurationMs: incomingMotion.durationMs,
-        });
-        const activeProgress = Math.min(1, activeElapsed * active.invDuration);
-        const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
-
-        // The new message starts at the right edge (or left for reverse).
-        // Overlap if the active message's right edge is still past the
-        // right edge minus headway gap.
-        if (mode === 'scroll') {
-          if (activeRightEdge > dims.width - headwayPx) {
-            forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
-              this.laneAllocator.markCollision(slotIdx);
-            });
-            this.observability.recordCollisionCheck(performance.now() - t0);
-            return { ok: false, reason: 'collision' };
-          }
-        } else {
-          // reverse mode: messages enter from left, travel right.
-          // Collision: the active message's LEFT edge must have cleared
-          // the left-side entry zone (+ headway gap) before a new message
-          // can enter the same lane. Testing the RIGHT edge (as the old
-          // code did) was always true — blocking lane reuse entirely.
-          const reverseTravel = dims.width - active.startX + this.settings.exitPaddingPx;
-          const activeX = active.startX + activeProgress * reverseTravel;
-          if (activeX < headwayPx) {
-            forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
-              this.laneAllocator.markCollision(slotIdx);
-            });
-            this.observability.recordCollisionCheck(performance.now() - t0);
-            return { ok: false, reason: 'collision' };
-          }
-        }
-      } else {
-        // Top/bottom modes: overlap if the active message in the same lane
-        // has not yet expired.
-        if (activeElapsed < active.duration) {
-          forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
-            this.laneAllocator.markCollision(slotIdx);
-          });
-          this.observability.recordCollisionCheck(performance.now() - t0);
-          return { ok: false, reason: 'collision' };
+    for (let attempt = 0; attempt < Math.min(totalLanes, 8); attempt++) {
+      const placement = this.laneAllocator.findPlacement(
+        msgHeight,
+        dims,
+        speedTier,
+        now,
+        laneStrategy,
+        Math.random,
+        true
+      );
+      if (!placement) break;
+      const motion = computeMessageMotionPlan({
+        mode,
+        now,
+        batchIndex,
+        previousStaggerDelayMs,
+        queueDepth: this.pendingQueue.size,
+        staggerSample,
+        maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
+        mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
+        placementWaitMs: placement.waitMs,
+        screenWidth: dims.width,
+        messageWidth: dimensions.width,
+        velocityPxPerSec: this.getSpeedForTier(speedTier),
+        scrollDurationMinMs: this.settings.scrollDurationMinMs,
+        scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
+        exitPaddingPx: this.settings.exitPaddingPx,
+        topBottomDurationMs: this.settings.topBottomDurationMs,
+        durationMultiplier,
+      });
+      const top = placement.laneY + placement.verticalOffset;
+      this.collisionScratch.clear();
+      const scanEnd = placement.laneIndex + placement.slotCount;
+      for (let lane = placement.laneIndex - 1; lane <= scanEnd; lane++) {
+        for (const active of this.activeMessagesByLane.get(lane) ?? []) {
+          this.collisionScratch.add(active);
         }
       }
+      let collision = false;
+      for (const active of this.collisionScratch) {
+        if (active.y + active.height <= top || active.y >= top + msgHeight) continue;
+        if (
+          motionPlansCollide(
+            motion,
+            motionPlanFromMessage(active, mode, dims.width, this.settings.exitPaddingPx),
+            this.settings.headwayGapRatio,
+            now
+          )
+        ) {
+          collision = true;
+          break;
+        }
+      }
+      this.collisionScratch.clear();
+      if (!collision) {
+        this.observability.recordCollisionCheck(performance.now() - t0);
+        return { ok: true, placement, dimensions, speedTier, motion };
+      }
+      forEachSlot(placement.laneIndex, placement.slotCount, (lane) => {
+        this.laneAllocator.markCollision(lane);
+      });
     }
-
-    return { ok: true, placement, dimensions, speedTier };
+    this.observability.recordCollisionCheck(performance.now() - t0);
+    return { ok: false, reason: 'temporarily_unavailable' };
   }
 
   // ── Message enqueue ──────────────────────────────────────────────────
@@ -1795,12 +1764,13 @@ export class CanvasRenderer extends RendererBase {
     previousStaggerDelayMs = 0,
     precomputedDimensions?: { width: number; height: number },
     precomputedSpeedTier?: number,
-    precomputedDims?: OverlayDimensions
+    precomputedDims?: OverlayDimensions,
+    precomputedMotion?: MessageMotionPlan
   ): number {
     const dims = precomputedDims ?? this.overlay.getDimensions();
     if (!dims) return previousStaggerDelayMs;
 
-    const mode = this.settings.danmakuMode;
+    const mode = this.effectiveMotionMode;
     const { width: msgWidth, height: msgHeight } =
       precomputedDimensions ?? this.estimateDimensions(message);
 
@@ -1811,25 +1781,27 @@ export class CanvasRenderer extends RendererBase {
       message.authorType === 'moderator' || message.authorType === 'owner'
         ? this.settings.modOwnerDurationMultiplier
         : 1;
-    const motion = computeMessageMotionPlan({
-      mode,
-      now,
-      batchIndex,
-      previousStaggerDelayMs,
-      queueDepth: this.pendingQueue.size,
-      staggerSample: CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
-      maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
-      mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
-      placementWaitMs: placement.waitMs,
-      screenWidth: dims.width,
-      messageWidth: msgWidth,
-      velocityPxPerSec: this.getSpeedForTier(speedTier),
-      scrollDurationMinMs: this.settings.scrollDurationMinMs,
-      scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
-      exitPaddingPx: this.settings.exitPaddingPx,
-      topBottomDurationMs: this.settings.topBottomDurationMs,
-      durationMultiplier,
-    });
+    const motion =
+      precomputedMotion ??
+      computeMessageMotionPlan({
+        mode,
+        now,
+        batchIndex,
+        previousStaggerDelayMs,
+        queueDepth: this.pendingQueue.size,
+        staggerSample: CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
+        maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
+        mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
+        placementWaitMs: placement.waitMs,
+        screenWidth: dims.width,
+        messageWidth: msgWidth,
+        velocityPxPerSec: this.getSpeedForTier(speedTier),
+        scrollDurationMinMs: this.settings.scrollDurationMinMs,
+        scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
+        exitPaddingPx: this.settings.exitPaddingPx,
+        topBottomDurationMs: this.settings.topBottomDurationMs,
+        durationMultiplier,
+      });
     this.laneAllocator.commitPlacement(
       placement,
       motion.startTime,
@@ -1849,6 +1821,7 @@ export class CanvasRenderer extends RendererBase {
       laneY,
       {
         onActivated: (cm) => {
+          cm.motion = motion;
           this.activeMessages.push(cm);
           const slotCount = placement.slotCount;
           cm.slotCount = slotCount;
@@ -2050,7 +2023,18 @@ export class CanvasRenderer extends RendererBase {
   override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
-    const prevDanmakuMode = this.settings.danmakuMode;
+    const motionPolicyChanged =
+      settings.danmakuMode !== this.settings.danmakuMode ||
+      settings.ignoreReducedMotion !== this.settings.ignoreReducedMotion ||
+      settings.speedPxPerSec !== this.settings.speedPxPerSec ||
+      settings.scrollDurationMinMs !== this.settings.scrollDurationMinMs ||
+      settings.scrollDurationMaxMs !== this.settings.scrollDurationMaxMs ||
+      settings.topBottomDurationMs !== this.settings.topBottomDurationMs ||
+      settings.modOwnerDurationMultiplier !== this.settings.modOwnerDurationMultiplier ||
+      settings.depthFarSpeedMul !== this.settings.depthFarSpeedMul ||
+      settings.depthNearSpeedMul !== this.settings.depthNearSpeedMul ||
+      settings.backlogSpeedMultiplier !== this.settings.backlogSpeedMultiplier ||
+      settings.exitPaddingPx !== this.settings.exitPaddingPx;
     const translationConfigurationChanged =
       settings.translationEnabled !== this.settings.translationEnabled ||
       settings.translationService !== this.settings.translationService ||
@@ -2135,7 +2119,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     if (
-      (laneGeometryChanged || translationGeometryChanged) &&
+      (laneGeometryChanged || translationGeometryChanged || motionPolicyChanged) &&
       !options?.resetState &&
       !this.workerManager.isActive
     ) {
@@ -2178,67 +2162,6 @@ export class CanvasRenderer extends RendererBase {
       depthLayersEnabled: settings.depthLayersEnabled,
     });
     this.buildOpacityConfig();
-
-    // M6: When danmakuMode changes, active messages retain startX computed
-    // for the old mode — recompute startX, duration, and current x for all
-    // active messages so they render correctly in the new mode.
-    if (prevDanmakuMode !== settings.danmakuMode) {
-      const dims = this.overlay.getDimensions();
-      if (dims && this.activeMessages.length > 0) {
-        const newIsScrolling =
-          settings.danmakuMode === 'scroll' || settings.danmakuMode === 'reverse';
-        const now = performance.now();
-        for (const msg of this.activeMessages) {
-          // Preserve current progress so messages don't jump mid-flight
-          const elapsed = now - msg.startTime - msg.pausedDuration;
-          const oldProgress =
-            msg.duration > 0 ? Math.min(1, Math.max(0, elapsed / msg.duration)) : 0;
-
-          // Recompute startX for the new mode
-          if (newIsScrolling) {
-            msg.startX = settings.danmakuMode === 'scroll' ? dims.width : -(msg.width + 0); // no stagger for in-flight messages
-          } else {
-            msg.startX = Math.max(0, Math.floor((dims.width - msg.width) / 2));
-          }
-
-          // Recompute duration based on new mode
-          if (newIsScrolling) {
-            const totalDistance =
-              settings.danmakuMode === 'scroll'
-                ? msg.startX + msg.width + settings.exitPaddingPx
-                : dims.width + msg.width + settings.exitPaddingPx;
-            const speed = this.getEffectiveSpeedPxPerSec();
-            msg.duration =
-              speed > 0
-                ? computeScrollDuration(
-                    totalDistance,
-                    speed,
-                    settings.scrollDurationMinMs,
-                    settings.scrollDurationMaxMs,
-                    settings.exitPaddingPx
-                  )
-                : settings.scrollDurationMinMs;
-          } else {
-            msg.duration = settings.topBottomDurationMs;
-          }
-          msg.invDuration = msg.duration > 0 ? 1 / msg.duration : 0;
-
-          // Reposition x based on new startX and preserved progress
-          if (newIsScrolling) {
-            if (settings.danmakuMode === 'scroll') {
-              const travelDistance = msg.startX + msg.width + settings.exitPaddingPx;
-              msg.x = msg.startX - oldProgress * travelDistance;
-            } else {
-              const reverseTravel = dims.width - msg.startX + settings.exitPaddingPx;
-              msg.x = msg.startX + oldProgress * reverseTravel;
-            }
-          } else {
-            // top/bottom: static centered
-            msg.x = msg.startX;
-          }
-        }
-      }
-    }
   }
 
   override setChatPanelOpen(open: boolean): void {

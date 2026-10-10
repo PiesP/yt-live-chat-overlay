@@ -58,7 +58,8 @@ import {
   getBidiLayoutCacheUsage,
   resolveTextDirection,
 } from '@renderer/canvas/bidi-layout';
-import type { WorkerMessage } from '@renderer/worker/types';
+import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
+import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -133,6 +134,91 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
   );
   return renderer;
 }
+
+describe('Worker reservation safety', () => {
+  function setup(mode: 'scroll' | 'reverse' | 'top' = 'scroll', reducedMotion = false) {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const renderer = initializeRenderer({
+      danmakuMode: mode, reducedMotion, speedPxPerSec: 350,
+      scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
+      outlineWidthPx: 0, outlineOpacity: 0,
+    });
+    const internals = renderer as unknown as {
+      laneHeap: [number, number][];
+      laneIndexToHeapIndex: Map<number, number>;
+      numLanes: number; laneHeight: number; logicalHeight: number;
+      activeMessages: ActiveMessage[];
+      pendingQueue: WorkerMessage[];
+      totalDrops: number;
+      drainQueue(now: number, width: number, height: number): void;
+      reflowActiveMessages(): void;
+    };
+    internals.laneHeap = [[0, 0], [1, 0]];
+    internals.laneIndexToHeapIndex = new Map([[0, 0], [1, 1]]);
+    internals.numLanes = 2;
+    internals.laneHeight = 20;
+    internals.logicalHeight = 40;
+    for (const id of ['first', 'short', 'long']) {
+      internals.pendingQueue.push({
+        id, text: id, content: [{ type: 'text', content: id }],
+        priority: 0, isBacklog: false, kind: 'text', authorType: 'normal',
+        width: id === 'short' ? 100 : 600, height: 20,
+      });
+    }
+    return { renderer, internals };
+  }
+
+  it.each(['scroll', 'reverse'] as const)('checks future reservations and uses an alternative lane in %s', (mode) => {
+    const { internals } = setup(mode);
+    internals.drainQueue(0, 640, 40);
+    expect(internals.activeMessages).toHaveLength(3);
+    const short = internals.activeMessages.find((m) => m.id === 'short');
+    const long = internals.activeMessages.find((m) => m.id === 'long');
+    expect(short?.startTime).toBeGreaterThan(0);
+    expect(long?.laneIndex).not.toBe(short?.laneIndex);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+        expect(motionPlansCollide(motionPlanFromMessage(a, mode, 640, 100), motionPlanFromMessage(b, mode, 640, 100), 0.08, 0)).toBe(false);
+      }
+    }
+  });
+
+  it('preserves future starts and resolves fixed capacity when reflow shrinks the lane range', () => {
+    const { internals } = setup('top');
+    internals.drainQueue(0, 640, 40);
+    const futureStarts = new Map(internals.activeMessages.map((m) => [m.id, m.startTime]));
+    expect([...futureStarts.values()].some((time) => time > 0)).toBe(true);
+    internals.numLanes = 1;
+    internals.logicalHeight = 20;
+    internals.reflowActiveMessages();
+    expect(internals.totalDrops).toBe(1);
+    expect(internals.activeMessages).toHaveLength(2);
+    expect(internals.activeMessages.every((m) => m.startTime === futureStarts.get(m.id))).toBe(true);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b) continue;
+        expect(motionPlansCollide(motionPlanFromMessage(a, 'top', 640, 100), motionPlanFromMessage(b, 'top', 640, 100), 0.08, 0)).toBe(false);
+      }
+    }
+  });
+
+  it('reconciles a live reduced-motion preference change before drawing', () => {
+    const { renderer, internals } = setup();
+    internals.drainQueue(0, 640, 40);
+    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { reducedMotion: true } }));
+    expect(internals.activeMessages.every((m) => m.motion?.mode === 'top' && m.x === Math.floor((640 - m.width) / 2))).toBe(true);
+    for (const a of internals.activeMessages) {
+      for (const b of internals.activeMessages) {
+        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+        expect(a.motion && b.motion && motionPlansCollide(a.motion, b.motion, 0.08, 0)).toBe(false);
+      }
+    }
+    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { ignoreReducedMotion: true } }));
+    expect(internals.activeMessages.every((m) => m.motion?.mode === 'scroll')).toBe(true);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

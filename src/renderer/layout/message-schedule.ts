@@ -10,46 +10,10 @@ import {
   STAGGER_QUEUE_MED,
 } from '@renderer/constants';
 import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
+import type { MessageMotionPlan, MessageMotionPlanInput } from '@renderer/layout/motion-types';
 import { computeScrollDuration } from '@util/design-tokens';
 
-export interface MessageMotionPlanInput {
-  mode: DanmakuMode;
-  now: number;
-  batchIndex: number;
-  previousStaggerDelayMs: number;
-  queueDepth: number;
-  /** Positive exponential-distribution sample, normally read from the shared LUT. */
-  staggerSample: number;
-  maxStaggerDelayMs: number;
-  mediumStaggerDelayMs: number;
-  placementWaitMs: number;
-  screenWidth: number;
-  messageWidth: number;
-  velocityPxPerSec: number;
-  scrollDurationMinMs: number;
-  scrollDurationMaxMs: number;
-  exitPaddingPx: number;
-  topBottomDurationMs: number;
-  durationMultiplier: number;
-}
-
-export interface MessageMotionPlan {
-  mode: DanmakuMode;
-  isScrolling: boolean;
-  horizontalStaggerPx: number;
-  staggerLimitMs: number;
-  staggerDelayMs: number;
-  startTime: number;
-  startX: number;
-  travelDistancePx: number;
-  durationMs: number;
-  screenWidthPx: number;
-  messageWidthPx: number;
-  actualVelocityPxPerMs: number;
-  viewportEntryTime: number;
-  visibleExitTime: number;
-  endTime: number;
-}
+export type { MessageMotionPlan, MessageMotionPlanInput } from '@renderer/layout/motion-types';
 
 /** Resolve the visual mode before choosing a lane or reserving its lifetime. */
 export function resolveEffectiveMotionMode(
@@ -136,7 +100,10 @@ export function motionPlanFromMessage(
     staggerLimitMs: 0,
     staggerDelayMs: 0,
     startTime,
-    startX: message.startX,
+    startX:
+      mode === 'top' || mode === 'bottom'
+        ? Math.max(0, Math.floor((screenWidthPx - message.width) / 2))
+        : message.startX,
     durationMs: message.duration,
     screenWidthPx,
     messageWidthPx: message.width,
@@ -154,7 +121,9 @@ export function messageXAtElapsed(
   elapsedMs: number,
   durationMs: number
 ): number {
-  if (mode === 'top' || mode === 'bottom') return startX;
+  if (mode === 'top' || mode === 'bottom') {
+    return Math.max(0, Math.floor((screenWidthPx - messageWidthPx) / 2));
+  }
   if (durationMs <= 0) return startX;
   const progress = Math.min(1, Math.max(0, elapsedMs / durationMs));
   const distance =

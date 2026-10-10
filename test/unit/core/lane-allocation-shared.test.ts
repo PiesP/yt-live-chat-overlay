@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { SPEED_TIER } from '@renderer/constants';
 import {
   computeBaseHeadwayPx,
-  computeRequiredEntryHeadwayPx,
   areSpeedTiersCompatible,
   computeLaneY,
   computeOccupancyMs,
@@ -68,50 +68,6 @@ describe('computeBaseHeadwayPx', () => {
 
   it('returns min for Infinity inputs', () => {
     expect(computeBaseHeadwayPx(Infinity, 0.08)).toBeGreaterThanOrEqual(16);
-  });
-});
-
-describe('computeRequiredEntryHeadwayPx', () => {
-  it('uses the base gap when the incoming comment cannot catch the active one', () => {
-    expect(
-      computeRequiredEntryHeadwayPx({
-        activeWidthPx: 300,
-        headwayGapRatio: 0.08,
-        activeTravelDistancePx: 1_600,
-        activeDurationMs: 8_000,
-        activeElapsedMs: 2_000,
-        incomingTravelDistancePx: 1_400,
-        incomingDurationMs: 7_000,
-      })
-    ).toBe(24);
-  });
-
-  it('reserves the full catch-up distance for a faster incoming comment', () => {
-    expect(
-      computeRequiredEntryHeadwayPx({
-        activeWidthPx: 300,
-        headwayGapRatio: 0.08,
-        activeTravelDistancePx: 1_600,
-        activeDurationMs: 8_000,
-        activeElapsedMs: 2_000,
-        incomingTravelDistancePx: 1_800,
-        incomingDurationMs: 6_000,
-      })
-    ).toBe(624);
-  });
-
-  it('falls back to the base gap for invalid motion data', () => {
-    expect(
-      computeRequiredEntryHeadwayPx({
-        activeWidthPx: 300,
-        headwayGapRatio: 0.08,
-        activeTravelDistancePx: Number.NaN,
-        activeDurationMs: 8_000,
-        activeElapsedMs: 2_000,
-        incomingTravelDistancePx: 1_800,
-        incomingDurationMs: 6_000,
-      })
-    ).toBe(24);
   });
 });
 
@@ -510,6 +466,15 @@ describe('commitPlacementShared', () => {
 // ── shiftLaneTimersShared ────────────────────────────────────────
 
 describe('shiftLaneTimersShared', () => {
+  it('permits exact motion validation to consider a lane with a retained older tier', () => {
+    const state = makeState(1, 0);
+    commitPlacementShared(state, 0, 1, 0, 600, 9000, SPEED_TIER.FAR);
+    commitPlacementShared(state, 0, 1, 1000, 600, 5000, SPEED_TIER.MID);
+    expect(state.speedTierLanes.get(0)?.tier).toBe(SPEED_TIER.FAR);
+    expect(findPlacementShared(state, 2000, 20, 20, 30000, SPEED_TIER.NEAR, () => 0, 'spread')).toBeNull();
+    expect(findPlacementShared(state, 2000, 20, 20, 30000, SPEED_TIER.NEAR, () => 0, 'spread', true)).toEqual({ laneIndex: 0, waitMs: 0 });
+  });
+
   it('shifts all lane available times forward', () => {
     const state = makeState(4, 1000);
     shiftLaneTimersShared(state, 500);
