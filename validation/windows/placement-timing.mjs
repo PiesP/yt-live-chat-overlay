@@ -443,6 +443,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     assert(deliveredBatches.has(batch), `Scoped placement batch ${batch} was not intercepted`);
   };
   const workerSnapshot = async () => {
+    // Flush observes the preceding frame; let queued settings reach that frame first.
+    await page.waitForTimeout(50);
     const requestId = await page.evaluate(() => {
       const probe = window.__ytPlacementProbe;
       const id = (probe.flushSequence ?? 0) + 1;
