@@ -24,6 +24,7 @@ import type {
   WorkerMotionSnapshot,
   WorkerStatsMessage,
 } from './types';
+import { WORKER_DROP_REASONS } from './types';
 
 export const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
 const MAX_STATS_MESSAGE_IDS =
@@ -112,6 +113,21 @@ function isSafeConfig(value: unknown): value is Record<string, unknown> {
 /** Validate cumulative state sent from the renderer Worker to the main thread. */
 export function isValidWorkerStatsMessage(value: unknown): value is WorkerStatsMessage {
   if (!isRecord(value) || value.type !== 'stats') return false;
+  if (Object.hasOwn(value, 'dropReasons')) {
+    if (!isRecord(value.dropReasons)) return false;
+    const entries = Object.entries(value.dropReasons);
+    if (entries.length > WORKER_DROP_REASONS.length) return false;
+    let reasonTotal = 0;
+    for (const [reason, count] of entries) {
+      if (
+        !WORKER_DROP_REASONS.some((known) => known === reason) ||
+        !isNonNegativeSafeInteger(count)
+      )
+        return false;
+      reasonTotal += count;
+    }
+    if (reasonTotal !== value.totalDrops) return false;
+  }
   return (
     isNonNegativeSafeInteger(value.activeMessages) &&
     isNonNegativeSafeInteger(value.pendingQueueDepth) &&
@@ -156,6 +172,7 @@ function isValidActiveMotion(value: unknown): value is WorkerActiveMotion {
     isRecord(value) &&
     typeof value.id === 'string' &&
     value.id.length > 0 &&
+    (!hasOwn(value, 'trackDrops') || typeof value.trackDrops === 'boolean') &&
     (value.mode === 'scroll' ||
       value.mode === 'reverse' ||
       value.mode === 'top' ||

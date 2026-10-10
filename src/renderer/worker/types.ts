@@ -8,7 +8,7 @@
  * the boundary between type definitions and rendering logic.
  */
 
-import type { DanmakuMode, FontWeight } from '@app-types';
+import type { DanmakuMode, DropReason, FontWeight } from '@app-types';
 import type { CardConfigWorker } from '@renderer/card-config';
 import type { MessageMotionPlan } from '@renderer/layout/motion-types';
 
@@ -214,12 +214,23 @@ export interface WorkerMessageGeometry {
 }
 
 /** Periodic cumulative state reported by the renderer Worker. */
+export const WORKER_DROP_REASONS = [
+  'queue_priority',
+  'queue_replaced',
+  'oversized',
+  'reflow_capacity',
+] as const satisfies readonly DropReason[];
+export type WorkerDropReason = (typeof WORKER_DROP_REASONS)[number];
+export type WorkerDropReasonCounts = Record<WorkerDropReason, number>;
+
 export interface WorkerStatsMessage {
   type: 'stats';
   activeMessages: number;
   pendingQueueDepth: number;
   totalRendered: number;
   totalDrops: number;
+  /** Optional cumulative, reason-specific counters; their sum equals totalDrops. */
+  dropReasons?: Partial<WorkerDropReasonCounts>;
   /** Highest addMessages batch fully admitted by this Worker instance. */
   processedBatchSequence: number;
   laneUtilization: number;
@@ -246,6 +257,8 @@ export interface WorkerMessageSnapshot {
 /** The exact active geometry and timeline at the Worker fallback boundary. */
 export interface WorkerActiveMotion {
   id: string;
+  /** Original drop-accounting disposition, independent of recovery requeue. */
+  trackDrops?: boolean;
   mode: DanmakuMode;
   startX: number;
   width: number;

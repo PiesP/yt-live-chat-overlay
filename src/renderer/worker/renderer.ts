@@ -130,6 +130,8 @@ import type {
   ActiveMessage,
   WorkerConfig,
   WorkerContentSegment,
+  WorkerDropReason,
+  WorkerDropReasonCounts,
   WorkerMessage,
   WorkerMessageGeometry,
   WorkerStatsMessage,
@@ -493,6 +495,12 @@ export class WorkerRenderer {
   /** Cumulative messages placed into the active render set for this Worker instance. */
   private totalRendered = 0;
   private totalDrops = 0;
+  private readonly dropReasons: WorkerDropReasonCounts = {
+    queue_priority: 0,
+    queue_replaced: 0,
+    oversized: 0,
+    reflow_capacity: 0,
+  };
   private processedBatchSequence = 0;
   private currentEpoch = 0;
   private readonly pendingTranslations = new Map<
@@ -882,6 +890,7 @@ export class WorkerRenderer {
               exitPaddingPx: this.config?.exitPaddingPx ?? DEFAULT_SETTINGS.exitPaddingPx,
               activeMotions: this.activeMessages.map((message) => ({
                 id: message.id,
+                trackDrops: message.trackDrops !== false,
                 mode: message.motion?.mode ?? this.effectiveMotionMode,
                 startX: message.startX,
                 width: message.width,
@@ -1016,14 +1025,14 @@ export class WorkerRenderer {
         // entry from messageById and register the new one so
         // translation results can be matched.
         const evicted = this.pendingQueue[minIdx];
-        if (evicted) this.recordDrop(evicted);
+        if (evicted) this.recordDrop(evicted, 'queue_replaced');
         if (evicted) this.messageById.delete(evicted.id);
         this.pendingQueue[minIdx] = msg;
         this.messageById.set(msg.id, msg);
         this.pendingQueueSortNeeded = true;
         return true;
       } else {
-        this.recordDrop(msg);
+        this.recordDrop(msg, 'queue_priority');
         return false;
       }
     }
@@ -1036,9 +1045,10 @@ export class WorkerRenderer {
     return true;
   }
 
-  private recordDrop(message: Pick<WorkerMessage, 'trackDrops'>): void {
-    if (message.trackDrops === false) return;
-    this.totalDrops = Math.min(Number.MAX_SAFE_INTEGER, this.totalDrops + 1);
+  private recordDrop(message: Pick<WorkerMessage, 'trackDrops'>, reason: WorkerDropReason): void {
+    if (message.trackDrops === false || this.totalDrops >= Number.MAX_SAFE_INTEGER) return;
+    this.totalDrops++;
+    this.dropReasons[reason]++;
   }
 
   /** Replace pending or active render state without creating a duplicate ID. */
@@ -1193,6 +1203,7 @@ export class WorkerRenderer {
       pendingQueueDepth: this.pendingQueue.length,
       totalRendered: this.totalRendered,
       totalDrops: this.totalDrops,
+      dropReasons: { ...this.dropReasons },
       processedBatchSequence: this.processedBatchSequence,
       laneUtilization,
       activeMessageIds: this.activeMessages.map((msg) => msg.id),
@@ -1376,7 +1387,7 @@ export class WorkerRenderer {
       );
     }
     for (const dropped of reconciled.dropped) {
-      this.recordDrop(dropped.message);
+      this.recordDrop(dropped.message, dropped.reason);
       this.messageById.delete(dropped.message.id);
       this.releaseQueuedAssetsForOwner(dropped.message.id);
       this.pendingTranslations.delete(dropped.message.id);
@@ -2177,7 +2188,7 @@ export class WorkerRenderer {
         // A message taller than the viewport can never obtain a contiguous
         // block. Treat it as a permanent drop instead of retrying it every
         // frame and keeping the Worker render loop alive indefinitely.
-        this.recordDrop(entry);
+        this.recordDrop(entry, 'oversized');
         this.messageById.delete(entry.id);
         committed.add(entry);
         continue;

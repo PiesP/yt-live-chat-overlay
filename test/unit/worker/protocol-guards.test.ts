@@ -665,6 +665,9 @@ describe('renderer worker protocol guards', () => {
       motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, durationMs: NaN }] },
     })).toBe(false);
     expect(isValidWorkerMessageSnapshot({ ...valid,
+      motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, trackDrops: 'no' }] },
+    })).toBe(false);
+    expect(isValidWorkerMessageSnapshot({ ...valid,
       motionSnapshot: { ...motionSnapshot, effectiveNowEpochMs: 1_600 },
     })).toBe(false);
     expect(isValidWorkerMessageSnapshot(validSnapshot())).toBe(true);
