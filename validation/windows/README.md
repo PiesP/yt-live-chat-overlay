@@ -67,6 +67,41 @@ response. `profile.mjs` records the fixture sizes and network-event tolerance;
 fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
 scenario uses intercepted fixture traffic rather than a live chat account.
 
+Installed Edge extension runs also execute `placement-timing.mjs` after the
+ordinary fixture, in separate task-owned pages. One page observes the actual
+packaged OffscreenCanvas Worker; the other makes
+`transferControlToOffscreen()` fail before transfer so the application takes its
+normal Canvas fallback. Both pages use the normal extension, chat response
+parser, runtime, and renderer with routed, bounded text and paid-card messages.
+The Worker page prefixes and suffixes a probe around the page-origin Blob built
+from the packaged Worker source. The original Worker code runs between them;
+the suffix attaches to the renderer instance only when the emitted handler
+matches the expected shape. Bundle drift fails the fixture. The probe records
+bounded exact Worker render/drain durations, queue residence for fixture IDs,
+placement and collision rejection counts, active-message coordinates, work
+before the first overlay clear, fixture text ink bounds, first viewport entry,
+Worker queue receipts, and a screenshot. It does not change production source
+or add application telemetry. The Canvas page records draw data on the main
+thread. The first-entry clock is
+`performance.timeOrigin + performance.now()` in each realm; compare only samples
+from the same run and inspect any clock disagreement before interpreting a
+cross-realm latency. `preClearWorkMs` includes drain and cleanup, so it is a
+work proxy; `exactWorkerDrainMs` is the wrapped drain method's duration. Text
+ink rectangles exclude paid card backgrounds and do not by themselves prove
+reservation safety. Collision rejection counts are attempted placements, not
+distinct dropped messages; unknown drops remain labeled `other`.
+
+For issue #193 performance comparison, run baseline and final source in the
+same prepared VM, installed Edge version, profile mode, viewport, fixture, and
+probe revision. Retain both source and bundle hashes and compare the reported
+first-entry latencies and frame-work percentiles alongside Worker queue receipts
+and screenshots. Report absent draw samples or Worker startup as unverified;
+do not infer a performance gain from a single screenshot or a formula change.
+The replay fixture holds video time at 10000, 10001, and 11500 ms and checks
+the corresponding accessibility entries using routed replay continuation
+actions. It remains a synthetic parser/runtime check. Alternate fixed and
+reduced-motion states and real-site playback need separate VM observations.
+
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
 motion override without changing its saved representation. It retains settings

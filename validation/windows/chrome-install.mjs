@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { run as runFixture } from './profile.mjs';
+import { runPlacementTimingFixture } from './placement-timing.mjs';
 import { countUnexpectedLiveErrors, isYouTubeHostError, redactDiagnosticText, validateLiveRenderer } from './live-rendering.mjs';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
 
@@ -356,7 +357,7 @@ export async function runChromeInstallation({
   let browserProcessId;
   let browserProcessIdentity;
   let primaryError;
-  const result = { installation, fixture: null, live: [], cleanup: {} };
+  const result = { installation, fixture: null, placementTiming: null, live: [], cleanup: {} };
   try {
     context = await chromium.launchPersistentContext(profile, {
       channel: browserName,
@@ -389,6 +390,13 @@ export async function runChromeInstallation({
     result.fixture = await runFixture({ browser: context.browser(), root, output,
       installedContext: context, installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
+    if (browserName === 'msedge' && installation === 'extension') {
+      result.placementTiming = await runPlacementTimingFixture({
+        context, root, output, extensionId,
+      });
+      assert.equal(result.placementTiming.status, 'passed',
+        'Installed Edge placement or replay fixture did not satisfy its observations');
+    }
     for (const [index, url] of liveUrls.entries()) {
       result.live.push(await inspectLivePage(context, url, output, index, installation));
     }
