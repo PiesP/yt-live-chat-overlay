@@ -113,7 +113,9 @@ congestion page requires an observed pending depth of at least 50 and an
 activation with zero temporal and geometric entry delay at that depth.
 Exact frame/drain samples reset immediately before this bounded pressure batch
 to prevent initial idle frames from consuming the sample cap. A single 50-message batch uses
-unique fixture authors and remains within the runtime live-batch boundary; the setting itself does not prove
+unique fixture authors, a 16px font and the full safe zone to keep initial
+lane utilization below the existing backlog throttle. It remains within the
+runtime live-batch boundary; the setting itself does not prove
 queue pressure. The translation page sends one bounded test-only
 `updateTranslation` through the production Worker protocol for a fixture ID,
 checks active geometry reflow, then sends a bounded removal update. It does not prove translation-provider

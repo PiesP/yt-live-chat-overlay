@@ -366,6 +366,7 @@ function attachWorkerRendererProbe(renderer) {
         reducedMotion: this.config?.reducedMotion ?? null,
         ignoreReducedMotion: this.config?.ignoreReducedMotion ?? null,
         translationGeneration: this.config?.translationGeneration ?? null,
+        fontSize: this.config?.fontSize ?? null, laneSpacing: this.config?.laneSpacing ?? null,
         safeTop: this.config?.safeTop ?? null, safeBottom: this.config?.safeBottom ?? null,
         maxConcurrentMessages: this.config?.maxConcurrentMessages ?? null,
         queueMaxSize: this.config?.queueMaxSize ?? null,
@@ -717,7 +718,9 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     }
     if (transition === 'congestion') {
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ maxConcurrentMessages: 30,
-        queueMaxSize: 50, staggerMaxDelayMs: 200, staggerMediumDelayMs: 80 }));
+        queueMaxSize: 50, fontSize: 16, laneSpacing: 0, safeTop: 0, safeBottom: 0,
+        staggerMaxDelayMs: 200, staggerMediumDelayMs: 80 }));
+      await workerSnapshot();
       await page.evaluate(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
         .worker.postMessage({ type: 'ytPlacementResetSamples' }));
       await sendBatch('2');
