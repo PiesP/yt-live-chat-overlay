@@ -106,7 +106,8 @@ do not infer a performance gain from a single screenshot or a formula change.
 The replay fixture holds video time at 10000, 10001, and 11500 ms and checks
 the corresponding accessibility entries using routed replay continuation
 actions. Separate installed Worker pages exercise top and bottom placement,
-system reduced motion on/off and its user override on/off, safe-zone/font/lane-density
+system reduced motion on/off and its user override on/off, active viewport resize,
+safe-zone/font/lane-density
 shrink and expansion, and a queue cap of 50 with active cap of 30. The
 congestion page requires an observed pending depth of at least 50 and an
 activation with zero temporal and geometric entry delay at that depth.

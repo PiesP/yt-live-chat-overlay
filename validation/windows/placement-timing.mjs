@@ -672,6 +672,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     }
     if (transition === 'safe-density') {
       const baseline = await workerSnapshot();
+      await page.setViewportSize({ width: 960, height: 640 });
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0.15,
         safeBottom: 0.25, fontSize: 40, laneSpacing: 10, maxConcurrentMessages: 30 }));
       await sendBatch('2');
@@ -679,6 +680,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[8]);
       await waitForWorkerEntry(TOKENS[8]);
       const compact = await workerSnapshot();
+      assert(compact.config.logicalWidth < baseline.config.logicalWidth,
+        'Active Worker viewport did not shrink');
       assert.equal(compact.config.safeTop, 0.15);
       assert.equal(compact.config.safeBottom, 0.25);
       assert.equal(compact.config.maxConcurrentMessages, 30);
@@ -690,6 +693,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assert.equal(findOverlappingActivePair(compact.activeNow,
         compact.config.logicalWidth, compact.config.logicalHeight), null,
       'Messages overlapped after safe-zone and density shrink');
+      await page.setViewportSize({ width: 1280, height: 720 });
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0,
         safeBottom: 0, fontSize: 32, laneSpacing: 0, maxConcurrentMessages: 300 }));
       await sendBatch('3');
@@ -697,6 +701,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[9]);
       await waitForWorkerEntry(TOKENS[9]);
       const expanded = await workerSnapshot();
+      assert(expanded.config.logicalWidth > compact.config.logicalWidth,
+        'Active Worker viewport did not expand');
       assert.equal(expanded.config.safeTop, 0);
       assert.equal(expanded.config.safeBottom, 0);
       assert(expanded.activeNow.some((entry) => entry.id === TOKENS[9]),
