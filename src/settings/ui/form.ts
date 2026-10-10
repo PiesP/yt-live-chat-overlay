@@ -489,7 +489,9 @@ export class SettingsUiForm {
     const text = this.modal.querySelector<HTMLElement>(
       '.yt-chat-overlay-settings-font-preview-text'
     );
-    if (!stage || !text || stage.getBoundingClientRect().width <= 0) return;
+    if (!stage || !text) return;
+
+    const stageWidth = stage.getBoundingClientRect().width;
 
     const canvas = text.querySelector('canvas');
     const width = Math.max(1, Math.floor(text.parentElement?.getBoundingClientRect().width || 320));
@@ -497,6 +499,7 @@ export class SettingsUiForm {
     if (
       this.previewSettings &&
       canvas &&
+      stageWidth > 0 &&
       (Number(canvas.dataset.logicalWidth) !== width || Number(canvas.dataset.dpr) !== dpr)
     ) {
       this.populateSpacingPreview(this.previewSettings, text);
@@ -504,7 +507,11 @@ export class SettingsUiForm {
 
     const availableFraction = Number(stage.dataset.previewAvailableFraction);
     const minimumHeight = Number.parseFloat(getComputedStyle(stage).minBlockSize);
-    const textHeight = Math.max(text.scrollHeight, text.getBoundingClientRect().height);
+    const textHeight = Math.max(
+      text.scrollHeight,
+      text.getBoundingClientRect().height,
+      Number.parseFloat(canvas?.style.blockSize || '0')
+    );
     if (
       !Number.isFinite(availableFraction) ||
       availableFraction <= 0 ||
@@ -1294,6 +1301,9 @@ export class SettingsUiForm {
     if (stage) {
       stage.dataset.previewAvailableFraction = String(availableFraction);
       stage.style.gridTemplateRows = `minmax(0, ${settings.safeTop}fr) minmax(0, ${availableFraction}fr) minmax(0, ${settings.safeBottom}fr)`;
+      // Reserve the new Canvas height even while this pane is hidden. Waiting
+      // for the next frame can briefly paint into the previous safe-zone row.
+      this.updateSettingsPreviewLayout();
       this.scheduleSettingsPreviewLayout();
     }
 
