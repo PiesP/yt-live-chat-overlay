@@ -9,6 +9,7 @@
     "entry": "validation/windows/install-profile.mjs",
     "assets": [
       "validation/windows/chrome-install.mjs",
+      "validation/windows/placement-timing.mjs",
       "validation/windows/chrome-process.mjs",
       "validation/windows/live-duration.mjs",
       "validation/windows/live-rendering.mjs",
