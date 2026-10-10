@@ -11,6 +11,7 @@ const TOKENS = [
   'WINDOWS193_REPLAY_DUE', 'WINDOWS193_REPLAY_NEXT', 'WINDOWS193_REPLAY_FUTURE',
   'WINDOWS193_REDUCED', 'WINDOWS193_OVERRIDE', 'WINDOWS193_TRANSITION',
   'WINDOWS193_EXPANDED', 'WINDOWS193_OVERRIDE_OFF', 'WINDOWS193_SYSTEM_OFF',
+  'WINDOWS193_PAID',
 ];
 const MAX_SAMPLES = 240;
 
@@ -43,7 +44,7 @@ function installProbeRuntime(options) {
     ? ctx.canvas === state.canvas
     : Boolean(ctx.canvas?.closest?.('#yt-live-chat-overlay'));
   const recordRect = (ctx, id, x, y, width, height) => {
-    if (!id || !overlayContext(ctx) || width <= 0 || height <= 0) return;
+    if (!id || !overlayContext(ctx) || ctx.globalAlpha === 0 || width <= 0 || height <= 0) return;
     const transform = ctx.getTransform();
     const points = [[x, y], [x + width, y], [x, y + height], [x + width, y + height]]
       .map(([px, py]) => ({
@@ -410,12 +411,13 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const replay = mode === 'replay';
   const replayObservations = {};
   const ids = replay ? TOKENS.slice(3, 6) : mode === 'reverse' ? [TOKENS[2]] : TOKENS.slice(0, 2);
-  const paidId = `WINDOWS193_PAID_${mode.toUpperCase()}`;
+  const paidId = 'WINDOWS193_PAID';
+  const drawnIds = replay ? ids : [...ids, paidId];
   const actions = ids.map((id) => messageAction(id, id === TOKENS[1] ? `${id}_${'W'.repeat(100)}` : id));
   if (!replay) actions.push({ addChatItemAction: { item: { liveChatPaidMessageRenderer: {
     id: paidId, authorName: { simpleText: 'Fixture donor' },
     purchaseAmountText: { simpleText: '$5.00' },
-    message: { simpleText: 'Bounded paid-card fixture' },
+    message: { simpleText: paidId },
   } } } });
   const replayActions = replay ? [10_000, 10_001, 11_500].map((offsetMs, index) => ({
     replayChatItemAction: { videoOffsetTimeMsec: offsetMs, actions: [actions[index]] },
@@ -492,7 +494,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   };
   const probeResult = (raw) => {
     const selected = raw && (forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample);
-    const ingress = forceFallback ? Object.fromEntries(ids.map((id) => [id, raw?.requestAtEpochMs]))
+    const ingress = forceFallback ? Object.fromEntries(drawnIds.map((id) => [id, raw?.requestAtEpochMs]))
       : raw?.ingress ?? {};
     return { renderer: forceFallback ? 'main' : 'worker', name, mode,
       phases: phaseObservations, ids: requested,
@@ -501,11 +503,11 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       deliveredBatches: [...deliveredBatches],
       sourcePrefixed: raw?.sourcePrefixed ?? false, sourceHooked: raw?.sourceHooked ?? false,
       workerReady: raw?.workers.some((worker) => worker.ready) ?? false,
-      firstEntryLatencyMs: Object.fromEntries(ids.map((id) => [id,
+      firstEntryLatencyMs: Object.fromEntries(drawnIds.map((id) => [id,
         selected?.firstEntry?.[id] !== undefined && ingress[id] !== undefined
           ? selected.firstEntry[id] - ingress[id] : null])),
       firstEntryAtEpochMs: selected?.firstEntry ?? {},
-      firstEntryScope: 'first sampled visible text ink; includes fade and frame quantization',
+      firstEntryScope: 'first sampled nonzero-alpha text draw touching the viewport; includes fade and frame quantization',
       geometryUnits: 'backing-store pixels',
       replayVideoTime: raw?.videoEntry ?? {},
       geometricEntryLatencyMs: Object.fromEntries((selected?.exact?.dispositions ?? [])
@@ -630,7 +632,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       const firstEntry = worker ? probe.workers.find((record) => record.ready)?.sample?.firstEntry
         : probe.firstEntry;
       return expected.every((id) => Number.isFinite(firstEntry?.[id]));
-    }, { expected: ids, worker: !forceFallback }, { timeout: 10_000 });
+    }, { expected: drawnIds, worker: !forceFallback }, { timeout: 10_000 });
 
     if (transition === 'reduced') {
       const baseline = await workerSnapshot();

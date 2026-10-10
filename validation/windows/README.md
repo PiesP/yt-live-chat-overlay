@@ -79,11 +79,13 @@ the suffix attaches to the renderer instance only when the emitted handler
 matches the expected shape. Bundle drift fails the fixture. The probe records
 bounded exact Worker render/drain durations, queue residence for fixture IDs,
 placement and collision rejection counts, active-message coordinates, work
-before the first overlay clear, fixture text ink bounds, first sampled visible ink, committed geometric entry,
+before the first overlay clear, fixture text ink bounds, first sampled nonzero-alpha draw, committed geometric entry,
 Worker queue receipts, and a screenshot. It does not change production source
 or add application telemetry. The Canvas page records draw data on the main
 thread. Ink bounds use backing-store pixels, including the canvas transform.
-Visible ink samples include fade and frame quantization; committed geometric
+Observed draw samples require nonzero canvas alpha and include fade and frame
+quantization; they do not establish a human readability threshold. Paid body
+ink has its own fixture token and must enter the viewport in both renderer paths; committed geometric
 entry is recorded separately from the final motion plan or the baseline
 committed constant-speed path. Replay accessibility entry also records video
 time minus source offset. The first-entry clock is
