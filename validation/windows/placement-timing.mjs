@@ -22,6 +22,8 @@ const TOKENS = [
 ];
 const MAX_SAMPLES = 240;
 export const MIXED_PRESSURE_COUNT = 40;
+// Keep both focus rows within the visual-reset replay window of 20 messages.
+export const MIXED_PRE_RESET_PRESSURE_COUNT = 18;
 export const MIXED_BURST_SETTINGS = Object.freeze({
   burstSampleWindow: 3,
   burstElevatedThreshold: 2,
@@ -1064,7 +1066,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       `東京の夜空にコメントが流れます ${id}`)) : transition === 'congestion'
       ? Array.from({ length: 50 }, (_, index) => messageAction(
         `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
-      : mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
+      : mixedGap ? Array.from({ length: MIXED_PRE_RESET_PRESSURE_COUNT }, (_, index) => messageAction(
         `WINDOWS204_PRESSURE_2_${String(index).padStart(2, '0')}`, 'Fixed top pressure'))
       : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
         'Bounded transition fixture')]],
@@ -1103,16 +1105,22 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const screenshot = `placement-${name}.png`;
   let screenshotCaptured = false;
   const sendBatch = async (batch) => {
-    await page.evaluate(async (key) => {
+    await page.evaluate(async ({ key, resetBurstSampling }) => {
       if (key === '1') {
         window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
+      }
+      if (resetBurstSampling) {
+        // Resume starts a fresh sampling window. Dispatch this bounded parser
+        // batch in the same evaluation before its first 500 ms sample.
+        window.__ytPlacementSetPaused(true);
+        window.__ytPlacementSetPaused(false);
       }
       const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=${key}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
       });
       if (!response.ok) throw new Error('Placement fixture request failed');
       await response.json();
-    }, batch);
+    }, { key: batch, resetBurstSampling: mixedGap && batch === '2' });
     assert(deliveredBatches.has(batch), `Scoped placement batch ${batch} was not intercepted`);
   };
   const workerSnapshot = async () => {
@@ -1390,10 +1398,36 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await page.evaluate(() => window.__ytChatOverlay.applySettings({
         safeTop: 0.1, safeBottom: 0.15, fontSize: 34,
       }));
+      const hasSafeSettings = (config) => config?.safeTop === 0.1 &&
+        config?.safeBottom === 0.15 && config?.fontSize === 34;
+      let replayedFocus;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const selected = await mixedSnapshot();
+        replayedFocus = selected;
+        const frame = selected.latestRenderFrame;
+        if (frame?.frameId > dense.latestRenderFrame.frameId && frame.complete &&
+          !frame.truncated && hasSafeSettings(selected.exact.config) &&
+          hasSafeSettings(frame.config) && MIXED_IDS.every((id) =>
+            selected.exact.activeNow.some((entry) => entry.id === id) &&
+            frame.active.some((entry) => entry.id === id))) break;
+        await page.waitForTimeout(200);
+      }
+      const replayedFrame = replayedFocus?.latestRenderFrame;
+      assert(replayedFrame?.frameId > dense.latestRenderFrame.frameId &&
+        replayedFrame.complete && !replayedFrame.truncated &&
+        hasSafeSettings(replayedFocus.exact.config) && hasSafeSettings(replayedFrame.config) &&
+        MIXED_IDS.every((id) => replayedFocus.exact.activeNow.some((entry) => entry.id === id) &&
+          replayedFrame.active.some((entry) => entry.id === id)),
+      `Settings reset did not replay both mixed-height rows before new pressure: ${JSON.stringify({
+        frameId: replayedFrame?.frameId, complete: replayedFrame?.complete,
+        truncated: replayedFrame?.truncated, config: replayedFocus?.exact.config,
+        frameConfig: replayedFrame?.config,
+        active: replayedFocus?.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)),
+        frameActive: replayedFrame?.active.filter((entry) => MIXED_IDS.includes(entry.id)),
+      })}`);
       await sendBatch('3');
-      const safe = await waitForClearance('settings-safe-zone-reflow', dense.latestRenderFrame.frameId,
-        (config) => config?.safeTop === 0.1 && config?.safeBottom === 0.15 &&
-          config?.fontSize === 34);
+      const safe = await waitForClearance('settings-safe-zone-reflow', replayedFrame.frameId,
+        hasSafeSettings);
       assert.equal(safe.exact.config.safeTop, 0.1);
       assert.equal(safe.exact.config.safeBottom, 0.15);
       assert.equal(safe.exact.config.fontSize, 34);

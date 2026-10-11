@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, MIXED_BURST_SETTINGS, MIXED_PRESSURE_COUNT, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, MIXED_BURST_SETTINGS, MIXED_PRE_RESET_PRESSURE_COUNT, MIXED_PRESSURE_COUNT, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
   const prefix = `WINDOWS196_GAP${gap}_`;
@@ -44,11 +44,11 @@ describe('Windows placement timing probe', () => {
     expect(new Set([...gap0, ...gap8]).size).toBe(24);
   });
 
-  it('uses enough parser actions for the production burst detector to reach half-cell density', () => {
+  it('keeps the pre-reset burst within replay20 while reaching real half-cell density', () => {
     vi.useFakeTimers();
     let now = 1000;
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
-    const levelAfterPressure = (count: number) => {
+    const levelAfterPressure = (count: number, cold: boolean) => {
       const detector = new BurstDetector();
       try {
         detector.updateThresholds(MIXED_BURST_SETTINGS);
@@ -57,6 +57,10 @@ describe('Windows placement timing probe', () => {
         for (let tick = 0; tick < 3; tick++) {
           now += 500;
           vi.advanceTimersByTime(500);
+        }
+        if (cold) {
+          detector.pause();
+          detector.resume();
         }
         for (let index = 0; index < count; index++) detector.onMessageReceived();
         now += 500;
@@ -67,9 +71,11 @@ describe('Windows placement timing probe', () => {
       }
     };
     try {
-      expect(levelAfterPressure(16)).not.toBe('extreme');
+      expect(2 + MIXED_PRE_RESET_PRESSURE_COUNT).toBeLessThanOrEqual(20);
+      expect(levelAfterPressure(MIXED_PRE_RESET_PRESSURE_COUNT, false)).not.toBe('extreme');
+      expect(levelAfterPressure(MIXED_PRE_RESET_PRESSURE_COUNT, true)).toBe('extreme');
       expect(MIXED_PRESSURE_COUNT).toBeLessThan(51);
-      expect(levelAfterPressure(MIXED_PRESSURE_COUNT)).toBe('extreme');
+      expect(levelAfterPressure(MIXED_PRESSURE_COUNT, false)).toBe('extreme');
     } finally {
       clock.mockRestore();
       vi.useRealTimers();
