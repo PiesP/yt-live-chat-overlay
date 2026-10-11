@@ -4,7 +4,7 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureVisibleRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
   const prefix = `WINDOWS196_GAP${gap}_`;
@@ -30,6 +30,7 @@ describe('Windows placement timing probe', () => {
       'worker-top', 'worker-bottom', 'worker-reduced-toggle', 'worker-safe-density',
       'worker-congestion', 'worker-translation', 'worker-replay',
       'worker-spacing-speed', 'main-spacing-speed',
+      'worker-mixed-gap', 'main-mixed-gap',
     ]));
   });
 
@@ -208,6 +209,56 @@ describe('Windows placement timing probe', () => {
       row('WINDOWS196_GAP0_B', 88)], draws: frame.draws.slice(0, 2) }))
       .toMatchObject({ status: 'unknown', pitchPx: null,
       reason: 'eligibility_changed_during_frame' });
+  });
+
+  it.each(['main', 'worker'])('requires two simultaneous painted mixed-height rows in a complete %s frame', (renderer) => {
+    const row = (id: string, x: number, y: number, height: number,
+      startAtEpochMs = 900, endAtEpochMs = 1100) => ({ id, x, y,
+        width: 100, height, startAtEpochMs, endAtEpochMs });
+    const draw = (id: string, x: number, y: number, height: number, alpha = 1) => ({
+      id, frameId: 11, alpha,
+      rect: { left: x, top: y, right: x + 100, bottom: y + height },
+    });
+    const regular = row('WINDOWS204_MIX_REGULAR', 10, 5, 46);
+    const paid = row('WINDOWS204_MIX_PAID', 10, 59, 44);
+    const frame = { frameId: 11, complete: true, truncated: false,
+      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
+      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
+      config: { renderer, fontSize: 32, laneSpacing: 8, mode: 'top', laneDensityFactor: 0.5 },
+      active: [regular, paid],
+      draws: [draw(regular.id, 10, 5, 46), draw(paid.id, 10, 59, 44)] };
+    expect(measureMixedHeightClearance(frame)).toMatchObject({ status: 'measured',
+      minimumGapPx: 8, paintedIds: [regular.id, paid.id],
+      pairs: [{ ids: [regular.id, paid.id], gapPx: 8 }] });
+    const violation = { ...frame, active: [regular, { ...paid, y: 52 }],
+      draws: [frame.draws[0], draw(paid.id, 10, 52, 44)] };
+    expect(measureMixedHeightClearance(violation)).toMatchObject({ status: 'violation',
+      minimumGapPx: 1, pairs: [{ gapPx: 1 }] });
+    expect(measureMixedHeightClearance({ ...frame, active: [regular, { ...paid, y: 5 }],
+      draws: [frame.draws[0], draw(paid.id, 10, 5, 44)] })).toMatchObject({
+      status: 'violation', minimumGapPx: -46,
+    });
+    for (const changed of [
+      { ...frame, active: frame.active.slice(0, 1), draws: frame.draws.slice(0, 1) },
+      { ...frame, active: [regular, { ...paid, height: 46 }] },
+      { ...frame, active: [regular, { ...paid, x: 130 }],
+        draws: [frame.draws[0], draw(paid.id, 130, 59, 44)] },
+      { ...frame, active: [regular, { ...paid, startAtEpochMs: 1050 }] },
+      { ...frame, active: [regular, { ...paid, x: 810 }],
+        draws: [frame.draws[0], draw(paid.id, 810, 59, 44)] },
+      { ...frame, draws: frame.draws.slice(0, 1) },
+      { ...frame, draws: [frame.draws[0], draw(paid.id, 10, 59, 44, 0)] },
+    ]) {
+      expect(measureMixedHeightClearance(changed).status).not.toBe('measured');
+    }
+    for (const changed of [
+      { ...frame, complete: false }, { ...frame, truncated: true },
+      { ...frame, finishedAtEpochMs: null },
+      { ...frame, draws: [{ ...frame.draws[0], frameId: 12 }, frame.draws[1]] },
+      { ...frame, config: { ...frame.config, laneSpacing: 0 } },
+    ]) {
+      expect(measureMixedHeightClearance(changed).status).toBe('unknown');
+    }
   });
 
   it('rejects clamped or burst-accelerated Backlog motion while retaining baseline comparison', () => {
