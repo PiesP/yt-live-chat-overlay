@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { reconcileMessagePlacements, reflowMotionPlan } from '@renderer/layout/message-reflow';
 import { computeMessageMotionPlan, motionPlansCollide } from '@renderer/layout/message-schedule';
-import { getRowGridHeight, getRowSlotCount } from '@renderer/layout/row-geometry';
+import { getRowGridHeight, getRowSlotCount, rowsNeedVerticalClearance } from '@renderer/layout/row-geometry';
 
 const input = {
   mode: 'top' as const, now: 0, batchIndex: 0, previousStaggerDelayMs: 0,
@@ -17,6 +17,23 @@ const options = {
 };
 
 describe('collision-aware message reflow', () => {
+  it('retains exact adjacent rows at a fractional safe-zone origin', () => {
+    const motion = computeMessageMotionPlan({ ...input, mode: 'top' });
+    const result = reconcileMessagePlacements([
+      { message: 'first', laneIndex: 0, height: 44, motion },
+      { message: 'second', laneIndex: 1, height: 44, motion },
+    ], {
+      ...options, laneCount: 2, viewportHeight: 123, safeTop: 0.13,
+      laneHeight: 52, laneSpacing: 8,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.placements.map(({ laneIndex }) => laneIndex)).toEqual([0, 1]);
+    expect(rowsNeedVerticalClearance(15.99, 44, 67.99, 44, 8)).toBe(false);
+    expect(rowsNeedVerticalClearance(15.99, 44, 67.89, 44, 8)).toBe(true);
+    expect(rowsNeedVerticalClearance(67.89, 44, 15.99, 44, 8)).toBe(true);
+    expect(rowsNeedVerticalClearance(5, 46, 52, 44, 8)).toBe(true);
+  });
+
   it('keeps configured clearance between mixed-height fixed messages after density reflow', () => {
     const motion = computeMessageMotionPlan({ ...input, mode: 'top' });
     const gap = 8;

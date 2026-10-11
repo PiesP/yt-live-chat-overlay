@@ -118,5 +118,11 @@ export function rowsNeedVerticalClearance(
   secondHeight: number,
   gap: number
 ): boolean {
-  return firstTop + firstHeight + gap > secondTop && secondTop + secondHeight + gap > firstTop;
+  // Fractional safe-zone origins can put an exact adjacent boundary a few
+  // floating-point units past its neighbor. Keep real subpixel deficits unsafe.
+  const epsilon = 1e-9;
+  return (
+    firstTop + firstHeight + gap > secondTop + epsilon &&
+    secondTop + secondHeight + gap > firstTop + epsilon
+  );
 }
