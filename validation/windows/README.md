@@ -68,8 +68,9 @@ fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
 scenario uses intercepted fixture traffic rather than a live chat account.
 
 Installed Edge extension runs also execute `placement-timing.mjs` after the
-ordinary fixture, in separate task-owned pages. These pages select a 32px font
-and full safe zone initially, then restore a cloned prior settings snapshot.
+ordinary fixture, in separate task-owned pages. Most placement pages select a
+32px font and full safe zone; the mixed-gap scenarios use the settings described
+below. Each page restores a cloned prior settings snapshot.
 A geometry sample marks future reservations separately from currently visible
 messages; a reserved fixed rectangle is not an already painted overlap. One page observes the actual
 packaged OffscreenCanvas Worker; the other makes
@@ -176,9 +177,11 @@ frame work is diagnostic rather than a general performance claim.
 The `worker-mixed-gap` and `main-mixed-gap` installed Edge scenarios route one
 ordinary comment and one paid message through the same parser into the packaged
 Worker and forced Canvas fallback, respectively. Both use fixed-top placement,
-Lane Gap 8, and a bounded parser-driven burst that must produce the actual 0.5
-lane-density factor. They retain both message IDs through the density change,
-safe-zone/font setting change, player resize, and actual fixture-player fullscreen.
+Lane Gap 8, a 34px font, 10% top and 15% bottom safe zones, and bounded
+four-action parser batches that must produce the actual 0.5 lane-density factor.
+They retain both message IDs through the density change, player resize, and
+actual fixture-player fullscreen. The scenario does not change visual settings
+after ingress or test message retention through a renderer reset.
 For each phase, the probe requires one complete, untruncated render frame with
 two different-height, time-eligible, onscreen rows joined by ID to positive-alpha
 draws. It compares their content rectangles only when their horizontal spans

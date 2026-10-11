@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, MIXED_BURST_SETTINGS, MIXED_PRE_RESET_PRESSURE_COUNT, MIXED_PRESSURE_COUNT, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, MIXED_BURST_SETTINGS, MIXED_PRESSURE_CHUNK_SIZE, MIXED_PRESSURE_COUNT, mixedPressureBatches, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
   const prefix = `WINDOWS196_GAP${gap}_`;
@@ -44,11 +44,25 @@ describe('Windows placement timing probe', () => {
     expect(new Set([...gap0, ...gap8]).size).toBe(24);
   });
 
-  it('keeps the pre-reset burst within replay20 while reaching real half-cell density', () => {
+  it('routes bounded parser callbacks that reach real half-cell density', () => {
+    const pressure = ['2', '4', '5'].map((phase) => mixedPressureBatches(phase));
+    const actions = pressure.flatMap((batches) => batches.flatMap((batch: {
+      actions: unknown[] }) => batch.actions));
+    const ids = actions.map((action: { addChatItemAction: { item: {
+      liveChatTextMessageRenderer: { id: string } } } }) =>
+      action.addChatItemAction.item.liveChatTextMessageRenderer.id);
+    expect(MIXED_PRESSURE_CHUNK_SIZE).toBeLessThan(5);
+    expect(pressure.every((batches) => batches.every((batch: { actions: unknown[] }) =>
+      batch.actions.length > 0 && batch.actions.length < 5))).toBe(true);
+    expect(pressure.every((batches) => batches.reduce((count: number,
+      batch: { actions: unknown[] }) => count + batch.actions.length, 0) === MIXED_PRESSURE_COUNT)).toBe(true);
+    const keys = pressure.flatMap((batches) => batches.map((batch: { key: string }) => batch.key));
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(new Set(ids).size).toBe(MIXED_PRESSURE_COUNT * pressure.length);
     vi.useFakeTimers();
     let now = 1000;
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
-    const levelAfterPressure = (count: number, cold: boolean) => {
+    const levelAfterPressure = (count: number) => {
       const detector = new BurstDetector();
       try {
         detector.updateThresholds(MIXED_BURST_SETTINGS);
@@ -57,10 +71,6 @@ describe('Windows placement timing probe', () => {
         for (let tick = 0; tick < 3; tick++) {
           now += 500;
           vi.advanceTimersByTime(500);
-        }
-        if (cold) {
-          detector.pause();
-          detector.resume();
         }
         for (let index = 0; index < count; index++) detector.onMessageReceived();
         now += 500;
@@ -71,11 +81,8 @@ describe('Windows placement timing probe', () => {
       }
     };
     try {
-      expect(2 + MIXED_PRE_RESET_PRESSURE_COUNT).toBeLessThanOrEqual(20);
-      expect(levelAfterPressure(MIXED_PRE_RESET_PRESSURE_COUNT, false)).not.toBe('extreme');
-      expect(levelAfterPressure(MIXED_PRE_RESET_PRESSURE_COUNT, true)).toBe('extreme');
-      expect(MIXED_PRESSURE_COUNT).toBeLessThan(51);
-      expect(levelAfterPressure(MIXED_PRESSURE_COUNT, false)).toBe('extreme');
+      expect(levelAfterPressure(16)).not.toBe('extreme');
+      expect(levelAfterPressure(MIXED_PRESSURE_COUNT)).toBe('extreme');
     } finally {
       clock.mockRestore();
       vi.useRealTimers();

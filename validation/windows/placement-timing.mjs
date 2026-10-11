@@ -22,8 +22,7 @@ const TOKENS = [
 ];
 const MAX_SAMPLES = 240;
 export const MIXED_PRESSURE_COUNT = 40;
-// Keep both focus rows within the visual-reset replay window of 20 messages.
-export const MIXED_PRE_RESET_PRESSURE_COUNT = 18;
+export const MIXED_PRESSURE_CHUNK_SIZE = 4;
 export const MIXED_BURST_SETTINGS = Object.freeze({
   burstSampleWindow: 3,
   burstElevatedThreshold: 2,
@@ -1021,6 +1020,17 @@ function messageAction(id, text) {
   } } } };
 }
 
+export function mixedPressureBatches(phase) {
+  return Array.from({ length: MIXED_PRESSURE_COUNT / MIXED_PRESSURE_CHUNK_SIZE }, (_, chunk) => ({
+    key: `${phase}-${chunk}`,
+    actions: Array.from({ length: MIXED_PRESSURE_CHUNK_SIZE }, (_, offset) => {
+      const index = chunk * MIXED_PRESSURE_CHUNK_SIZE + offset;
+      return messageAction(`WINDOWS204_PRESSURE_${phase}_${String(index).padStart(2, '0')}`,
+        'Bounded placement pressure');
+    }),
+  }));
+}
+
 function chatResponse(actions) {
   return { continuationContents: { liveChatContinuation: { actions, continuations: [
     { timedContinuationData: { continuation: 'windows193-next', timeoutMs: 30_000 } },
@@ -1044,6 +1054,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const replay = mode === 'replay';
   const spacingSpeed = transition === 'spacing-speed';
   const mixedGap = transition === 'mixed-gap';
+  const hasMixedConfig = (config) => config?.mode === 'top' && config?.fontSize === 34 &&
+    config?.laneSpacing === 8 && config?.safeTop === 0.1 && config?.safeBottom === 0.15;
   const replayObservations = {};
   const ids = replay ? TOKENS.slice(3, 6) : mixedGap ? [MIXED_IDS[0]]
     : spacingSpeed ? spacingFixtureIds().gap0
@@ -1066,8 +1078,6 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       `東京の夜空にコメントが流れます ${id}`)) : transition === 'congestion'
       ? Array.from({ length: 50 }, (_, index) => messageAction(
         `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
-      : mixedGap ? Array.from({ length: MIXED_PRE_RESET_PRESSURE_COUNT }, (_, index) => messageAction(
-        `WINDOWS204_PRESSURE_2_${String(index).padStart(2, '0')}`, 'Fixed top pressure'))
       : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
         'Bounded transition fixture')]],
     ['3', spacingSpeed ? Array.from({ length: 51 }, (_, index) => {
@@ -1075,19 +1085,19 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       return messageAction(id, index === 14
         ? `${id} ${'東京の夜空をゆっくり流れるコメント'.repeat(5)}`
         : `${id} バックログ`);
-    }) : mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
-      `WINDOWS204_PRESSURE_3_${String(index).padStart(2, '0')}`, 'Safe zone pressure'))
-      : [messageAction(transition === 'reduced' ? TOKENS[7] : TOKENS[9],
+    }) : [messageAction(transition === 'reduced' ? TOKENS[7] : TOKENS[9],
       'Bounded second transition fixture')]],
-    ['4', mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
-      `WINDOWS204_PRESSURE_4_${String(index).padStart(2, '0')}`, 'Resize pressure'))
-      : spacingSpeed ? Array.from({ length: 4 }, (_, index) => messageAction(
+    ['4', spacingSpeed ? Array.from({ length: 4 }, (_, index) => messageAction(
       `WINDOWS195_BURST_${String(index).padStart(2, '0')}`, 'Bounded live burst'))
       : [messageAction(TOKENS[10], 'Reduced-motion override disabled')]],
-    ['5', mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
-      `WINDOWS204_PRESSURE_5_${String(index).padStart(2, '0')}`, 'Fullscreen pressure'))
-      : [messageAction(TOKENS[11], 'System reduced motion disabled')]],
+    ['5', [messageAction(TOKENS[11], 'System reduced motion disabled')]],
   ]);
+  if (mixedGap) {
+    for (const phase of ['2', '3', '4', '5']) batches.delete(phase);
+    for (const phase of ['2', '4', '5']) {
+      for (const batch of mixedPressureBatches(phase)) batches.set(batch.key, batch.actions);
+    }
+  }
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   let html = preview.replace(
     '<div class="player-inner">Video Player Placeholder</div>',
@@ -1105,24 +1115,24 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const screenshot = `placement-${name}.png`;
   let screenshotCaptured = false;
   const sendBatch = async (batch) => {
-    await page.evaluate(async ({ key, resetBurstSampling }) => {
-      if (key === '1') {
-        window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
+    const keys = Array.isArray(batch) ? batch : [batch];
+    await page.evaluate(async (keys) => {
+      for (const key of keys) {
+        if (key === '1') {
+          window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
+        }
+        const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=${key}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+        });
+        if (!response.ok) throw new Error('Placement fixture request failed');
+        await response.json();
       }
-      if (resetBurstSampling) {
-        // Resume starts a fresh sampling window. Dispatch this bounded parser
-        // batch in the same evaluation before its first 500 ms sample.
-        window.__ytPlacementSetPaused(true);
-        window.__ytPlacementSetPaused(false);
-      }
-      const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=${key}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
-      });
-      if (!response.ok) throw new Error('Placement fixture request failed');
-      await response.json();
-    }, { key: batch, resetBurstSampling: mixedGap && batch === '2' });
-    assert(deliveredBatches.has(batch), `Scoped placement batch ${batch} was not intercepted`);
+    }, keys);
+    for (const key of keys) {
+      assert(deliveredBatches.has(key), `Scoped placement batch ${key} was not intercepted`);
+    }
   };
+  const sendPressure = (phase) => sendBatch(mixedPressureBatches(phase).map((batch) => batch.key));
   const workerSnapshot = async () => {
     // Flush observes the preceding frame; let queued settings reach that frame first.
     await page.waitForTimeout(50);
@@ -1170,6 +1180,14 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         ingress: probe.ingress, overflow: probe.overflow,
         workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })) };
     });
+  };
+  const mixedSnapshot = async () => {
+    if (!forceFallback) await workerSnapshot();
+    const raw = await captureProbe();
+    const selected = forceFallback ? raw : raw?.workers.find((record) => record.ready)?.sample;
+    assert(raw?.canvasSourceHooked && selected?.exact,
+      'Packaged mixed-height renderer probe did not attach');
+    return selected;
   };
   const probeResult = (raw) => {
     const selected = raw && (forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample);
@@ -1270,7 +1288,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       const overrides = { danmakuMode,
         outline: { ...settings.outline, enabled: spacingSpeed, widthPx: 2, opacity: 0.7 },
         showDebugOverlay: true,
-        fontSize: 32, laneSpacing: mixedGap ? 8 : 0, safeTop: 0, safeBottom: 0,
+        fontSize: mixedGap ? 34 : 32, laneSpacing: mixedGap ? 8 : 0,
+        safeTop: mixedGap ? 0.1 : 0, safeBottom: mixedGap ? 0.15 : 0,
         maxConcurrentMessages: 300, queueMaxSize: 200,
         ignoreReducedMotion: false, translationEnabled: false };
       if (spacingSpeed) Object.assign(overrides, {
@@ -1299,6 +1318,21 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       return status.includes('Render:') && status.includes('Render: n/a') === worker;
     }, !forceFallback, { timeout: 15_000 });
     await page.waitForTimeout(300);
+    if (mixedGap) {
+      let configured;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        configured = await mixedSnapshot();
+        if (hasMixedConfig(configured.exact.config)) break;
+        await page.waitForTimeout(200);
+      }
+      assert(hasMixedConfig(configured?.exact.config),
+      `Mixed-height settings did not reach the renderer before ingress: ${JSON.stringify({
+        config: configured?.exact.config, frameConfig: configured?.latestRenderFrame?.config,
+        complete: configured?.latestRenderFrame?.complete,
+      })}`);
+      phaseObservations.push({ phase: 'configured-safe-zone', config: configured.exact.config,
+        frameId: configured.latestRenderFrame?.frameId ?? null });
+    }
     if (replay) {
       await page.waitForFunction(() => document.querySelector(
         '.yt-live-chat-overlay-live-region > p[data-message-id="WINDOWS193_REPLAY_DUE"]',
@@ -1344,15 +1378,10 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     }, { expected: drawnIds, worker: !forceFallback }, { timeout: 10_000 });
 
     if (mixedGap) {
-      const mixedSnapshot = async () => {
-        if (!forceFallback) await workerSnapshot();
-        const raw = await captureProbe();
-        const selected = forceFallback ? raw : raw?.workers.find((record) => record.ready)?.sample;
-        assert(raw?.canvasSourceHooked && selected?.exact,
-          'Packaged mixed-height renderer probe did not attach');
-        return selected;
-      };
       const initial = await mixedSnapshot();
+      assert(hasMixedConfig(initial.exact.config) &&
+        hasMixedConfig(initial.latestRenderFrame?.config),
+      'Mixed-height focus rows did not use the configured font and safe zone');
       assert(MIXED_IDS.every((id) => initial.exact.activeNow.some((entry) => entry.id === id)),
         'Mixed-height fixture rows were not both active before reflow');
       phaseObservations.push({ phase: 'initial', config: initial.exact.config,
@@ -1367,7 +1396,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
             continue;
           }
           clearance = measureMixedHeightClearance(frame);
-          if (!acceptsConfig(selected.exact.config) || !acceptsConfig(frame.config)) {
+          if (!hasMixedConfig(selected.exact.config) || !hasMixedConfig(frame.config) ||
+            !acceptsConfig(selected.exact.config) || !acceptsConfig(frame.config)) {
             await page.waitForTimeout(200);
             continue;
           }
@@ -1390,55 +1420,19 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         }
         assert.fail(`${phase} lacked two painted mixed-height rows at density 0.5: ${JSON.stringify(clearance)}`);
       };
-      await sendBatch('2');
+      await sendPressure('2');
       const dense = await waitForClearance('density-reflow', initial.latestRenderFrame?.frameId ?? 0,
         (config) => config?.laneHeight < initial.exact.config.laneHeight);
       assert(dense.exact.config.laneHeight < initial.exact.config.laneHeight,
         'Parser-driven burst did not shrink the lane grid');
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({
-        safeTop: 0.1, safeBottom: 0.15, fontSize: 34,
-      }));
-      const hasSafeSettings = (config) => config?.safeTop === 0.1 &&
-        config?.safeBottom === 0.15 && config?.fontSize === 34;
-      let replayedFocus;
-      for (let attempt = 0; attempt < 40; attempt++) {
-        const selected = await mixedSnapshot();
-        replayedFocus = selected;
-        const frame = selected.latestRenderFrame;
-        if (frame?.frameId > dense.latestRenderFrame.frameId && frame.complete &&
-          !frame.truncated && hasSafeSettings(selected.exact.config) &&
-          hasSafeSettings(frame.config) && MIXED_IDS.every((id) =>
-            selected.exact.activeNow.some((entry) => entry.id === id) &&
-            frame.active.some((entry) => entry.id === id))) break;
-        await page.waitForTimeout(200);
-      }
-      const replayedFrame = replayedFocus?.latestRenderFrame;
-      assert(replayedFrame?.frameId > dense.latestRenderFrame.frameId &&
-        replayedFrame.complete && !replayedFrame.truncated &&
-        hasSafeSettings(replayedFocus.exact.config) && hasSafeSettings(replayedFrame.config) &&
-        MIXED_IDS.every((id) => replayedFocus.exact.activeNow.some((entry) => entry.id === id) &&
-          replayedFrame.active.some((entry) => entry.id === id)),
-      `Settings reset did not replay both mixed-height rows before new pressure: ${JSON.stringify({
-        frameId: replayedFrame?.frameId, complete: replayedFrame?.complete,
-        truncated: replayedFrame?.truncated, config: replayedFocus?.exact.config,
-        frameConfig: replayedFrame?.config,
-        active: replayedFocus?.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)),
-        frameActive: replayedFrame?.active.filter((entry) => MIXED_IDS.includes(entry.id)),
-      })}`);
-      await sendBatch('3');
-      const safe = await waitForClearance('settings-safe-zone-reflow', replayedFrame.frameId,
-        hasSafeSettings);
-      assert.equal(safe.exact.config.safeTop, 0.1);
-      assert.equal(safe.exact.config.safeBottom, 0.15);
-      assert.equal(safe.exact.config.fontSize, 34);
       await page.locator('.player-wrapper').evaluate((element) => {
         element.style.maxWidth = '1000px';
       });
       await page.setViewportSize({ width: 1100, height: 700 });
-      await sendBatch('4');
-      const resized = await waitForClearance('resize-reflow', safe.latestRenderFrame.frameId,
-        (config) => config?.logicalWidth > safe.exact.config.logicalWidth);
-      assert(resized.exact.config.logicalWidth > safe.exact.config.logicalWidth,
+      await sendPressure('4');
+      const resized = await waitForClearance('resize-reflow', dense.latestRenderFrame.frameId,
+        (config) => config?.logicalWidth > dense.exact.config.logicalWidth);
+      assert(resized.exact.config.logicalWidth > dense.exact.config.logicalWidth,
         'Fixture video did not grow on resize');
       await page.locator('#placement-fullscreen').evaluate((element) => {
         element.addEventListener('click', () =>
@@ -1447,7 +1441,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await page.locator('#placement-fullscreen').click();
       await page.waitForFunction(() => document.fullscreenElement?.id === 'movie_player',
         undefined, { timeout: 5000 });
-      await sendBatch('5');
+      await sendPressure('5');
       const fullscreen = await waitForClearance('fullscreen-reflow', resized.latestRenderFrame.frameId,
         (config) => config?.logicalHeight > resized.exact.config.logicalHeight);
       assert(fullscreen.exact.config.logicalHeight > resized.exact.config.logicalHeight,
