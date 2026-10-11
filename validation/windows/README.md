@@ -122,8 +122,20 @@ rectangles, and bounded Japanese glyph ink extents. A missing, incoherent, or
 truncated frame yields `null` with a reason; historical aggregate ink cannot
 fill that gap. The fixture waits for two Japanese glyph draws to intersect the
 logical viewport before each gap capture. The default spread allocator can
-leave legitimate empty lanes; neither pitch is an assumed `laneHeight`
-formula. The Worker inset receipt is computed by that
+leave legitimate empty lanes. Allocation-origin and visible-origin distances
+are observations of different populations, not proven adjacent-row pitch or
+empty space between glyph edges. Both phases must provide their required
+frame, Japanese ink and setting evidence; a decrease between unrelated samples
+(such as 88px to 52px) is not an acceptance failure or a product regression.
+Neither an increase nor equality proves that Lane Gap worked. Exact option
+correctness is established by `test/unit/core/vertical-spacing.test.ts`: real
+text measurement, controlled adjacent `top` placements, committed reservations
+and drawing require `measured.height + gap` for the supported ordinary rows,
+over the existing 0–20 gap, density and outline cases. Its ignored-gap negative
+control fails that same assertion even when a sparse two-step sample increases.
+This contract does not impose a one-row formula on tall/translated content,
+paid cards or unequal rows. Product spread selection remains unchanged.
+The Worker inset receipt is computed by that
 same compiled page helper used for serialization; Worker paint is observed
 separately through its image/ink samples. The existing settings dialog is exercised by
 keyboard on its slider, Done, Escape, reopen, preview row metadata and an
@@ -131,9 +143,16 @@ extension-storage readback. The preview reports two rows and its reserved
 pitch in `data-preview-rows`, `data-preview-row-height` and
 `data-preview-row-pitch` on the existing preview text element.
 
-An optional run can name only the two spacing scenarios and set
-`spacingOnly: true` to stop after the gap-8 capture. Default runs still
-exercise all eleven scenarios, including Backlog and recovery.
+An optional run can explicitly select
+`['worker-spacing-speed', 'main-spacing-speed']` and set `spacingOnly: true`
+to stop after the gap-8 capture; candidate acceptance keeps
+`comparisonOnly: false`. Default runs still exercise all eleven scenarios,
+including Backlog and recovery. Retained complete frames can be reanalyzed as
+post-processing, with the original source/probe hashes and receipts preserved;
+this is not a fresh browser execution. Older allocation-only data cannot supply
+missing visible-frame evidence. The [dated #196 evidence addendum](https://github.com/PiesP/yt-live-chat-overlay/issues/196#issuecomment-6098886948)
+records sparse Canvas gap-8 distances of 144px/104px; those observations are not
+nominal pitch, capacity or comparable improvement measurements.
 
 The speed phase routes 51 chat actions through the normal response parser to
 trigger Backlog injection, then four ordinary actions through the same parser
@@ -163,7 +182,8 @@ Backlog activation, unclamped geometry and source guards, while allowing the
 old two-slot row and extra Worker burst acceleration. Both baseline and
 candidate require same-ID retention through actual video resize and
 Worker-to-Canvas recovery. The candidate commit keeps the constant `false`
-and applies strict spacing and speed assertions. Preserve
+and applies required spacing evidence, compact-row reservation and strict speed
+assertions. Preserve
 both attempts and their source, bundle and probe hashes outside Git. Do not
 interpret a `comparisonOnly` pass as a fix or substitute it for candidate
 acceptance. The ordinary real-YouTube smoke retains its existing route and

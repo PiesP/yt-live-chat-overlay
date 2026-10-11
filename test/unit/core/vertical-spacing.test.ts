@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanvasRenderingContext2D, createCanvas } from 'canvas';
 import type { ChatMessage } from '@app-types';
 import { renderRegularMessage, renderSegment, type AnyCanvasContext, type TextBitmapCache } from '@renderer/canvas/shared';
-import { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { LaneAllocator, type LanePlacement } from '@renderer/layout/lane-allocator';
 import { estimateMessageDimensions } from '@renderer/shared';
 import { clearTextMeasurementCaches, getFontString, measureTextTopBounds } from '@renderer/text-measure';
 
@@ -39,6 +39,11 @@ function inkBounds(canvas: ReturnType<typeof createCanvas>): [number, number] {
     }
   }
   return [top, bottom];
+}
+function assertAdjacentPitch(height: number, gap: number, first: LanePlacement, second: LanePlacement) {
+  const pitch = second.laneY + second.verticalOffset - first.laneY - first.verticalOffset;
+  expect(pitch).toBeCloseTo(height + gap, 6);
+  return pitch;
 }
 beforeEach(() => clearTextMeasurementCaches());
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); clearTextMeasurementCaches(); });
@@ -74,7 +79,7 @@ describe('complete ordinary row geometry', () => {
         if (!second) throw new Error('second row missing');
         const y1 = first.laneY + first.verticalOffset;
         const y2 = second.laneY + second.verticalOffset;
-        expect(y2 - y1).toBeCloseTo(measured.height + gap, 6);
+        assertAdjacentPitch(measured.height, gap, first, second);
         expect(y2 - y1).toBeGreaterThanOrEqual(previousPitch);
         expect(first.slotCount).toBe(density === 1 ? 1 : density === 0.75 ? 2 : 4);
         expect(first.verticalOffset).toBe(0);
@@ -88,6 +93,49 @@ describe('complete ordinary row geometry', () => {
         previousPitch = y2 - y1;
       }
     }
+  });
+
+  it('rejects an ignored gap in real adjacent allocation even when sparse observations increase', () => {
+    const text = '日本語のコメント';
+    const outline = 2;
+    const measured = estimate(text, outline);
+    const lanes = allocator(0, 1, outline);
+    const baselineFirst = lanes.findPlacement(measured.height, dimensions, undefined, 0, 'top');
+    if (!baselineFirst) throw new Error('baseline first row missing');
+    lanes.commitPlacement(baselineFirst, 0, 5000);
+    const baselineSecond = lanes.findPlacement(measured.height, dimensions, undefined, 0, 'top');
+    if (!baselineSecond) throw new Error('baseline second row missing');
+    const gap0AdjacentObservation = assertAdjacentPitch(measured.height, 0, baselineFirst, baselineSecond);
+    const update = lanes.updateFontMetrics.bind(lanes);
+    // Negative control: forward the real settings update while dropping only its gap input.
+    vi.spyOn(lanes, 'updateFontMetrics').mockImplementation((size, weight, font, _gap, width) =>
+      update(size, weight, font, 0, width));
+    lanes.updateFontMetrics(fontSize, 'bold', family, 8, outline);
+    lanes.reset(dimensions, 0);
+    const placements: LanePlacement[] = [];
+    const canvas = createCanvas(800, 200);
+    const ctx = canvas.getContext('2d');
+    const drawn = vi.spyOn(ctx, 'fillText');
+    for (let row = 0; row < 3; row++) {
+      const placement = lanes.findPlacement(measured.height, dimensions, undefined, 0, 'top');
+      if (!placement) throw new Error('negative-control row missing');
+      expect(placement.slotCount).toBe(1);
+      expect(placement.verticalOffset).toBe(0);
+      placements.push(placement);
+      lanes.commitPlacement(placement, 0, 5000);
+      paint(ctx as unknown as AnyCanvasContext, text,
+        placement.laneY + placement.verticalOffset, outline);
+    }
+    const [first, second, third] = placements;
+    if (!first || !second || !third) throw new Error('negative-control placements missing');
+    const actualPitch = assertAdjacentPitch(measured.height, 0, first, second);
+    const [firstDraw, secondDraw] = drawn.mock.calls;
+    if (!firstDraw || !secondDraw) throw new Error('negative-control draws missing');
+    expect(secondDraw[2] - firstDraw[2]).toBeCloseTo(actualPitch, 6);
+    const gap8SparseObservation = third.laneY - first.laneY;
+    expect(gap8SparseObservation).toBeGreaterThan(gap0AdjacentObservation);
+    // A larger two-step sample cannot make the exact adjacent contract accept an ignored 8px.
+    expect(() => assertAdjacentPitch(measured.height, 8, first, second)).toThrow();
   });
 
   it.each(['日本語のコメント', '한국어 댓글', 'Latin gj Á', 'a\u0301\u0308\u030d\u0302\u0304\u0305', '👩🏽‍🚀'])('contains actual %s ink and outlines', (text) => {

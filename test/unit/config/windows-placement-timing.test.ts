@@ -4,7 +4,23 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureVisibleRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureVisibleRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+
+function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
+  const prefix = `WINDOWS196_GAP${gap}_`;
+  const active = origins.map((y, index) => ({ id: `${prefix}${index}`,
+    x: index === offscreenIndex ? 900 : 10, y, width: 100, height: 44,
+    startAtEpochMs: 900, endAtEpochMs: 1100 }));
+  const draws = active.map(({ id, x, y }) => ({ id, frameId: 7, alpha: 1,
+    rect: { left: x, top: y, right: x + 100, bottom: y + 32 },
+    japanese: { text: '東京', rect: { left: x, top: y, right: x + 50, bottom: y + 32 } } }));
+  const config = { renderer, fontSize: 32, laneSpacing: gap };
+  return { exact: { activeNow: active, config },
+    renderFrame: { frameId: 7, complete: true, truncated: false,
+      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
+      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
+      config, active, draws } };
+}
 
 describe('Windows placement timing probe', () => {
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
@@ -35,6 +51,78 @@ describe('Windows placement timing probe', () => {
     ];
     expect(measureAllocationRowPitch(messages)).toBe(38);
     expect(measureAllocationRowPitch(messages.slice(0, 1))).toBeNull();
+  });
+
+  it.each(['main', 'worker'])('accepts healthy sparse %s phase observations without comparing cohort pitch', (renderer) => {
+    for (const offscreenMiddle of [false, true]) {
+      const gap0 = spacingSnapshot(renderer, 0, offscreenMiddle ? [0, 44, 88] : [0, 88],
+        offscreenMiddle ? 1 : -1);
+      const gap8 = spacingSnapshot(renderer, 8, [0, 52]);
+      const before = assertSpacingPhase(gap0, 'WINDOWS196_GAP0_', 0, renderer);
+      const after = assertSpacingPhase(gap8, 'WINDOWS196_GAP8_', 8, renderer);
+      expect(before).toMatchObject({ allocationPitchPx: offscreenMiddle ? 44 : 88,
+        visibleRowPitch: { status: 'measured', pitchPx: 88,
+          japaneseVisibleRowOriginsPx: [0, 88] } });
+      expect(after).toMatchObject({ allocationPitchPx: 52,
+        visibleRowPitch: { status: 'measured', pitchPx: 52,
+          japaneseVisibleRowOriginsPx: [0, 52] } });
+      if (offscreenMiddle) {
+        expect(before.visibleRowPitch.excluded).toContainEqual({
+          id: 'WINDOWS196_GAP0_1', reason: 'offscreen_row',
+        });
+        expect(after.allocationPitchPx).toBeGreaterThan(before.allocationPitchPx);
+      } else {
+        // The old allocation assertion rejects case A, before the visibility comparison.
+        expect(() => expect(after.allocationPitchPx).toBeGreaterThanOrEqual(before.allocationPitchPx))
+          .toThrow();
+      }
+      // Case B passes the allocation comparison but fails the old visible comparison.
+      expect(() => expect(after.visibleRowPitch.pitchPx)
+        .toBeGreaterThanOrEqual(before.visibleRowPitch.pitchPx)).toThrow();
+    }
+    const adjacent0 = assertSpacingPhase(spacingSnapshot(renderer, 0, [0, 44]),
+      'WINDOWS196_GAP0_', 0, renderer);
+    const adjacent8 = assertSpacingPhase(spacingSnapshot(renderer, 8, [0, 52]),
+      'WINDOWS196_GAP8_', 8, renderer);
+    expect(adjacent0.visibleRowPitch.pitchPx).toBe(44);
+    expect(adjacent8.visibleRowPitch.pitchPx).toBe(52);
+  });
+
+  it.each(['main', 'worker'])('keeps missing and incoherent %s phase evidence unavailable', (renderer) => {
+    const valid = spacingSnapshot(renderer, 8, [0, 52]);
+    for (const [name, frame] of [
+      ['no rows', { ...valid.renderFrame, active: [], draws: [] }],
+      ['one row', { ...valid.renderFrame, active: valid.renderFrame.active.slice(0, 1),
+        draws: valid.renderFrame.draws.slice(0, 1) }],
+      ['incomplete', { ...valid.renderFrame, complete: false }],
+      ['truncated', { ...valid.renderFrame, truncated: true }],
+      ['wrong frame', { ...valid.renderFrame, draws: valid.renderFrame.draws.map((draw) =>
+        ({ ...draw, frameId: 8 })) }],
+      ['invalid viewport', { ...valid.renderFrame, logicalWidth: 0 }],
+      ['zero alpha', { ...valid.renderFrame, draws: valid.renderFrame.draws.map((draw) =>
+        ({ ...draw, alpha: 0 })) }],
+      ['no Japanese ink', { ...valid.renderFrame, draws: valid.renderFrame.draws.map((draw) =>
+        ({ ...draw, japanese: null })) }],
+    ] as const) {
+      const measured = measureVisibleRowPitch(frame, 'WINDOWS196_GAP8_');
+      if (name !== 'no Japanese ink') {
+        expect(measured.pitchPx, name).toBeNull();
+        expect(['unknown', 'insufficient'], name).toContain(measured.status);
+        expect(measured.reason, name).toEqual(expect.any(String));
+      } else {
+        expect(measured).toMatchObject({ status: 'measured', pitchPx: 52,
+          japaneseVisibleRowOriginsPx: [] });
+      }
+      expect(() => assertSpacingPhase({ ...valid, renderFrame: frame },
+        'WINDOWS196_GAP8_', 8, renderer), name).toThrow(/two visible Japanese rows/);
+    }
+    expect(() => assertSpacingPhase(valid, 'WINDOWS196_GAP8_', 0, renderer))
+      .toThrow(/phase Lane Gap/);
+    expect(() => assertSpacingPhase({ ...valid, exact: { ...valid.exact,
+      config: { ...valid.exact.config, laneSpacing: 0 } } }, 'WINDOWS196_GAP8_', 8, renderer))
+      .toThrow(/snapshot did not use/);
+    expect(() => assertSpacingPhase(valid, 'WINDOWS196_GAP8_', 8,
+      renderer === 'main' ? 'worker' : 'main')).toThrow(/wrong renderer/);
   });
 
   it.each(['main', 'worker'])('measures only two painted, eligible row origins in one %s frame', (renderer) => {
