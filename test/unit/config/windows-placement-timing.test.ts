@@ -2,9 +2,10 @@
 // Copyright (c) 2026 PiesP
 
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+import { BurstDetector } from '@renderer/layout/burst-detector';
+import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, MIXED_BURST_SETTINGS, MIXED_PRESSURE_COUNT, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
 
 function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
   const prefix = `WINDOWS196_GAP${gap}_`;
@@ -41,6 +42,38 @@ describe('Windows placement timing probe', () => {
     expect(gap0.every((id: string) => id.startsWith('WINDOWS196_GAP0_'))).toBe(true);
     expect(gap8.every((id: string) => id.startsWith('WINDOWS196_GAP8_'))).toBe(true);
     expect(new Set([...gap0, ...gap8]).size).toBe(24);
+  });
+
+  it('uses enough parser actions for the production burst detector to reach half-cell density', () => {
+    vi.useFakeTimers();
+    let now = 1000;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const levelAfterPressure = (count: number) => {
+      const detector = new BurstDetector();
+      try {
+        detector.updateThresholds(MIXED_BURST_SETTINGS);
+        detector.onMessageReceived();
+        detector.onMessageReceived();
+        for (let tick = 0; tick < 3; tick++) {
+          now += 500;
+          vi.advanceTimersByTime(500);
+        }
+        for (let index = 0; index < count; index++) detector.onMessageReceived();
+        now += 500;
+        vi.advanceTimersByTime(500);
+        return detector.getLevel();
+      } finally {
+        detector.destroy();
+      }
+    };
+    try {
+      expect(levelAfterPressure(16)).not.toBe('extreme');
+      expect(MIXED_PRESSURE_COUNT).toBeLessThan(51);
+      expect(levelAfterPressure(MIXED_PRESSURE_COUNT)).toBe('extreme');
+    } finally {
+      clock.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('labels active-origin spacing as allocation pitch', () => {
@@ -231,6 +264,10 @@ describe('Windows placement timing probe', () => {
     expect(measureMixedHeightClearance(frame)).toMatchObject({ status: 'measured',
       minimumGapPx: 8, paintedIds: [regular.id, paid.id],
       pairs: [{ ids: [regular.id, paid.id], gapPx: 8 }] });
+    expect(measureMixedHeightClearance({ ...frame,
+      config: { ...frame.config, laneDensityFactor: 0.75 } })).toMatchObject({
+      status: 'unknown', reason: 'wrong_lane_density', observedLaneDensityFactor: 0.75,
+    });
     const violation = { ...frame, active: [regular, { ...paid, y: 52 }],
       draws: [frame.draws[0], draw(paid.id, 10, 52, 44)] };
     expect(measureMixedHeightClearance(violation)).toMatchObject({ status: 'violation',

@@ -21,6 +21,13 @@ const TOKENS = [
   ...MIXED_IDS,
 ];
 const MAX_SAMPLES = 240;
+export const MIXED_PRESSURE_COUNT = 40;
+export const MIXED_BURST_SETTINGS = Object.freeze({
+  burstSampleWindow: 3,
+  burstElevatedThreshold: 2,
+  burstHighThreshold: 5,
+  burstExtremeThreshold: 10,
+});
 
 export const PLACEMENT_SCENARIOS = Object.freeze([
   { name: 'worker-scroll', forceFallback: false, mode: 'scroll' },
@@ -544,6 +551,7 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
 /** Content-rectangle clearance of both fixture rows painted in one completed frame. */
 export function measureMixedHeightClearance(frame) {
   const result = { status: 'unknown', reason: null, frameId: frame?.frameId ?? null,
+    observedLaneDensityFactor: frame?.config?.laneDensityFactor ?? null,
     paintedIds: [], heightsPx: [], pairs: [], minimumGapPx: null };
   const unknown = (reason) => { result.reason = reason; return result; };
   if (!frame || !Number.isSafeInteger(frame.frameId) || frame.frameId <= 0 ||
@@ -557,13 +565,14 @@ export function measureMixedHeightClearance(frame) {
     !Number.isFinite(frame.backingRatioY) || frame.backingRatioY <= 0 ||
     !['main', 'worker'].includes(frame.config?.renderer) ||
     frame.config?.mode !== 'top' || frame.config?.laneSpacing !== 8 ||
-    frame.config?.laneDensityFactor !== 0.5 ||
+    !Number.isFinite(frame.config?.laneDensityFactor) ||
     !Number.isFinite(frame.config.safeTop) || !Number.isFinite(frame.config.safeBottom) ||
     frame.config.safeTop < 0 || frame.config.safeBottom < 0 ||
     frame.config.safeTop + frame.config.safeBottom >= 1 ||
     !Array.isArray(frame.active) || !Array.isArray(frame.draws)) {
     return unknown('incomplete_or_unsupported_frame');
   }
+  if (frame.config.laneDensityFactor !== 0.5) return unknown('wrong_lane_density');
   const intersects = (rect) => rect &&
     [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
     rect.right > rect.left && rect.bottom > rect.top &&
@@ -1055,7 +1064,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       `東京の夜空にコメントが流れます ${id}`)) : transition === 'congestion'
       ? Array.from({ length: 50 }, (_, index) => messageAction(
         `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
-      : mixedGap ? Array.from({ length: 16 }, (_, index) => messageAction(
+      : mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
         `WINDOWS204_PRESSURE_2_${String(index).padStart(2, '0')}`, 'Fixed top pressure'))
       : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
         'Bounded transition fixture')]],
@@ -1064,16 +1073,16 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       return messageAction(id, index === 14
         ? `${id} ${'東京の夜空をゆっくり流れるコメント'.repeat(5)}`
         : `${id} バックログ`);
-    }) : mixedGap ? Array.from({ length: 16 }, (_, index) => messageAction(
+    }) : mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
       `WINDOWS204_PRESSURE_3_${String(index).padStart(2, '0')}`, 'Safe zone pressure'))
       : [messageAction(transition === 'reduced' ? TOKENS[7] : TOKENS[9],
       'Bounded second transition fixture')]],
-    ['4', mixedGap ? Array.from({ length: 16 }, (_, index) => messageAction(
+    ['4', mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
       `WINDOWS204_PRESSURE_4_${String(index).padStart(2, '0')}`, 'Resize pressure'))
       : spacingSpeed ? Array.from({ length: 4 }, (_, index) => messageAction(
       `WINDOWS195_BURST_${String(index).padStart(2, '0')}`, 'Bounded live burst'))
       : [messageAction(TOKENS[10], 'Reduced-motion override disabled')]],
-    ['5', mixedGap ? Array.from({ length: 16 }, (_, index) => messageAction(
+    ['5', mixedGap ? Array.from({ length: MIXED_PRESSURE_COUNT }, (_, index) => messageAction(
       `WINDOWS204_PRESSURE_5_${String(index).padStart(2, '0')}`, 'Fullscreen pressure'))
       : [messageAction(TOKENS[11], 'System reduced motion disabled')]],
   ]);
@@ -1247,7 +1256,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached', timeout: 15_000 });
     await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings), undefined,
       { timeout: 15_000 });
-    originalSettings = await page.evaluate(({ danmakuMode, spacingSpeed, mixedGap }) => {
+    originalSettings = await page.evaluate(({ danmakuMode, spacingSpeed, mixedGap,
+      mixedBurstSettings }) => {
       const settings = window.__ytChatOverlay.getSettings();
       const overrides = { danmakuMode,
         outline: { ...settings.outline, enabled: spacingSpeed, widthPx: 2, opacity: 0.7 },
@@ -1264,8 +1274,7 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
       });
       if (mixedGap) Object.assign(overrides, {
-        topBottomDurationMs: 30000, burstSampleWindow: 3,
-        burstElevatedThreshold: 2, burstHighThreshold: 5, burstExtremeThreshold: 10,
+        topBottomDurationMs: 30000, ...mixedBurstSettings,
         staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
       });
       const previous = structuredClone(Object.fromEntries([
@@ -1275,7 +1284,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       ].map((key) => [key, settings[key]])));
       window.__ytChatOverlay.applySettings(overrides);
       return previous;
-    }, { danmakuMode: replay ? 'scroll' : mode, spacingSpeed, mixedGap });
+    }, { danmakuMode: replay ? 'scroll' : mode, spacingSpeed, mixedGap,
+      mixedBurstSettings: MIXED_BURST_SETTINGS });
     await page.waitForFunction((worker) => {
       const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
       return status.includes('Render:') && status.includes('Render: n/a') === worker;
@@ -1344,12 +1354,15 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         for (let attempt = 0; attempt < 40; attempt++) {
           const selected = await mixedSnapshot();
           const frame = selected.latestRenderFrame;
-          if (!frame || frame.frameId <= priorFrameId ||
-            !acceptsConfig(selected.exact.config) || !acceptsConfig(frame.config)) {
+          if (!frame || frame.frameId <= priorFrameId) {
             await page.waitForTimeout(200);
             continue;
           }
           clearance = measureMixedHeightClearance(frame);
+          if (!acceptsConfig(selected.exact.config) || !acceptsConfig(frame.config)) {
+            await page.waitForTimeout(200);
+            continue;
+          }
           if (clearance.status === 'violation') {
             assert.fail(`${phase} content clearance violated: ${JSON.stringify(clearance)}`);
           }
