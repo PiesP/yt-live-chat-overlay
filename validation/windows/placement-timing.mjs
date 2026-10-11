@@ -558,6 +558,9 @@ export function measureMixedHeightClearance(frame) {
     !['main', 'worker'].includes(frame.config?.renderer) ||
     frame.config?.mode !== 'top' || frame.config?.laneSpacing !== 8 ||
     frame.config?.laneDensityFactor !== 0.5 ||
+    !Number.isFinite(frame.config.safeTop) || !Number.isFinite(frame.config.safeBottom) ||
+    frame.config.safeTop < 0 || frame.config.safeBottom < 0 ||
+    frame.config.safeTop + frame.config.safeBottom >= 1 ||
     !Array.isArray(frame.active) || !Array.isArray(frame.draws)) {
     return unknown('incomplete_or_unsupported_frame');
   }
@@ -591,6 +594,13 @@ export function measureMixedHeightClearance(frame) {
     if (!intersects(rect)) {
       result.status = 'insufficient';
       result.reason = `offscreen_${id}`;
+      return result;
+    }
+    const safeTop = frame.logicalHeight * frame.config.safeTop;
+    const safeBottom = frame.logicalHeight * (1 - frame.config.safeBottom);
+    if (rect.top + 1e-6 < safeTop || rect.bottom > safeBottom + 1e-6) {
+      result.status = 'violation';
+      result.reason = `content_outside_safe_zone_${id}`;
       return result;
     }
     const draws = frame.draws.filter((draw) => draw?.id === id);
@@ -1329,11 +1339,17 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         'Mixed-height fixture rows were not both active before reflow');
       phaseObservations.push({ phase: 'initial', config: initial.exact.config,
         active: initial.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)) });
-      const waitForClearance = async (phase) => {
+      const waitForClearance = async (phase, priorFrameId, acceptsConfig) => {
         let clearance;
         for (let attempt = 0; attempt < 40; attempt++) {
           const selected = await mixedSnapshot();
-          clearance = measureMixedHeightClearance(selected.latestRenderFrame);
+          const frame = selected.latestRenderFrame;
+          if (!frame || frame.frameId <= priorFrameId ||
+            !acceptsConfig(selected.exact.config) || !acceptsConfig(frame.config)) {
+            await page.waitForTimeout(200);
+            continue;
+          }
+          clearance = measureMixedHeightClearance(frame);
           if (clearance.status === 'violation') {
             assert.fail(`${phase} content clearance violated: ${JSON.stringify(clearance)}`);
           }
@@ -1354,14 +1370,17 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         assert.fail(`${phase} lacked two painted mixed-height rows at density 0.5: ${JSON.stringify(clearance)}`);
       };
       await sendBatch('2');
-      const dense = await waitForClearance('density-reflow');
+      const dense = await waitForClearance('density-reflow', initial.latestRenderFrame?.frameId ?? 0,
+        (config) => config?.laneHeight < initial.exact.config.laneHeight);
       assert(dense.exact.config.laneHeight < initial.exact.config.laneHeight,
         'Parser-driven burst did not shrink the lane grid');
       await page.evaluate(() => window.__ytChatOverlay.applySettings({
         safeTop: 0.1, safeBottom: 0.15, fontSize: 34,
       }));
       await sendBatch('3');
-      const safe = await waitForClearance('settings-safe-zone-reflow');
+      const safe = await waitForClearance('settings-safe-zone-reflow', dense.latestRenderFrame.frameId,
+        (config) => config?.safeTop === 0.1 && config?.safeBottom === 0.15 &&
+          config?.fontSize === 34);
       assert.equal(safe.exact.config.safeTop, 0.1);
       assert.equal(safe.exact.config.safeBottom, 0.15);
       assert.equal(safe.exact.config.fontSize, 34);
@@ -1370,7 +1389,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       });
       await page.setViewportSize({ width: 1100, height: 700 });
       await sendBatch('4');
-      const resized = await waitForClearance('resize-reflow');
+      const resized = await waitForClearance('resize-reflow', safe.latestRenderFrame.frameId,
+        (config) => config?.logicalWidth > safe.exact.config.logicalWidth);
       assert(resized.exact.config.logicalWidth > safe.exact.config.logicalWidth,
         'Fixture video did not grow on resize');
       await page.locator('#placement-fullscreen').evaluate((element) => {
@@ -1381,7 +1401,8 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await page.waitForFunction(() => document.fullscreenElement?.id === 'movie_player',
         undefined, { timeout: 5000 });
       await sendBatch('5');
-      const fullscreen = await waitForClearance('fullscreen-reflow');
+      const fullscreen = await waitForClearance('fullscreen-reflow', resized.latestRenderFrame.frameId,
+        (config) => config?.logicalHeight > resized.exact.config.logicalHeight);
       assert(fullscreen.exact.config.logicalHeight > resized.exact.config.logicalHeight,
         'Actual fullscreen did not expand the overlay');
     }

@@ -224,7 +224,8 @@ describe('Windows placement timing probe', () => {
     const frame = { frameId: 11, complete: true, truncated: false,
       startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
       logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
-      config: { renderer, fontSize: 32, laneSpacing: 8, mode: 'top', laneDensityFactor: 0.5 },
+      config: { renderer, fontSize: 32, laneSpacing: 8, mode: 'top', laneDensityFactor: 0.5,
+        safeTop: 0, safeBottom: 0 },
       active: [regular, paid],
       draws: [draw(regular.id, 10, 5, 46), draw(paid.id, 10, 59, 44)] };
     expect(measureMixedHeightClearance(frame)).toMatchObject({ status: 'measured',
@@ -238,6 +239,10 @@ describe('Windows placement timing probe', () => {
       draws: [frame.draws[0], draw(paid.id, 10, 5, 44)] })).toMatchObject({
       status: 'violation', minimumGapPx: -46,
     });
+    for (const safeZone of [{ safeTop: 0.1, safeBottom: 0 }, { safeTop: 0, safeBottom: 0.8 }]) {
+      expect(measureMixedHeightClearance({ ...frame, config: { ...frame.config, ...safeZone } }))
+        .toMatchObject({ status: 'violation', reason: expect.stringContaining('content_outside_safe_zone_') });
+    }
     for (const changed of [
       { ...frame, active: frame.active.slice(0, 1), draws: frame.draws.slice(0, 1) },
       { ...frame, active: [regular, { ...paid, height: 46 }] },
