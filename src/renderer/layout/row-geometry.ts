@@ -109,3 +109,14 @@ export function getRowContentOffset(height: number, gridHeight: number, gap = 0)
     Math.floor((getRowSlotCount(height, gridHeight, gap) * gridHeight - gap - height) / 2)
   );
 }
+
+/** Content rectangles need motion separation until the configured gap fits between them. */
+export function rowsNeedVerticalClearance(
+  firstTop: number,
+  firstHeight: number,
+  secondTop: number,
+  secondHeight: number,
+  gap: number
+): boolean {
+  return firstTop + firstHeight + gap > secondTop && secondTop + secondHeight + gap > firstTop;
+}

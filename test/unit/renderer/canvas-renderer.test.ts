@@ -150,6 +150,44 @@ describe('Canvas reservation safety', () => {
     expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(true);
     renderer.destroy();
   });
+
+  it('reflows an asynchronously taller fixed row with its configured clearance', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const dimensions = { width: 640, height: 400 };
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(overlay, makeSettings({ danmakuMode: 'top', laneSpacing: 8 }));
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      activeMessagesByLane: Map<number, CanvasMessage[]>;
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      applyMessageGeometry(message: CanvasMessage, geometry: { width: number; height: number; translationHeight: number }): boolean;
+      drainQueue(now: number): void;
+      reflowActiveMessages(dimensions: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.updateLaneDensityFactor(0.5);
+    internals.laneAllocator.reset(dimensions, 1000);
+    const baselineHeight = internals.laneAllocator.getLaneHeight() * 4 - 8;
+    internals.estimateDimensions = () => ({ width: 100, height: baselineHeight });
+    for (const id of ['first', 'second']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(1000);
+    expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
+    const first = internals.activeMessages[0];
+    if (!first) throw new Error('first row was not activated');
+    expect(internals.applyMessageGeometry(first, { width: first.width, height: baselineHeight + 2, translationHeight: 0 })).toBe(true);
+    internals.reflowActiveMessages(dimensions);
+    const [taller, second] = internals.activeMessages;
+    expect(internals.activeMessages).toHaveLength(2);
+    if (!taller || !second) throw new Error('row was lost during reflow');
+    expect(taller.laneIndex).toBe(0);
+    expect(second.laneIndex).toBe(5);
+    expect(second.y - (taller.y + taller.height)).toBeGreaterThanOrEqual(8);
+    expect(internals.activeMessagesByLane.get(second.laneIndex)).toContain(second);
+    renderer.destroy();
+  });
 });
 
 describe('CanvasRenderer', () => {

@@ -137,6 +137,40 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
 }
 
 describe('Worker reservation safety', () => {
+  it('reflows a geometry update without losing the fixed-row gap or lane index', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(10_000);
+    const renderer = initializeRenderer({
+      danmakuMode: 'top', laneSpacing: 8, safeTop: 0, safeBottom: 0, outlineWidthPx: 0,
+    });
+    renderer.handleMessage(makeEvent({ type: 'laneDensity', factor: 0.5 }));
+    const internals = renderer as unknown as {
+      laneHeight: number;
+      activeMessages: ActiveMessage[];
+      activeMessagesByLane: Map<number, ActiveMessage[]>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    const baselineHeight = internals.laneHeight * 4 - 8;
+    renderer.handleMessage(makeEvent({
+      type: 'addMessages',
+      messages: [
+        makeWorkerMessage({ id: 'first', height: baselineHeight }),
+        makeWorkerMessage({ id: 'second', height: baselineHeight }),
+      ],
+    }));
+    internals.drainQueue(10_000, 640, 360);
+    expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
+    renderer.handleMessage(makeEvent({
+      type: 'updateMessageGeometries',
+      geometries: [{ id: 'first', width: 100, height: baselineHeight + 2 }],
+    }));
+    const [first, second] = internals.activeMessages;
+    expect(internals.activeMessages).toHaveLength(2);
+    if (!first || !second) throw new Error('Worker row was lost during reflow');
+    expect([first.laneIndex, second.laneIndex]).toEqual([0, 5]);
+    expect(second.y - (first.y + first.height)).toBeGreaterThanOrEqual(8);
+    expect(internals.activeMessagesByLane.get(second.laneIndex)).toContain(second);
+  });
+
   it('budgets failed placement work and rotates through all priority groups', () => {
     let clock = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => clock);
