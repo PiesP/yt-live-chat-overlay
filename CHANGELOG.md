@@ -4,13 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.5] - 2026-10-11
+
 ### Fixed
 
+- **Mixed-height reflow spacing** — Preserve the configured Lane Gap between comments of different heights when resizing or other geometry changes reconcile their positions.
 - **Comment row spacing** — Compact transparent comments while retaining glyph, outline and photo safety. The existing Lane Gap slider adds predictable row separation, with a two-row preview and consistent configured text size in both renderers. Saved settings remain compatible.
 
 - **Backlog speed parity** — Apply the dedicated Backlog multiplier without extra burst acceleration in both Canvas and Worker rendering, including pending messages and reflow.
 - **Comment placement** — Check future reservations and actual scrolling speeds in both Canvas and Worker rendering. Reduced-motion comments reserve their stationary lifetime, and resizing or translated text reconciles positions with an explicit capacity-drop policy.
 - **Replay and entry timing** — Keep prefetched comments pending until their video timestamp, carry bounded entry spacing across frames, and limit collision-search work while retaining messages that can be retried. Worker fallback preserves validated progress and future reservations. Existing settings remain compatible; no reset or migration is required.
+
+### Changed
+
+- **Comment text size** — Use the saved `fontSize` in logical pixels instead of scaling it with viewport height. Existing settings, including legacy sizing keys, remain readable; text may appear at a different size after updating, so adjust the font-size control if needed.
 
 ## [0.45.4] - 2026-10-09
 
