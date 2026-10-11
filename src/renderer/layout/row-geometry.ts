@@ -109,3 +109,20 @@ export function getRowContentOffset(height: number, gridHeight: number, gap = 0)
     Math.floor((getRowSlotCount(height, gridHeight, gap) * gridHeight - gap - height) / 2)
   );
 }
+
+/** Content rectangles need motion separation until the configured gap fits between them. */
+export function rowsNeedVerticalClearance(
+  firstTop: number,
+  firstHeight: number,
+  secondTop: number,
+  secondHeight: number,
+  gap: number
+): boolean {
+  // Fractional safe-zone origins can put an exact adjacent boundary a few
+  // floating-point units past its neighbor. Keep real subpixel deficits unsafe.
+  const epsilon = 1e-9;
+  return (
+    firstTop + firstHeight + gap > secondTop + epsilon &&
+    secondTop + secondHeight + gap > firstTop + epsilon
+  );
+}

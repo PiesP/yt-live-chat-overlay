@@ -61,6 +61,7 @@ import {
 } from '@renderer/canvas/bidi-layout';
 import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
 import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -137,6 +138,80 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
 }
 
 describe('Worker reservation safety', () => {
+  it.each([
+    { name: 'mixed heights with only 1px clearance', activeY: 5, activeHeight: 46, candidateY: 52, allowed: false },
+    { name: 'exactly 8px of clearance', activeY: 0, activeHeight: 44, candidateY: 52, allowed: true },
+    { name: 'fractional safe-zone origin at exact clearance', activeY: 15.99, activeHeight: 44, candidateY: 67.99, allowed: true },
+    { name: 'fractional origin with 7.9px clearance', activeY: 15.99, activeHeight: 44.1, candidateY: 67.99, allowed: false },
+  ])('checks normal Worker admission for $name', ({ activeY, activeHeight, candidateY, allowed }) => {
+    const renderer = initializeRenderer({
+      danmakuMode: 'top', laneSpacing: 8, safeTop: activeY === 15.99 ? 15.99 / 360 : 0,
+    });
+    const placement = {
+      laneIndex: 4, waitMs: 0, laneY: candidateY, slotCount: 4, verticalOffset: 0,
+    };
+    const active = {
+      y: activeY, height: activeHeight, width: 100, startX: 270,
+      startTime: 0, pausedDuration: 0, duration: 5000, invDuration: 1 / 5000,
+    };
+    const internals = renderer as unknown as {
+      activeMessagesByLane: Map<number, typeof active[]>;
+      checkCollision(
+        candidatePlacement: typeof placement,
+        entry: WorkerMessage,
+        speedTier: number,
+        batchIndex: number,
+        previousStaggerDelayMs: number,
+        now: number,
+        width: number,
+        precomputedMotion: ReturnType<typeof motionPlanFromMessage>
+      ): boolean;
+    };
+    for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
+      internals.activeMessagesByLane.set(lane, [active]);
+    }
+    const motion = motionPlanFromMessage({
+      startTime: 1000, pausedDuration: 0, startX: 270, width: 100, duration: 5000,
+    }, 'top', 640, 100);
+    expect(internals.checkCollision(
+      placement, makeWorkerMessage({ width: 100, height: 44 }), 1, 0, 0, 1000, 640, motion
+    )).toBe(allowed);
+  });
+
+  it('reflows a geometry update without losing the fixed-row gap or lane index', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(10_000);
+    const renderer = initializeRenderer({
+      danmakuMode: 'top', laneSpacing: 8, safeTop: 0, safeBottom: 0, outlineWidthPx: 0,
+    });
+    renderer.handleMessage(makeEvent({ type: 'laneDensity', factor: 0.5 }));
+    const internals = renderer as unknown as {
+      laneHeight: number;
+      activeMessages: ActiveMessage[];
+      activeMessagesByLane: Map<number, ActiveMessage[]>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    const baselineHeight = internals.laneHeight * 4 - 8;
+    renderer.handleMessage(makeEvent({
+      type: 'addMessages',
+      messages: [
+        makeWorkerMessage({ id: 'first', height: baselineHeight }),
+        makeWorkerMessage({ id: 'second', height: baselineHeight }),
+      ],
+    }));
+    internals.drainQueue(10_000, 640, 360);
+    expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
+    renderer.handleMessage(makeEvent({
+      type: 'updateMessageGeometries',
+      geometries: [{ id: 'first', width: 100, height: baselineHeight + 2 }],
+    }));
+    const [first, second] = internals.activeMessages;
+    expect(internals.activeMessages).toHaveLength(2);
+    if (!first || !second) throw new Error('Worker row was lost during reflow');
+    expect([first.laneIndex, second.laneIndex]).toEqual([0, 5]);
+    expect(second.y - (first.y + first.height)).toBeGreaterThanOrEqual(8);
+    expect(internals.activeMessagesByLane.get(second.laneIndex)).toContain(second);
+  });
+
   it('budgets failed placement work and rotates through all priority groups', () => {
     let clock = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => clock);

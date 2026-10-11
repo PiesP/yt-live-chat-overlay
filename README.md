@@ -55,6 +55,13 @@ Open a YouTube live stream, premiere, or replay with chat. The overlay starts
 automatically. Select the gear button added to the player to configure display,
 backlog, translation, performance, and accessibility options.
 
+Comment text uses the saved font size in logical pixels rather than scaling with
+the viewport. Your settings remain available after updating, but text may look
+larger or smaller; adjust **Size (px)** in the comment settings if needed. The
+existing **Lane Gap** setting controls separation between comments of different
+heights. See the [rendering timing contract](./docs/rendering-timing.md) for the
+spacing rules.
+
 ## Browser support
 
 | Distribution | Support |

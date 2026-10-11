@@ -91,7 +91,7 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
-import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { getRowSlotCount, rowsNeedVerticalClearance } from '@renderer/layout/row-geometry';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
 import {
@@ -1783,7 +1783,16 @@ export class CanvasRenderer extends RendererBase {
       }
       let collision = false;
       for (const active of this.collisionScratch) {
-        if (active.y + active.height <= top || active.y >= top + msgHeight) continue;
+        if (
+          !rowsNeedVerticalClearance(
+            top,
+            msgHeight,
+            active.y,
+            active.height,
+            this.settings.laneSpacing
+          )
+        )
+          continue;
         if (
           motionPlansCollide(
             motion,

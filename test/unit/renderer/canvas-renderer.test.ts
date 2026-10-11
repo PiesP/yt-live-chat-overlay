@@ -17,6 +17,7 @@ import { ImageFetchManager } from '@media/image-fetch-manager';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import { messageXAtTime, motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 
 // Mock OffscreenCanvas
@@ -148,6 +149,91 @@ describe('Canvas reservation safety', () => {
     expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 1000)).toBe(true);
     internals.laneAllocator.shiftAll(9000);
     expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(true);
+    renderer.destroy();
+  });
+
+  it('reflows an asynchronously taller fixed row with its configured clearance', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const dimensions = { width: 640, height: 400 };
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(overlay, makeSettings({ danmakuMode: 'top', laneSpacing: 8 }));
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      activeMessagesByLane: Map<number, CanvasMessage[]>;
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      applyMessageGeometry(message: CanvasMessage, geometry: { width: number; height: number; translationHeight: number }): boolean;
+      drainQueue(now: number): void;
+      reflowActiveMessages(dimensions: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.updateLaneDensityFactor(0.5);
+    internals.laneAllocator.reset(dimensions, 1000);
+    const baselineHeight = internals.laneAllocator.getLaneHeight() * 4 - 8;
+    internals.estimateDimensions = () => ({ width: 100, height: baselineHeight });
+    for (const id of ['first', 'second']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(1000);
+    expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
+    const first = internals.activeMessages[0];
+    if (!first) throw new Error('first row was not activated');
+    expect(internals.applyMessageGeometry(first, { width: first.width, height: baselineHeight + 2, translationHeight: 0 })).toBe(true);
+    internals.reflowActiveMessages(dimensions);
+    const [taller, second] = internals.activeMessages;
+    expect(internals.activeMessages).toHaveLength(2);
+    if (!taller || !second) throw new Error('row was lost during reflow');
+    expect(taller.laneIndex).toBe(0);
+    expect(second.laneIndex).toBe(5);
+    expect(second.y - (taller.y + taller.height)).toBeGreaterThanOrEqual(8);
+    expect(internals.activeMessagesByLane.get(second.laneIndex)).toContain(second);
+    renderer.destroy();
+  });
+
+  it.each([
+    { name: 'mixed heights with only 1px clearance', activeY: 5, activeHeight: 46, candidateY: 52, allowed: false },
+    { name: 'exactly 8px of clearance', activeY: 0, activeHeight: 44, candidateY: 52, allowed: true },
+    { name: 'fractional safe-zone origin at exact clearance', activeY: 15.99, activeHeight: 44, candidateY: 67.99, allowed: true },
+    { name: 'fractional origin with 7.9px clearance', activeY: 15.99, activeHeight: 44.1, candidateY: 67.99, allowed: false },
+  ])('checks normal Canvas admission for $name', ({ activeY, activeHeight, candidateY, allowed }) => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const overlay = new Overlay();
+    const dimensions = { width: 640, height: 156 };
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(overlay, makeSettings({
+      danmakuMode: 'top', laneSpacing: 8, safeTop: activeY === 15.99 ? 15.99 / dimensions.height : 0,
+    }));
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessagesByLane: Map<number, CanvasMessage[]>;
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      checkPlacement(message: ChatMessage, now: number, dimensions: { width: number; height: number }): { ok: boolean };
+    };
+    const heap = Array.from({ length: 12 }, (_, lane) => [lane, 1000] as [number, number]);
+    internals.laneAllocator.restore({
+      heap, indexMap: Object.fromEntries(heap.map(([lane], index) => [lane, index])),
+      laneHeight: 13, laneCount: 12, speedTierLanes: {},
+    });
+    internals.estimateDimensions = () => ({ width: 100, height: 44 });
+    const original = makeMessage('active', 'active');
+    const active = {
+      message: original, renderMessage: original,
+      startTime: 0, fadeStartTime: 0, duration: 5000, invDuration: 1 / 5000,
+      width: 100, height: activeHeight, startX: 270, x: 270, y: activeY,
+      pausedDuration: 0, laneIndex: 0, staggerDelay: 0, speedTier: 1,
+      ghostText: 'active', laneArrayIndices: [],
+    } as CanvasMessage;
+    for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
+      internals.activeMessagesByLane.set(lane, [active]);
+    }
+    const placement = {
+      laneIndex: 4, waitMs: 0, laneY: candidateY, slotCount: 4, verticalOffset: 0,
+    };
+    vi.spyOn(internals.laneAllocator, 'findPlacement')
+      .mockReturnValueOnce(placement)
+      .mockReturnValue(null);
+
+    expect(internals.checkPlacement(makeMessage('candidate', 'candidate'), 1000, dimensions).ok).toBe(allowed);
     renderer.destroy();
   });
 });

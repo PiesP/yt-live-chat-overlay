@@ -9,7 +9,11 @@ import {
   motionPlanFromMessage,
   motionPlansCollide,
 } from '@renderer/layout/message-schedule';
-import { getRowContentOffset, getRowSlotCount } from '@renderer/layout/row-geometry';
+import {
+  getRowContentOffset,
+  getRowSlotCount,
+  rowsNeedVerticalClearance,
+} from '@renderer/layout/row-geometry';
 
 /** Reconstruct paused time while retaining the prior viewport and measured geometry. */
 export function previousMotionPlan(
@@ -114,11 +118,23 @@ export function reconcileMessagePlacements<T>(
       computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) +
       getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
     scratch.clear();
+    // Every content rectangle plus its gap fits inside its reserved slot block.
+    // Thus a clearance conflict must share a slot; the adjacent lanes also
+    // cover fractional-grid rounding at the block boundary.
     for (let lane = laneIndex - 1; lane <= laneIndex + slotCount; lane++) {
       for (const other of occupants.get(lane) ?? []) scratch.add(other);
     }
     for (const other of scratch) {
-      if (other.y + other.height <= y || other.y >= y + candidate.height) continue;
+      if (
+        !rowsNeedVerticalClearance(
+          y,
+          candidate.height,
+          other.y,
+          other.height,
+          options.laneSpacing ?? 0
+        )
+      )
+        continue;
       if (
         motionPlansCollide(candidate.motion, other.motion, options.headwayGapRatio, options.now)
       ) {

@@ -41,7 +41,8 @@ row reserves all its subdivisions, so finer grids do not claim more ordinary
 capacity or increase its pitch. Genuinely taller author, translation and paid
 content reserves `ceil((height + gap) / gridHeight)` slots. Its remaining discrete
 rounding space is centered around content, excluding the user gap. Reservations
-and reflow use the same rule. Spread still spans the full safe zone and may
+and reflow use the same rule, including mixed-height neighbors that need vertical
+separation. Spread still spans the full safe zone and may
 leave unused rows or future reservations. The settings preview paints two
 rows with the shared estimate, reservation and drawing code.
 

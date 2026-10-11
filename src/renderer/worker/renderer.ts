@@ -118,6 +118,7 @@ import {
   getRowContentOffset,
   getRowGridHeight,
   getRowSlotCount,
+  rowsNeedVerticalClearance,
 } from '@renderer/layout/row-geometry';
 import { resolveRequiredRenderAssets } from '@renderer/render-assets';
 import {
@@ -613,8 +614,7 @@ export class WorkerRenderer {
               (canvas) => canvas.width * canvas.height * 4
             );
             this.recomputeConfigDerived();
-            // Set logical dimensions BEFORE initLanes so that
-            // getEffectiveFontSize() can scale the font to the viewport.
+            // Set logical dimensions before initLanes computes the row grid.
             this.logicalWidth = data.width as number;
             this.logicalHeight = data.height as number;
             this.initLanes(data.width as number, data.height as number);
@@ -2141,7 +2141,16 @@ export class WorkerRenderer {
     }
     let collision = false;
     for (const active of this.collisionScratch) {
-      if (active.y + active.height <= top || active.y >= top + entry.height) continue;
+      if (
+        !rowsNeedVerticalClearance(
+          top,
+          entry.height,
+          active.y,
+          active.height,
+          this.config.laneSpacing
+        )
+      )
+        continue;
       if (
         motionPlansCollide(
           motion,
