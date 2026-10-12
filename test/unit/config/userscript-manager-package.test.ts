@@ -45,6 +45,14 @@ function runPython(body: string): void {
 }
 
 describe('pinned userscript manager preparation', () => {
+  it('pins the reviewed Tampermonkey 5.5.1 package bytes', () => {
+    runPython(String.raw`
+assert manager.VERSION == '5.5.1'
+assert manager.SHA256 == 'b5167937817e636adeba462ed9bf9b32ff01c2888f78a9afc6aa4f8e655fe872'
+assert manager.EXTENSION_ID == 'dhdgffkkebhmkfjojejmpbldmpobfkfo'
+`);
+  });
+
   it('rejects a changed Store package before creating output', () => {
     runPython(String.raw`
 with tempfile.TemporaryDirectory() as directory:
@@ -246,14 +254,14 @@ for message, failure in failures:
     runPython(String.raw`
 responses = [
     Response(b'ignored redirect body', 302, 'https://clients2.googleusercontent.com/package'),
-    Response(b'ignored redirect body', 307, '/reviewed.crx?version=5.5.0'),
+    Response(b'ignored redirect body', 307, '/reviewed.crx?version=5.5.1'),
     Response(b'reviewed'),
 ]
 with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', side_effect=responses) as request:
     assert manager.download_package() == b'reviewed'
 assert [call.args[0].full_url for call in request.call_args_list] == [
     manager.URL, 'https://clients2.googleusercontent.com/package',
-    'https://clients2.googleusercontent.com/reviewed.crx?version=5.5.0',
+    'https://clients2.googleusercontent.com/reviewed.crx?version=5.5.1',
 ]
 assert all(call.args[0].get_method() == 'GET' and call.args[0].timeout == 60
            for call in request.call_args_list)
