@@ -13,6 +13,8 @@ import {
 import type { CanvasRenderContext } from '@renderer/canvas/render-pipeline';
 import type { ChatMessage } from '@app-types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { LruMap } from '@piesp/browser-core/util';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 
 describe('scrolling motion on the main Canvas path', () => {
   it.each([false, true])('uses fixed position only when effective reduced motion is %s', (reducedMotion) => {
@@ -81,7 +83,7 @@ function makeDrainCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderCon
     // Stubs for fields not exercised by drainStage
     settings: {} as CanvasRenderContext['settings'],
     textBitmapCache: {} as CanvasRenderContext['textBitmapCache'],
-    superChatGradientCache: new Map() as CanvasRenderContext['superChatGradientCache'],
+    superChatGradientCache: new LruMap(GRADIENT_CACHE_MAX),
     imageFetchManager: {} as CanvasRenderContext['imageFetchManager'],
     boundGetFont: () => '',
     boundMeasureTextWidth: () => 0,
@@ -413,7 +415,7 @@ function makeCompactCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderC
     // Stubs
     settings: {} as CanvasRenderContext['settings'],
     textBitmapCache: {} as CanvasRenderContext['textBitmapCache'],
-    superChatGradientCache: new Map() as CanvasRenderContext['superChatGradientCache'],
+    superChatGradientCache: new LruMap(GRADIENT_CACHE_MAX),
     imageFetchManager: {} as CanvasRenderContext['imageFetchManager'],
     boundGetFont: () => '',
     boundMeasureTextWidth: () => 0,

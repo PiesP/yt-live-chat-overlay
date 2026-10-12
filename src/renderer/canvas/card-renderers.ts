@@ -9,7 +9,7 @@
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
-import { getCachedGradient } from '@renderer/canvas/gradient-utils';
+import { type GradientCache, getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
   drawAuthorSection,
@@ -73,7 +73,7 @@ function renderCardBackground(
   w: number,
   h: number,
   config: CardConfig,
-  gradientCache: Map<string, CanvasGradient>,
+  gradientCache: GradientCache,
   baseColor: string,
   topAlpha: number,
   scAlpha: number,
@@ -276,7 +276,7 @@ export function renderPaidCard(
   stickerCache: ResizableByteLimitedCache<HTMLImageElement>,
   emojiCache: ResizableByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
-  gradientCache: Map<string, CanvasGradient>
+  gradientCache: GradientCache
 ): void {
   const fontSize = settings.fontSize;
   const w = msgWidth;

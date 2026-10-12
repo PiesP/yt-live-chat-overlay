@@ -19,6 +19,8 @@ import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import { messageXAtTime, motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
+import { LruMap } from '@piesp/browser-core/util';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -75,6 +77,44 @@ function makeMessage(id: string, text: string): ChatMessage {
     authorType: 'normal',
   };
 }
+
+describe('Canvas gradient cache', () => {
+  it('uses the bounded core cache and clears it on state reset', () => {
+    const renderer = new CanvasRenderer(new Overlay(), makeSettings());
+    const internals = renderer as unknown as {
+      superChatGradientCache: LruMap<string, CanvasGradient>;
+      resetState(): void;
+    };
+    const cache = internals.superChatGradientCache;
+    expect(cache).toBeInstanceOf(LruMap);
+    expect(cache.maxSize).toBe(GRADIENT_CACHE_MAX);
+    cache.set('old', { addColorStop: vi.fn() } as unknown as CanvasGradient);
+
+    internals.resetState();
+
+    expect(cache.size).toBe(0);
+    renderer.destroy();
+  });
+
+  it('drops gradients bound to the old context after restoration', () => {
+    const renderer = new CanvasRenderer(new Overlay(), makeSettings());
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      superChatGradientCache: LruMap<string, CanvasGradient>;
+      handleContextRestored(): void;
+    };
+    const canvas = document.createElement('canvas');
+    vi.spyOn(canvas, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
+    internals.canvas = canvas;
+    renderer.isPaused = true;
+    internals.superChatGradientCache.set('old', { addColorStop: vi.fn() } as unknown as CanvasGradient);
+
+    internals.handleContextRestored();
+
+    expect(internals.superChatGradientCache.size).toBe(0);
+    renderer.destroy();
+  });
+});
 
 describe('Canvas reservation safety', () => {
   afterEach(() => vi.restoreAllMocks());

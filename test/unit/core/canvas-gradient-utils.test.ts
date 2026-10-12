@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import type { GradientContext } from '@renderer/canvas/gradient-utils';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { LruMap } from '@piesp/browser-core/util';
 
 // ── Mock CanvasGradient ──────────────────────────────────────────────
 
@@ -36,11 +37,11 @@ function createMockCtx(): GradientContext & { createdGradients: MockCanvasGradie
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('getCachedGradient', () => {
-  let cache: Map<string, CanvasGradient>;
+  let cache: LruMap<string, CanvasGradient>;
   let ctx: GradientContext & { createdGradients: MockCanvasGradient[] };
 
   beforeEach(() => {
-    cache = new Map();
+    cache = new LruMap(GRADIENT_CACHE_MAX);
     ctx = createMockCtx();
   });
 
@@ -83,6 +84,15 @@ describe('getCachedGradient', () => {
       const g2 = getCachedGradient(ctx, cache, 'rgb(255,0,0)', 100, 0.9, 0.3, 0.1);
       expect(g1).not.toBe(g2);
     });
+
+    it('does not reuse gradients from another rendering context after reset', () => {
+      const first = getCachedGradient(ctx, cache, 'rgb(255,0,0)', 100, 0.5, 0.3, 0.1);
+      cache.clear();
+      const nextCtx = createMockCtx();
+      const second = getCachedGradient(nextCtx, cache, 'rgb(255,0,0)', 100, 0.5, 0.3, 0.1);
+      expect(second).not.toBe(first);
+      expect(nextCtx.createdGradients).toHaveLength(1);
+    });
   });
 
   describe('LRU eviction', () => {
@@ -93,13 +103,28 @@ describe('getCachedGradient', () => {
       }
       expect(cache.size).toBe(GRADIENT_CACHE_MAX);
 
-      const oldestKey = cache.keys().next().value;
+      const oldestKey = 'rgb(0,0,0)|100|0.5|0.3|0.1';
+      expect(cache.has(oldestKey)).toBe(true);
 
       // Add one more — should evict oldest
       getCachedGradient(ctx, cache, 'rgb(999,0,0)', 100, 0.5, 0.3, 0.1);
 
       expect(cache.size).toBe(GRADIENT_CACHE_MAX);
-      expect(cache.has(oldestKey!)).toBe(false);
+      expect(cache.has(oldestKey)).toBe(false);
+    });
+
+    it('promotes a reused gradient before the capacity boundary', () => {
+      const first = getCachedGradient(ctx, cache, 'rgb(0,0,0)', 100, 0.5, 0.3, 0.1);
+      for (let i = 1; i < GRADIENT_CACHE_MAX; i++) {
+        getCachedGradient(ctx, cache, `rgb(${i},0,0)`, 100, 0.5, 0.3, 0.1);
+      }
+
+      expect(getCachedGradient(ctx, cache, 'rgb(0,0,0)', 100, 0.5, 0.3, 0.1)).toBe(first);
+      getCachedGradient(ctx, cache, 'rgb(999,0,0)', 100, 0.5, 0.3, 0.1);
+
+      expect(cache.size).toBe(GRADIENT_CACHE_MAX);
+      expect(cache.has('rgb(0,0,0)|100|0.5|0.3|0.1')).toBe(true);
+      expect(cache.has('rgb(1,0,0)|100|0.5|0.3|0.1')).toBe(false);
     });
 
     it('does not evict when under capacity', () => {

@@ -4,6 +4,8 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatMessage } from '@app-types';
 import { drawLeftRoundedRect, renderPaidCard } from '@renderer/canvas/card-renderers';
+import { LruMap } from '@piesp/browser-core/util';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
@@ -198,7 +200,7 @@ describe('renderPaidCard canvas state', () => {
       cache as never,
       cache as never,
       () => 'bold 32px sans-serif',
-      new Map()
+      new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX)
     );
 
     expect(ctx.font).toBe('italic 12px serif');

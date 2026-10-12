@@ -2,6 +2,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { WorkerRenderer } from '@renderer/worker/renderer';
+import { LruMap } from '@piesp/browser-core/util';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 
 // Mock OffscreenCanvas
 class MockOffscreenCanvas {
@@ -36,6 +38,12 @@ describe('WorkerRenderer', () => {
 
   it('constructs without throwing', () => {
     expect(() => new WorkerRenderer()).not.toThrow();
+  });
+
+  it('uses the same bounded core gradient cache as the main renderer', () => {
+    const internals = wr as unknown as { superChatGradientCache: LruMap<string, CanvasGradient> };
+    expect(internals.superChatGradientCache).toBeInstanceOf(LruMap);
+    expect(internals.superChatGradientCache.maxSize).toBe(GRADIENT_CACHE_MAX);
   });
 
   it.each([
