@@ -334,12 +334,12 @@ Prepare the reviewed userscript manager outside the checkout:
 
 ```bash
 python3 validation/windows/prepare-userscript-manager.py \
-  --output /tmp/yt-tampermonkey-5.5.0
+  --output /tmp/yt-tampermonkey-5.5.1
 ```
 
 This is a host-side preparation step before VM installation, not an asset bundled
 in `profile.json` or code run by the Windows profile. The Python 3 standard-library
-helper owns the reviewed Tampermonkey 5.5.0 version, extension ID, exact Store URL,
+helper owns the reviewed Tampermonkey 5.5.1 version, extension ID, exact Store URL,
 and SHA-256 pin. Importing the module only defines the preparer; network and
 filesystem work starts when `prepare()` is called or the CLI runs. The CLI takes
 `--output` as its only operational input, refuses an existing destination before
@@ -352,12 +352,12 @@ request timeout, and limits the final body to 16 MiB. It verifies the pinned
 SHA-256 and CRX3 header bounds before using Python's `zipfile`; extraction checks
 at most 1,000 entries and 64 MiB of declared uncompressed size, rejecting
 absolute, parent-traversal, backslash, colon, and symlink entries. It validates
-entries before omitting `_metadata`, checks the manifest for version 5.5.0 and
+entries before omitting `_metadata`, checks the manifest for version 5.5.1 and
 Manifest V3, writes `installation-source.json` with Store identity, URL, digest,
 method, and omission, then atomically renames a new staging directory into
 place. Failures remove that staging directory.
 
-The thirteen local tests in `test/unit/config/userscript-manager-package.test.ts`
+The fourteen local tests in `test/unit/config/userscript-manager-package.test.ts`
 cover a fixture package and receipt, pin mismatch, existing output, traversal,
 approved and rejected redirects, redirect count, HTTP/body limits, and transport
 failure without live downloads. They also reject wrong manager/manifest versions,

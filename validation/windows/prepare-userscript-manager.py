@@ -13,8 +13,8 @@ import urllib.request
 from urllib.parse import urljoin, urlsplit
 import zipfile
 
-VERSION = '5.5.0'
-SHA256 = 'bcaec082c439e11c4df683f43d07e9ac3d4439251d72b91c5b452f977dac15d5'
+VERSION = '5.5.1'
+SHA256 = 'b5167937817e636adeba462ed9bf9b32ff01c2888f78a9afc6aa4f8e655fe872'
 EXTENSION_ID = 'dhdgffkkebhmkfjojejmpbldmpobfkfo'
 URL = (
     'https://clients2.google.com/service/update2/crx?response=redirect'
