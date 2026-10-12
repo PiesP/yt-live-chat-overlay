@@ -326,4 +326,21 @@ describe('ImageFetchManager terminal lifecycle', () => {
     manager.destroy();
   });
 
+  it('releases cache references without clearing retained HTMLImageElement sources', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 2 } as OverlaySettings, null);
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const image = PendingImage.instances[0];
+    if (!image) throw new Error('Expected pending sticker image');
+    image.naturalWidth = 600;
+    image.naturalHeight = 600;
+    image.onload?.();
+
+    manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 1 } as OverlaySettings, null);
+    expect(manager.stickerCache.has(STICKER_URL)).toBe(false);
+    manager.destroy();
+
+    expect(manager.stickerCache.size).toBe(0);
+    expect(image.src).toBe(STICKER_URL);
+  });
 });
