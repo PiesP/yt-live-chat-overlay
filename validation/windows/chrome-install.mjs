@@ -4,10 +4,11 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { run as runFixture } from './profile.mjs';
-import { runPlacementTimingFixture } from './placement-timing.mjs';
+import { runBitmapLifecycleFixture } from './bitmap-lifecycle.mjs';
 import { countUnexpectedLiveErrors, isYouTubeHostError, redactDiagnosticText, validateLiveRenderer } from './live-rendering.mjs';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
+import { runPlacementTimingFixture } from './placement-timing.mjs';
+import { run as runFixture } from './profile.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -482,7 +483,7 @@ export async function runChromeInstallation({
   let browserProcessId;
   let browserProcessIdentity;
   let primaryError;
-  const result = { installation, fixture: null, placementTiming: null,
+  const result = { installation, fixture: null, placementTiming: null, bitmapLifecycle: null,
     live: [], liveWorkflowCoverage: null, cleanup: {} };
   try {
     context = await chromium.launchPersistentContext(profile, {
@@ -517,6 +518,11 @@ export async function runChromeInstallation({
       installedContext: context, installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
     if (browserName === 'msedge' && installation === 'extension') {
+      result.bitmapLifecycle = await runBitmapLifecycleFixture({
+        context, root, extensionId,
+      });
+      assert.equal(result.bitmapLifecycle.status, 'passed',
+        'Installed Edge real bitmap lifecycle fixture failed');
       // A baseline-only harness commit can set this to true with the same probe bytes.
       const comparisonOnly = false;
       result.placementTiming = await runPlacementTimingFixture({

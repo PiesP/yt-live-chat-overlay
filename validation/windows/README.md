@@ -77,6 +77,27 @@ packaged OffscreenCanvas Worker; the other makes
 `transferControlToOffscreen()` fail before transfer so the application takes its
 normal Canvas fallback. Both pages use the normal extension, chat response
 parser, runtime, and renderer with routed, bounded text and paid-card messages.
+
+The installed Edge extension also runs `bitmap-lifecycle.mjs` in a bounded fixture
+page. It uses the compiled page bundle's cache with a real main-thread
+`ImageBitmap`, then defensively transfers a separate real bitmap through the
+Worker's existing `addMessages` protocol into its compiled renderer's emoji cache.
+It also routes a local red PNG through the Worker's real fetch and
+`createImageBitmap` path. Each cache repeats same-key registration and rejects a
+cross-key alias while the bitmap is still drawable, then requires zero dimensions
+plus a failed draw after removal. The fixture records the
+sender's detached dimensions, exact local image request count, and page/console
+errors, then closes its page. The current production sender does not use
+`imageData`; the transfer probes the receiver's supported boundary. The
+self-fetch check exercises production resource creation with deterministic bytes,
+not live YouTube image delivery.
+
+The supported Worker self-fetch path creates a distinct `ImageBitmap` for each
+cache target, and current source has no `imageData` sender. The corrected core
+cache guards aliases within one cache; it cannot detect an object inserted into
+two separate caches. Such cross-cache aliasing remains caller-owned unsupported
+input, and this fixture makes no cross-cache ownership claim.
+
 The Worker page prefixes and suffixes a probe around the page-origin Blob built
 from the packaged Worker source. The original Worker code runs between them;
 the suffix attaches to the renderer instance only when the emitted handler

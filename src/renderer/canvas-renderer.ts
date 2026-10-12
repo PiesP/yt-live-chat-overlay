@@ -30,7 +30,11 @@ import { getTranslatableText } from '@chat/message-helpers';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
-import { ResizableByteLimitedCache, yieldIfOverBudgetAsync } from '@piesp/browser-core/util';
+import {
+  LruMap,
+  ResizableByteLimitedCache,
+  yieldIfOverBudgetAsync,
+} from '@piesp/browser-core/util';
 import { resetBidiLayoutCaches } from '@renderer/canvas/bidi-layout';
 import {
   applyDevicePixelRatio,
@@ -115,7 +119,6 @@ import { DensityIndicator } from '@util/density-indicator';
 import { statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
-import { MapCompatibleLruMap } from '@util/lru-map';
 import { MessageActivator } from '@util/message-activator';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import { scheduleOverlayTask } from '@util/scheduler-utils';
@@ -253,9 +256,7 @@ export class CanvasRenderer extends RendererBase {
     this.settings.textCacheMb * 1_000_000, // configurable MB
     (c) => c.width * c.height * 4 // RGBA bytes
   );
-  private readonly superChatGradientCache = new MapCompatibleLruMap<string, CanvasGradient>(
-    GRADIENT_CACHE_MAX
-  );
+  private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
@@ -2332,6 +2333,7 @@ export class CanvasRenderer extends RendererBase {
     clearTextMeasurementCaches();
     resetBidiLayoutCaches();
     this.textBitmapCache.clear();
+    this.superChatGradientCache.clear();
     this.dimensionCache.clear();
   }
 
@@ -2548,6 +2550,7 @@ export class CanvasRenderer extends RendererBase {
 
     const ctx = newCanvas.getContext('2d', { desynchronized: true });
     if (!ctx) return false;
+    this.superChatGradientCache.clear();
 
     newCanvas.addEventListener('contextlost', (e: Event) => {
       e.preventDefault();
@@ -2695,6 +2698,7 @@ export class CanvasRenderer extends RendererBase {
       });
       return;
     }
+    this.superChatGradientCache.clear();
     this.ctx = ctx;
     // Restore DPR transform that was lost with the context
     const dims = this.overlay?.getDimensions();

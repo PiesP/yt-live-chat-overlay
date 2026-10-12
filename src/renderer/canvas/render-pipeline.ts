@@ -11,7 +11,7 @@
  */
 
 import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
-import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
+import type { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
@@ -42,7 +42,6 @@ import { getMessagePriority } from '@renderer/message-priority';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
 import { rendererLayout } from '@util/design-tokens';
-import type { MapCompatibleLruMap } from '@util/lru-map';
 import type { MessageActivator } from '@util/message-activator';
 import type { ObservabilityReporter } from '@util/observability';
 import type { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
@@ -61,7 +60,7 @@ export interface CanvasRenderContext {
   settings: OverlaySettings;
 
   textBitmapCache: ResizableByteLimitedCache<HTMLCanvasElement>;
-  superChatGradientCache: MapCompatibleLruMap<string, CanvasGradient>;
+  superChatGradientCache: LruMap<string, CanvasGradient>;
 
   imageFetchManager: {
     emojiCache: ResizableByteLimitedCache<HTMLImageElement>;

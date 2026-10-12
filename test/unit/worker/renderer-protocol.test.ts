@@ -63,6 +63,8 @@ import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
 import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
+import type { CardConfigWorker } from '@renderer/card-config';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -135,6 +137,46 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
     })
   );
   return renderer;
+}
+
+function prepareGradientPaidCard() {
+  const renderer = initializeRenderer({ danmakuMode: 'top' });
+  const card: CardConfigWorker = {
+    background: 'gradient',
+    backgroundGradient: { topBoost: 0.12, bottomReduction: 0.15, minOpacity: 0.35 },
+    decoration: 'none',
+    badgeEnabled: false, badgeFillColor: '', badgeStrokeColor: '',
+    badgeRadius: 0, badgePaddingH: 0, badgePaddingV: 0, badgeStrokeWidth: 0,
+    headerTagEnabled: false, headerTagFontSizeScale: 1, headerTagColor: '',
+    headerTagMarginTop: 0, headerTagMarginBottom: 0,
+    authorShow: false, authorNameMaxWidth: 0, bodyMaxLines: 1, bodyMarginTop: 0,
+    stickerEnabled: false, stickerSizeScale: 1, stickerMarginTop: 0,
+    showBadgeAmount: false, padding: { horizontal: 0, vertical: 0 },
+    cardRadius: 0, textColor: '#fff', resolveColorRgb: { r: 0, g: 0, b: 0 },
+    needsGradientCache: true, needsElapsed: false,
+  };
+  const message: ActiveMessage = {
+    id: 'paid-gradient', x: 100, y: 20, startX: 100, width: 120, height: 40,
+    startTime: 0, fadeStartTime: 0, duration: 30_000, invDuration: 1 / 30_000,
+    pausedDuration: 0, laneIndex: 0, laneSlotCount: 1, laneArrayIndices: [],
+    speedTier: 1, text: '', color: '#fff', content: [], ghostText: '',
+    kind: 'superchat', cardConfigWorker: card,
+  };
+  const internals = renderer as unknown as {
+    activeMessages: ActiveMessage[];
+    superChatGradientCache: {
+      size: number;
+      has(key: string): boolean;
+      keys(): IterableIterator<string>;
+    };
+    renderFrame(): void;
+  };
+  internals.activeMessages.push(message);
+  const renderColor = (red: number) => {
+    card.resolveColorRgb = { r: red, g: 0, b: 0 };
+    internals.renderFrame();
+  };
+  return { renderer, internals, message, renderColor };
 }
 
 describe('Worker reservation safety', () => {
@@ -355,6 +397,70 @@ describe('Worker module', () => {
 
   it('resetWorkerForTests does not throw', () => {
     expect(() => resetWorkerForTests()).not.toThrow();
+  });
+});
+
+describe('Worker paid-card gradient cache integration', () => {
+  it('reuses rendered gradients and promotes them before the bounded capacity evicts the oldest', () => {
+    const { renderer, internals, renderColor } = prepareGradientPaidCard();
+    const cache = internals.superChatGradientCache;
+
+    renderColor(0);
+    const firstKey = [...cache.keys()][0];
+    renderColor(0);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(1);
+
+    renderColor(1);
+    const secondKey = [...cache.keys()][1];
+    if (firstKey === undefined || secondKey === undefined) {
+      throw new Error('Expected two paid-card gradient keys');
+    }
+    for (let red = 2; red < GRADIENT_CACHE_MAX; red++) renderColor(red);
+    expect(cache.size).toBe(GRADIENT_CACHE_MAX);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(GRADIENT_CACHE_MAX);
+
+    renderColor(0);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(GRADIENT_CACHE_MAX);
+    renderColor(GRADIENT_CACHE_MAX);
+    expect(cache.size).toBe(GRADIENT_CACHE_MAX);
+    expect(cache.has(firstKey)).toBe(true);
+    expect(cache.has(secondKey)).toBe(false);
+    renderColor(1);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(GRADIENT_CACHE_MAX + 2);
+    renderer.handleMessage(makeEvent({ type: 'destroy' }));
+  });
+
+  it('retains gradients across same-context state reset and invalidates them for style, init, and destroy', () => {
+    const { renderer, internals, message, renderColor } = prepareGradientPaidCard();
+    const cache = internals.superChatGradientCache;
+
+    renderColor(7);
+    expect(cache.size).toBe(1);
+    renderer.handleMessage(makeEvent({ type: 'clearState', epoch: 1 }));
+    expect(cache.size).toBe(1);
+    internals.activeMessages.push(message);
+    renderColor(7);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(1);
+
+    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { superChatOpacity: 0.7 } }));
+    expect(cache.size).toBe(0);
+    renderColor(7);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(2);
+
+    const nextCtx = {
+      ...mockCtx,
+      createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    };
+    renderer.handleMessage(makeEvent({
+      type: 'init', config: makeMinimalConfig(), canvas: { getContext: () => nextCtx },
+      dpr: 1, width: 640, height: 360,
+    }));
+    expect(cache.size).toBe(0);
+    renderColor(7);
+    expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(2);
+    expect(nextCtx.createLinearGradient).toHaveBeenCalledOnce();
+    renderer.handleMessage(makeEvent({ type: 'destroy' }));
+    expect(cache.size).toBe(0);
   });
 });
 
@@ -1010,6 +1116,148 @@ describe('Worker message protocol', () => {
       expect(bitmap.close).not.toHaveBeenCalled();
       renderer.handleMessage(makeEvent({ type: 'destroy' }));
       expect(internals.emojiCache.size).toBe(0);
+      expect(bitmap.close).toHaveBeenCalledOnce();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
+    it('closes a replaced transferred bitmap once and retains its distinct replacement', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { get(url: string): ImageBitmap | undefined };
+      };
+      const url = 'https://yt3.ggpht.com/replaced-emoji';
+      const first = { width: 64, height: 64, close: vi.fn() };
+      const second = { width: 64, height: 64, close: vi.fn() };
+
+      for (const bitmap of [first, second]) {
+        renderer.handleMessage(makeEvent({
+          type: 'addMessages', messages: [], imageData: [{ url, bitmap, target: 'emoji' }],
+        }));
+      }
+
+      expect(internals.emojiCache.get(url)).toBe(second);
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(second.close).not.toHaveBeenCalled();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(second.close).toHaveBeenCalledOnce();
+    });
+
+    it('promotes a defensively repeated same-key bitmap without re-estimating or closing it', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: {
+          get(url: string): ImageBitmap | undefined;
+          has(url: string): boolean;
+          currentBytes: number;
+          size: number;
+        };
+      };
+      const url = 'https://yt3.ggpht.com/repeated-bitmap';
+      const otherUrl = 'https://yt3.ggpht.com/other-bitmap';
+      const bitmap = { width: 400, height: 400, close: vi.fn() };
+      const other = { width: 400, height: 400, close: vi.fn() };
+      const register = (key: string, value: typeof bitmap) => renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [], imageData: [{ url: key, bitmap: value, target: 'emoji' }],
+      }));
+
+      register(url, bitmap);
+      register(otherUrl, other);
+      const retainedBytes = internals.emojiCache.currentBytes;
+      bitmap.width = 10_000; // Defensive fixture: a second estimate would exceed capacity.
+      register(url, bitmap);
+
+      expect(internals.emojiCache.has(url)).toBe(true);
+      expect(internals.emojiCache.size).toBe(2);
+      expect(internals.emojiCache.currentBytes).toBe(retainedBytes);
+      expect(bitmap.close).not.toHaveBeenCalled();
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { emojiCacheMb: 1 } }));
+      expect(internals.emojiCache.has(url)).toBe(true);
+      expect(internals.emojiCache.has(otherUrl)).toBe(false);
+      expect(internals.emojiCache.get(url)).toBe(bitmap);
+      expect(other.close).toHaveBeenCalledOnce();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(bitmap.close).toHaveBeenCalledOnce();
+      expect(other.close).toHaveBeenCalledOnce();
+    });
+
+    it('rejects a defensive cross-key bitmap alias before altering its owner', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: {
+          get(url: string): ImageBitmap | undefined;
+          has(url: string): boolean;
+          currentBytes: number;
+          size: number;
+        };
+      };
+      const firstUrl = 'https://yt3.ggpht.com/alias-first';
+      const aliasUrl = 'https://yt3.ggpht.com/alias-second';
+      const bitmap = { width: 64, height: 64, close: vi.fn() };
+      renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [],
+        imageData: [{ url: firstUrl, bitmap, target: 'emoji' }],
+      }));
+      const retainedBytes = internals.emojiCache.currentBytes;
+      postMessageSpy.mockClear();
+
+      renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [],
+        imageData: [{ url: aliasUrl, bitmap, target: 'emoji' }],
+      }));
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'error', error: expect.any(String) })
+      );
+      expect(internals.emojiCache.get(firstUrl)).toBe(bitmap);
+      expect(internals.emojiCache.has(aliasUrl)).toBe(false);
+      expect(internals.emojiCache.size).toBe(1);
+      expect(internals.emojiCache.currentBytes).toBe(retainedBytes);
+      expect(bitmap.close).not.toHaveBeenCalled();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
+    it('closes only the evicted bitmap when a transferred-image cache shrinks', () => {
+      const renderer = initializeRenderer({ emojiCacheMb: 4 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+      };
+      const firstUrl = 'https://yt3.ggpht.com/first-bitmap';
+      const secondUrl = 'https://yt3.ggpht.com/second-bitmap';
+      const first = { width: 400, height: 400, close: vi.fn() };
+      const second = { width: 400, height: 400, close: vi.fn() };
+      renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [], imageData: [
+          { url: firstUrl, bitmap: first, target: 'emoji' },
+          { url: secondUrl, bitmap: second, target: 'emoji' },
+        ],
+      }));
+
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { emojiCacheMb: 1 } }));
+
+      expect(internals.emojiCache.has(firstUrl)).toBe(false);
+      expect(internals.emojiCache.has(secondUrl)).toBe(true);
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(second.close).not.toHaveBeenCalled();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(second.close).toHaveBeenCalledOnce();
+    });
+
+    it('lets the cache close an oversized transferred bitmap without caller cleanup', () => {
+      const renderer = initializeRenderer({ emojiCacheMb: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+      };
+      const url = 'https://yt3.ggpht.com/oversized-bitmap';
+      const bitmap = { width: 1_000, height: 1_000, close: vi.fn() };
+
+      renderer.handleMessage(makeEvent({
+        type: 'addMessages', messages: [], imageData: [{ url, bitmap, target: 'emoji' }],
+      }));
+
+      expect(internals.emojiCache.has(url)).toBe(false);
       expect(bitmap.close).toHaveBeenCalledOnce();
       renderer.handleMessage(makeEvent({ type: 'destroy' }));
       expect(bitmap.close).toHaveBeenCalledOnce();

@@ -36,7 +36,7 @@ import type { FontWeight } from '@app-types';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
-import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
+import { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { resetBidiLayoutCaches, type TextDirection } from '@renderer/canvas/bidi-layout';
 import {
   DRAIN_MAX_ATTEMPTS,
@@ -44,7 +44,7 @@ import {
   nextDrainPriority,
   selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
-import { getCachedGradient } from '@renderer/canvas/gradient-utils';
+import { type GradientCache, getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
   addMessageToLaneIndex,
@@ -139,7 +139,6 @@ import {
   rendererLayout,
   spacing,
 } from '@util/design-tokens';
-import { MapCompatibleLruMap } from '@util/lru-map';
 import { isValidControlMessage } from './protocol-guards';
 
 import type {
@@ -212,7 +211,7 @@ function renderPaidCardWorker(
   emojiCache: ResizableByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string, direction?: TextDirection) => number,
-  gradientCache: Map<string, CanvasGradient>,
+  gradientCache: GradientCache,
   /** Configurable SuperChat opacity from settings, clamped to [0.35, 1]. */
   superChatOpacity: number
 ): void {
@@ -523,9 +522,7 @@ export class WorkerRenderer {
   private emojiCache!: ResizableByteLimitedCache<ImageBitmap>;
   private authorPhotoCache!: ResizableByteLimitedCache<ImageBitmap>;
   private stickerCache!: ResizableByteLimitedCache<ImageBitmap>;
-  private superChatGradientCache = new MapCompatibleLruMap<string, CanvasGradient>(
-    GRADIENT_CACHE_MAX
-  );
+  private superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
   private readonly messageById = new Map<string, WorkerMessage | ActiveMessage>();
   private fetching = new Set<string>();
   private readonly imageFetchTasks = new Map<
@@ -591,6 +588,7 @@ export class WorkerRenderer {
               self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
               return;
             }
+            this.superChatGradientCache.clear();
             const dpr = data.dpr as number;
             this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             this.emojiCache = new ResizableByteLimitedCache<ImageBitmap>(

@@ -18,9 +18,7 @@ import type { MessageMotionPlan } from '@renderer/layout/motion-types';
 
 // ── Card rendering ──────────────────────────────────────────────────────
 
-/** Max cached linear-gradient entries (SuperChat/Membership card backgrounds).
- *  Used by both main thread (MapCompatibleLruMap) and worker (Map with manual eviction)
- *  to keep gradient memory bounded during long streams. */
+/** Capacity of each renderer's LruMap for paid-card background gradients. */
 export const GRADIENT_CACHE_MAX = 64;
 
 // ── Lane allocation (lane-allocator.ts) ─────────────────────────────────────
