@@ -12,7 +12,8 @@ import * as chromeInstallModule from '../../../validation/windows/chrome-install
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.mjs';
 
 const { cleanupChromeInstallation, enableDeveloperMode, readOwnedBrowserProcessId,
-  readPublicPageState, requireLiveSuccess, selectPublicSeekTarget } =
+  isOwnedManagerOptionsUrl, readManagerUiLabels, readPublicPageState, requireLiveSuccess,
+  requireManagerUiLabels, selectPublicSeekTarget } =
   chromeInstallModule;
 
 const roots: string[] = [];
@@ -52,6 +53,62 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(selectPublicSeekTarget({ currentTime: 99, start: 0, end: 100 })).toBe(96);
     expect(selectPublicSeekTarget({ currentTime: 10, start: 8, end: 11 })).toBeNull();
     expect(selectPublicSeekTarget({ currentTime: NaN, start: 0, end: 100 })).toBeNull();
+  });
+
+  it.each([
+    [{ Utilities: '도구', Install: '설치', Installed_userscripts: '설치된 유저 스크립트' },
+      { utilities: '도구', install: '설치', installedUserscripts: '설치된 유저 스크립트' }],
+    [{ Utilities: 'Utilities', Install: 'Install', Installed_userscripts: 'Installed Userscripts' },
+      { utilities: 'Utilities', install: 'Install', installedUserscripts: 'Installed Userscripts' }],
+  ])('reads bundled manager labels from its owned options page: %j', async (messages, expected) => {
+    const optionsUrl = 'chrome-extension://owned/options.html';
+    const page = { url: () => optionsUrl,
+      evaluate: async (read: (id: string) => unknown, id: string) => runInNewContext(
+        `(${read})(${JSON.stringify(id)})`, {
+          URL, location: { href: optionsUrl },
+          chrome: { i18n: { getMessage: (key: string) => messages[key as keyof typeof messages] ?? '' } },
+        }
+      ) };
+    expect(await readManagerUiLabels(page, 'owned')).toEqual(expected);
+  });
+
+  it('rejects manager label lookup outside its owned options page and after navigation', async () => {
+    const optionsUrl = 'chrome-extension://owned/options.html';
+    for (const url of ['about:blank', 'https://example.com/',
+      'chrome-extension://other/options.html', 'chrome-extension://owned/ask.html',
+      'chrome-extension://owned/options.html?token=private']) {
+      expect(isOwnedManagerOptionsUrl(url, 'owned')).toBe(false);
+      const evaluate = vi.fn();
+      await expect(readManagerUiLabels({ url: () => url, evaluate }, 'owned'))
+        .rejects.toThrow('owned options page');
+      expect(evaluate).not.toHaveBeenCalled();
+    }
+    expect(isOwnedManagerOptionsUrl(optionsUrl, 'owned')).toBe(true);
+    const evaluateFrom = (frameUrl: string) => (read: (id: string) => unknown, id: string) =>
+      runInNewContext(`(${read})(${JSON.stringify(id)})`, {
+        URL, location: { href: frameUrl }, chrome: { i18n: { getMessage: () => 'label' } },
+      });
+    await expect(readManagerUiLabels({ url: () => optionsUrl,
+      evaluate: evaluateFrom('https://example.com/') }, 'owned'))
+      .rejects.toThrow('navigated away');
+    let reportedUrl = optionsUrl;
+    await expect(readManagerUiLabels({ url: () => reportedUrl,
+      evaluate: (read: (id: string) => unknown, id: string) => {
+        const labels = evaluateFrom(optionsUrl)(read, id);
+        reportedUrl = 'chrome-extension://other/options.html';
+        return labels;
+      } }, 'owned')).rejects.toThrow('navigated away after label lookup');
+  });
+
+  it('requires three bounded manager UI labels', () => {
+    const valid = { utilities: 'Utilities', install: 'Install',
+      installedUserscripts: 'Installed Userscripts' };
+    expect(requireManagerUiLabels(valid)).toEqual(valid);
+    for (const labels of [null, [], { ...valid, utilities: '' },
+      { ...valid, install: 'x'.repeat(81) }, { ...valid, utilities: 'Tools\nother' },
+      { ...valid, extra: 'unexpected' }]) {
+      expect(() => requireManagerUiLabels(labels)).toThrow();
+    }
   });
 
   it('uses the visible Edge switch and its checked property, while keeping Chrome controls', async () => {
