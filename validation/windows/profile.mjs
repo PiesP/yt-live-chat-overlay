@@ -168,7 +168,6 @@ export function readInstalledLifecycleDomDiagnostic() {
   const dropped = /^Drop: (\d+) /u.exec(lines[1] ?? '');
   const logLevel = document.querySelector('select[name="logLevel"]')?.value;
   return {
-    pageInterceptorBatches: window.__ytAcceptanceInterceptorBatches ?? null,
     pageAppHandleVisible: Boolean(window.__ytChatOverlay),
     uiLogLevel: ['warn', 'info', 'debug'].includes(logLevel) ? logLevel : null,
     debugCounts: received && dropped ? {
@@ -883,19 +882,46 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
   ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
   const requestPhase = async (phase) => {
     if (diagnostic) diagnostic.activePhase = phase;
-    const previousBatches = await page.evaluate(
-      () => window.__ytAcceptanceInterceptorBatches ?? 0,
-    );
-    await page.evaluate(async (name) => {
-      const response = await fetch(
-        `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&sustained-phase=${name}`,
+    const expectedCounts = {
+      'low-1': 1, 'low-2': 1, burst: 8, paused: 2,
+      hidden: 1, visible: 1, 'second-video': 1,
+    };
+    const expectedCount = expectedCounts[phase];
+    assert(Number.isSafeInteger(expectedCount), `Unexpected sustained-viewing phase: ${phase}`);
+    // Register before the page fetch: the userscript logs from its own realm,
+    // so a page-world console wrapper cannot count its interceptor batches.
+    let resolveReceived;
+    const received = new Promise((resolve) => {
+      resolveReceived = resolve;
+    });
+    const onConsole = (message) => {
+      if (message.type() === 'debug' && message.text().includes('[FetchInterceptor]') &&
+          message.text().includes('chat.interceptor.messages-received')) {
+        resolveReceived(message);
+      }
+    };
+    page.on('console', onConsole);
+    const timeout = setTimeout(() => resolveReceived(null), 15_000);
+    try {
+      await page.evaluate(async (name) => {
+        const response = await fetch(
+          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&sustained-phase=${name}`,
+        );
+        await response.json();
+      }, phase);
+      const message = await received;
+      assert(message, `No product interceptor event for sustained-viewing phase ${phase}`);
+      const observed = await summarizeInterceptorConsoleMessage(
+        message, phase, diagnostic?.managerId ?? '',
       );
-      await response.json();
-    }, phase);
-    await page.waitForFunction(
-      (previous) => (window.__ytAcceptanceInterceptorBatches ?? 0) > previous,
-      previousBatches,
-    );
+      assert.equal(observed?.event, 'chat.interceptor.messages-received');
+      assert.equal(observed.count, expectedCount,
+        `Unexpected intercepted message count for sustained-viewing phase ${phase}`);
+    } finally {
+      clearTimeout(timeout);
+      page.off('console', onConsole);
+      resolveReceived(null);
+    }
   };
   const waitForExactIds = async (expected) => {
     await page.waitForFunction((ids) => {
@@ -1100,7 +1126,7 @@ export async function run({ browser, root, output, installedContext, installedEx
   const highActivityRequests = new Map();
   const lifecycleDiagnostic = installedContext ? {
     activePhase: null, consoleEvents: [], debugMessagesObserved: 0,
-    contexts: new Map(), cdp: null, setupErrorType: null,
+    contexts: new Map(), cdp: null, setupErrorType: null, managerId: installedExtensionId,
   } : null;
   const context = installedContext ?? await browser.newContext({
     colorScheme: 'dark',
@@ -1253,17 +1279,6 @@ export async function run({ browser, root, output, installedContext, installedEx
 
     if (installedContext) await page.addInitScript(installFixtureWorkerProbe, EXPECTED_MESSAGE_IDS);
     await page.addInitScript((inspectPaidCardInk) => {
-      window.__ytAcceptanceInterceptorBatches = 0;
-      const nativeDebug = console.debug.bind(console);
-      console.debug = (...args) => {
-        if (
-          args[0] === '[FetchInterceptor]' &&
-          args[1] === 'chat.interceptor.messages-received'
-        ) {
-          window.__ytAcceptanceInterceptorBatches++;
-        }
-        nativeDebug(...args);
-      };
       const playbackState = { currentTime: 0, paused: false };
       Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
         configurable: true,

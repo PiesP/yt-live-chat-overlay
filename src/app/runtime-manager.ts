@@ -1200,6 +1200,7 @@ export class RuntimeManager {
   private installFetchInterceptor(chatSource: ChatSource): void {
     try {
       this.fetchInterceptorUnsubscribe = installFetchInterceptor(
+        __USERSCRIPT__ ? unsafeWindow : window,
         () => this.settings as OverlaySettings,
         (messages) => {
           if (this.isDisposedState) return;

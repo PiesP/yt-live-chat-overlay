@@ -79,7 +79,7 @@ describe('fetch interceptor response identities', () => {
     const body = JSON.stringify({ continuationContents: {} });
     window.fetch = vi.fn(async () => responseWithText(body));
     const onMessages = vi.fn();
-    const restore = installFetchInterceptor(() => settings, onMessages);
+    const restore = installFetchInterceptor(window, () => settings, onMessages);
 
     await window.fetch(CHAT_URL);
     await window.fetch(CHAT_URL);
@@ -88,6 +88,77 @@ describe('fetch interceptor response identities', () => {
     expect(mocks.getLiveChatPayload).toHaveBeenCalledOnce();
     expect(onMessages).toHaveBeenCalledOnce();
     restore();
+  });
+
+  it('patches the selected page window and preserves the original Promise', async () => {
+    const sandboxFetch = window.fetch;
+    const response = Promise.resolve(responseWithText('{"continuationContents":{}}'));
+    const original = vi.fn(() => response);
+    const pageWindow = {
+      fetch: original,
+      get Request(): never { throw new Error('page Request getter must not be read'); },
+      get URL(): never { throw new Error('page URL getter must not be read'); },
+    } as unknown as Window & typeof globalThis;
+    const onMessages = vi.fn();
+    const restore = installFetchInterceptor(pageWindow, () => settings, onMessages);
+    const request = new URL(CHAT_URL);
+
+    expect(window.fetch).toBe(sandboxFetch);
+    const returned = pageWindow.fetch(request);
+    expect(returned).toBe(response);
+    await returned;
+    await vi.waitFor(() => expect(onMessages).toHaveBeenCalledOnce());
+    expect(original).toHaveBeenCalledOnce();
+    expect(original).toHaveBeenCalledWith(request, undefined);
+
+    restore();
+    expect(pageWindow.fetch).toBe(original);
+  });
+
+  it('does not parse a duck-typed chat URL that fetch would coerce elsewhere', async () => {
+    const original = vi.fn(async () => responseWithText('{"continuationContents":{}}'));
+    const pageWindow = { fetch: original } as unknown as Window & typeof globalThis;
+    const onMessages = vi.fn();
+    const restore = installFetchInterceptor(pageWindow, () => settings, onMessages);
+    const spoof = { url: CHAT_URL, toString: () => 'https://foreign.example/' } as Request;
+
+    await pageWindow.fetch(spoof);
+    await flushInterceptor();
+    expect(original).toHaveBeenCalledOnce();
+    expect(mocks.getLiveChatPayload).not.toHaveBeenCalled();
+    expect(onMessages).not.toHaveBeenCalled();
+    restore();
+  });
+
+  it('forwards a throwing request URL getter to the original fetch exactly once', async () => {
+    const response = responseWithText('{}');
+    let calls = 0;
+    let forwarded: RequestInfo | URL | undefined;
+    const original = async (input: RequestInfo | URL): Promise<Response> => {
+      calls++;
+      forwarded = input;
+      return response;
+    };
+    const pageWindow = { fetch: original } as unknown as Window & typeof globalThis;
+    const restore = installFetchInterceptor(pageWindow, () => settings, vi.fn());
+    const request = { get url(): string { throw new Error('unreadable URL'); } } as Request;
+
+    await expect(pageWindow.fetch(request)).resolves.toBe(response);
+    expect(calls).toBe(1);
+    expect(forwarded).toBe(request);
+    expect(mocks.getLiveChatPayload).not.toHaveBeenCalled();
+    restore();
+  });
+
+  it('leaves a later page fetch patch in place on teardown', () => {
+    const original = vi.fn(async () => responseWithText('{}'));
+    const pageWindow = { fetch: original } as unknown as Window & typeof globalThis;
+    const restore = installFetchInterceptor(pageWindow, () => settings, vi.fn());
+    const foreignPatch = vi.fn(pageWindow.fetch);
+    pageWindow.fetch = foreignPatch;
+
+    restore();
+    expect(pageWindow.fetch).toBe(foreignPatch);
   });
 
   it('releases clone-read slots after real over-limit branches while originals stay open', async () => {
@@ -120,7 +191,7 @@ describe('fetch interceptor response identities', () => {
       return response;
     });
     const onMessages = vi.fn();
-    const restore = installFetchInterceptor(() => settings, onMessages);
+    const restore = installFetchInterceptor(window, () => settings, onMessages);
 
     try {
       await expect(window.fetch(CHAT_URL)).resolves.toBe(declaredOverLimit);
@@ -173,7 +244,7 @@ describe('fetch interceptor response identities', () => {
       const clone = cloneSpies[responseIndex++];
       return { clone } as unknown as Response;
     });
-    const restore = installFetchInterceptor(() => settings, vi.fn());
+    const restore = installFetchInterceptor(window, () => settings, vi.fn());
 
     await Promise.all([window.fetch(CHAT_URL), window.fetch(CHAT_URL), window.fetch(CHAT_URL)]);
     await flushInterceptor();
@@ -203,13 +274,13 @@ describe('fetch interceptor response identities', () => {
     const original = vi.fn(() => oldResponse);
     window.fetch = original;
     const oldMessages = vi.fn();
-    installFetchInterceptor(() => settings, oldMessages);
+    installFetchInterceptor(window, () => settings, oldMessages);
     const pendingOldFetch = window.fetch(CHAT_URL);
 
     const body = JSON.stringify({ continuationContents: { liveChatContinuation: {} } });
     original.mockImplementation(async () => responseWithText(body));
     const newMessages = vi.fn();
-    const restoreNew = installFetchInterceptor(() => settings, newMessages);
+    const restoreNew = installFetchInterceptor(window, () => settings, newMessages);
 
     resolveOld(responseWithText(body));
     await pendingOldFetch;
@@ -231,7 +302,7 @@ describe('fetch interceptor response identities', () => {
         })
     );
     const onMessages = vi.fn();
-    const restore = installFetchInterceptor(() => settings, onMessages);
+    const restore = installFetchInterceptor(window, () => settings, onMessages);
     const pendingFetch = window.fetch(CHAT_URL);
 
     restore();

@@ -5,6 +5,7 @@
  */
 
 (function installYTGmMocks() {
+  window.unsafeWindow = window;
   const storage = new Map();
   const listeners = new Map();
   let listenerId = 0;

@@ -19,6 +19,7 @@ export function createBasePreset(): UserConfig {
 
     define: {
       __DEV__: 'process.env.NODE_ENV === "development"',
+      __USERSCRIPT__: 'false',
       __VERSION__: '""',
       __BUILD_TIME__: '""',
     },
