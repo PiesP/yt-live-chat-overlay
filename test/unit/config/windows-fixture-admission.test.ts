@@ -107,7 +107,7 @@ describe('installed Windows fixture admission', () => {
     }));
     entries.push({ dataset: { messageId: 'unrelated' }, textContent: 'private unrelated content' });
     const state = runInNewContext(`(${readInstalledLifecycleDomDiagnostic.toString()})()`, {
-      window: { __ytAcceptanceInterceptorBatches: 0, __ytChatOverlay: {} },
+      window: { __ytChatOverlay: {} },
       document: {
         querySelectorAll: (selector: string) => selector.includes('yt-chat-overlay-debug')
           ? [{ textContent: 'Rcvd: 12 | Rndr: 10' }, { textContent: 'Drop: 2 (16.7%)' }]
@@ -115,7 +115,7 @@ describe('installed Windows fixture admission', () => {
         querySelector: () => ({ value: 'debug' }),
       },
     });
-    expect(state).toMatchObject({ pageInterceptorBatches: 0, pageAppHandleVisible: true,
+    expect(state).toMatchObject({ pageAppHandleVisible: true,
       uiLogLevel: 'debug', debugCounts: { received: 12, rendered: 10, dropped: 2 } });
     expect(state.sustainedIds).toHaveLength(16);
     expect(JSON.stringify(state)).not.toContain('private');

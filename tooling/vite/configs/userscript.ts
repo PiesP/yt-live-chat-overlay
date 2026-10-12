@@ -42,6 +42,7 @@ export function createUserscriptConfig({ mode }: ConfigEnv): UserConfig {
             'GM_registerMenuCommand',
             'GM_removeValueChangeListener',
             'GM_setValue',
+            'unsafeWindow',
           ],
           'run-at': 'document-end',
           icon: 'https://www.youtube.com/favicon.ico',
@@ -68,6 +69,7 @@ export function createUserscriptConfig({ mode }: ConfigEnv): UserConfig {
     },
     define: {
       __DEV__: JSON.stringify(isDev),
+      __USERSCRIPT__: 'true',
       __VERSION__: JSON.stringify(version),
       __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },

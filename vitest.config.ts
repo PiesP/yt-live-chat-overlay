@@ -7,7 +7,7 @@ const testDir = resolve(__dirname, ".");
 const srcDir = resolve(__dirname, "src");
 
 export default defineConfig({
-  define: { __DEV__: true },
+  define: { __DEV__: true, __USERSCRIPT__: false },
   test: {
     globals: true,
     environment: "jsdom",

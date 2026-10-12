@@ -11,7 +11,7 @@
  * When YouTube's client receives new chat messages, the overlay gets
  * them at the same instant — eliminating one full poll interval of delay.
  *
- * Zero runtime dependencies — patches window.fetch in-place.
+ * Zero runtime dependencies — patches the selected page window's fetch in-place.
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -76,19 +76,51 @@ export type InterceptorUnsubscribe = () => void;
 
 let activeInterceptor: {
   restore: InterceptorUnsubscribe;
-  interceptedFn: typeof window.fetch;
 } | null = null;
+
+function intrinsicGetter(
+  prototype: object,
+  name: string
+): ((this: unknown) => unknown) | undefined {
+  let current: object | null = prototype;
+  while (current && current !== Object.prototype) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name);
+    if (descriptor) return descriptor.get;
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return undefined;
+}
+
+const REQUEST_URL_GETTER = intrinsicGetter(Request.prototype, 'url');
+const URL_HREF_GETTER = intrinsicGetter(URL.prototype, 'href');
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  // These local native accessors brand-check genuine Request/URL receivers
+  // across realms. Do not trust constructors or duck-typed URLs from the page.
+  for (const getter of [REQUEST_URL_GETTER, URL_HREF_GETTER]) {
+    try {
+      const value: unknown = getter?.call(input);
+      if (typeof value === 'string') return value;
+    } catch {
+      // A mismatched realm or hostile receiver is left to the original fetch.
+    }
+  }
+  return '';
+}
 
 /**
  * Install a fetch monkey-patch that intercepts YouTube's own chat requests.
  *
  * Calling this again automatically removes the previous interceptor first.
  *
+ * @param targetWindow Window whose fetch is used by the page making chat requests.
  * @param getSettings  Callback returning current overlay settings (needed by extractChatEvents).
  * @param onMessages   Called with parsed ChatMessage[] whenever a chat response is intercepted.
  * @returns            Unsubscribe function that restores the original fetch.
  */
 export function installFetchInterceptor(
+  targetWindow: Window & typeof globalThis,
   getSettings: () => Readonly<OverlaySettings>,
   onMessages: InterceptorCallback
 ): InterceptorUnsubscribe {
@@ -99,7 +131,7 @@ export function installFetchInterceptor(
   }
 
   // Capture the current fetch at install time so we chain properly with other patches.
-  const originalFetch = window.fetch;
+  const originalFetch = targetWindow.fetch;
   const responseIdentityCache = new Set<string>();
   let isActive = true;
   let inFlightCloneReads = 0;
@@ -109,14 +141,7 @@ export function installFetchInterceptor(
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input instanceof Request
-            ? input.url
-            : '';
+    const url = requestUrl(input);
 
     // Only exact same-origin chat endpoints need cloning; all other requests
     // pass through untouched.
@@ -174,13 +199,13 @@ export function installFetchInterceptor(
     return response;
   }
 
-  window.fetch = interceptedFetch as typeof window.fetch;
+  targetWindow.fetch = interceptedFetch as typeof window.fetch;
 
   const restore = (): void => {
     isActive = false;
     responseIdentityCache.clear();
-    if (window.fetch === interceptedFetch) {
-      window.fetch = originalFetch;
+    if (targetWindow.fetch === interceptedFetch) {
+      targetWindow.fetch = originalFetch;
     }
     if (activeInterceptor?.restore === restore) {
       activeInterceptor = null;
@@ -188,7 +213,7 @@ export function installFetchInterceptor(
     log.info('chat.interceptor.removed');
   };
 
-  activeInterceptor = { restore, interceptedFn: interceptedFetch as typeof window.fetch };
+  activeInterceptor = { restore };
 
   log.info('chat.interceptor.installed');
   return restore;

@@ -111,6 +111,7 @@ export function installYTMock(init: {
   }
 
   // GM_* API mocks
+  (window as unknown as Record<string, unknown>).unsafeWindow = window;
   window.GM_setValue = (key: string, value: unknown) => {
     const oldVal = storage.get(key);
     storage.set(key, value);

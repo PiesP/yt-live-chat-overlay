@@ -20,6 +20,10 @@ interface YtChatOverlayDebugHandle {
 declare global {
   /** Build-time development flag injected by Vite. */
   const __DEV__: boolean;
+  /** Selects the granted page window for userscript fetch interception. */
+  const __USERSCRIPT__: boolean;
+  /** Tampermonkey page-window grant, used only by the userscript build. */
+  const unsafeWindow: Window & typeof globalThis;
   /** Semantic version string injected at build time. */
   const __VERSION__: string;
   /** Build timestamp injected at build time. */
