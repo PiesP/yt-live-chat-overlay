@@ -161,6 +161,88 @@ export function readFixtureAdmissionDiagnostic(expectedIds) {
   };
 }
 
+export function readInstalledLifecycleDomDiagnostic() {
+  const lines = Array.from(document.querySelectorAll('#yt-chat-overlay-debug > div'),
+    (element) => element.textContent ?? '');
+  const received = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
+  const dropped = /^Drop: (\d+) /u.exec(lines[1] ?? '');
+  const logLevel = document.querySelector('select[name="logLevel"]')?.value;
+  return {
+    pageInterceptorBatches: window.__ytAcceptanceInterceptorBatches ?? null,
+    pageAppHandleVisible: Boolean(window.__ytChatOverlay),
+    uiLogLevel: ['warn', 'info', 'debug'].includes(logLevel) ? logLevel : null,
+    debugCounts: received && dropped ? {
+      received: Number(received[1]), rendered: Number(received[2]), dropped: Number(dropped[1]),
+    } : null,
+    sustainedIds: Array.from(document.querySelectorAll(
+      '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
+    ), (element) => element.dataset.messageId).filter((id) =>
+      typeof id === 'string' && id.startsWith('windows-sustained-')).slice(0, 16),
+  };
+}
+
+export async function summarizeInterceptorConsoleMessage(message, phase, managerId) {
+  if (!['debug', 'log', 'info'].includes(message.type()) ||
+      !message.text().includes('[FetchInterceptor]')) return null;
+  const args = message.args();
+  if (args.length < 2 || args.length > 3) return null;
+  const [moduleName, eventName] = await Promise.all(args.slice(0, 2).map((arg) => arg.jsonValue()));
+  if (moduleName !== '[FetchInterceptor]' || typeof eventName !== 'string' ||
+      !/^chat\.interceptor\.(?:installed|removed|messages-received|skip-duplicate|skip-in-flight-limit|parse-failed)$/u.test(eventName)) {
+    return null;
+  }
+  const detail = eventName === 'chat.interceptor.messages-received' && args[2]
+    ? await args[2].jsonValue() : null;
+  const count = detail && typeof detail === 'object' && Number.isSafeInteger(detail.count) &&
+    detail.count >= 0 && detail.count <= 1000 ? detail.count : null;
+  const source = message.location().url;
+  return {
+    phase,
+    event: eventName,
+    count,
+    consoleType: message.type(),
+    sourceKind: source.startsWith(`chrome-extension://${managerId}/`) ? 'manager-extension'
+      : source.startsWith('https://www.youtube.com/') ? 'youtube-page' : 'other',
+  };
+}
+
+async function readInstalledLifecycleWorlds(cdp, contexts) {
+  if (!cdp) return { status: 'unavailable', contexts: [] };
+  const frameTree = await cdp.send('Page.getFrameTree');
+  const frameId = frameTree.frameTree.frame.id;
+  const expression = `(() => {
+    const app = window.__ytChatOverlay;
+    let settings = null;
+    try { settings = app?.getSettings?.() ?? null; } catch {}
+    return {
+      appHandleVisible: Boolean(app),
+      logLevel: ['warn', 'info', 'debug'].includes(settings?.logLevel) ? settings.logLevel : null,
+      fetchOwnProperty: Object.prototype.hasOwnProperty.call(window, 'fetch'),
+    };
+  })()`;
+  const active = Array.from(contexts.values()).filter((entry) =>
+    entry.auxData?.frameId === frameId).slice(0, 16);
+  return { status: 'captured', contexts: await Promise.all(active.map(async (entry) => {
+    let state = null;
+    try {
+      const result = await cdp.send('Runtime.evaluate', {
+        contextId: entry.id, expression, returnByValue: true,
+      });
+      if (!result.exceptionDetails) state = result.result?.value ?? null;
+    } catch { /* A context can disappear during navigation. */ }
+    return {
+      worldType: entry.auxData?.type ?? null,
+      isDefault: entry.auxData?.isDefault === true,
+      nameKind: entry.name === '' ? 'default'
+        : /tampermonkey|^tm_/iu.test(entry.name) ? 'manager'
+          : /playwright/iu.test(entry.name) ? 'playwright' : 'other',
+      originKind: entry.origin === 'https://www.youtube.com' ? 'youtube-page'
+        : entry.origin?.startsWith('chrome-extension:') ? 'extension' : 'other',
+      state,
+    };
+  })) };
+}
+
 export function installFixtureWorkerProbe(expectedIds) {
   const workers = [];
   const expected = new Set(expectedIds);
@@ -788,7 +870,7 @@ async function verifyIsolatedPaidCardInk(page, output) {
   return { ...result, accessibleMessageId };
 }
 
-async function verifySustainedViewingLifecycle(page, expectedRenderer) {
+async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnostic) {
   const initialIds = [
     'windows-sustained-low-1',
     'windows-sustained-low-2',
@@ -800,6 +882,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer) {
     '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
   ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
   const requestPhase = async (phase) => {
+    if (diagnostic) diagnostic.activePhase = phase;
     const previousBatches = await page.evaluate(
       () => window.__ytAcceptanceInterceptorBatches ?? 0,
     );
@@ -1015,6 +1098,10 @@ export async function run({ browser, root, output, installedContext, installedEx
   let installedFixtureCursor = 0;
   let highActivityProbe = null;
   const highActivityRequests = new Map();
+  const lifecycleDiagnostic = installedContext ? {
+    activePhase: null, consoleEvents: [], debugMessagesObserved: 0,
+    contexts: new Map(), cdp: null, setupErrorType: null,
+  } : null;
   const context = installedContext ?? await browser.newContext({
     colorScheme: 'dark',
     locale: 'en-US',
@@ -1029,7 +1116,42 @@ export async function run({ browser, root, output, installedContext, installedEx
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
+      if (lifecycleDiagnostic) {
+        if (message.type() === 'debug') {
+          lifecycleDiagnostic.debugMessagesObserved = Math.min(
+            32, lifecycleDiagnostic.debugMessagesObserved + 1,
+          );
+        }
+        if (message.text().includes('[FetchInterceptor]')) {
+          lifecycleDiagnostic.consoleEvents.push(
+            summarizeInterceptorConsoleMessage(message, lifecycleDiagnostic.activePhase,
+              installedExtensionId).catch(() => null),
+          );
+          if (lifecycleDiagnostic.consoleEvents.length > 32) lifecycleDiagnostic.consoleEvents.shift();
+        }
+      }
     });
+    if (lifecycleDiagnostic && typeof context.newCDPSession === 'function') {
+      try {
+        const cdp = await context.newCDPSession(page);
+        lifecycleDiagnostic.cdp = cdp;
+        cdp.on('Runtime.executionContextCreated', ({ context: entry }) => {
+          lifecycleDiagnostic.contexts.set(entry.id, entry);
+          if (lifecycleDiagnostic.contexts.size > 16) {
+            lifecycleDiagnostic.contexts.delete(lifecycleDiagnostic.contexts.keys().next().value);
+          }
+        });
+        cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
+          lifecycleDiagnostic.contexts.delete(executionContextId);
+        });
+        cdp.on('Runtime.executionContextsCleared', () => lifecycleDiagnostic.contexts.clear());
+        await cdp.send('Runtime.enable');
+      } catch (setupError) {
+        lifecycleDiagnostic.setupErrorType = setupError?.name ?? 'Error';
+        await lifecycleDiagnostic.cdp?.detach().catch(() => {});
+        lifecycleDiagnostic.cdp = null;
+      }
+    }
     page.on('requestfinished', (request) => {
       const sample = highActivityRequests.get(request);
       if (sample) {
@@ -1394,7 +1516,9 @@ export async function run({ browser, root, output, installedContext, installedEx
     const paidCardInkContainment = expectedRenderer === 'main' && !installedContext
       ? await verifyIsolatedPaidCardInk(page, output)
       : null;
-    const sustainedViewing = await verifySustainedViewingLifecycle(page, expectedRenderer);
+    const sustainedViewing = await verifySustainedViewingLifecycle(
+      page, expectedRenderer, lifecycleDiagnostic,
+    );
     assert.equal(sustainedChatRequests, 7, 'The sustained-viewing fixture was incomplete');
     let highActivityPolling = null;
     if (installedContext && expectedRenderer === 'worker') {
@@ -1511,14 +1635,38 @@ export async function run({ browser, root, output, installedContext, installedEx
     };
   } catch (error) {
     await page?.screenshot({ path: join(output, 'fixture-error.png') }).catch(() => {});
+    const installedLifecycle = lifecycleDiagnostic && page ? await (async () => {
+      let deadline;
+      try {
+        return await Promise.race([
+          (async () => {
+            const [dom, worlds, events] = await Promise.all([
+              page.evaluate(readInstalledLifecycleDomDiagnostic),
+              readInstalledLifecycleWorlds(lifecycleDiagnostic.cdp, lifecycleDiagnostic.contexts),
+              Promise.all(lifecycleDiagnostic.consoleEvents),
+            ]);
+            return {
+              activePhase: lifecycleDiagnostic.activePhase,
+              routedSustainedRequests: sustainedChatRequests,
+              debugMessagesObserved: lifecycleDiagnostic.debugMessagesObserved,
+              consoleEvents: events.filter(Boolean), worlds, dom,
+              cdpSetupErrorType: lifecycleDiagnostic.setupErrorType,
+            };
+          })().catch(() => null),
+          new Promise((resolve) => { deadline = setTimeout(() => resolve(null), 2_000); }),
+        ]);
+      } finally { clearTimeout(deadline); }
+    })() : null;
     await writeFile(join(output, 'fixture-error.json'), JSON.stringify({
       pageErrors: pageErrors.slice(-16), consoleErrors: consoleErrors.slice(-16),
       chatApiRequests, installedFixtureDelivered,
+      installedLifecycle,
       admission: page ? await page.evaluate(readFixtureAdmissionDiagnostic, EXPECTED_MESSAGE_IDS)
         .catch(() => null) : null,
     }, null, 2));
     throw error;
   } finally {
+    await lifecycleDiagnostic?.cdp?.detach().catch(() => {});
     if (installedContext) await page?.close();
     else await context.close();
   }

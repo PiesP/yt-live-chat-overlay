@@ -4,7 +4,10 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { exactDeclaredMessageIdsReady, installFixtureWorkerProbe, readFixtureAdmissionDiagnostic } from '../../../validation/windows/profile.mjs';
+import * as profileModule from '../../../validation/windows/profile.mjs';
+
+const { exactDeclaredMessageIdsReady, installFixtureWorkerProbe, readFixtureAdmissionDiagnostic,
+  readInstalledLifecycleDomDiagnostic, summarizeInterceptorConsoleMessage } = profileModule;
 
 const ids = ['ko', 'ja', 'rtl', 'emoji', 'paid', 'member'];
 
@@ -96,5 +99,54 @@ describe('installed Windows fixture admission', () => {
     });
     expect(diagnostic.accessibility.declared[0].snippet).toHaveLength(120);
     expect(JSON.stringify(diagnostic)).not.toContain('private unrelated content');
+  });
+
+  it('records bounded installed lifecycle state without copying unrelated DOM content', () => {
+    const entries = Array.from({ length: 20 }, (_, index) => ({
+      dataset: { messageId: `windows-sustained-${index}` }, textContent: 'private message',
+    }));
+    entries.push({ dataset: { messageId: 'unrelated' }, textContent: 'private unrelated content' });
+    const state = runInNewContext(`(${readInstalledLifecycleDomDiagnostic.toString()})()`, {
+      window: { __ytAcceptanceInterceptorBatches: 0, __ytChatOverlay: {} },
+      document: {
+        querySelectorAll: (selector: string) => selector.includes('yt-chat-overlay-debug')
+          ? [{ textContent: 'Rcvd: 12 | Rndr: 10' }, { textContent: 'Drop: 2 (16.7%)' }]
+          : entries,
+        querySelector: () => ({ value: 'debug' }),
+      },
+    });
+    expect(state).toMatchObject({ pageInterceptorBatches: 0, pageAppHandleVisible: true,
+      uiLogLevel: 'debug', debugCounts: { received: 12, rendered: 10, dropped: 2 } });
+    expect(state.sustainedIds).toHaveLength(16);
+    expect(JSON.stringify(state)).not.toContain('private');
+  });
+
+  it('accepts only bounded product interceptor console events', async () => {
+    const consoleMessage = (event: string, count: number, text = '[FetchInterceptor]') => ({
+      type: () => 'debug', text: () => text,
+      args: () => ['[FetchInterceptor]', event, { count, private: 'do not record' }]
+        .map((value) => ({ jsonValue: async () => value })),
+      location: () => ({ url: 'chrome-extension://owned/private?token=secret' }),
+    });
+    const event = await summarizeInterceptorConsoleMessage(
+      consoleMessage('chat.interceptor.messages-received', 2), 'paused', 'owned',
+    );
+    expect(event).toEqual({ phase: 'paused', event: 'chat.interceptor.messages-received',
+      count: 2, consoleType: 'debug', sourceKind: 'manager-extension' });
+    expect(JSON.stringify(event)).not.toContain('private');
+    expect(await summarizeInterceptorConsoleMessage(
+      consoleMessage('chat.interceptor.messages-received', 2, 'unrelated'), 'paused', 'owned',
+    )).toBeNull();
+    expect(await summarizeInterceptorConsoleMessage(
+      consoleMessage('chat.interceptor.unrelated', 2), 'paused', 'owned',
+    )).toBeNull();
+    expect((await summarizeInterceptorConsoleMessage(
+      consoleMessage('chat.interceptor.messages-received', 1001), 'paused', 'owned',
+    ))?.count).toBeNull();
+    const parseFailure = consoleMessage('chat.interceptor.parse-failed', 0);
+    const args = parseFailure.args();
+    args[2] = { jsonValue: async () => { throw new Error('private error body was read'); } };
+    expect((await summarizeInterceptorConsoleMessage({ ...parseFailure, args: () => args },
+      'paused', 'owned'))?.count).toBeNull();
   });
 });
