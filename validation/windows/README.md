@@ -42,6 +42,9 @@ use cached bitmap rendering without ink beyond its right card boundary. Author a
 labels are hidden for that check so they cannot satisfy the cached-body assertion.
 A missing artifact, failed readiness assertion, page error, console error, or incomplete
 render rejects the run.
+The initial chat check waits for all six declared IDs exactly, regardless of
+activation order. Its bounded diagnostics record accessibility snippets, Worker
+admission receipts, active/pending stats and observation times when readiness fails.
 
 ## Scope
 

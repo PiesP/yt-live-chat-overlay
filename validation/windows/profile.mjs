@@ -90,6 +90,164 @@ const CHAT_ACTIONS = [
   },
 ];
 
+const EXPECTED_MESSAGE_IDS = CHAT_ACTIONS.map(({ addChatItemAction: { item } }) => {
+  const renderer = item.liveChatTextMessageRenderer ?? item.liveChatPaidMessageRenderer ??
+    item.liveChatMembershipItemRenderer;
+  assert.equal(typeof renderer?.id, 'string', 'A declared fixture message has no ID');
+  return renderer.id;
+});
+assert.equal(EXPECTED_MESSAGE_IDS.length, EXPECTED_MESSAGE_COUNT);
+assert.equal(new Set(EXPECTED_MESSAGE_IDS).size, EXPECTED_MESSAGE_COUNT);
+
+export function exactDeclaredMessageIdsReady(expectedIds) {
+  const entries = document.querySelectorAll('.yt-live-chat-overlay-live-region > p');
+  const actual = Array.from(entries, (element) => element.dataset.messageId);
+  const observedAtMs = Math.round(performance.now());
+  const readiness = window.__ytAcceptanceReadiness ??= {
+    startedAtMs: observedAtMs,
+    firstSeenAtMs: {},
+    exactReadyAtMs: null,
+  };
+  for (const id of actual) {
+    if (expectedIds.includes(id) && readiness.firstSeenAtMs[id] === undefined) {
+      readiness.firstSeenAtMs[id] = observedAtMs;
+    }
+  }
+  const ready = actual.length === expectedIds.length &&
+    new Set(actual).size === expectedIds.length &&
+    actual.every((id) => expectedIds.includes(id));
+  if (ready) readiness.exactReadyAtMs = observedAtMs;
+  return ready;
+}
+
+export function readFixtureAdmissionDiagnostic(expectedIds) {
+  const expected = new Set(expectedIds);
+  const entries = Array.from(document.querySelectorAll('.yt-live-chat-overlay-live-region > p'));
+  const declared = entries.filter((element) => expected.has(element.dataset.messageId));
+  const readiness = window.__ytAcceptanceReadiness;
+  return {
+    observedAtMs: Math.round(performance.now()),
+    accessibility: {
+      count: entries.length,
+      unexpectedCount: entries.length - declared.length,
+      missingIds: expectedIds.filter((id) => !declared.some((element) =>
+        element.dataset.messageId === id)),
+      declared: declared.slice(0, expectedIds.length).map((element) => ({
+        id: element.dataset.messageId,
+        firstSeenAtMs: readiness?.firstSeenAtMs?.[element.dataset.messageId] ?? null,
+        snippet: (element.textContent ?? '').slice(0, 120),
+      })),
+    },
+    readiness: readiness ? {
+      startedAtMs: readiness.startedAtMs,
+      exactReadyAtMs: readiness.exactReadyAtMs,
+    } : null,
+    hasCanvas: Boolean(document.querySelector('#yt-live-chat-overlay canvas')),
+    paused: document.querySelector('video')?.paused ?? null,
+    workers: (window.__ytAcceptanceWorkers ?? []).slice(-2).map((worker) => ({
+      urlKind: worker.url?.startsWith('blob:') ? 'blob' : 'other',
+      ready: worker.ready,
+      readyAtMs: worker.readyAtMs,
+      acknowledgements: worker.acknowledgements,
+      terminated: worker.terminated,
+      error: typeof worker.error === 'string' ? worker.error.slice(0, 160) : null,
+      addedDeclaredIds: (worker.addedMessageIds ?? []).flat()
+        .filter((id) => expected.has(id)).slice(0, expectedIds.length),
+      recentReceipts: (worker.recentReceipts ?? []).slice(-16),
+      recentStats: (worker.recentStats ?? []).slice(-16),
+    })),
+    debugLines: Array.from(document.querySelectorAll('#yt-chat-overlay-debug > div'))
+      .slice(0, 3).map((element) => (element.textContent ?? '').slice(0, 120)),
+  };
+}
+
+export function installFixtureWorkerProbe(expectedIds) {
+  const workers = [];
+  const expected = new Set(expectedIds);
+  const declaredIds = (value) => Array.isArray(value) ? value
+    .filter((id) => typeof id === 'string' && expected.has(id))
+    .slice(0, expectedIds.length) : [];
+  const boundedNumber = (value) => Number.isSafeInteger(value) && value >= 0;
+  const remember = (list, value) => {
+    list.push(value);
+    if (list.length > 16) list.shift();
+  };
+  window.__ytAcceptanceWorkers = workers;
+  const NativeWorker = window.Worker;
+  window.Worker = new Proxy(NativeWorker, {
+    construct(target, args) {
+      const record = {
+        url: String(args[0]),
+        ready: false,
+        readyAtMs: null,
+        acknowledgements: 0,
+        addedMessageIds: [],
+        recentReceipts: [],
+        recentStats: [],
+        terminated: false,
+      };
+      if (workers.length < 16) workers.push(record);
+      try {
+        const worker = Reflect.construct(target, args);
+        worker.addEventListener('message', (event) => {
+          const data = event.data;
+          if (data?.type === 'ready') {
+            record.ready = true;
+            record.readyAtMs = Math.round(performance.now());
+          }
+          if (data?.type === 'ack') record.acknowledgements++;
+          if (data?.type === 'batchReceipt' &&
+              [data.batchSequence, data.admittedMessages, data.pendingQueueDepth]
+                .every(boundedNumber)) {
+            remember(record.recentReceipts, {
+              observedAtMs: Math.round(performance.now()),
+              batchSequence: data.batchSequence,
+              admittedMessages: data.admittedMessages,
+              pendingQueueDepth: data.pendingQueueDepth,
+            });
+          }
+          if (data?.type === 'stats' &&
+              [data.activeMessages, data.pendingQueueDepth, data.totalRendered,
+                data.totalDrops, data.processedBatchSequence].every(boundedNumber)) {
+            remember(record.recentStats, {
+              observedAtMs: Math.round(performance.now()),
+              activeMessages: data.activeMessages,
+              pendingQueueDepth: data.pendingQueueDepth,
+              totalRendered: data.totalRendered,
+              totalDrops: data.totalDrops,
+              processedBatchSequence: data.processedBatchSequence,
+              activeDeclaredIds: declaredIds(data.activeMessageIds),
+              pendingDeclaredIds: declaredIds(data.pendingMessageIds),
+            });
+          }
+        });
+        worker.addEventListener('error', (event) => { record.error = event.message; });
+        const nativePostMessage = worker.postMessage.bind(worker);
+        worker.postMessage = (message, transfer) => {
+          if (message?.type === 'addMessages' && Array.isArray(message.messages)) {
+            record.addedMessageIds.push(
+              message.messages
+                .map((entry) => entry?.id)
+                .filter((id) => typeof id === 'string'),
+            );
+          }
+          if (transfer === undefined) nativePostMessage(message);
+          else nativePostMessage(message, transfer);
+        };
+        const nativeTerminate = worker.terminate.bind(worker);
+        worker.terminate = () => {
+          record.terminated = true;
+          nativeTerminate();
+        };
+        return worker;
+      } catch (error) {
+        record.error = String(error);
+        throw error;
+      }
+    },
+  });
+}
+
 function chatResponse(actions, timeoutMs = 30_000) {
   return {
     continuationContents: {
@@ -971,52 +1129,7 @@ export async function run({ browser, root, output, installedContext, installedEx
       await route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by fixture' });
     });
 
-    if (installedContext) await page.addInitScript(() => {
-      const workers = [];
-      window.__ytAcceptanceWorkers = workers;
-      const NativeWorker = window.Worker;
-      window.Worker = new Proxy(NativeWorker, {
-        construct(target, args) {
-          const record = {
-            url: String(args[0]),
-            ready: false,
-            acknowledgements: 0,
-            addedMessageIds: [],
-            terminated: false,
-          };
-          if (workers.length < 16) workers.push(record);
-          try {
-            const worker = Reflect.construct(target, args);
-            worker.addEventListener('message', (event) => {
-              if (event.data?.type === 'ready') record.ready = true;
-              if (event.data?.type === 'ack') record.acknowledgements++;
-            });
-            worker.addEventListener('error', (event) => { record.error = event.message; });
-            const nativePostMessage = worker.postMessage.bind(worker);
-            worker.postMessage = (message, transfer) => {
-              if (message?.type === 'addMessages' && Array.isArray(message.messages)) {
-                record.addedMessageIds.push(
-                  message.messages
-                    .map((entry) => entry?.id)
-                    .filter((id) => typeof id === 'string'),
-                );
-              }
-              if (transfer === undefined) nativePostMessage(message);
-              else nativePostMessage(message, transfer);
-            };
-            const nativeTerminate = worker.terminate.bind(worker);
-            worker.terminate = () => {
-              record.terminated = true;
-              nativeTerminate();
-            };
-            return worker;
-          } catch (error) {
-            record.error = String(error);
-            throw error;
-          }
-        },
-      });
-    });
+    if (installedContext) await page.addInitScript(installFixtureWorkerProbe, EXPECTED_MESSAGE_IDS);
     await page.addInitScript((inspectPaidCardInk) => {
       window.__ytAcceptanceInterceptorBatches = 0;
       const nativeDebug = console.debug.bind(console);
@@ -1187,26 +1300,16 @@ export async function run({ browser, root, output, installedContext, installedEx
     assert.equal(explicitChatRequests, installedContext ? 0 : EXPECTED_MESSAGE_COUNT);
 
     try {
-      await page.waitForFunction(
-        (expected) =>
-          document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length >= expected,
-        EXPECTED_MESSAGE_COUNT,
-        { timeout: 15_000 },
-      );
+      await page.waitForFunction(exactDeclaredMessageIdsReady, EXPECTED_MESSAGE_IDS,
+        { timeout: 15_000 });
     } catch (error) {
-      const state = await page.evaluate(() => ({
-        accessibleMessages: Array.from(
-          document.querySelectorAll('.yt-live-chat-overlay-live-region > p'),
-          (element) => element.textContent,
-        ),
-        hasCanvas: Boolean(document.querySelector('#yt-live-chat-overlay canvas')),
-        paused: document.querySelector('video')?.paused,
-        settings: window.__ytChatOverlay?.getSettings?.(),
-      }));
-      throw new Error(`Renderer readiness failed: ${JSON.stringify({ chatApiRequests, state })}`, {
+      const diagnostic = await page.evaluate(readFixtureAdmissionDiagnostic, EXPECTED_MESSAGE_IDS);
+      throw new Error(`Renderer readiness failed: ${JSON.stringify({ chatApiRequests, diagnostic })}`, {
         cause: error,
       });
     }
+    const initialAdmission = await page.evaluate(readFixtureAdmissionDiagnostic,
+      EXPECTED_MESSAGE_IDS);
 
     const accessibleMessages = await page
       .locator('.yt-live-chat-overlay-live-region > p')
@@ -1398,6 +1501,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         screenshots,
         backgroundObservationMs,
         paidCardInkContainment,
+        initialAdmission,
         sustainedViewing,
         highActivityPolling,
         backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(
@@ -1408,8 +1512,10 @@ export async function run({ browser, root, output, installedContext, installedEx
   } catch (error) {
     await page?.screenshot({ path: join(output, 'fixture-error.png') }).catch(() => {});
     await writeFile(join(output, 'fixture-error.json'), JSON.stringify({
-      pageErrors, consoleErrors, chatApiRequests, installedFixtureDelivered,
-      workers: await page?.evaluate(() => window.__ytAcceptanceWorkers).catch(() => []),
+      pageErrors: pageErrors.slice(-16), consoleErrors: consoleErrors.slice(-16),
+      chatApiRequests, installedFixtureDelivered,
+      admission: page ? await page.evaluate(readFixtureAdmissionDiagnostic, EXPECTED_MESSAGE_IDS)
+        .catch(() => null) : null,
     }, null, 2));
     throw error;
   } finally {
