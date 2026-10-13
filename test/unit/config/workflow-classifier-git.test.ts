@@ -187,7 +187,6 @@ function expectSource(scopes: Scopes): void {
     unit: true,
     e2e: true,
     build: true,
-    duplication: true,
     semgrep: true,
     codeql_javascript: true,
   });

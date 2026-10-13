@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -10,6 +11,19 @@ function jobSection(workflow: string, job: string): string {
   const section = workflow.match(new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`))?.[0];
   if (!section) throw new Error(`Workflow job not found: ${job}`);
   return section;
+}
+
+function stepCondition(job: string, name: string): string {
+  const step = job.split(`      - name: ${name}\n`)[1]?.split('\n      - name: ')[0];
+  const condition = step?.match(/^\s+if: \$\{\{ (.+) \}\}$/mu)?.[1];
+  if (!condition) throw new Error(`Missing step condition: ${name}`);
+  return condition;
+}
+
+function selectedStep(condition: string, result: string, quality: string, unit: string): boolean {
+  return runInNewContext(condition, {
+    needs: { changes: { result, outputs: { quality, unit } } },
+  }) as boolean;
 }
 
 function runSecuritySummary(event: string, results: Record<string, string> = {}) {
@@ -42,7 +56,6 @@ type Scope =
   | 'core'
   | 'e2e'
   | 'build'
-  | 'duplication'
   | 'osv'
   | 'semgrep'
   | 'codeql_actions'
@@ -101,7 +114,6 @@ describe('workflow change classification', () => {
       core: false,
       e2e: false,
       build: false,
-      duplication: false,
       osv: false,
       semgrep: true,
       codeql_actions: false,
@@ -119,7 +131,6 @@ describe('workflow change classification', () => {
       core: false,
       e2e: true,
       build: true,
-      duplication: true,
       osv: false,
       semgrep: true,
       codeql_actions: false,
@@ -145,7 +156,6 @@ describe('workflow change classification', () => {
       core: true,
       e2e: true,
       build: true,
-      duplication: false,
       osv: true,
       semgrep: true,
       codeql_javascript: true,
@@ -161,7 +171,6 @@ describe('workflow change classification', () => {
       unit: true,
       e2e: true,
       build: true,
-      duplication: true,
       osv: false,
       semgrep: true,
       codeql_actions: true,
@@ -170,15 +179,10 @@ describe('workflow change classification', () => {
     });
   });
 
-  it('routes reviewed tool metadata and installation changes', () => {
+  it('routes reviewed scanner metadata changes', () => {
     expect(classify(['scripts/ci/pinned-tools.json'])).toMatchObject({
-      duplication: true,
       osv: true,
       semgrep: true,
-      pinned_tools: true,
-    });
-    expect(classify(['scripts/ci/install-nose.ts'])).toMatchObject({
-      duplication: true,
       pinned_tools: true,
     });
   });
@@ -220,6 +224,84 @@ describe('workflow change classification', () => {
 });
 
 describe('workflow scope integration', () => {
+  it.each([
+    ['src/app/page-watcher.ts', true, true],
+    ['test/e2e/specs/overlay.spec.ts', true, false],
+    ['README.md', false, false],
+  ] as const)('routes %s through the selected quality and unit scopes', (path, quality, unit) => {
+    const scopes = classify([path]);
+    expect(scopes.quality).toBe(quality);
+    expect(scopes.unit).toBe(unit);
+    const ci = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
+    const qualityJob = jobSection(ci, 'quality');
+    const unitJob = jobSection(ci, 'unit');
+    const qualityRuns = selectedStep(
+      stepCondition(qualityJob, '✅ Run quality gate'),
+      'success',
+      String(scopes.quality),
+      String(scopes.unit)
+    );
+    const unitFocusedRuns = selectedStep(
+      stepCondition(unitJob, '🧪 Run focused CI regression tests'),
+      'success',
+      String(scopes.quality),
+      String(scopes.unit)
+    );
+    expect(qualityRuns).toBe(quality);
+    expect(unitFocusedRuns).toBe(false);
+  });
+
+  it.each([
+    ['combined', 'success', 'true', 'true', true, false, true],
+    ['quality only', 'success', 'true', 'false', true, false, false],
+    ['unit only', 'success', 'false', 'true', false, true, true],
+    ['unrelated paths', 'success', 'false', 'false', false, false, false],
+    ['conservative classifier fallback', 'success', 'true', 'true', true, false, true],
+    ['failed classification job', 'failure', '', '', true, false, true],
+  ] as const)(
+    '%s assigns focused checks to one owner',
+    (_label, result, quality, unit, expectedQuality, expectedUnit, expectedCoverage) => {
+      const ci = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
+      const qualityJob = jobSection(ci, 'quality');
+      const unitJob = jobSection(ci, 'unit');
+      const qualityRuns = selectedStep(
+        stepCondition(qualityJob, '✅ Run quality gate'),
+        result,
+        quality,
+        unit
+      );
+      const unitFocusedRuns = selectedStep(
+        stepCondition(unitJob, '🧪 Run focused CI regression tests'),
+        result,
+        quality,
+        unit
+      );
+      const coverageRuns = selectedStep(
+        stepCondition(unitJob, '🧪 Run unit tests and coverage thresholds'),
+        result,
+        quality,
+        unit
+      );
+      expect(qualityRuns).toBe(expectedQuality);
+      expect(unitFocusedRuns).toBe(expectedUnit);
+      expect(coverageRuns).toBe(expectedCoverage);
+      expect(Number(qualityRuns) + Number(unitFocusedRuns)).toBeLessThanOrEqual(1);
+      expect(qualityJob).toContain('run: pnpm quality');
+      expect(unitJob).toContain('run: pnpm test:ci');
+      expect(unitJob).toContain('run: pnpm test:cov');
+      expect(qualityJob).toContain('name: pr-gate/quality');
+      expect(qualityJob).toContain('if: ${{ !cancelled() }}');
+      expect(unitJob).toContain('name: pr-gate/unit');
+      expect(unitJob).toContain('if: ${{ !cancelled() }}');
+      expect(
+        selectedStep(stepCondition(qualityJob, 'No relevant changes'), result, quality, unit)
+      ).toBe(result === 'success' && quality !== 'true');
+      expect(
+        selectedStep(stepCondition(unitJob, 'No relevant changes'), result, quality, unit)
+      ).toBe(result === 'success' && unit !== 'true');
+    }
+  );
+
   it.each(['pull_request', 'merge_group', 'push', 'schedule', 'workflow_dispatch'])(
     'validates the actual scanner results for %s without manual status publishing',
     (event) => {
@@ -263,8 +345,6 @@ describe('workflow scope integration', () => {
       expect(`${ci}\n${security}`).toContain(`name: ${check}`);
     }
     expect(ci.match(/name: No relevant changes/g)).toHaveLength(4);
-    expect(ci).not.toContain('name: pr-gate/duplication');
-    expect(settings).not.toContain('context: "pr-gate/duplication"');
     expect(security.match(/name: No relevant changes/g)).toHaveLength(5);
   });
 
@@ -318,7 +398,7 @@ describe('workflow scope integration', () => {
       expect(changes).toContain("install-dependencies: 'false'");
       expect(changes).toContain('RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}');
       expect(changes).toContain(
-        'for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast'
+        'for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast'
       );
     }
   });

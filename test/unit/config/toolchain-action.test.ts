@@ -8,10 +8,10 @@ const centralAction =
 const centralWorkflowJobs = {
   'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
   'security.yaml': ['changes', 'pin-metadata', 'pinned-tools', 'osv-scan-pr', 'osv-scan-dispatch'],
-  'deep-checks.yaml': ['duplication', 'mutation-fast', 'mutation-renderer'],
+  'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
-const releaseLocalExecutionJobs = [...releaseJobs, 'duplication'];
+const releaseLocalExecutionJobs = releaseJobs;
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
 
@@ -39,7 +39,7 @@ describe('project setup actions', () => {
         expect(jobSection).not.toContain('node-version:');
       }
       expect(workflow.split(centralAction)).toHaveLength(
-        filename === 'deep-checks.yaml' ? 6 : jobs.length + 1
+        filename === 'deep-checks.yaml' ? 5 : jobs.length + 1
       );
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
       expect(workflow).not.toContain(releaseAction);
@@ -66,10 +66,6 @@ describe('project setup actions', () => {
       expect(jobSection).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
-    const duplication =
-      releaseWorkflow.match(/ {2}duplication:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/u)?.[0] ?? '';
-    expect(duplication).toContain(`uses: ${centralAction}`);
-    expect(duplication).toContain("install-dependencies: 'false'");
     const provenance =
       releaseWorkflow.match(/ {2}provenance:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/)?.[0] ?? '';
     expect(provenance).toContain(`uses: ${centralAction}`);
@@ -81,9 +77,9 @@ describe('project setup actions', () => {
     if (!publishSection) throw new Error('Release publish job not found');
     expect(publishSection).toContain(`uses: ${centralAction}`);
     expect(publishSection).toContain("install-dependencies: 'false'");
-    expect(
-      releaseWorkflow.replace(duplication, '').replace(provenance, '').replace(publishSection, '')
-    ).not.toContain(centralAction);
+    expect(releaseWorkflow.replace(provenance, '').replace(publishSection, '')).not.toContain(
+      centralAction
+    );
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
@@ -125,10 +121,7 @@ describe('project setup actions', () => {
       const jobSection = releaseWorkflow.match(
         new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
       )?.[0];
-      const firstLocalExecution =
-        job === 'duplication'
-          ? 'node --experimental-strip-types "$pinned_dir/install-nose.ts"'
-          : `uses: ${releaseAction}`;
+      const firstLocalExecution = `uses: ${releaseAction}`;
 
       expect(jobSection).toBeDefined();
       if (!jobSection) throw new Error(`Release job not found: ${job}`);

@@ -3,44 +3,43 @@
 `classify-workflow-changes.ts` uses only Node.js built-ins. CI and Security set
 up the manifest-pinned Node runtime without installing dependencies, then run
 the CLI from the trusted base revision for pull requests and merge groups.
-The first rollout has no TypeScript classifier in that revision, so the callers
-select all 13 scopes. Failed checkout, runtime setup, or classification also
-selects every scope. Pushes run the checked-out CLI.
+If the trusted base lacks the classifier, the callers select all 12 scopes.
+Failed checkout, runtime setup, or classification also selects every scope. Pushes run the checked-out CLI.
 
 The CLI accepts `--paths` for explicit policy checks. Event comparisons use
 `BASE_SHA...HEAD_SHA` for pull requests and merge groups and
 `BASE_SHA..HEAD_SHA` for pushes. Git paths are NUL-delimited with rename
-detection disabled, preserving both sides of a move. It prints all 13 outputs
+detection disabled, preserving both sides of a move. It prints all 12 outputs
 and appends them to `GITHUB_OUTPUT` when set.
 
 # Pinned security tools
 
-`pinned-tools.json` records the existing Nose installer version and SHA-256,
-OSV scanner image version and digest, and Semgrep version and image digest.
+`pinned-tools.json` records OSV scanner and Semgrep versions and image digests.
 The dependency-free `check-pinned-tools.ts` checks the newest stable GitHub
-release older than 24 hours, the Nose release asset digest, and the OSV tag's
-GHCR manifest digest. Version drift warns; missing metadata, API failure, or
-digest drift fails. It continues checking later pins after an earlier failure.
-`install-nose.ts` downloads the installer over HTTPS with the existing bounded
-retry options, checks its bytes before running `sh` without GitHub tokens, and
-appends to `GITHUB_PATH` only after success. `pinned-tools.ts env` writes
-validated image references to `GITHUB_ENV` and accepts no metadata path. All
-three modules are inert on import.
+release older than 24 hours and the OSV tag's GHCR manifest digest. Version
+drift warns; missing metadata, API failure, or digest drift fails. It continues
+checking later pins after an earlier failure. `pinned-tools.ts env` writes
+validated image references to `GITHUB_ENV` and accepts no metadata path. Both
+modules are inert on import.
 
-The security workflow resolves scanner images from the immutable reviewed
-`9f040ccfd72528f683f898a4b31e94a21f5913b7` revision and passes them to the
-OSV and Semgrep jobs. Its freshness job uses that revision too. Deep verification
-and release duplication retrieve the installer and metadata from the same SHA
-with `git show`, even after a release checkout. Each job sets up Node before
-running a private copy of the helpers. The privileged security jobs never run
-candidate PR helper code. Update the SHA only with a reviewed pin change.
-The focused CLI fixture test is `test/unit/config/pinned-tools-cli.test.ts`.
+The security workflow resolves scanner images and freshness checks from the
+immutable reviewed `83364ae1027cf6b1761a91dcb855ea9a95c8886c` revision.
+Each job sets up Node before running a private copy of the helpers. The
+privileged security jobs never run candidate PR helper code. Repin only to a
+reviewed, published full commit. The focused CLI fixture test is
+`test/unit/config/pinned-tools-cli.test.ts`.
+
+CI runs `test:ci` within quality when quality is selected. When only unit is
+selected, the unit job runs it before independent full coverage. A failed or
+unavailable owner is not a completed check. Local `pnpm quality` always runs
+`test:ci`. Protected release-source verification rejects tags whose quality
+scripts still invoke retired Nose tooling before any validation job starts.
 
 # Deep code-analysis reuse
 
-The scheduled deep workflow may reuse successful duplication, fast mutation, or
-renderer mutation results for unchanged tracked bytes, file modes, gitlinks,
-configuration, locks, declared Node/pnpm versions, pinned tools/actions, gate,
+The scheduled deep workflow may reuse successful fast or renderer mutation
+results for unchanged tracked bytes, file modes, gitlinks, configuration, locks,
+declared Node/pnpm versions, pinned tools/actions, gate,
 OS, architecture, ImageOS, and runner label. Manual runs default to fresh
 analysis; `reuse_success=true` opts in. Unknown runner identity, missing or
 corrupt markers, and cache failures run fresh.
@@ -67,9 +66,8 @@ runner or tool behavior. Security intelligence and external browser
 compatibility checks retain their existing triggers and do not use this marker.
 
 The early setup pins Node and pnpm without installing dependencies. A fresh
-mutation run uses the normal frozen dependency setup; duplication installs Nose
-only when it runs. Local regression checks: `pnpm test:ci` and
-`pnpm check:scripts`.
+mutation run uses the normal frozen dependency setup. Local regression checks:
+`pnpm test:ci` and `pnpm check:scripts`.
 
 Reruns (`GITHUB_RUN_ATTEMPT > 1`) always analyze selected gates afresh, including
 scheduled runs and manual reuse opt-ins. Actions run listings expose only the

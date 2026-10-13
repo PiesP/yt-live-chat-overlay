@@ -42,7 +42,7 @@ for (const path of [
   'stryker.conf.fast.json',
   'stryker.conf.renderer.json',
   'pnpm-lock.yaml',
-  'scripts/ci/install-nose.ts',
+  'scripts/ci/pinned-tools.ts',
   'scripts/ci/pinned-tools.json',
   '.github/workflows/deep-checks.yaml',
 ]) {
@@ -66,7 +66,7 @@ const runner = {
   GITHUB_RUN_ATTEMPT: '1',
   GITHUB_SHA: 'a'.repeat(40),
 };
-const baseline = fingerprint('duplication', fixture, runner);
+const baseline = fingerprint('mutation-fast', fixture, runner);
 if (!baseline) throw new Error('Fixture runner identity must be complete');
 
 test('each tracked source, test, configuration, lock, and tool input invalidates success', () => {
@@ -77,7 +77,7 @@ test('each tracked source, test, configuration, lock, and tool input invalidates
     'stryker.conf.fast.json',
     'stryker.conf.renderer.json',
     'pnpm-lock.yaml',
-    'scripts/ci/install-nose.ts',
+    'scripts/ci/pinned-tools.ts',
     'scripts/ci/pinned-tools.json',
     '.github/workflows/deep-checks.yaml',
     'package.json',
@@ -91,7 +91,7 @@ test('each tracked source, test, configuration, lock, and tool input invalidates
           })
         : 'changed\n'
     );
-    assert.notEqual(fingerprint('duplication', fixture, runner), baseline, path);
+    assert.notEqual(fingerprint('mutation-fast', fixture, runner), baseline, path);
     if (path === 'package.json') {
       write(
         path,
@@ -104,7 +104,7 @@ test('each tracked source, test, configuration, lock, and tool input invalidates
       write(path, 'original\n');
     }
   }
-  assert.equal(fingerprint('duplication', fixture, runner), baseline);
+  assert.equal(fingerprint('mutation-fast', fixture, runner), baseline);
   write(
     'package.json',
     JSON.stringify({
@@ -112,7 +112,7 @@ test('each tracked source, test, configuration, lock, and tool input invalidates
       volta: { node: '26.9.0', pnpm: '11.26.1' },
     })
   );
-  assert.notEqual(fingerprint('duplication', fixture, runner), baseline);
+  assert.notEqual(fingerprint('mutation-fast', fixture, runner), baseline);
   write(
     'package.json',
     JSON.stringify({
@@ -128,7 +128,7 @@ test('fingerprint uses the length of the bytes read when a tracked file changes'
   try {
     for (const replacement of [Buffer.alloc(0), Buffer.from('changed longer content\n')]) {
       write('src/app.ts', replacement);
-      const expected = fingerprint('duplication', fixture, runner);
+      const expected = fingerprint('mutation-fast', fixture, runner);
       write('src/app.ts', 'original\n');
       let replaced = false;
       t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
@@ -141,7 +141,7 @@ test('fingerprint uses the length of the bytes read when a tracked file changes'
         return read(...args);
       });
       syncBuiltinESMExports();
-      assert.equal(fingerprint('duplication', fixture, runner), expected);
+      assert.equal(fingerprint('mutation-fast', fixture, runner), expected);
       assert.equal(replaced, true);
       t.mock.restoreAll();
       syncBuiltinESMExports();
@@ -151,7 +151,7 @@ test('fingerprint uses the length of the bytes read when a tracked file changes'
     syncBuiltinESMExports();
     write('src/app.ts', 'original\n');
   }
-  assert.equal(fingerprint('duplication', fixture, runner), baseline);
+  assert.equal(fingerprint('mutation-fast', fixture, runner), baseline);
 });
 
 test('gitlink, runner platform and label, and gate identity invalidate success', () => {
@@ -161,7 +161,7 @@ test('gitlink, runner platform and label, and gate identity invalidate success',
     '--cacheinfo',
     '160000,2222222222222222222222222222222222222222,packages/core'
   );
-  assert.notEqual(fingerprint('duplication', fixture, runner), baseline);
+  assert.notEqual(fingerprint('mutation-fast', fixture, runner), baseline);
   git(
     'update-index',
     '--add',
@@ -174,19 +174,19 @@ test('gitlink, runner platform and label, and gate identity invalidate success',
     { ImageOS: 'ubuntu26' },
     { DEEP_RUNNER_LABEL: 'ubuntu-26.04' },
   ]) {
-    assert.notEqual(fingerprint('duplication', fixture, { ...runner, ...change }), baseline);
+    assert.notEqual(fingerprint('mutation-fast', fixture, { ...runner, ...change }), baseline);
   }
   assert.equal(
-    fingerprint('duplication', fixture, { ...runner, ImageVersion: '20261001.2' }),
+    fingerprint('mutation-fast', fixture, { ...runner, ImageVersion: '20261001.2' }),
     baseline
   );
   const fast = fingerprint('mutation-fast', fixture, runner);
   const renderer = fingerprint('mutation-renderer', fixture, runner);
-  assert.notEqual(fast, baseline);
+  assert.equal(fast, baseline);
   assert.notEqual(renderer, baseline);
   assert.notEqual(fast, renderer);
-  assert.equal(fingerprint('duplication', fixture, { ...runner, ImageVersion: '' }), null);
-  assert.equal(fingerprint('duplication', fixture, { ...runner, DEEP_RUNNER_LABEL: '' }), null);
+  assert.equal(fingerprint('mutation-fast', fixture, { ...runner, ImageVersion: '' }), null);
+  assert.equal(fingerprint('mutation-fast', fixture, { ...runner, DEEP_RUNNER_LABEL: '' }), null);
 });
 
 test('every missing or empty runner identity field prevents caching', () => {
@@ -194,7 +194,7 @@ test('every missing or empty runner identity field prevents caching', () => {
     for (const value of [undefined, '']) {
       const env = { ...runner, [key]: value };
       assert.equal(runnerIdentity(env), null, key);
-      assert.equal(fingerprint('duplication', fixture, env), null, key);
+      assert.equal(fingerprint('mutation-fast', fixture, env), null, key);
     }
   }
 });
@@ -215,45 +215,57 @@ test('an unmerged Git index cannot produce a reusable fingerprint', () => {
     input: `100644 ${object} 1\tconflicted.ts\n100644 ${object} 2\tconflicted.ts\n`,
   });
   assert.throws(
-    () => fingerprint('duplication', cwd, runner),
+    () => fingerprint('mutation-fast', cwd, runner),
     /Invalid or unmerged Git index entry/
   );
 });
 
 test('only a valid successful marker can be reused', () => {
   const marker = join(fixture, 'marker.json');
-  assert.equal(validMarker(marker, 'duplication', baseline), false);
-  writeMarker(marker, 'duplication', baseline, runner);
-  assert.equal(validMarker(marker, 'duplication', baseline), true);
+  assert.equal(validMarker(marker, 'mutation-fast', baseline), false);
+  writeMarker(marker, 'mutation-fast', baseline, runner);
+  assert.equal(validMarker(marker, 'mutation-fast', baseline), true);
   assert.equal(JSON.parse(readFileSync(marker, 'utf8')).imageVersion, runner.ImageVersion);
   assert.equal(JSON.parse(readFileSync(marker, 'utf8')).runId, 100);
   assert.equal(
     validMarker(
       marker,
-      'duplication',
-      fingerprint('duplication', fixture, {
+      'mutation-fast',
+      fingerprint('mutation-fast', fixture, {
         ...runner,
         ImageVersion: '20261001.2',
       })
     ),
     true
   );
-  assert.equal(validMarker(marker, 'mutation-fast', baseline), false);
   assert.equal(validMarker(marker, 'mutation-renderer', baseline), false);
-  assert.equal(validMarker(marker, 'duplication', '0'.repeat(64)), false);
+  assert.equal(validMarker(marker, 'mutation-fast', '0'.repeat(64)), false);
   writeFileSync(
     marker,
     JSON.stringify({
       schema: 3,
-      gate: 'duplication',
+      gate: 'mutation-fast',
       fingerprint: baseline,
       result: 'failure',
       imageVersion: runner.ImageVersion,
     })
   );
-  assert.equal(validMarker(marker, 'duplication', baseline), false);
+  assert.equal(validMarker(marker, 'mutation-fast', baseline), false);
   writeFileSync(marker, 'corrupt');
-  assert.equal(validMarker(marker, 'duplication', baseline), false);
+  assert.equal(validMarker(marker, 'mutation-fast', baseline), false);
+});
+
+test('retired duplication gates and markers cannot authorize mutation reuse', async () => {
+  const marker = join(fixture, 'retired-gate-marker.json');
+  writeMarker(marker, 'mutation-fast', baseline, runner);
+  const retired = JSON.parse(readFileSync(marker, 'utf8')) as Record<string, unknown>;
+  retired.gate = 'duplication';
+  writeFileSync(marker, JSON.stringify(retired));
+  assert.equal(validMarker(marker, 'mutation-fast', baseline), false);
+  assert.equal(validMarker(marker, 'mutation-renderer', baseline), false);
+  assert.throws(() => fingerprint('duplication', fixture, runner), /Unknown deep gate/);
+  assert.throws(() => writeMarker(marker, 'duplication', baseline, runner), /Unknown deep gate/);
+  await assert.rejects(evaluateReuse(marker, 'duplication', baseline, runner), /Unknown deep gate/);
 });
 
 test('schedule reuses success; manual defaults to fresh and can opt in', () => {
@@ -313,14 +325,14 @@ const oldJob: {
     completed_at: string | null;
   } | null> | null;
 } = {
-  name: '🔍 Duplication',
+  name: '🧬 Fast mutation',
   status: 'completed',
   conclusion: 'success',
   started_at: '2026-09-30T01:00:00Z',
   completed_at: '2026-09-30T01:04:00Z',
   steps: [
     {
-      name: '🔎 Check for new duplication',
+      name: '🧬 Run fast mutation gate',
       status: 'completed',
       conclusion: 'success',
       started_at: '2026-09-30T01:03:40Z',
@@ -341,7 +353,7 @@ const verifyEnv = {
 };
 
 function markerWithTime(path: string, time = analyzedAt, source = runner) {
-  writeMarker(path, 'duplication', baseline!, source);
+  writeMarker(path, 'mutation-fast', baseline!, source);
   const marker = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
   marker.analyzedAt = time;
   writeFileSync(path, JSON.stringify(marker));
@@ -380,7 +392,7 @@ test('missing or invalid markers run fresh without requesting history', async ()
     rmSync(marker, { force: true });
     if (content !== undefined) writeFileSync(marker, content);
     const { api, requests } = historyApi();
-    assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+    assert.deepEqual(await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api), {
       reuse: false,
       reason: 'marker-or-policy-invalid',
     });
@@ -406,7 +418,7 @@ test('reuse evaluates one validated snapshot even if the marker changes after re
       });
       syncBuiltinESMExports();
       const { api } = historyApi();
-      assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+      assert.deepEqual(await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api), {
         reuse: true,
         reason: 'validated-history',
         savedSeconds: 20,
@@ -425,7 +437,7 @@ test('duplicate selected history jobs cannot authorize reuse', async () => {
   const marker = join(fixture, 'ambiguous-marker.json');
   markerWithTime(marker);
   const { api } = historyApi([oldRun], { 100: [oldJob, oldJob] });
-  assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+  assert.deepEqual(await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api), {
     reuse: false,
     reason: 'gate-history-incomplete',
   });
@@ -435,7 +447,7 @@ test('verified origin reports only the completed analysis step duration', async 
   const marker = join(fixture, 'history-marker.json');
   markerWithTime(marker);
   const { api, requests } = historyApi();
-  assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+  assert.deepEqual(await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api), {
     reuse: true,
     reason: 'validated-history',
     savedSeconds: 20,
@@ -459,7 +471,7 @@ test('missing, skipped, duplicate, or invalid analysis timing omits the estimate
     [analysis, analysis],
   ]) {
     const { api } = historyApi([oldRun], { 100: [{ ...oldJob, steps }] });
-    assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+    assert.deepEqual(await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api), {
       reuse: true,
       reason: 'validated-history',
     });
@@ -473,7 +485,7 @@ test('zero-second analysis is reported as zero', async () => {
   const zero = historyApi([oldRun], {
     100: [{ ...oldJob, steps: [{ ...analysis, completed_at: analysis.started_at }] }],
   });
-  assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, zero.api), {
+  assert.deepEqual(await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, zero.api), {
     reuse: true,
     reason: 'validated-history',
     savedSeconds: 0,
@@ -493,7 +505,7 @@ test('later failed, cancelled, and ongoing selected gates invalidate a prior suc
       100: [oldJob],
       101: [{ ...oldJob, status, conclusion }],
     });
-    const decision = await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api);
+    const decision = await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api);
     assert.equal(decision.reuse, false, `${status}/${conclusion}`);
   }
   // A failure that finished while the origin job was marking success must not
@@ -510,7 +522,7 @@ test('later failed, cancelled, and ongoing selected gates invalidate a prior suc
     99: [{ ...oldJob, conclusion: 'failure', completed_at: '2026-09-30T01:04:30Z' }],
   });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, history.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, history.api)).reason,
     'newer-gate-invalid'
   );
 });
@@ -528,7 +540,7 @@ test('same-run retries run fresh after API errors and failed analysis', async ()
     };
     const unavailable = async () => ({ ok: false, json: async () => ({}) });
     assert.equal(
-      (await evaluateReuse(marker, 'duplication', baseline, current, unavailable)).reason,
+      (await evaluateReuse(marker, 'mutation-fast', baseline, current, unavailable)).reason,
       'api-unavailable-or-incomplete'
     );
     // The resulting fresh analysis failed in this run's first attempt. A new
@@ -538,7 +550,7 @@ test('same-run retries run fresh after API errors and failed analysis', async ()
     const failedJob = { ...oldJob, conclusion: 'failure' };
     const failed = historyApi([failedRun, oldRun], { 100: [oldJob], 101: [failedJob] });
     assert.equal(
-      (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, failed.api)).reason,
+      (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, failed.api)).reason,
       'newer-gate-invalid'
     );
     for (const attempt of [2, 3]) {
@@ -549,7 +561,7 @@ test('same-run retries run fresh after API errors and failed analysis', async ()
       assert.deepEqual(
         await evaluateReuse(
           marker,
-          'duplication',
+          'mutation-fast',
           baseline,
           { ...current, GITHUB_RUN_ATTEMPT: String(attempt) },
           history.api
@@ -572,7 +584,7 @@ test('reruns stay fresh even when the earlier selected attempt succeeded', async
   assert.deepEqual(
     await evaluateReuse(
       marker,
-      'duplication',
+      'mutation-fast',
       baseline,
       { ...verifyEnv, GITHUB_RUN_ID: '101', GITHUB_RUN_ATTEMPT: '2' },
       history.api
@@ -590,7 +602,7 @@ test('invalid current attempt provenance refuses reuse before Actions lookup', a
     assert.deepEqual(
       await evaluateReuse(
         marker,
-        'duplication',
+        'mutation-fast',
         baseline,
         { ...verifyEnv, GITHUB_RUN_ATTEMPT: attempt },
         history.api
@@ -617,7 +629,7 @@ test('complete second pages of workflow runs and jobs are required', async () =>
   }));
   const complete = historyApi([...older, oldRun], { 100: [...unrelatedJobs, oldJob] });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, complete.api)).reuse,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, complete.api)).reuse,
     true
   );
   assert.ok(
@@ -638,7 +650,7 @@ test('complete second pages of workflow runs and jobs are required', async () =>
     99: [{ ...oldJob, conclusion: 'failure' }],
   });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, invalid.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, invalid.api)).reason,
     'newer-gate-invalid'
   );
 });
@@ -651,17 +663,17 @@ test('skipped unrelated gate is safe, while missing selected gate and reruns run
     101: [{ ...oldJob, conclusion: 'skipped' }],
   });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, skipped.api)).reuse,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, skipped.api)).reuse,
     true
   );
   const missing = historyApi([laterRun, oldRun], { 100: [oldJob], 101: [] });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, missing.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, missing.api)).reason,
     'gate-history-incomplete'
   );
   const rerun = historyApi([{ ...oldRun, run_attempt: 2 }, laterRun], { 100: [oldJob] });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, rerun.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, rerun.api)).reason,
     'origin-invalid'
   );
   const olderRerun = historyApi(
@@ -669,7 +681,7 @@ test('skipped unrelated gate is safe, while missing selected gate and reruns run
     { 100: [oldJob], 99: [{ ...oldJob, conclusion: 'failure' }] }
   );
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, olderRerun.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, olderRerun.api)).reason,
     'newer-gate-invalid'
   );
 });
@@ -701,7 +713,7 @@ test('a newer successful marker restores reuse after the earlier failed run', as
       102: [recoveredJob],
     });
     assert.equal(
-      (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api)).reuse,
+      (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, api)).reuse,
       true
     );
   }
@@ -712,27 +724,27 @@ test('unavailable, truncated, or forged Actions history always runs fresh', asyn
   markerWithTime(marker);
   const absent = historyApi([laterRun]);
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, absent.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, absent.api)).reason,
     'origin-invalid'
   );
   const unavailable = async () => ({ ok: false, json: async () => ({}) });
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, unavailable)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, unavailable)).reason,
     'api-unavailable-or-incomplete'
   );
   const truncated = historyApi([oldRun], { 100: [oldJob] }, (url) =>
     url.pathname.endsWith('/runs') ? { total_count: 101, workflow_runs: [oldRun] } : undefined
   );
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, truncated.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, truncated.api)).reason,
     'api-unavailable-or-incomplete'
   );
   markerWithTime(marker, '2099-01-01T00:00:00Z');
-  assert.equal(validMarker(marker, 'duplication', baseline), false);
+  assert.equal(validMarker(marker, 'mutation-fast', baseline), false);
   markerWithTime(marker, '2026-09-30T00:55:00Z');
   const validApi = historyApi();
   assert.equal(
-    (await evaluateReuse(marker, 'duplication', baseline, verifyEnv, validApi.api)).reason,
+    (await evaluateReuse(marker, 'mutation-fast', baseline, verifyEnv, validApi.api)).reason,
     'origin-invalid'
   );
 });
@@ -749,22 +761,22 @@ test('CLI fails closed when Actions history cannot be authenticated', () => {
     });
     return readFileSync(output, 'utf8');
   };
-  assert.match(run(['fingerprint', 'duplication']), new RegExp(`fingerprint=${baseline}`));
+  assert.match(run(['fingerprint', 'mutation-fast']), new RegExp(`fingerprint=${baseline}`));
   const verifyEnv = {
     CACHE_HIT: 'true',
     RESTORE_OUTCOME: 'success',
     GITHUB_EVENT_NAME: 'schedule',
   };
-  assert.match(run(['verify', 'duplication', baseline, marker], verifyEnv), /reuse=false/);
-  run(['mark', 'duplication', baseline, marker]);
-  assert.match(run(['verify', 'duplication', baseline, marker], verifyEnv), /reuse=false/);
+  assert.match(run(['verify', 'mutation-fast', baseline, marker], verifyEnv), /reuse=false/);
+  run(['mark', 'mutation-fast', baseline, marker]);
+  assert.match(run(['verify', 'mutation-fast', baseline, marker], verifyEnv), /reuse=false/);
   assert.match(
-    run(['verify', 'duplication', baseline, marker], verifyEnv),
+    run(['verify', 'mutation-fast', baseline, marker], verifyEnv),
     /reason=provenance-unavailable/
   );
-  assert.match(run(['verify', 'duplication', baseline, marker], verifyEnv), /origin_run_id=100/);
+  assert.match(run(['verify', 'mutation-fast', baseline, marker], verifyEnv), /origin_run_id=100/);
   assert.match(
-    run(['verify', 'duplication', baseline, marker], {
+    run(['verify', 'mutation-fast', baseline, marker], {
       ...verifyEnv,
       RESTORE_OUTCOME: 'failure',
     }),
@@ -780,7 +792,7 @@ test('CLI requires a nonempty marker path before writing outputs or markers', ()
       writeFileSync(output, '');
       const result: SpawnSyncReturns<string> = spawnSync(
         process.execPath,
-        [script, command, 'duplication', baseline, ...path],
+        [script, command, 'mutation-fast', baseline, ...path],
         {
           cwd: fixture,
           env: { ...process.env, ...runner, GITHUB_OUTPUT: output },
@@ -816,7 +828,7 @@ syncBuiltinESMExports();
   );
   execFileSync(
     process.execPath,
-    ['--import', preload, script, 'verify', 'duplication', baseline, marker],
+    ['--import', preload, script, 'verify', 'mutation-fast', baseline, marker],
     {
       cwd: fixture,
       env: {
@@ -947,7 +959,7 @@ test('each deep job pins Node before fingerprint without installing dependencies
   );
   assert.doesNotMatch(workflow, /^ {2}changes:/m);
   assert.match(workflow, /reuse_success:\n\s+description:.*\n\s+required: true\n\s+default: false/);
-  for (const gate of ['duplication', 'mutation-fast', 'mutation-renderer']) {
+  for (const gate of ['mutation-fast', 'mutation-renderer']) {
     const job = workflow.split(`\n  ${gate}:\n`)[1]?.split(/\n {2}[a-z][\w-]*:\n/)[0];
     assert.ok(job, gate);
     const checkout = job.indexOf('      - name: 📥 Checkout code');
