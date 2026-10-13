@@ -56,6 +56,47 @@ describe('polling interval normalization', () => {
   });
 });
 
+describe('scalar and nested normalization boundaries', () => {
+  it('coerces finite numbers, rounds cache budgets, and swaps inverted duration pairs', () => {
+    const result = normalizeStoredSettings({
+      speedPxPerSec: '499',
+      emojiCacheMb: '2.5',
+      scrollDurationMinMs: 20_000,
+      scrollDurationMaxMs: 5_000,
+      outline: { widthPx: '9', opacity: '-1', enabled: 'yes' },
+    });
+
+    expect(result.speedPxPerSec).toBe(499);
+    expect(result.emojiCacheMb).toBe(3);
+    expect([result.scrollDurationMinMs, result.scrollDurationMaxMs]).toEqual([5_000, 15_000]);
+    expect(result.outline).toEqual({
+      enabled: DEFAULT_SETTINGS.outline.enabled,
+      widthPx: 8,
+      opacity: 0.5,
+    });
+  });
+
+  it('rejects malformed scalar and nested values independently', () => {
+    const result = normalizeStoredSettings({
+      allowShortTextMessages: 'false',
+      fontFamily: 'Bad; font',
+      translationMode: 'side-by-side',
+      opacity: 'not a number',
+      outline: { widthPx: Number.POSITIVE_INFINITY, opacity: 0.4 },
+      showAuthor: { normal: 'true', member: true },
+    });
+
+    expect(result.allowShortTextMessages).toBe(DEFAULT_SETTINGS.allowShortTextMessages);
+    expect(result.fontFamily).toBe(DEFAULT_SETTINGS.fontFamily);
+    expect(result.translationMode).toBe(DEFAULT_SETTINGS.translationMode);
+    expect(result.opacity).toBe(DEFAULT_SETTINGS.opacity);
+    expect(result.outline.widthPx).toBe(DEFAULT_SETTINGS.outline.widthPx);
+    expect(result.outline.opacity).toBe(0.5);
+    expect(result.showAuthor.normal).toBe(DEFAULT_SETTINGS.showAuthor.normal);
+    expect(result.showAuthor.member).toBe(true);
+  });
+});
+
 describe('DEFAULT_SETTINGS', () => {
   it('has expected root defaults', () => {
     expect(DEFAULT_SETTINGS.enabled).toBe(true);

@@ -66,6 +66,30 @@ describe('RenderWorkerManager', () => {
   });
 
   describe('worker configuration', () => {
+    it('copies every selected setting and derives the initial wire fields', () => {
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        outline: { enabled: false, widthPx: 5, opacity: 0.4 },
+        colors: { ...DEFAULT_SETTINGS.colors, normal: '#112233' },
+      };
+      const config = RenderWorkerManager.buildWorkerConfig(settings);
+
+      for (const key of RenderWorkerManager.WORKER_CONFIG_KEYS) {
+        expect(config[key]).toEqual(settings[key]);
+      }
+      expect(config.outlineWidthPx).toBe(0);
+      expect(config.outlineOpacity).toBe(0);
+      expect(config.color).toBe('#112233');
+      expect(config.authorColors).toEqual(settings.colors);
+      expect(config.authorColors).not.toBe(settings.colors);
+      expect(config.showAuthor).toBe(settings.showAuthor);
+      expect(config.reducedMotion).toBe(
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      );
+      expect(config.isReplayMode).toBe(false);
+      expect(config.translationGeneration).toBe(0);
+    });
+
     it('copies author background colors into the worker config snapshot', () => {
       const config = RenderWorkerManager.buildWorkerConfig(DEFAULT_SETTINGS);
 
@@ -94,6 +118,38 @@ describe('RenderWorkerManager', () => {
       });
       const postedConfig = postMessage.mock.calls[0]?.[0].config as Record<string, unknown>;
       expect(postedConfig.backgroundColors).not.toBe(DEFAULT_SETTINGS.backgroundColors);
+    });
+
+    it('updates selected and derived fields without resetting replay mode', () => {
+      const postMessage = vi.fn();
+      (manager as unknown as { worker: Worker | null }).worker = {
+        postMessage,
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as Worker;
+      manager.setActive(true);
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        speedPxPerSec: 320,
+        outline: { enabled: false, widthPx: 8, opacity: 0.2 },
+        colors: { ...DEFAULT_SETTINGS.colors, normal: '#ABCDEF' },
+      };
+
+      manager.updateSettings(settings, 7);
+
+      const update = postMessage.mock.calls[0]?.[0];
+      expect(update.type).toBe('updateConfig');
+      expect(update.config).toMatchObject({
+        speedPxPerSec: 320,
+        outlineWidthPx: 0,
+        outlineOpacity: 0,
+        color: '#ABCDEF',
+        translationGeneration: 7,
+      });
+      expect(update.config).not.toHaveProperty('isReplayMode');
+      expect(update.config.authorColors).not.toBe(settings.colors);
+      expect(update.config.showAuthor).toBe(settings.showAuthor);
     });
   });
 

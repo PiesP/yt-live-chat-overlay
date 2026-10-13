@@ -36,6 +36,7 @@ import {
   WORKER_DROP_REASONS,
   type WorkerActiveMotion,
   type WorkerBatchReceipt,
+  type WorkerConfig,
   type WorkerDropReasonCounts,
   type WorkerMessageGeometry,
   type WorkerMotionSnapshot,
@@ -95,7 +96,7 @@ const log = createLogger('RenderWorkerManager');
 
 export class RenderWorkerManager {
   /** WorkerConfig keys subset of OverlaySettings for cross-thread transfer. */
-  static readonly WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
+  static readonly WORKER_CONFIG_KEYS = [
     'speedPxPerSec',
     'fontSize',
     'fontBaseViewportHeight',
@@ -147,26 +148,73 @@ export class RenderWorkerManager {
     'preserveUserColor',
     'backgroundQueueMax',
     'translationBatchSize',
-  ];
+  ] as const satisfies readonly (keyof OverlaySettings & keyof WorkerConfig)[];
   /**
    * Build a flat, serializable config object from OverlaySettings.
    * Only includes keys needed by the render worker.
    */
-  static buildWorkerConfig(settings: OverlaySettings): Record<string, unknown> {
-    const config: Record<string, unknown> = {};
-    for (const key of RenderWorkerManager.WORKER_CONFIG_KEYS) {
-      config[key] = settings[key];
-    }
-    config.outlineWidthPx = settings.outline.enabled ? settings.outline.widthPx : 0;
-    config.outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
-    config.authorColors = { ...settings.colors };
-    config.backgroundColors = { ...settings.backgroundColors };
-    config.color = settings.colors.normal;
-    // Workers cannot access matchMedia — main thread relays the OS preference.
-    config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    config.isReplayMode = false;
-    config.translationGeneration = 0;
-    return config;
+  static buildWorkerConfig(settings: OverlaySettings): WorkerConfig {
+    return {
+      speedPxPerSec: settings.speedPxPerSec,
+      fontSize: settings.fontSize,
+      fontBaseViewportHeight: settings.fontBaseViewportHeight,
+      fontMinSize: settings.fontMinSize,
+      fontMaxSize: settings.fontMaxSize,
+      fontWeight: settings.fontWeight,
+      fontFamily: settings.fontFamily,
+      opacity: settings.opacity,
+      laneSpacing: settings.laneSpacing,
+      safeTop: settings.safeTop,
+      safeBottom: settings.safeBottom,
+      maxConcurrentMessages: settings.maxConcurrentMessages,
+      danmakuMode: settings.danmakuMode,
+      backlogSpeedMultiplier: settings.backlogSpeedMultiplier,
+      depthLayersEnabled: settings.depthLayersEnabled,
+      depthFarSpeedMul: settings.depthFarSpeedMul,
+      depthNearSpeedMul: settings.depthNearSpeedMul,
+      depthFarOpacityMul: settings.depthFarOpacityMul,
+      motionBlurEnabled: settings.motionBlurEnabled,
+      motionBlurAlpha: settings.motionBlurAlpha,
+      backlogOpacityMultiplier: settings.backlogOpacityMultiplier,
+      fadeDurationMs: settings.fadeDurationMs,
+      modOwnerDurationMultiplier: settings.modOwnerDurationMultiplier,
+      superChatOpacity: settings.superChatOpacity,
+      superChatMaxBodyLines: settings.superChatMaxBodyLines,
+      membershipMaxBodyLines: settings.membershipMaxBodyLines,
+      showAuthor: settings.showAuthor,
+      showSuperChatAmount: settings.showSuperChatAmount,
+      translationEnabled: settings.translationEnabled,
+      translationMode: settings.translationMode,
+      exitPaddingPx: settings.exitPaddingPx,
+      scrollDurationMinMs: settings.scrollDurationMinMs,
+      scrollDurationMaxMs: settings.scrollDurationMaxMs,
+      topBottomDurationMs: settings.topBottomDurationMs,
+      queueMaxSize: settings.queueMaxSize,
+      maxMessageAgeMs: settings.maxMessageAgeMs,
+      headwayGapRatio: settings.headwayGapRatio,
+      emojiCacheMb: settings.emojiCacheMb,
+      photoCacheMb: settings.photoCacheMb,
+      stickerCacheMb: settings.stickerCacheMb,
+      textCacheMb: settings.textCacheMb,
+      emojiFetchLimit: settings.emojiFetchLimit,
+      emojiFetchTimeoutMs: settings.emojiFetchTimeoutMs,
+      failedEmojiRetryMins: settings.failedEmojiRetryMins,
+      staggerMaxDelayMs: settings.staggerMaxDelayMs,
+      staggerMediumDelayMs: settings.staggerMediumDelayMs,
+      ignoreReducedMotion: settings.ignoreReducedMotion,
+      preserveUserColor: settings.preserveUserColor,
+      backgroundQueueMax: settings.backgroundQueueMax,
+      translationBatchSize: settings.translationBatchSize,
+      outlineWidthPx: settings.outline.enabled ? settings.outline.widthPx : 0,
+      outlineOpacity: settings.outline.enabled ? settings.outline.opacity : 0,
+      authorColors: { ...settings.colors },
+      backgroundColors: { ...settings.backgroundColors },
+      color: settings.colors.normal,
+      // Workers cannot access matchMedia — main thread relays the OS preference.
+      reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      isReplayMode: false,
+      translationGeneration: 0,
+    };
   }
 
   private worker: Worker | null = null;
@@ -417,9 +465,8 @@ export class RenderWorkerManager {
         return { started: false, canvasTransferred };
       }
 
-      // TS can't infer that worker is non-null here despite inner catch always
-      // returning — assert non-null so the rest of the block sees Worker.
-      const w = worker!;
+      if (worker === null) throw new Error('Worker creation returned no instance');
+      const w = worker;
 
       // ── Worker ready — now transfer the canvas ───────────────────
       // Apply DPR to canvas backing store BEFORE transferring to offscreen,
@@ -1022,17 +1069,16 @@ export class RenderWorkerManager {
     this.deps.settings = settings;
     if (!this.active || !this.worker) return;
 
-    const config = buildPartialWorkerConfig(
-      settings,
-      RenderWorkerManager.WORKER_CONFIG_KEYS
-    ) as Record<string, unknown>;
-    config.outlineWidthPx = settings.outline.enabled ? settings.outline.widthPx : 0;
-    config.outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
-    config.authorColors = { ...settings.colors };
-    config.backgroundColors = { ...settings.backgroundColors };
-    config.color = settings.colors.normal;
-    config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    config.translationGeneration = translationGeneration;
+    const config: Partial<WorkerConfig> = {
+      ...buildPartialWorkerConfig(settings, RenderWorkerManager.WORKER_CONFIG_KEYS),
+      outlineWidthPx: settings.outline.enabled ? settings.outline.widthPx : 0,
+      outlineOpacity: settings.outline.enabled ? settings.outline.opacity : 0,
+      authorColors: { ...settings.colors },
+      backgroundColors: { ...settings.backgroundColors },
+      color: settings.colors.normal,
+      reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      translationGeneration,
+    };
     sendUpdateConfigToWorker({ worker: this.worker }, config);
     if (messageLayoutChanged) {
       const retained = [...this.sentMessages.entries()].filter(
@@ -1058,7 +1104,7 @@ export class RenderWorkerManager {
   /** Send replay mode state to the worker. */
   sendReplayModeToWorker(isReplayMode: boolean): void {
     if (!this.worker) return;
-    sendUpdateConfigToWorker({ worker: this.worker }, { isReplayMode } as Record<string, unknown>);
+    sendUpdateConfigToWorker({ worker: this.worker }, { isReplayMode });
   }
 
   /**
@@ -1067,7 +1113,7 @@ export class RenderWorkerManager {
    */
   sendReducedMotion(reducedMotion: boolean): void {
     if (!this.worker) return;
-    sendUpdateConfigToWorker({ worker: this.worker }, { reducedMotion } as Record<string, unknown>);
+    sendUpdateConfigToWorker({ worker: this.worker }, { reducedMotion });
   }
 
   /**
