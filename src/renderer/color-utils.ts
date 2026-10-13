@@ -17,16 +17,16 @@ export function parseAnyColor(colorString: string): RgbColor | null {
     if (hex.length < 3) return null;
     if (hex.length === 3) {
       // #RGB → expand each char to two (#RRGGBB)
-      const r = parseInt(hex[0]! + hex[0], 16);
-      const g = parseInt(hex[1]! + hex[1], 16);
-      const b = parseInt(hex[2]! + hex[2], 16);
+      const r = parseInt(hex.charAt(0) + hex.charAt(0), 16);
+      const g = parseInt(hex.charAt(1) + hex.charAt(1), 16);
+      const b = parseInt(hex.charAt(2) + hex.charAt(2), 16);
       return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? { r, g, b } : null;
     }
     if (hex.length === 4) {
       // #RGBA → expand first 3 chars (#RRGGBB), drop alpha (RgbColor has no alpha field)
-      const r = parseInt(hex[0]! + hex[0], 16);
-      const g = parseInt(hex[1]! + hex[1], 16);
-      const b = parseInt(hex[2]! + hex[2], 16);
+      const r = parseInt(hex.charAt(0) + hex.charAt(0), 16);
+      const g = parseInt(hex.charAt(1) + hex.charAt(1), 16);
+      const b = parseInt(hex.charAt(2) + hex.charAt(2), 16);
       return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? { r, g, b } : null;
     }
     const r = parseInt(hex.slice(0, 2), 16);

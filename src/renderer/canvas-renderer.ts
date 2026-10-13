@@ -1029,12 +1029,15 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     // Defer trimming to a background task so it doesn't compete with
     // frame-critical rendering or message processing.
-    scheduleOverlayTask(
+    void scheduleOverlayTask(
       () => {
         this.pendingQueue.trim(this.settings.backgroundQueueMax);
       },
       { priority: 'background' }
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      log.warn('renderer.background-queue.trim-failed', { error: String(error) });
+    });
   }
 
   /** Drain all pending queue messages for re-injection (used by overlay refresh). */
@@ -1495,18 +1498,21 @@ export class CanvasRenderer extends RendererBase {
           ? message.userColor
           : (this.settings.colors[message.authorType] ?? this.settings.colors.normal);
       const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
-      warmTextBitmapCache(
-        toSharedContentSegments(message.content),
-        this.settings.fontSize,
-        this.settings.fontWeight,
-        this.settings.fontFamily,
-        warmColor,
-        this.settings.outline.widthPx,
-        this.settings.outline.opacity,
-        this.textBitmapCache,
-        this.ctx!,
-        farSpacing
-      );
+      const renderCtx = this.ctx;
+      if (renderCtx) {
+        warmTextBitmapCache(
+          toSharedContentSegments(message.content),
+          this.settings.fontSize,
+          this.settings.fontWeight,
+          this.settings.fontFamily,
+          warmColor,
+          this.settings.outline.widthPx,
+          this.settings.outline.opacity,
+          this.textBitmapCache,
+          renderCtx,
+          farSpacing
+        );
+      }
     }
 
     return { placed: true, oversized: false, staggerDelayMs };
@@ -1651,7 +1657,8 @@ export class CanvasRenderer extends RendererBase {
     this.lastRenderActivity = performance.now();
     if (trackedOversized.length === 0) return;
 
-    const first = trackedOversized[0]!;
+    const first = trackedOversized[0];
+    if (!first) return;
     const firstEstHeight = Math.round(this.estimateDimensions(first).height);
     const laneCount = this.laneAllocator.getLaneCount();
     const requiredSlots = Math.ceil(
@@ -1867,6 +1874,7 @@ export class CanvasRenderer extends RendererBase {
         isReplay: this.replayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.size,
+        // biome-ignore lint/style/noNonNullAssertion: fastRandom yields [0, 1), bounding the index to this 256-entry table.
         staggerSample: CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
         maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
         mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
@@ -2223,9 +2231,11 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // Re-attempt translator creation if it previously failed due to missing
-    // user activation or model download. Fire-and-forget — configure() below
-    // serializes behind configurePromise so they don't race.
-    this.translationService.onUserActivation();
+    // user activation or model download. Both calls serialize through the
+    // translation service's lifecycle queue.
+    void this.translationService.onUserActivation().catch((error: unknown) => {
+      log.debug('renderer.translation.activation-retry-failed', { error: String(error) });
+    });
 
     // Invalidate pending detection when its enabled/source configuration changes.
     const sourceChanged = settings.translationSource !== prevSource;

@@ -280,8 +280,7 @@ function wrapCharSegments(
   let currentWidth = 0;
 
   const chars: string[] = splitGraphemeClusters(word);
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i]!;
+  for (const ch of chars) {
     const chWidth = measureTextFn(ch);
     if (currentWidth + chWidth > maxWidth && current.length > 0) {
       segments.push({ text: current, width: currentWidth });

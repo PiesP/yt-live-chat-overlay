@@ -481,7 +481,7 @@ export class WorkerRenderer {
   private static TEXT_MEASURE_CACHE_MAX = 500;
   /** Pre-computed exponential distribution table for stagger delay (256 entries).
    *  Each entry = -ln(1 - (i+0.5)/256), yielding a positive exponential sample.
-   *  Indexed by floor(Math.random() * 256) — avoids per-message Math.log calls. */
+   *  Indexed by floor(fastRandom() * 256) — avoids per-message Math.log calls. */
   private static readonly STAGGER_EXP_TABLE: Float64Array = (() => {
     const t = new Float64Array(256);
     for (let i = 0; i < 256; i++) {
@@ -1564,6 +1564,7 @@ export class WorkerRenderer {
         isReplay: this.config.isReplayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.length,
+        // biome-ignore lint/style/noNonNullAssertion: fastRandom yields [0, 1), bounding the index to this 256-entry table.
         staggerSample: WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
         maxStaggerDelayMs: this.config.staggerMaxDelayMs,
         mediumStaggerDelayMs: this.config.staggerMediumDelayMs,
@@ -1888,6 +1889,7 @@ export class WorkerRenderer {
                   msg.height,
                   sx,
                   sy,
+                  // biome-ignore lint/style/noNonNullAssertion: the active bucket pass assigns elapsed before drawing.
                   msg._frameElapsed!,
                   msg.cardConfigWorker,
                   cfg.fontSize,
@@ -2332,18 +2334,21 @@ export class WorkerRenderer {
               this.config.color ||
               DEFAULT_TEXT_COLOR;
         const farSpacing = speedTier === SPEED_TIER.FAR ? '1px' : undefined;
-        warmTextBitmapCache(
-          entry.content,
-          this.getEffectiveFontSize(),
-          this.config.fontWeight,
-          this.config.fontFamily,
-          warmColor,
-          this.config.outlineWidthPx,
-          this.config.outlineOpacity,
-          this.textBitmapCache,
-          this.ctx!,
-          farSpacing
-        );
+        const renderCtx = this.ctx;
+        if (renderCtx) {
+          warmTextBitmapCache(
+            entry.content,
+            this.getEffectiveFontSize(),
+            this.config.fontWeight,
+            this.config.fontFamily,
+            warmColor,
+            this.config.outlineWidthPx,
+            this.config.outlineOpacity,
+            this.textBitmapCache,
+            renderCtx,
+            farSpacing
+          );
+        }
       }
     }
     if (committed.size > 0) {
