@@ -383,6 +383,21 @@ describe('findPlacementShared', () => {
       waitMs: 0,
     });
   });
+
+  it('respects exclusions across every slot and falls back across incompatible speed tiers', () => {
+    const state = makeState(4);
+    state.collidedLanes.add(0);
+    state.speedTierLanes.set(1, { tier: SPEED_TIER.FAR, until: 5000 });
+    state.speedTierLanes.set(2, { tier: SPEED_TIER.FAR, until: 5000 });
+
+    // The top block is excluded, and the next block is tier-incompatible.
+    expect(findPlacementShared(state, 0, 80, 40, 100, SPEED_TIER.NEAR, () => 0, 'top')).toEqual({
+      laneIndex: 1,
+      waitMs: 0,
+    });
+    state.collidedLanes.add(2);
+    expect(findPlacementShared(state, 0, 80, 40, 100, SPEED_TIER.NEAR, () => 0, 'top')).toBeNull();
+  });
 });
 
 // ── resetBatchShared ─────────────────────────────────────────────

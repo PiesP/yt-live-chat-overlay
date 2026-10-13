@@ -10,6 +10,7 @@ import {
   computeOccupancyMs,
   findPlacementShared,
   heapSiftDown,
+  type LaneAllocationState,
   type LaneSelectionStrategy,
   resetBatchShared,
 } from '@renderer/layout/lane-shared';
@@ -95,27 +96,17 @@ export interface LaneAllocatorSnapshot {
  *   - Minimum readability duration (via computeScrollDuration)
  */
 export class LaneAllocator {
-  /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
-  private heap: [number, number][] = [];
-  /** Reverse map: laneIndex → heap index for O(1) lookup and update */
-  private indexMap: Map<number, number> = new Map();
+  /** Mutable allocation data shared with the main-thread and Worker algorithms. */
+  private readonly state: LaneAllocationState = {
+    heap: [],
+    indexMap: new Map(),
+    numLanes: 0,
+    // Two tiers within one level may share a lane; resetBatch prunes expired entries.
+    speedTierLanes: new Map(),
+    // Retries retain candidate exclusions until the next message or batch.
+    collidedLanes: new Set(),
+  };
   private laneHeight = 0;
-  private numLanes = 0;
-
-  /**
-   * Candidate-local exclusions. Cleared before evaluating each new message;
-   * retries of that message retain the exclusions.
-   */
-  private collidedLanes: Set<number> = new Set();
-
-  /**
-   * Per-lane active speed tier tracking: laneIndex → { tier, until }.
-   * Replaces the old realTimeLanesUntil / backlogLanesUntil dual-map.
-   * Two tiers are speed-compatible when within 1 tier of each other
-   * (e.g. Mid and Near can share, but Far and Backlog cannot).
-   * Stale entries (until < now) are cleared on each resetBatch().
-   */
-  private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -146,13 +137,13 @@ export class LaneAllocator {
   }
 
   reset(dimensions: OverlayDimensions | null, now: number = performance.now()): void {
-    this.heap = [];
-    this.indexMap = new Map();
-    this.collidedLanes.clear();
-    this.speedTierLanes.clear();
+    this.state.heap = [];
+    this.state.indexMap.clear();
+    this.state.collidedLanes.clear();
+    this.state.speedTierLanes.clear();
     if (!dimensions) {
       this.laneHeight = 0;
-      this.numLanes = 0;
+      this.state.numLanes = 0;
       return;
     }
 
@@ -171,41 +162,40 @@ export class LaneAllocator {
     );
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
-    this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+    this.state.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
 
     log.debug('Reset', {
-      lanes: this.numLanes,
+      lanes: this.state.numLanes,
       height: Math.round(this.laneHeight),
       density: this.options.laneDensityFactor,
     });
 
     // Uniform initialization: all lanes start at the same available time.
-    this.heap = buildLaneHeap(this.numLanes, now, this.indexMap);
+    this.state.heap = buildLaneHeap(this.state.numLanes, now, this.state.indexMap);
   }
 
   isEmpty(): boolean {
-    return this.heap.length === 0;
+    return this.state.heap.length === 0;
   }
 
   /**
    * Export current allocator state as a serializable snapshot.
-   * Transient/derived state (collidedLanes, utilization counters) is
-   * excluded — they are reset on the next frame via resetBatch().
+   * Candidate exclusions are omitted; resetBatch() clears them for the next frame.
    */
   snapshot(): LaneAllocatorSnapshot {
     const indexMap: Record<number, number> = {};
-    this.indexMap.forEach((v, k) => {
+    this.state.indexMap.forEach((v, k) => {
       indexMap[k] = v;
     });
     const speedTierMap: Record<number, { tier: number; until: number }> = {};
-    this.speedTierLanes.forEach((v, k) => {
+    this.state.speedTierLanes.forEach((v, k) => {
       speedTierMap[k] = { tier: v.tier, until: v.until };
     });
     return {
-      heap: structuredClone(this.heap),
+      heap: structuredClone(this.state.heap),
       indexMap,
       laneHeight: this.laneHeight,
-      laneCount: this.numLanes,
+      laneCount: this.state.numLanes,
       speedTierLanes: speedTierMap,
     };
   }
@@ -215,31 +205,33 @@ export class LaneAllocator {
    * Resets all transient state — call before the next frame's drainQueue.
    */
   restore(snapshot: LaneAllocatorSnapshot): void {
-    this.heap = structuredClone(snapshot.heap);
-    this.indexMap = new Map(Object.entries(snapshot.indexMap).map(([k, v]) => [Number(k), v]));
+    this.state.heap = structuredClone(snapshot.heap);
+    this.state.indexMap = new Map(
+      Object.entries(snapshot.indexMap).map(([k, v]) => [Number(k), v])
+    );
     this.laneHeight = snapshot.laneHeight;
-    this.numLanes = snapshot.laneCount;
-    this.speedTierLanes = new Map(
+    this.state.numLanes = snapshot.laneCount;
+    this.state.speedTierLanes = new Map(
       Object.entries(snapshot.speedTierLanes).map(([k, v]) => [
         Number(k),
         { tier: v.tier, until: v.until },
       ])
     );
-    this.collidedLanes.clear();
+    this.state.collidedLanes.clear();
   }
 
   getLaneCount(): number {
-    return this.numLanes;
+    return this.state.numLanes;
   }
 
   /** Get current lane utilization ratio from live lane timers. */
   getUtilization(now: number = performance.now()): number {
-    if (this.heap.length === 0) return 0;
+    if (this.state.heap.length === 0) return 0;
     let occupied = 0;
-    for (const [, availableAt] of this.heap) {
+    for (const [, availableAt] of this.state.heap) {
       if (availableAt > now) occupied++;
     }
-    return occupied / this.heap.length;
+    return occupied / this.state.heap.length;
   }
 
   getLaneHeight(): number {
@@ -259,15 +251,13 @@ export class LaneAllocator {
     random: () => number = Math.random,
     exactMotionValidation = false
   ): LanePlacement | null {
-    const totalLanes = this.numLanes;
+    const totalLanes = this.state.numLanes;
     if (totalLanes <= 0) return null;
 
     const slotCount = getRowSlotCount(messageHeight, this.laneHeight, this.options.laneSpacing);
 
-    // Delegate to shared pure function via LaneAllocationState cast.
-    const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
     const result = findPlacementShared(
-      state,
+      this.state,
       now,
       messageHeight,
       this.laneHeight,
@@ -309,9 +299,8 @@ export class LaneAllocator {
     entryOffsetPx = 0
   ): void {
     const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth, entryOffsetPx);
-    const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
     commitPlacementShared(
-      state,
+      this.state,
       placement.laneIndex,
       placement.slotCount,
       startTime,
@@ -331,27 +320,26 @@ export class LaneAllocator {
     // Heap integrity guard: heap length must match index map size.
     // A mismatch indicates a corrupted laneIndexToHeapIndex mapping
     // (duplicate or missing lane entries).
-    if (this.heap.length !== this.indexMap.size) {
+    if (this.state.heap.length !== this.state.indexMap.size) {
       log.warn('renderer.lane-allocator.heap-integrity', {
-        heapLength: this.heap.length,
-        indexMapSize: this.indexMap.size,
+        heapLength: this.state.heap.length,
+        indexMapSize: this.state.indexMap.size,
       });
       // Rebuild laneIndexToHeapIndex from scratch to restore consistency
-      this.indexMap.clear();
-      for (let i = 0; i < this.heap.length; i++) {
-        const entry = this.heap[i];
-        if (entry) this.indexMap.set(entry[0], i);
+      this.state.indexMap.clear();
+      for (let i = 0; i < this.state.heap.length; i++) {
+        const entry = this.state.heap[i];
+        if (entry) this.state.indexMap.set(entry[0], i);
       }
       // Re-heapify to restore min-heap invariant (corrupted heap may remain
       // after index map rebuild — the heap array itself could be out of order).
-      for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
+      for (let i = Math.floor((this.state.heap.length - 2) / 4); i >= 0; i--) {
         this.siftDown(i);
       }
     }
 
     // Prune expired speed-tier entries and clear collision set.
-    const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
-    resetBatchShared(state, now);
+    resetBatchShared(this.state, now);
   }
 
   /**
@@ -360,12 +348,12 @@ export class LaneAllocator {
    * falling through to the next available lane below.
    */
   markCollision(laneIndex: number): void {
-    this.collidedLanes.add(laneIndex);
+    this.state.collidedLanes.add(laneIndex);
   }
 
   /** Begin evaluating another message without carrying prior candidate failures. */
   clearCandidateExclusions(): void {
-    this.collidedLanes.clear();
+    this.state.collidedLanes.clear();
   }
 
   // ── Private helpers ─────────────────────────────────────────────────
@@ -392,36 +380,29 @@ export class LaneAllocator {
     );
   }
 
-  /**
-   * Allocate a contiguous block of `slotCount` lanes for tall messages
-   * (superchat, membership). Uses a 3-phase strategy:
-   *
-
-  /** Get the available-at time for a lane by its index. */
-
   /** Shift all lane timers and speed-tier tracking by a fixed offset. */
   shiftAll(offsetMs: number): void {
     if (offsetMs <= 0) return;
 
     // Shift lane occupancy timers (4-ary min-heap) and speed-tier tracking
-    if (this.heap.length > 0) {
-      for (let i = 0; i < this.heap.length; i++) {
-        const entry = this.heap[i];
+    if (this.state.heap.length > 0) {
+      for (let i = 0; i < this.state.heap.length; i++) {
+        const entry = this.state.heap[i];
         if (entry) entry[1] += offsetMs;
       }
       // Rebuild heap invariant after bulk update (4-ary)
-      for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
+      for (let i = Math.floor((this.state.heap.length - 2) / 4); i >= 0; i--) {
         this.siftDown(i);
       }
     }
-    for (const [idx, entry] of this.speedTierLanes) {
-      this.speedTierLanes.set(idx, { tier: entry.tier, until: entry.until + offsetMs });
+    for (const [idx, entry] of this.state.speedTierLanes) {
+      this.state.speedTierLanes.set(idx, { tier: entry.tier, until: entry.until + offsetMs });
     }
   }
 
   // ── 4-ary min-heap operations ──────────────────────────────────────
 
   private siftDown(startIdx: number): void {
-    heapSiftDown(this.heap, this.indexMap, startIdx);
+    heapSiftDown(this.state.heap, this.state.indexMap, startIdx);
   }
 }

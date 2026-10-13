@@ -2,11 +2,11 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Shared lane allocation primitives — pure functions usable by both main-thread
- * LaneAllocator and the Web Worker renderer (renderer-worker.ts).
+ * Shared lane allocation computations and deterministic state operations for
+ * main-thread LaneAllocator and the Web Worker renderer (renderer-worker.ts).
  *
- * All functions are stateless (no `this`, no DOM, no side effects beyond
- * parameter mutation). This eliminates the ~190-line duplication of lane
+ * State operations mutate only their explicit parameters; they do not own
+ * renderer state or access the DOM. This eliminates duplication of lane
  * allocation logic between the two contexts.
  */
 
@@ -503,7 +503,7 @@ export function findPlacementShared(
 
 /**
  * Allocate a single lane with three-phase speed-tier scanning.
- * Pure function operating on LaneAllocationState — no `this`.
+ * Reads the supplied LaneAllocationState without mutating it.
  */
 export function allocateSingleLaneShared(
   state: LaneAllocationState,
