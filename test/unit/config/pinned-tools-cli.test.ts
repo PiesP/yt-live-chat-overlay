@@ -1,12 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -17,10 +15,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const source = resolve(import.meta.dirname, '../../../scripts/ci');
 const roots: string[] = [];
-const installerBody = '#!/bin/sh\necho fixture installer\n';
 
 type Pins = {
-  nose: { version: string; installerSha256: string };
   osv: { version: string; image: string };
   semgrep: { version: string; image: string };
 };
@@ -33,10 +29,9 @@ function fixture() {
   mkdirSync(scripts, { recursive: true });
   mkdirSync(bin);
   writeFileSync(join(root, 'package.json'), '{"type":"module"}\n');
-  for (const name of ['pinned-tools.ts', 'check-pinned-tools.ts', 'install-nose.ts'])
+  for (const name of ['pinned-tools.ts', 'check-pinned-tools.ts'])
     copyFileSync(join(source, name), join(scripts, name));
   const pins = JSON.parse(readFileSync(join(source, 'pinned-tools.json'), 'utf8')) as Pins;
-  pins.nose.installerSha256 = createHash('sha256').update(installerBody).digest('hex');
   writeFileSync(join(scripts, 'pinned-tools.json'), JSON.stringify(pins));
   const stub = join(bin, 'mock');
   writeFileSync(
@@ -49,14 +44,12 @@ const args = process.argv.slice(2);
 const root = process.env.FAKE_ROOT;
 const scenario = process.env.MOCK_SCENARIO || '';
 const pins = JSON.parse(fs.readFileSync(path.join(root, 'scripts/ci/pinned-tools.json'), 'utf8'));
-fs.appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify({ command, args,
-  tokens: command === 'sh' ? [process.env.GH_TOKEN, process.env.GITHUB_TOKEN, process.env.NOSE_CLI_GITHUB_TOKEN] : undefined }) + '\\n');
+fs.appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify({ command, args }) + '\\n');
 if (command === 'gh') {
   if (scenario === 'api-fail') process.exit(7);
   const target = args[1];
   if (target.endsWith('/releases?per_page=100')) {
-    const version = target.includes('corca-ai/nose') ? pins.nose.version :
-      target.includes('google/osv-scanner') ? pins.osv.version : pins.semgrep.version;
+    const version = target.includes('google/osv-scanner') ? pins.osv.version : pins.semgrep.version;
     const old = new Date(Date.now() - 48 * 3600000).toISOString();
     const young = new Date(Date.now() - 3600000).toISOString();
     const list = scenario === 'no-mature' ? [{ tag_name: 'v' + version, published_at: young, draft: false, prerelease: false }] :
@@ -65,39 +58,27 @@ if (command === 'gh') {
         { tag_name: 'v' + version, published_at: old, draft: false, prerelease: false },
       ] : [{ tag_name: 'v' + (scenario === 'update' ? '9.9.9' : version), published_at: old, draft: false, prerelease: false }];
     process.stdout.write(JSON.stringify(scenario === 'malformed-api' ? { error: 'bad' } : list));
-  } else {
-    const assets = scenario === 'no-asset' ? [] : [{ name: 'nose-cli-installer.sh',
-      digest: 'sha256:' + (scenario === 'digest-mismatch' ? '0'.repeat(64) : pins.nose.installerSha256) }];
-    process.stdout.write(JSON.stringify({ assets }));
   }
 } else if (command === 'curl') {
-  if (scenario === 'download-signal') process.kill(process.pid, 'SIGTERM');
-  if (scenario === 'download-fail' && args.includes('--location')) process.exit(7);
   if (scenario === 'manifest-fail' && args.includes('--dump-header')) process.exit(7);
-  if (args.includes('--location')) fs.writeFileSync(args[args.indexOf('--output') + 1], ${JSON.stringify(installerBody)});
-  else if (args.some((arg) => arg.includes('ghcr.io/token')))
+  if (args.some((arg) => arg.includes('ghcr.io/token')))
     process.stdout.write(JSON.stringify(scenario === 'no-token' ? {} : { token: 'fixture-token' }));
   else if (scenario !== 'no-image-digest')
     process.stdout.write('Docker-Content-Digest: ' + (scenario === 'image-mismatch' ? 'sha256:' + '0'.repeat(64) : pins.osv.image.split('@')[1]) + '\\r\\n');
-} else if (command === 'sh') {
-  if (scenario === 'installer-signal') process.kill(process.pid, 'SIGTERM');
-  if (scenario === 'installer-fail') process.exit(7);
 }
 `
   );
   chmodSync(stub, 0o755);
-  for (const name of ['gh', 'curl', 'sh']) copyFileSync(stub, join(bin, name));
+  for (const name of ['gh', 'curl']) copyFileSync(stub, join(bin, name));
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH ?? ''}`,
     FAKE_ROOT: root,
     RUNNER_TEMP: root,
     HOME: join(root, 'home with spaces'),
-    GITHUB_PATH: join(root, 'github path'),
     GITHUB_ENV: join(root, 'github env'),
     GH_TOKEN: 'secret-gh',
     GITHUB_TOKEN: 'secret-github',
-    NOSE_CLI_GITHUB_TOKEN: 'secret-nose',
   };
   const run = (name: string, scenario = '', args: string[] = []) => {
     const result = spawnSync(
@@ -113,10 +94,7 @@ if (command === 'gh') {
       ? readFileSync(join(root, 'calls.jsonl'), 'utf8')
           .trim()
           .split('\n')
-          .map(
-            (line) =>
-              JSON.parse(line) as { command: string; args: string[]; tokens?: (string | null)[] }
-          )
+          .map((line) => JSON.parse(line) as { command: string; args: string[] })
       : [];
     return { result, calls };
   };
@@ -128,13 +106,11 @@ afterEach(() => {
 });
 
 describe('pinned tool checker CLI', () => {
-  it('checks exact release, asset and image endpoints in API order', () => {
+  it('checks scanner release and image endpoints in API order', () => {
     const { run, pins } = fixture();
     const { result, calls } = run('check-pinned-tools.ts', 'young-first');
     expect(result.status).toBe(0);
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
-      ['gh', 'api', 'repos/corca-ai/nose/releases?per_page=100'],
-      ['gh', 'api', `repos/corca-ai/nose/releases/tags/v${pins.nose.version}`],
       ['gh', 'api', 'repos/google/osv-scanner/releases?per_page=100'],
       [
         'curl',
@@ -166,15 +142,13 @@ describe('pinned tool checker CLI', () => {
     const { run } = fixture();
     const { result } = run('check-pinned-tools.ts', 'update');
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('::warning title=nose update available::');
+    expect(result.stdout).toContain('::warning title=osv-scanner update available::');
   });
 
   for (const [scenario, message] of [
     ['no-mature', 'No stable'],
     ['api-fail', 'check-pinned-tools:'],
     ['malformed-api', 'Invalid'],
-    ['no-asset', 'digest mismatch'],
-    ['digest-mismatch', 'digest mismatch'],
     ['no-token', 'Invalid GHCR token'],
     ['no-image-digest', 'digest mismatch'],
     ['image-mismatch', 'digest mismatch'],
@@ -202,67 +176,6 @@ describe('pinned tool checker CLI', () => {
     expect(
       calls.some((call) => call.args.includes('repos/semgrep/semgrep/releases?per_page=100'))
     ).toBe(true);
-  });
-});
-
-describe('Nose installer CLI', () => {
-  it('verifies a downloaded installer before one token-scrubbed shell invocation', () => {
-    const { run, root, pins } = fixture();
-    const { result, calls } = run('install-nose.ts');
-    expect(result.status).toBe(0);
-    expect(calls.map((call) => call.command)).toEqual(['curl', 'sh']);
-    expect(calls[0]?.args).toContain(
-      `https://github.com/corca-ai/nose/releases/download/v${pins.nose.version}/nose-cli-installer.sh`
-    );
-    expect(calls[0]?.args).toContain('=https');
-    expect(calls[0]?.args).toEqual(
-      expect.arrayContaining(['--retry', '3', '--retry-delay', '2', '--retry-max-time', '30'])
-    );
-    expect(calls[1]?.tokens).toEqual([null, null, null]);
-    expect(readFileSync(join(root, 'github path'), 'utf8')).toBe(
-      `${join(root, 'home with spaces/.cargo/bin')}\n`
-    );
-  });
-
-  for (const scenario of ['download-fail', 'installer-fail']) {
-    it(`propagates ${scenario} without publishing PATH`, () => {
-      const { run, root } = fixture();
-      const { result, calls } = run('install-nose.ts', scenario);
-      expect(result.status).toBe(7);
-      expect(existsSync(join(root, 'github path'))).toBe(false);
-      expect(calls.map((call) => call.command)).toEqual(
-        scenario === 'download-fail' ? ['curl'] : ['curl', 'sh']
-      );
-      expect(readdirSync(root).filter((name) => name.startsWith('nose-installer-'))).toEqual([]);
-    });
-  }
-
-  for (const scenario of ['download-signal', 'installer-signal']) {
-    it(`preserves ${scenario} and removes temporary files`, () => {
-      const { run, root } = fixture();
-      const { result } = run('install-nose.ts', scenario);
-      expect(result.status, result.stderr).toBe(143);
-      expect(existsSync(join(root, 'github path'))).toBe(false);
-      expect(readdirSync(root).filter((name) => name.startsWith('nose-installer-'))).toEqual([]);
-    });
-  }
-
-  it('preserves command-not-found without reaching a system downloader', () => {
-    const { run, env, root } = fixture();
-    env.PATH = join(root, 'missing-bin');
-    expect(run('install-nose.ts').result.status).toBe(127);
-    expect(existsSync(join(root, 'github path'))).toBe(false);
-  });
-
-  it('rejects a checksum mismatch before execution', () => {
-    const { run, scripts, root, pins } = fixture();
-    pins.nose.installerSha256 = '0'.repeat(64);
-    writeFileSync(join(scripts, 'pinned-tools.json'), JSON.stringify(pins));
-    const { result, calls } = run('install-nose.ts');
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('SHA-256 mismatch');
-    expect(calls.map((call) => call.command)).toEqual(['curl']);
-    expect(existsSync(join(root, 'github path'))).toBe(false);
   });
 });
 
@@ -303,7 +216,7 @@ describe('pinned image environment CLI', () => {
 });
 
 it('rejects missing or malformed metadata before external calls', () => {
-  for (const value of ['{}', '{', '{"nose":{"version":"bad"}}']) {
+  for (const value of ['{}', '{', '{"osv":{"version":"bad"}}']) {
     const { run, scripts } = fixture();
     writeFileSync(join(scripts, 'pinned-tools.json'), value);
     const { result, calls } = run('check-pinned-tools.ts');
@@ -314,7 +227,7 @@ it('rejects missing or malformed metadata before external calls', () => {
 
 it('does no reads, writes, or subprocess calls on module import', () => {
   const { scripts, root, env } = fixture();
-  for (const name of ['pinned-tools.ts', 'check-pinned-tools.ts', 'install-nose.ts']) {
+  for (const name of ['pinned-tools.ts', 'check-pinned-tools.ts']) {
     const result = spawnSync(
       process.execPath,
       [
@@ -327,6 +240,5 @@ it('does no reads, writes, or subprocess calls on module import', () => {
     );
     expect(result.status).toBe(0);
     expect(existsSync(join(root, 'calls.jsonl'))).toBe(false);
-    expect(existsSync(join(root, 'github path'))).toBe(false);
   }
 });
