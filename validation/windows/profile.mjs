@@ -100,11 +100,12 @@ export function exactDeclaredMessageIdsReady(expectedIds) {
   const entries = document.querySelectorAll('.yt-live-chat-overlay-live-region > p');
   const actual = Array.from(entries, (element) => element.dataset.messageId);
   const observedAtMs = Math.round(performance.now());
-  const readiness = (window.__ytAcceptanceReadiness ??= {
+  window.__ytAcceptanceReadiness ??= {
     startedAtMs: observedAtMs,
     firstSeenAtMs: {},
     exactReadyAtMs: null,
-  });
+  };
+  const readiness = window.__ytAcceptanceReadiness;
   for (const id of actual) {
     if (expectedIds.includes(id) && readiness.firstSeenAtMs[id] === undefined) {
       readiness.firstSeenAtMs[id] = observedAtMs;

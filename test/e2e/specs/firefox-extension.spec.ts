@@ -73,6 +73,7 @@ test.describe('Firefox extension runtime', () => {
     }
   });
 
+  // biome-ignore lint/correctness/noEmptyPattern: This native BiDi lane owns its browser and requests no Playwright fixtures.
   test('injects, persists normalized cache settings, renders chat, and survives SPA navigation', async ({}, testInfo) => {
     let browser: FirefoxBidiSession | null = null;
     try {

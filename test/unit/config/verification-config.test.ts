@@ -1,36 +1,59 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
+import { isFunctionDeclaration } from 'typescript/unstable/ast';
+import { API } from 'typescript/unstable/sync';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
 
 describe('Verification configuration', () => {
-  it('keeps the renderer mutation slice on fitting, outlines, and shape detection', () => {
+  it('targets complete fitting, outline, and shape functions and detects an omitted target', () => {
     const config = JSON.parse(
       readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
     ) as { mutate: string[] };
-    const target = config.mutate.find((entry) =>
-      entry.startsWith('src/renderer/canvas/shared.ts:')
-    );
-    const range = target?.match(/:(\d+)-(\d+)$/);
-    expect(range).toBeTruthy();
-    const source = readFileSync(resolve(root, 'src/renderer/canvas/shared.ts'), 'utf8');
-    const selected = source
-      .split('\n')
-      .slice(Number(range?.[1]) - 1, Number(range?.[2]))
-      .join('\n');
-
-    for (const marker of [
-      'if (lo > 0)',
-      "const text = graphemes.slice(0, lo).join('')",
-      'export function strokeTextOutline',
-      'ctx.strokeText(text, x, y)',
-      'function hasRoundRect',
-      'export function drawRoundRect',
-      'ctx.beginPath()',
-      'if (hasRoundRect(ctx))',
-    ]) {
-      expect(selected).toContain(marker);
+    const api = new API({ cwd: root });
+    try {
+      const path = resolve(root, 'src/renderer/canvas/shared.ts');
+      const snapshot = api.updateSnapshot({ openFiles: [path] });
+      const source = snapshot.getDefaultProjectForFile(path)?.program.getSourceFile(path);
+      if (!source) throw new Error('Mutation source is unavailable');
+      const names = ['fitWrappedLineToWidth', 'strokeTextOutline', 'hasRoundRect', 'drawRoundRect'];
+      const functions = source.statements
+        .filter(isFunctionDeclaration)
+        .filter((node) => names.includes(node.name?.text ?? ''));
+      expect(functions).toHaveLength(names.length);
+      function assertTargets(targets: string[]) {
+        const ranges = targets.flatMap((target) => {
+          const match = /^src\/renderer\/canvas\/shared\.ts(?::(\d+)-(\d+))?$/.exec(target);
+          return match ? [[Number(match[1] ?? 1), Number(match[2] ?? Infinity)]] : [];
+        });
+        for (const fn of functions) {
+          if (!fn.body) throw new Error('Mutation target has no body');
+          const start = source!.getLineAndCharacterOfPosition(fn.body.getStart(source)).line + 1;
+          const end = source!.getLineAndCharacterOfPosition(fn.body.getEnd() - 1).line + 1;
+          if (
+            !ranges.some(
+              ([first, last]) =>
+                first !== undefined && last !== undefined && first <= start && last >= end
+            )
+          ) {
+            throw new Error(`Mutation target omitted: ${fn.name?.text}`);
+          }
+        }
+      }
+      assertTargets(config.mutate);
+      expect(() =>
+        assertTargets(
+          config.mutate.filter((entry) => !entry.startsWith('src/renderer/canvas/shared.ts'))
+        )
+      ).toThrow('Mutation target omitted');
+      expect(() => assertTargets(['src/renderer/canvas/shared.ts:1-1'])).toThrow(
+        'Mutation target omitted'
+      );
+    } finally {
+      api.close();
     }
   });
 
@@ -87,32 +110,103 @@ describe('Verification configuration', () => {
     expect(workflow).toContain('playwright-report/');
   });
 
-  it('runs Biome over every published extension TypeScript entrypoint', () => {
-    const config = JSON.parse(readFileSync(resolve(root, 'biome.json'), 'utf8')) as {
-      files?: { includes?: string[] };
-    };
-    const includes = config.files?.includes ?? [];
-
-    expect(includes).toContain('extension/**/*.ts');
-    expect(includes.some((pattern) => pattern.includes('!!**/extension/'))).toBe(false);
-  });
-
-  it('reuses one artifact build pipeline without duplicating the quality gate', () => {
-    const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
-    const scripts = packageJson.scripts ?? {};
-
-    expect(scripts['quality:fix']).toBe('pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s quality');
-    expect(scripts['build:targets:ci']).toBe(
-      'pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts'
-    );
-    expect(scripts['build:all']).toBe('pnpm -s build:targets:ci');
-    expect(scripts['build:all:ci']).toBe(
-      'pnpm -s check:versions && pnpm -s check:i18n && pnpm -s build:targets:ci'
-    );
-    expect(scripts.verify).toBe(
-      'pnpm -s quality && pnpm -s check:versions && pnpm -s build:targets:ci'
-    );
+  it('runs one complete Biome pass, preserves quality order, and propagates failures', () => {
+    const scripts = (
+      JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+        scripts: Record<string, string>;
+      }
+    ).scripts;
+    const directory = mkdtempSync(join(tmpdir(), 'yt-quality-contract-'));
+    try {
+      const bin = join(directory, 'bin');
+      mkdirSync(bin);
+      const log = join(directory, 'calls.jsonl');
+      const record = join(directory, 'record.mjs');
+      writeFileSync(
+        record,
+        `import { appendFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+appendFileSync(process.env.CALL_LOG, JSON.stringify(args) + '\\n');
+process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
+`
+      );
+      for (const tool of ['biome', 'pnpm']) {
+        const shim = join(bin, tool);
+        writeFileSync(shim, `#!/bin/sh\nexec '${process.execPath}' '${record}' ${tool} "$@"\n`);
+        chmodSync(shim, 0o755);
+      }
+      function run(name: string, failure = '') {
+        writeFileSync(log, '');
+        const command = scripts[name];
+        if (!command) throw new Error(`Missing command: ${name}`);
+        const result = spawnSync(command, {
+          shell: true,
+          cwd: directory,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${bin}${delimiter}${process.env.PATH}`,
+            CALL_LOG: log,
+            FAIL_COMMAND: failure,
+          },
+        });
+        expect(result.error).toBeUndefined();
+        const calls = readFileSync(log, 'utf8')
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as string[]);
+        return { status: result.status, calls };
+      }
+      const quality = run('quality');
+      expect(quality.status).toBe(0);
+      expect(quality.calls[0]).toEqual(['biome', 'check', '.']);
+      expect(quality.calls.filter(([tool]) => tool === 'biome')).toHaveLength(1);
+      expect(quality.calls.slice(1).map((call) => call.at(-1))).toEqual([
+        'check',
+        'check:extension',
+        'check:test',
+        'check:e2e',
+        'check:scripts',
+        'test:ci',
+        'check:i18n',
+        'circular',
+        'knip',
+        'quality:nose',
+      ]);
+      const rejected = run('quality', 'biome check .');
+      expect(rejected.status).toBe(17);
+      expect(rejected.calls).toHaveLength(1);
+      const typeFailure = run('quality', 'pnpm -s check:extension');
+      expect(typeFailure.status).toBe(17);
+      expect(typeFailure.calls.map((call) => call.at(-1))).toEqual([
+        '.',
+        'check',
+        'check:extension',
+      ]);
+      expect(run('quality:fix').calls).toEqual([
+        ['biome', 'check', '--write', '.'],
+        ['pnpm', '-s', 'quality'],
+      ]);
+      const targets = [
+        'build:ci',
+        'build:extension:ci',
+        'build:extension:firefox:ci',
+        'check:artifacts',
+      ];
+      expect(run('build:targets:ci').calls.map((call) => call.at(-1))).toEqual(targets);
+      expect(run('verify').calls.map((call) => call.at(-1))).toEqual([
+        'quality',
+        'check:versions',
+        'build:targets:ci',
+      ]);
+      expect(run('build:all:ci').calls.map((call) => call.at(-1))).toEqual([
+        'check:versions',
+        'check:i18n',
+        'build:targets:ci',
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

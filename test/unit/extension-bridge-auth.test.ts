@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 describe('extension storage bridge authentication', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    document
-      .querySelectorAll('script[src^="chrome-extension://"]')
-      .forEach((script) => script.remove());
+    document.querySelectorAll('script[src^="chrome-extension://"]').forEach((script) => {
+      script.remove();
+    });
     vi.resetModules();
   });
 

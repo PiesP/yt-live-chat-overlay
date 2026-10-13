@@ -484,7 +484,7 @@ describe('Placement through source, runtime and renderer', () => {
       harness.renderer.setUserPaused(false);
       const measurement =
         mode === 'worker'
-          ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx.measureText
+          ? (harness.worker!.backend as unknown as { ctx: TestContext }).ctx.measureText
           : harness.mainContext.measureText;
       measurement.mockClear();
       const originalMeasurement = measurement.getMockImplementation();
@@ -524,7 +524,7 @@ describe('Placement through source, runtime and renderer', () => {
       expect(restored.every((message) => message.height === initial[0]?.height)).toBe(true);
       const drawing =
         mode === 'worker'
-          ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx
+          ? (harness.worker!.backend as unknown as { ctx: TestContext }).ctx
           : harness.mainContext;
       expect(drawing.font).toContain(`${fontSize}px`);
     }

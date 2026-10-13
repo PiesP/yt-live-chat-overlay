@@ -11,9 +11,8 @@
  * - Forward menu clicks to the active tab's content script
  *
  * `chrome` global is always available in extension service worker context.
- * API references are extracted with `!` assertions because the type
- * declaration marks them as possibly undefined (for content-script compat)
- * but all APIs are present in SW context.
+ * Validate required APIs once because the shared declaration also describes
+ * page contexts where extension APIs are unavailable.
  *
  * Firefox compatibility note: The manifest.firefox.json declares the
  * `menus` permission (Firefox's equivalent of `contextMenus`). Firefox MV3
@@ -21,10 +20,11 @@
  * works in both Chrome and Firefox extension service workers.
  */
 
-// Extract API references — always defined in SW context.
-const contextMenus = chrome!.contextMenus!;
-const runtime = chrome!.runtime!;
-const tabs = chrome!.tabs!;
+// Fail startup if the extension context lacks a required API.
+const contextMenus = chrome?.contextMenus;
+const runtime = chrome?.runtime;
+const tabs = chrome?.tabs;
+if (!contextMenus || !runtime || !tabs) throw new Error('Required extension APIs are unavailable');
 
 // ── Menu commands ──────────────────────────────────────────────────────────
 

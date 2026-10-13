@@ -57,8 +57,8 @@ pinned. The table records execution stage, inputs, side effects and checks.
 | `pnpm check:i18n`, `check:artifacts` | `scripts/check/i18n.ts` compares locale keys to English; `scripts/check/artifacts.ts` verifies built userscript/extensions, with `--e2e` selecting development user script. | Reads locale or generated build files; reports failures, no product source writes. `test/consistency/i18n-coverage.test.ts`, artifact/config tests and direct commands. |
 | `pnpm check:versions`, `sync:versions`, `release:prepare` | `scripts/release/version.ts` checks or syncs extension versions against package version (`BUILD_VERSION` may select check target). `scripts/release/prepare.ts` validates `RELEASE_VERSION` and optional SHA, then prepares archives, checksums, metadata and release notes. | `check` reads; `sync` writes manifests; prepare reads builds/source identity and writes local release assets. `test/unit/config/{node-script-boundaries,release-prepare,release-runtime}.test.ts` plus artifact inspection. Preparation does not publish. |
 | `pnpm check`, `check:extension`, `check:test`, `check:e2e`, `check:scripts`, `typecheck` | TypeScript projects for browser, extension, Vitest, Playwright and strict NodeNext/erasable scripts. `tsconfig.scripts.json` includes all `scripts/**/*.ts` plus the Node DevTools endpoint fixture; `tsconfig.test.json` excludes that direct-Node fixture. | Read-only; `pnpm quality` executes every type boundary. Windows `.mjs` is outside TypeScript checking and needs its own syntax/unit checks. |
-| `pnpm fmt`, `fmt:check`, `lint`, `knip`, `knip:full`, `knip:production`, `circular` | Biome formatting/lint, unused-code and source graph analysis. | Read-only; Knip includes `scripts/**/*.ts`, tooling and test projects. `fmt:fix`, `lint:fix`, `quality:fix` write source formatting and need diff review. |
-| `pnpm quality`, `verify`, `verify:full` | Quality chains formatting, lint, all type projects, direct Node CI tests, i18n, circular, Knip and optional Nose. Verify adds versions and all production target builds/artifact checks; full adds core verification, coverage and Playwright E2E. | Writes generated builds/reports/browser profiles at broader stages; `verify` alone is not browser or prepared-VM acceptance. |
+| `pnpm fmt`, `fmt:check`, `lint`, `knip`, `knip:full`, `knip:production`, `circular` | `fmt`/`fmt:check` check formatting and import assists; `lint` checks lint alone. Knip and circular check unused code and source graphs. | Read-only; `fmt:fix` and `lint:fix` apply only safe fixes in their respective surfaces. `quality:fix` applies one complete safe Biome pass, then runs quality. Review the diff; unsafe transformations require separate review. |
+| `pnpm quality`, `verify`, `verify:full` | Quality runs one read-only `biome check .` for formatting, lint and imports, then all type projects, direct Node CI tests, i18n, circular, Knip and optional Nose. Verify adds versions and all production target builds/artifact checks; full adds core verification, coverage and Playwright E2E. | Writes generated builds/reports/browser profiles at broader stages; `verify` alone is not browser or prepared-VM acceptance. |
 | `pnpm test`, `test:watch`, `test:cov`, `test:ci`, `test:core`, `validate:consistency` | Vitest and direct Node `scripts/ci/{deep-check-reuse,repository-authority}.test.ts` and `scripts/release/verify-source.test.ts`; `test:core` installs/verifies the pinned core checkout, and consistency selects contract tests. | Watch persists and coverage writes reports; `test:ci` checks reuse, authority and tagged source, not UI. `test:core` changes submodule dependencies and needs a prepared checkout. |
 | `pnpm test:e2e`, `test:e2e:headed`, `pretest:e2e` | Playwright config under `test/e2e/`; pre-hook builds development userscript plus Chromium/Firefox bundles and checks `--e2e` artifacts. | Requires installed browsers, writes profiles/results/screenshots; validate actual fixture browser flow. Headed local tests are distinct from source-bound Windows installation/live acceptance. |
 | `pnpm mut`, `mut:fast`, `mut:renderer` | Stryker full/fast/renderer mutation profiles. | Writes temp/report files; use actual mutation/deep-check receipts. |
@@ -106,6 +106,44 @@ public-release evidence.
   single-page navigation.
 - Keep renderer and worker state instance-owned, bounded, DPR-aware, and
   cleanup-safe. Canvas2D is the implemented rendering path.
+
+## Code style
+
+`biome.json` owns style coverage and exceptions. Keep two-space indentation,
+100 columns, LF, single quotes, semicolons, ES5 trailing commas and parentheses
+around arrow parameters. Style checks cover supported product, extension, test,
+tooling, CI helper and Windows ESM files, plus maintained root configurations.
+Generated builds, reports, browser profiles, vendor code and `packages/core`
+remain excluded. Biome does not validate Python, shell or YAML; retain their
+existing boundary checks. HTML fixture coverage follows the pinned tool's
+supported languages rather than enabling an experimental parser.
+
+Use `import type` for type-only statements and inline `type` specifiers when
+the same module supplies values. Keep side-effect import order and direct-Node
+`.ts`/ESM extension requirements. Prefer relative imports within a cohesive
+local module and existing aliases across product domains; do not create runtime
+barrels just to shorten paths. Safe fixes must converge on a second run.
+
+Keep the recommended lint preset and explicitly stronger correctness and
+performance severities. Non-null expression assertions are errors in product
+and extension code: use checked initialization or guards, or explain a proven
+bounded-index invariant at its exact use. Definite-assignment fields have a
+different initialization contract. Test assertions and direct Node test mocks
+have a narrow override; mock-only `any` and constructor-return exceptions name
+their existing test files.
+
+Remaining production exceptions are scoped: control-character regexes sanitize
+chat, font names and userscript-manager labels; `void` unions describe browser
+callback contracts. The Windows launch adapters deliberately aggregate cleanup
+failures in `finally` while preserving the primary failure. Test source strings
+may contain literal template placeholders. Static helper classes remain allowed;
+this project does not impose class, loop or file-length bans.
+
+The pinned Biome supports nursery Promise rules, but they are not enforcement
+gates: Promise-presence checks for serialization, storage and replay produce
+false positives, and `void` alone does not define rejection handling. Detached
+tasks must instead have a reviewed rejection/cancellation policy. Rule trials
+and decisions belong in the change's validation evidence.
 
 ## Browser validation
 

@@ -16,14 +16,20 @@
  * used optional chaining (chrome?.runtime?.onMessage?.addListener?.()) which
  * silently failed — menu commands were never delivered.
  *
- * Non-null assertions (!) on chrome.runtime are safe: in ISOLATED world,
- * chrome is always defined. If it weren't, the content script would fail
- * to load entirely.
+ * Validate the required isolated-world APIs at startup so missing APIs fail
+ * explicitly instead of silently dropping a required relay operation.
  */
 
 import { loadPackagedWorkerSource } from './worker-source-loader';
 
-const cr = (chrome as ChromeNamespace).runtime!;
+const cr = chrome?.runtime;
+const storage = chrome?.storage;
+const localStorage = storage?.local;
+const storageChanged = storage?.onChanged;
+const onMessage = cr?.onMessage;
+if (!cr || !localStorage || !storageChanged || !onMessage) {
+  throw new Error('Required extension relay APIs are unavailable');
+}
 
 const bridgeNonce = crypto.randomUUID();
 // ── Inject page script ─────────────────────────────────────────────────
@@ -110,8 +116,8 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 
   if (method === 'get') {
-    chrome!
-      .storage!.local!.get(key)
+    localStorage
+      .get(key)
       .then((result) => {
         const value = result?.[key];
         window.postMessage(
@@ -142,8 +148,8 @@ window.addEventListener('message', (event: MessageEvent) => {
       });
   } else if (method === 'set') {
     const value = data.value;
-    chrome!
-      .storage!.local!.set({ [key]: value })
+    localStorage
+      .set({ [key]: value })
       .then(() => {
         window.postMessage(
           { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, value: null },
@@ -169,7 +175,7 @@ window.addEventListener('message', (event: MessageEvent) => {
 // MAIN-world scripts (page-script.ts) cannot listen for it directly.
 // We relay change events to MAIN world via window.postMessage so that
 // cross-tab settings sync works in extension context.
-chrome!.storage!.onChanged!.addListener((changes: Record<string, unknown>, areaName: string) => {
+storageChanged.addListener((changes: Record<string, unknown>, areaName: string) => {
   if (areaName !== 'local') return;
   for (const key of Object.keys(changes)) {
     if (!ALLOWED_STORAGE_KEYS.has(key)) continue;
@@ -195,8 +201,7 @@ interface ChromeMessageSender {
   tab?: { id?: number };
 }
 
-const extRuntime = chrome!.runtime!;
-const onMessage = extRuntime.onMessage!;
+const extRuntime = cr;
 
 onMessage.addListener((message: unknown, sender: ChromeMessageSender) => {
   // Defense-in-depth: reject messages not from this extension.
