@@ -16,10 +16,10 @@ import type {
 } from '@app-types';
 import { AUTHOR_BACKGROUND_ALPHA_HEX, DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
 import { resolveLimits } from '@settings/limits';
-import type { RootScalarSettingKey } from '@settings/meta';
 import {
   AUTHOR_COLOR_KEYS,
   ROOT_SETTING_META,
+  type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
   VISUAL_ROOT_KEYS,
 } from '@settings/meta';

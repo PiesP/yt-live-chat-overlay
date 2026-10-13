@@ -24,6 +24,13 @@ describe('createFastRandom', () => {
     }
   });
 
+  it('keeps the maximum LCG state below one for bounded stagger-table indexing', () => {
+    // This seed's first transition is exactly 0xffffffff, the upper endpoint.
+    const value = createFastRandom(653637408)();
+    expect(value).toBeLessThan(1);
+    expect((value * 256) >>> 0).toBe(255);
+  });
+
   it('produces deterministic sequence with same seed', () => {
     const rng1 = createFastRandom(12345);
     const rng2 = createFastRandom(12345);
@@ -35,7 +42,7 @@ describe('createFastRandom', () => {
   it('matches the documented LCG transition for an explicit zero seed', () => {
     const rng = createFastRandom(0);
 
-    expect(rng()).toBe(1013904223 / 0xffffffff);
+    expect(rng()).toBe(1013904223 / 0x100000000);
   });
 
   it('produces different sequences with different seeds', () => {

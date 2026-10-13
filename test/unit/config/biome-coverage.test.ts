@@ -21,8 +21,11 @@ describe('Effective Biome coverage', () => {
       const included = [
         'src/fixture.ts',
         'extension/fixture.ts',
+        'extension/manifest.json',
+        'extension/manifest.firefox.json',
         'test/unit/fixture.ts',
         'test/e2e/fixture.ts',
+        'test/visual/gm-mocks.js',
         'tooling/fixture.ts',
         'scripts/fixture.ts',
         'validation/windows/fixture.mjs',
@@ -46,6 +49,7 @@ describe('Effective Biome coverage', () => {
         'test/browser-profiles/default/fixture.json',
         'vendor/fixture.ts',
         'validation/windows/fixture.py',
+        'test/visual/fixture.html',
       ];
       function write(path: string, text: string) {
         mkdirSync(dirname(join(directory, path)), { recursive: true });

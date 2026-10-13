@@ -115,8 +115,8 @@ around arrow parameters. Style checks cover supported product, extension, test,
 tooling, CI helper and Windows ESM files, plus maintained root configurations.
 Generated builds, reports, browser profiles, vendor code and `packages/core`
 remain excluded. Biome does not validate Python, shell or YAML; retain their
-existing boundary checks. HTML fixture coverage follows the pinned tool's
-supported languages rather than enabling an experimental parser.
+existing boundary checks. HTML fixtures are deliberately excluded from style checks while the pinned
+tool's full HTML support is experimental; existing browser checks still load them.
 
 Use `import type` for type-only statements and inline `type` specifiers when
 the same module supplies values. Keep side-effect import order and direct-Node

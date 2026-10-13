@@ -85,7 +85,7 @@ export function createFastRandom(seed?: number): () => number {
   return () => {
     // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
     s = (Math.imul(1664525, s) + 1013904223) >>> 0;
-    return s / 0xffffffff;
+    return s / 0x100000000;
   };
 }
 

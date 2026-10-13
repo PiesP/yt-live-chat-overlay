@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { isFunctionDeclaration } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import { describe, expect, it } from 'vitest';
@@ -93,19 +94,55 @@ describe('Verification configuration', () => {
     expect(config.mutator?.excludedMutations).not.toContain('ConditionalExpression');
     expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
     expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
-    expect(packageJson.scripts?.['mut:fast']).toBe('stryker run stryker.conf.fast.json');
+    expect(packageJson.scripts?.['mut:fast']?.trim().split(/\s+/)).toEqual([
+      'stryker',
+      'run',
+      'stryker.conf.fast.json',
+    ]);
     expect(workflow).toContain('timeout-minutes: 35');
     expect(workflow).toContain('path: reports/mutation/');
     expect(workflow).toContain('if-no-files-found: error');
   });
 
   it('captures browser failure evidence on the first CI retry', () => {
-    const config = readFileSync(resolve(root, 'test/e2e/playwright.config.ts'), 'utf8');
+    const url = pathToFileURL(resolve(root, 'test/e2e/playwright.config.ts')).href;
+    // Direct Node loading avoids asking Vitest to transform Playwright's runner.
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--input-type=module',
+        '--eval',
+        `
+      const observations = [];
+      for (const ci of [false, true]) {
+        if (ci) process.env.CI = 'true'; else delete process.env.CI;
+        const { default: config } = await import(${JSON.stringify(url)} + '?ci=' + ci);
+        observations.push({ retries: config.retries, failOnFlakyTests: config.failOnFlakyTests, trace: config.use.trace, video: config.use.video, screenshot: config.use.screenshot });
+      }
+      process.stdout.write(JSON.stringify(observations));
+    `,
+      ],
+      { cwd: root, encoding: 'utf8' }
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([
+      {
+        retries: 0,
+        failOnFlakyTests: true,
+        trace: 'retain-on-failure',
+        video: 'off',
+        screenshot: 'only-on-failure',
+      },
+      {
+        retries: 1,
+        failOnFlakyTests: true,
+        trace: 'on-first-retry',
+        video: 'on-first-retry',
+        screenshot: 'only-on-failure',
+      },
+    ]);
     const workflow = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
-
-    expect(config).toContain('retries: process.env.CI ? 1 : 0');
-    expect(config).toContain("trace: process.env.CI ? 'on-first-retry' : 'retain-on-failure'");
-    expect(config).toContain("video: process.env.CI ? 'on-first-retry' : 'off'");
     expect(workflow).toContain('test-results/');
     expect(workflow).toContain('playwright-report/');
   });

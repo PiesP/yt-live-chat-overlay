@@ -10,6 +10,7 @@
       "src/**",
       "scripts/**",
       "extension/**/*.ts",
+      "extension/**/*.json",
       "test/**",
       "tooling/**",
       "validation/windows/**/*.mjs",
@@ -27,7 +28,8 @@
       "!!**/.stryker-tmp*",
       "!!**/.cache",
       "!!**/browser-profiles",
-      "!!**/vendor"
+      "!!**/vendor",
+      "!!test/**/*.html"
     ],
     "ignoreUnknown": true
   },
