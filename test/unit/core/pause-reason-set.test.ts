@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
 import type { OverlaySettings } from '@app-types';
 import { ChatSource } from '@chat/source-base';
 import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { describe, expect, it, vi } from 'vitest';
 
 // ── Minimal concrete ChatSource for testing pause reason set ────────
 
@@ -140,12 +140,9 @@ describe('ChatSource pause reason set', () => {
     const received: unknown[] = [];
 
     // Set up callback and inject a message
-    source.start(
-      (msgs) => {
-        received.push(Array.isArray(msgs) ? msgs.length : 1);
-      },
-      new AbortController().signal
-    );
+    source.start((msgs) => {
+      received.push(Array.isArray(msgs) ? msgs.length : 1);
+    }, new AbortController().signal);
 
     // Inject empty — no crash
     source.injectExternalMessages([]);

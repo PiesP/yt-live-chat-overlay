@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { expect, test } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { launchFirefoxBidi, type FirefoxBidiSession } from '../fixtures/firefox-bidi';
+import { expect, test } from '@playwright/test';
+import { type FirefoxBidiSession, launchFirefoxBidi } from '../fixtures/firefox-bidi';
 import {
   MOCK_HTML,
   MOCK_NON_WATCH_HTML,
@@ -73,6 +73,7 @@ test.describe('Firefox extension runtime', () => {
     }
   });
 
+  // biome-ignore lint/correctness/noEmptyPattern: This native BiDi lane owns its browser and requests no Playwright fixtures.
   test('injects, persists normalized cache settings, renders chat, and survives SPA navigation', async ({}, testInfo) => {
     let browser: FirefoxBidiSession | null = null;
     try {
@@ -212,7 +213,7 @@ test.describe('Firefox extension runtime', () => {
         'the Firefox extension overlay to reload from extension storage'
       );
       const reloadedSettings = await browser.evaluateJson<Record<string, unknown>>(
-        `window.__ytChatOverlay?.getSettings() ?? {}`
+        'window.__ytChatOverlay?.getSettings() ?? {}'
       );
       expect(reloadedSettings).toMatchObject({
         allowShortTextMessages: true,

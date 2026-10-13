@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
 import { DEFAULT_SETTINGS, normalizeStoredSettings } from '@settings/schema';
+import { describe, expect, it } from 'vitest';
 
 describe('translationTarget validation', () => {
   it('default translationTarget is "auto"', () => {

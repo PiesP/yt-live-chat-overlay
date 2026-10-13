@@ -10,14 +10,26 @@
       "src/**",
       "scripts/**",
       "extension/**/*.ts",
-      "vite.config*.ts",
-      "package.json",
-      "tsconfig.json",
-      "tsconfig.extension.json",
-      "knip.json",
-      "biome.json",
-      "!!**/dist-extension/",
-      "!!**/dist-extension-firefox/"
+      "extension/**/*.json",
+      "test/**",
+      "tooling/**",
+      "validation/windows/**/*.mjs",
+      "validation/windows/**/*.json",
+      ".github/actions/**/*.mjs",
+      "*.ts",
+      "*.json",
+      "!!**/node_modules",
+      "!!packages/core",
+      "!!**/dist*",
+      "!!**/coverage",
+      "!!**/reports",
+      "!!**/test-results",
+      "!!**/playwright-report",
+      "!!**/.stryker-tmp*",
+      "!!**/.cache",
+      "!!**/browser-profiles",
+      "!!**/vendor",
+      "!!test/**/*.html"
     ],
     "ignoreUnknown": true
   },
@@ -33,32 +45,26 @@
     "rules": {
       "preset": "recommended",
       "correctness": {
-        "noUnusedImports": "error",
-        "noUnusedVariables": "warn",
-        "useExhaustiveDependencies": "warn",
-        "noUnknownMediaFeatureName": "off",
-        "noUnknownPseudoElement": "off"
+        "noUnusedImports": "error"
       },
       "style": {
-        "noNonNullAssertion": "off",
+        "noNonNullAssertion": "warn",
         "useConst": "error",
         "noParameterAssign": "warn",
         "noUnusedTemplateLiteral": "error",
-        "useExponentiationOperator": "error"
+        "useExponentiationOperator": "error",
+        "useImportType": {
+          "level": "error",
+          "options": {
+            "style": "auto"
+          }
+        }
       },
       "suspicious": {
         "noExplicitAny": "error",
-        "noConfusingVoidType": "off",
-        "noControlCharactersInRegex": "off",
-        "noAssignInExpressions": "off",
-        "noDocumentCookie": "off",
-        "noSelfCompare": "warn",
-        "noArrayIndexKey": "off",
-        "noImplicitAnyLet": "error",
-        "useIterableCallbackReturn": "error"
+        "noImplicitAnyLet": "error"
       },
       "complexity": {
-        "noForEach": "off",
         "noStaticOnlyClass": "off",
         "noUselessTernary": "error",
         "noUselessSwitchCase": "error",
@@ -67,14 +73,6 @@
       },
       "performance": {
         "noAccumulatingSpread": "error"
-      },
-      "a11y": {
-        "noStaticElementInteractions": "error",
-        "useKeyWithClickEvents": "error",
-        "useMediaCaption": "off",
-        "noSvgWithoutTitle": "error",
-        "useAriaPropsSupportedByRole": "error",
-        "useSemanticElements": "error"
       }
     }
   },
@@ -100,5 +98,95 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/**", "extension/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["test/**", "scripts/**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noTemplateCurlyInString": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/chat/message-helpers.ts",
+        "src/settings/schema.ts",
+        "validation/windows/chrome-install.mjs"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noControlCharactersInRegex": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/platform/chrome-types.d.ts", "src/renderer/canvas/shared.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConfusingVoidType": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "test/unit/app/standby-controller.test.ts",
+        "test/unit/settings/ui/controller.test.ts",
+        "test/unit/worker/manager.test.ts",
+        "test/unit/worker/renderer.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "test/unit/core/canvas-render-mock.test.ts",
+        "test/unit/core/vertical-spacing.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noConstructorReturn": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "validation/windows/chrome-install.mjs",
+        "validation/windows/natural-chrome.mjs"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnsafeFinally": "off"
+          }
+        }
+      }
+    }
+  ]
 }

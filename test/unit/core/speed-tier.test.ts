@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
-import { getSpeedTier, type SpeedTierConfig } from '@renderer/canvas/speed-tier';
-import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
-import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
-import { SPEED_TIER } from '@renderer/constants';
 import type { ChatMessage } from '@app-types';
+import { getSpeedTier, type SpeedTierConfig } from '@renderer/canvas/speed-tier';
+import { SPEED_TIER } from '@renderer/constants';
+import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
+import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
+import { describe, expect, it } from 'vitest';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -8,19 +8,20 @@
  * without requiring a real browser canvas.
  */
 
-import { afterEach, describe, it, expect, vi } from 'vitest';
-import { Canvas, createCanvas } from 'canvas';
 import {
+  type AnyCanvasContext,
   buildWrappedLines,
   drawRoundRect,
   renderRegularMessage,
-  renderSegment,
   renderRegularMessageBackground,
+  renderSegment,
   strokeTextOutline,
+  type TextBitmapCache,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
-import type { AnyCanvasContext, TextBitmapCache } from '@renderer/canvas/shared';
 import { rendererLayout, spacing } from '@util/design-tokens';
+import { Canvas, createCanvas } from 'canvas';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════════════
 // Mock Canvas context (mirrors test/setup.ts pattern)
@@ -83,22 +84,62 @@ function createMockContext(
   }> = [];
 
   const ctx = {
-    get fillStyle() { return state.fillStyle; },
-    set fillStyle(v: string | CanvasGradient | CanvasPattern) { state.fillStyle = String(v); state.ops.push('fillStyle'); },
-    get strokeStyle() { return state.strokeStyle; },
-    set strokeStyle(v: string | CanvasGradient | CanvasPattern) { state.strokeStyle = String(v); state.ops.push('strokeStyle'); },
-    get font() { return state.font; },
-    set font(v: string) { state.font = v; state.ops.push('font'); },
-    get textBaseline() { return state.textBaseline; },
-    set textBaseline(v: string) { state.textBaseline = v; state.ops.push('textBaseline'); },
-    get direction() { return state.direction; },
-    set direction(v: CanvasDirection) { state.direction = v; state.ops.push('direction'); },
-    get textAlign() { return state.textAlign; },
-    set textAlign(v: CanvasTextAlign) { state.textAlign = v; state.ops.push('textAlign'); },
-    get globalAlpha() { return state.globalAlpha; },
-    set globalAlpha(v: number) { state.globalAlpha = v; state.ops.push('globalAlpha'); },
-    get lineWidth() { return state.lineWidth; },
-    set lineWidth(v: number) { state.lineWidth = v; state.ops.push('lineWidth'); },
+    get fillStyle() {
+      return state.fillStyle;
+    },
+    set fillStyle(v: string | CanvasGradient | CanvasPattern) {
+      state.fillStyle = String(v);
+      state.ops.push('fillStyle');
+    },
+    get strokeStyle() {
+      return state.strokeStyle;
+    },
+    set strokeStyle(v: string | CanvasGradient | CanvasPattern) {
+      state.strokeStyle = String(v);
+      state.ops.push('strokeStyle');
+    },
+    get font() {
+      return state.font;
+    },
+    set font(v: string) {
+      state.font = v;
+      state.ops.push('font');
+    },
+    get textBaseline() {
+      return state.textBaseline;
+    },
+    set textBaseline(v: string) {
+      state.textBaseline = v;
+      state.ops.push('textBaseline');
+    },
+    get direction() {
+      return state.direction;
+    },
+    set direction(v: CanvasDirection) {
+      state.direction = v;
+      state.ops.push('direction');
+    },
+    get textAlign() {
+      return state.textAlign;
+    },
+    set textAlign(v: CanvasTextAlign) {
+      state.textAlign = v;
+      state.ops.push('textAlign');
+    },
+    get globalAlpha() {
+      return state.globalAlpha;
+    },
+    set globalAlpha(v: number) {
+      state.globalAlpha = v;
+      state.ops.push('globalAlpha');
+    },
+    get lineWidth() {
+      return state.lineWidth;
+    },
+    set lineWidth(v: number) {
+      state.lineWidth = v;
+      state.ops.push('lineWidth');
+    },
 
     measureText: vi.fn((text: string) => {
       state.measuredTexts.push(text);
@@ -109,22 +150,52 @@ function createMockContext(
 
     fillText: vi.fn((text: string, _x, _y, _maxWidth?) => {
       state.filledTexts.push(text);
-      state.textDraws.push({ method: 'fill', text, direction: state.direction, textAlign: state.textAlign });
+      state.textDraws.push({
+        method: 'fill',
+        text,
+        direction: state.direction,
+        textAlign: state.textAlign,
+      });
       state.ops.push('fillText');
     }),
     strokeText: vi.fn((text: string, _x, _y, _maxWidth?) => {
       state.strokedTexts.push(text);
-      state.textDraws.push({ method: 'stroke', text, direction: state.direction, textAlign: state.textAlign });
+      state.textDraws.push({
+        method: 'stroke',
+        text,
+        direction: state.direction,
+        textAlign: state.textAlign,
+      });
       state.ops.push('strokeText');
     }),
-    drawImage: vi.fn(() => { state.ops.push('drawImage'); }),
+    drawImage: vi.fn(() => {
+      state.ops.push('drawImage');
+    }),
     getTransform: vi.fn(() => ({ a: 1 })),
-    roundRect: vi.fn(() => { state.roundRectCalled = true; state.ops.push('roundRect'); }),
-    beginPath: vi.fn(() => { state.beginPathCalled = true; state.ops.push('beginPath'); }),
-    closePath: vi.fn(() => { state.closePathCalled = true; state.ops.push('closePath'); }),
-    moveTo: vi.fn((_x, _y) => { state.moveToCalled = true; state.ops.push('moveTo'); }),
-    lineTo: vi.fn((_x, _y) => { state.lineToCalled = true; state.ops.push('lineTo'); }),
-    arcTo: vi.fn((_x1, _y1, _x2, _y2, _r) => { state.arcToCalled = true; state.ops.push('arcTo'); }),
+    roundRect: vi.fn(() => {
+      state.roundRectCalled = true;
+      state.ops.push('roundRect');
+    }),
+    beginPath: vi.fn(() => {
+      state.beginPathCalled = true;
+      state.ops.push('beginPath');
+    }),
+    closePath: vi.fn(() => {
+      state.closePathCalled = true;
+      state.ops.push('closePath');
+    }),
+    moveTo: vi.fn((_x, _y) => {
+      state.moveToCalled = true;
+      state.ops.push('moveTo');
+    }),
+    lineTo: vi.fn((_x, _y) => {
+      state.lineToCalled = true;
+      state.ops.push('lineTo');
+    }),
+    arcTo: vi.fn((_x1, _y1, _x2, _y2, _r) => {
+      state.arcToCalled = true;
+      state.ops.push('arcTo');
+    }),
     save: vi.fn(() => {
       savedTextStates.push({ direction: state.direction, textAlign: state.textAlign });
       state.ops.push('save');
@@ -137,8 +208,12 @@ function createMockContext(
       }
       state.ops.push('restore');
     }),
-    fill: vi.fn(() => { state.ops.push('fill'); }),
-    stroke: vi.fn(() => { state.ops.push('stroke'); }),
+    fill: vi.fn(() => {
+      state.ops.push('fill');
+    }),
+    stroke: vi.fn(() => {
+      state.ops.push('stroke');
+    }),
   } as unknown as AnyCanvasContext;
 
   return { ctx, state };
@@ -177,32 +252,35 @@ describe('renderSegment bidirectional text', () => {
     ['مرحبا بكم — RTL + English 123', 'rtl'],
     ['… — 123 مرحبا بكم', 'rtl'],
     ['English مرحبا 123', 'ltr'],
-  ] as const)('passes %s to Canvas in logical order with %s base direction', (logicalText, direction) => {
-    const { ctx, state } = createMockContext();
+  ] as const)(
+    'passes %s to Canvas in logical order with %s base direction',
+    (logicalText, direction) => {
+      const { ctx, state } = createMockContext();
 
-    renderSegment(
-      ctx,
-      logicalText,
-      10,
-      20,
-      '#ffffff',
-      32,
-      0,
-      0,
-      { get: () => undefined, set: vi.fn() },
-      () => 'bold 32px sans-serif'
-    );
+      renderSegment(
+        ctx,
+        logicalText,
+        10,
+        20,
+        '#ffffff',
+        32,
+        0,
+        0,
+        { get: () => undefined, set: vi.fn() },
+        () => 'bold 32px sans-serif'
+      );
 
-    expect(ctx.fillText).toHaveBeenCalledWith(logicalText, 10, 20);
-    expect(state.textDraws).toContainEqual({
-      method: 'fill',
-      text: logicalText,
-      direction,
-      textAlign: 'left',
-    });
-    expect(ctx.direction).toBe('inherit');
-    expect(ctx.textAlign).toBe('start');
-  });
+      expect(ctx.fillText).toHaveBeenCalledWith(logicalText, 10, 20);
+      expect(state.textDraws).toContainEqual({
+        method: 'fill',
+        text: logicalText,
+        direction,
+        textAlign: 'left',
+      });
+      expect(ctx.direction).toBe('inherit');
+      expect(ctx.textAlign).toBe('start');
+    }
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -300,11 +378,29 @@ describe('renderSegment bitmap cache', () => {
     };
     const logicalText = 'مرحبا — English 123';
 
-    renderSegment(ctx, logicalText, 10, 20, '#ffffff', 32, 2, 0.7, cache, () =>
-      'bold 32px sans-serif'
+    renderSegment(
+      ctx,
+      logicalText,
+      10,
+      20,
+      '#ffffff',
+      32,
+      2,
+      0.7,
+      cache,
+      () => 'bold 32px sans-serif'
     );
-    renderSegment(ctx, logicalText, 30, 40, '#ffffff', 32, 2, 0.7, cache, () =>
-      'bold 32px sans-serif'
+    renderSegment(
+      ctx,
+      logicalText,
+      30,
+      40,
+      '#ffffff',
+      32,
+      2,
+      0.7,
+      cache,
+      () => 'bold 32px sans-serif'
     );
 
     expect(instances).toHaveLength(1);
@@ -312,9 +408,7 @@ describe('renderSegment bitmap cache', () => {
     expect(instances[0]?.context.textAlign).toBe('left');
     expect(instances[0]?.context.strokeText).toHaveBeenCalledWith(logicalText, 2, 2);
     expect(instances[0]?.context.fillText).toHaveBeenCalledWith(logicalText, 2, 2);
-    expect([...bitmaps.keys()]).toEqual([
-      expect.stringContaining(`|rtl|${logicalText}|`),
-    ]);
+    expect([...bitmaps.keys()]).toEqual([expect.stringContaining(`|rtl|${logicalText}|`)]);
     expect(ctx.drawImage).toHaveBeenCalledTimes(2);
     expect(ctx.direction).toBe('inherit');
     expect(ctx.textAlign).toBe('start');
@@ -403,9 +497,7 @@ describe('renderSegment bitmap cache', () => {
       },
     };
 
-    renderSegment(ctx, 'HELLO', 0, 0, '#ffffff', 32, 2, 0.7, cache, () =>
-      'bold 32px sans-serif'
-    );
+    renderSegment(ctx, 'HELLO', 0, 0, '#ffffff', 32, 2, 0.7, cache, () => 'bold 32px sans-serif');
 
     expect(measuredBaselines).toEqual(['top']);
     const bitmap = [...bitmaps.values()][0] as unknown as MockOffscreenCanvas;
@@ -449,17 +541,7 @@ describe('renderSegment bitmap cache', () => {
       { type: 'text' as const, content: ' World' },
     ];
 
-    warmTextBitmapCache(
-      segments,
-      32,
-      'bold',
-      'sans-serif',
-      '#ffffff',
-      2,
-      0.7,
-      cache,
-      ctx
-    );
+    warmTextBitmapCache(segments, 32, 'bold', 'sans-serif', '#ffffff', 2, 0.7, cache, ctx);
     const warmedKeys = [...bitmaps.keys()];
 
     expect(warmedKeys).toEqual([
@@ -584,8 +666,17 @@ describe('renderSegment bitmap cache', () => {
       },
     };
     const render = (): void =>
-      renderSegment(ctx, 'HELLO', 10, 20, '#ffffff', 32, 2, 0.7, cache, () =>
-        'bold 32px sans-serif'
+      renderSegment(
+        ctx,
+        'HELLO',
+        10,
+        20,
+        '#ffffff',
+        32,
+        2,
+        0.7,
+        cache,
+        () => 'bold 32px sans-serif'
       );
 
     for (rawDpr of [Number.NaN, 0, -2, 1]) render();
@@ -806,9 +897,15 @@ describe('renderRegularMessage mixed content layout', () => {
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
     expect(fillText.mock.calls.map(([text]) => text)).toEqual(['Hello ', ' World', 'مرحبا ']);
-    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
-    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
-    expect(fillText.mock.calls.map(([, x]) => x)).toEqual([...fillText.mock.calls.map(([, x]) => x)].sort((a, b) => a - b));
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(
+      drawImage.mock.invocationCallOrder[0]!
+    );
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(
+      fillText.mock.invocationCallOrder[1]!
+    );
+    expect(fillText.mock.calls.map(([, x]) => x)).toEqual(
+      [...fillText.mock.calls.map(([, x]) => x)].sort((a, b) => a - b)
+    );
   });
 
   it('places an inline emoji between two Arabic runs in resolved visual order', () => {
@@ -841,8 +938,12 @@ describe('renderRegularMessage mixed content layout', () => {
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
     expect(fillText.mock.calls.map(([text]) => text)).toEqual([' بكم', 'مرحبا ']);
-    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
-    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(
+      drawImage.mock.invocationCallOrder[0]!
+    );
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(
+      fillText.mock.invocationCallOrder[1]!
+    );
   });
 
   it('keeps a missing custom emoji fallback atomic in resolved RTL order', () => {
@@ -1052,13 +1153,7 @@ describe('renderRegularMessageBackground', () => {
 
     expect(state.fillStyle).toBe('#1B3A6F59');
     expect(state.ops).toEqual(['fillStyle', 'beginPath', 'roundRect', 'fill']);
-    expect((ctx as CanvasRenderingContext2D).roundRect).toHaveBeenCalledWith(
-      10,
-      20,
-      100,
-      50,
-      6
-    );
+    expect((ctx as CanvasRenderingContext2D).roundRect).toHaveBeenCalledWith(10, 20, 100, 50, 6);
     expect(state.globalAlpha).toBe(1);
   });
 
@@ -1170,7 +1265,9 @@ describe('buildWrappedLines', () => {
   });
 
   it('splits long text across multiple lines', () => {
-    const segments = [{ type: 'text' as const, content: 'a very long text that exceeds the maximum width' }];
+    const segments = [
+      { type: 'text' as const, content: 'a very long text that exceeds the maximum width' },
+    ];
     const result = buildWrappedLines(segments, 50, 16, () => 10);
     expect(result.lines.length).toBeGreaterThan(1);
   });

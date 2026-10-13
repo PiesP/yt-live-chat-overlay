@@ -11,12 +11,9 @@
  * 4. Verifying overlay initialization and state
  */
 
-import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
-import {
-  USERSCRIPT_PATH,
-  setupOverlayPage,
-} from '../fixtures/test-utils';
+import { expect, test } from '@playwright/test';
+import { setupOverlayPage, USERSCRIPT_PATH } from '../fixtures/test-utils';
 
 test.describe('YT Live Chat Overlay E2E', () => {
   test.beforeAll(() => {
@@ -36,8 +33,8 @@ test.describe('YT Live Chat Overlay E2E', () => {
 
     await setupOverlayPage(page);
 
-    const overlayErrors = errors.filter((e) =>
-      e.includes('ytco') || e.includes('overlay') || e.includes('chat-overlay')
+    const overlayErrors = errors.filter(
+      (e) => e.includes('ytco') || e.includes('overlay') || e.includes('chat-overlay')
     );
     expect(overlayErrors).toHaveLength(0);
   });
@@ -53,10 +50,9 @@ test.describe('YT Live Chat Overlay E2E', () => {
     await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => window.__ytChatOverlay)).toBeUndefined();
 
-    const overlayErrors = errors.filter((e) =>
-      e.includes('ytco') || e.includes('overlay') || e.includes('chat-overlay')
+    const overlayErrors = errors.filter(
+      (e) => e.includes('ytco') || e.includes('overlay') || e.includes('chat-overlay')
     );
     expect(overlayErrors).toHaveLength(0);
   });
-
 });

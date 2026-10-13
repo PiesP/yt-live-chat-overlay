@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
 import {
-  resolveLimits,
-  resolveOutlineLimits,
   getOutlineDisplayScale,
   OUTLINE_NUMERIC_KEYS,
+  resolveLimits,
+  resolveOutlineLimits,
 } from '@settings/limits';
+import { describe, expect, it } from 'vitest';
 
 // ── resolveLimits ───────────────────────────────────────────────
 

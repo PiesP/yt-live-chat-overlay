@@ -1,10 +1,13 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
 import type { ChatMessage } from '@app-types';
+import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function makeMessage(kind: ChatMessage['kind'] = 'text', overrides: Partial<ChatMessage> = {}): ChatMessage {
+function makeMessage(
+  kind: ChatMessage['kind'] = 'text',
+  overrides: Partial<ChatMessage> = {}
+): ChatMessage {
   return {
     text: 'hello',
     content: [{ type: 'text', content: 'hello' }],

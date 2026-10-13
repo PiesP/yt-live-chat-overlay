@@ -1,41 +1,108 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, describe, it, expect, vi } from 'vitest';
+
 import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   const d = {
-    enabled: true, danmakuMode: 'scroll' as const, speedPxPerSec: 250,
-    fontSize: 32, opacity: 1, superChatOpacity: 0.95, safeTop: 0, safeBottom: 0,
-    maxConcurrentMessages: 300, allowShortTextMessages: false, minTextLength: 1,
-    logLevel: 'warn' as const, showAuthor: { normal: false, member: true, moderator: true, owner: true, verified: true, superChat: true },
-    colors: { normal: '#FFFFFF', member: '#0F9D58', moderator: '#5E84F1', owner: '#FFD600', verified: '#AAAAAA' },
+    enabled: true,
+    danmakuMode: 'scroll' as const,
+    speedPxPerSec: 250,
+    fontSize: 32,
+    opacity: 1,
+    superChatOpacity: 0.95,
+    safeTop: 0,
+    safeBottom: 0,
+    maxConcurrentMessages: 300,
+    allowShortTextMessages: false,
+    minTextLength: 1,
+    logLevel: 'warn' as const,
+    showAuthor: {
+      normal: false,
+      member: true,
+      moderator: true,
+      owner: true,
+      verified: true,
+      superChat: true,
+    },
+    colors: {
+      normal: '#FFFFFF',
+      member: '#0F9D58',
+      moderator: '#5E84F1',
+      owner: '#FFD600',
+      verified: '#AAAAAA',
+    },
     outline: { enabled: true, widthPx: 2, opacity: 0.7 },
-    laneSpacing: 1, showDebugOverlay: false, ignoreReducedMotion: false,
-    authorRateLimit: 'normal' as const, backlogMaxRate: 10, backlogSpeedMultiplier: 1,
-    backlogMode: 'playback' as const, backlogRecentMinutes: 5, backlogOpacityMultiplier: 0.5,
-    depthLayersEnabled: false, depthNearSpeedMul: 1.2, depthFarSpeedMul: 0.8, depthFarOpacityMul: 0.6,
-    modOwnerDurationMultiplier: 1.5, showSuperChatAmount: true,
-    fontWeight: 'bold' as const, fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
-    preserveUserColor: true, superChatMaxBodyLines: 3, membershipMaxBodyLines: 2,
-    fadeDurationMs: 300, minPollIntervalMs: 1000, maxPollIntervalMs: 10000,
-    language: 'en' as const, translationEnabled: false, translationService: 'auto' as const,
-    translationSource: 'auto' as const, translationTarget: 'en' as const,
-    translationMode: 'dual' as const, exitPaddingPx: 50,
-    scrollDurationMinMs: 3000, scrollDurationMaxMs: 15000, topBottomDurationMs: 5000,
-    queueMaxSize: 500, backgroundQueueMax: 200, maxMessageAgeMs: 30000, headwayGapRatio: 0.3,
-    emojiCacheMb: 20, photoCacheMb: 10, stickerCacheMb: 5, textCacheMb: 5,
-    translationBatchSize: 5, emojiFetchLimit: 20, failedEmojiRetryMins: 5,
-    burstSampleWindow: 60, burstElevatedThreshold: 5, burstHighThreshold: 15, burstExtremeThreshold: 30,
-    backlogInjectionMax: 50, backlogDensityRampMs: 5000, livePollFallbackMs: 2000, livePollFailureLimit: 5,
-    speedBoostThreshold: 2, backlogPauseThreshold: 0.3, backlogResumeThreshold: 0.1,
-    activityTimeoutMs: 60000, staggerMaxDelayMs: 100, staggerMediumDelayMs: 50,
-    emojiFetchTimeoutMs: 5000, backlogDensityRampMaxMs: 10000, backlogInjectionRateMin: 1,
-    speedBoostMax: 1, speedBoostDenom: 2, backlogToggleCooldownMs: 2000,
-    replayPrefetchPages: 50, replayBatchLimit: 50,
+    laneSpacing: 1,
+    showDebugOverlay: false,
+    ignoreReducedMotion: false,
+    authorRateLimit: 'normal' as const,
+    backlogMaxRate: 10,
+    backlogSpeedMultiplier: 1,
+    backlogMode: 'playback' as const,
+    backlogRecentMinutes: 5,
+    backlogOpacityMultiplier: 0.5,
+    depthLayersEnabled: false,
+    depthNearSpeedMul: 1.2,
+    depthFarSpeedMul: 0.8,
+    depthFarOpacityMul: 0.6,
+    modOwnerDurationMultiplier: 1.5,
+    showSuperChatAmount: true,
+    fontWeight: 'bold' as const,
+    fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
+    preserveUserColor: true,
+    superChatMaxBodyLines: 3,
+    membershipMaxBodyLines: 2,
+    fadeDurationMs: 300,
+    minPollIntervalMs: 1000,
+    maxPollIntervalMs: 10000,
+    language: 'en' as const,
+    translationEnabled: false,
+    translationService: 'auto' as const,
+    translationSource: 'auto' as const,
+    translationTarget: 'en' as const,
+    translationMode: 'dual' as const,
+    exitPaddingPx: 50,
+    scrollDurationMinMs: 3000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    maxMessageAgeMs: 30000,
+    headwayGapRatio: 0.3,
+    emojiCacheMb: 20,
+    photoCacheMb: 10,
+    stickerCacheMb: 5,
+    textCacheMb: 5,
+    translationBatchSize: 5,
+    emojiFetchLimit: 20,
+    failedEmojiRetryMins: 5,
+    burstSampleWindow: 60,
+    burstElevatedThreshold: 5,
+    burstHighThreshold: 15,
+    burstExtremeThreshold: 30,
+    backlogInjectionMax: 50,
+    backlogDensityRampMs: 5000,
+    livePollFallbackMs: 2000,
+    livePollFailureLimit: 5,
+    speedBoostThreshold: 2,
+    backlogPauseThreshold: 0.3,
+    backlogResumeThreshold: 0.1,
+    activityTimeoutMs: 60000,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    emojiFetchTimeoutMs: 5000,
+    backlogDensityRampMaxMs: 10000,
+    backlogInjectionRateMin: 1,
+    speedBoostMax: 1,
+    speedBoostDenom: 2,
+    backlogToggleCooldownMs: 2000,
+    replayPrefetchPages: 50,
+    replayBatchLimit: 50,
     ...overrides,
   } as OverlaySettings;
   return d;
@@ -68,7 +135,10 @@ describe('RuntimeManager (extended)', () => {
     getDesiredState: () => { shouldRun: boolean; url: string; settings: OverlaySettings };
     matchesSessionUrl: (url: string) => boolean;
     getRemainingSettleDelay: () => number;
-    handleSessionRestart: (reason: 'watchdog' | 'foreground-return' | 'standby-resolved', generation?: number) => void;
+    handleSessionRestart: (
+      reason: 'watchdog' | 'foreground-return' | 'standby-resolved',
+      generation?: number
+    ) => void;
     requestManagedRestart: (reason: 'watchdog' | 'foreground-return' | 'standby-resolved') => void;
     computeConnectionStatus: () => string;
     acceptForRenderer: (msg: { id?: string; actionType?: 'add' | 'replace' }) => boolean;
@@ -98,7 +168,9 @@ describe('RuntimeManager (extended)', () => {
     _recoveringFromError: boolean;
   };
 
-  function createOpts(overrides: { url?: string; settings?: OverlaySettings; valid?: boolean } = {}) {
+  function createOpts(
+    overrides: { url?: string; settings?: OverlaySettings; valid?: boolean } = {}
+  ) {
     return {
       getCurrentUrl: () => overrides.url ?? 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
       getSettings: () => overrides.settings ?? makeDefaults(),
@@ -265,10 +337,9 @@ describe('RuntimeManager (extended)', () => {
         trimBackgroundQueue: vi.fn(),
         destroy: vi.fn(),
       };
-      Object.assign(
-        (rm as unknown as { standbyController: object }).standbyController,
-        { pause: pauseStandby }
-      );
+      Object.assign((rm as unknown as { standbyController: object }).standbyController, {
+        pause: pauseStandby,
+      });
       Object.assign(internals.chatPanelObserver, { pause: pausePanelObserver });
 
       const originalVisibilityState = document.visibilityState;
@@ -307,9 +378,11 @@ describe('RuntimeManager (extended)', () => {
     });
 
     it('returns shouldRun=false when settings are disabled', () => {
-      const rm = new RuntimeManager(createOpts({
-        settings: makeDefaults({ enabled: false }),
-      }));
+      const rm = new RuntimeManager(
+        createOpts({
+          settings: makeDefaults({ enabled: false }),
+        })
+      );
       const desired = internalsOf(rm).getDesiredState();
       expect(desired.shouldRun).toBe(false);
     });
@@ -342,7 +415,9 @@ describe('RuntimeManager (extended)', () => {
     it('returns "standby" when standby controller is active', () => {
       const rm = new RuntimeManager(createOpts());
       const internals = internalsOf(rm);
-      const standbyController = (rm as unknown as { standbyController: { isStandby: () => boolean } }).standbyController;
+      const standbyController = (
+        rm as unknown as { standbyController: { isStandby: () => boolean } }
+      ).standbyController;
 
       // Force standby mode
       standbyController.isStandby = () => true;
@@ -494,44 +569,49 @@ describe('RuntimeManager (extended)', () => {
       ['large backlog', 51, false, 0],
       ['error recovery', 2, true, 0],
       ['high utilization', 5, false, 1],
-    ])('preserves a queued replacement through the %s route', (_label, batchSize, recovering, utilization) => {
-      vi.useFakeTimers();
-      const rm = new RuntimeManager(createOpts({ settings: makeDefaults({ backlogMode: 'full' }) }));
-      const internals = internalsOf(rm);
-      internals.settings = makeDefaults({ backlogMode: 'full' });
-      const addMessage = vi.fn();
-      internals.renderer = {
-        addMessage,
-        setStandbyStatus: vi.fn(),
-        getLaneUtilization: vi.fn(() => utilization),
-        laneCount: 24,
-        observability: undefined,
-        destroy: vi.fn(),
-      };
+    ])(
+      'preserves a queued replacement through the %s route',
+      (_label, batchSize, recovering, utilization) => {
+        vi.useFakeTimers();
+        const rm = new RuntimeManager(
+          createOpts({ settings: makeDefaults({ backlogMode: 'full' }) })
+        );
+        const internals = internalsOf(rm);
+        internals.settings = makeDefaults({ backlogMode: 'full' });
+        const addMessage = vi.fn();
+        internals.renderer = {
+          addMessage,
+          setStandbyStatus: vi.fn(),
+          getLaneUtilization: vi.fn(() => utilization),
+          laneCount: 24,
+          observability: undefined,
+          destroy: vi.fn(),
+        };
 
-      const makeBatch = (replacement: boolean) =>
-        Array.from({ length: batchSize }, (_, index) => ({
-          id: index === 1 ? 'target' : `${replacement ? 'next' : 'initial'}-${index}`,
-          text: index === 1 && replacement ? 'replacement' : `message-${index}`,
-          kind: 'text',
-          timestamp: index,
-          ...(index === 1 && replacement ? { actionType: 'replace' as const } : {}),
-        }));
+        const makeBatch = (replacement: boolean) =>
+          Array.from({ length: batchSize }, (_, index) => ({
+            id: index === 1 ? 'target' : `${replacement ? 'next' : 'initial'}-${index}`,
+            text: index === 1 && replacement ? 'replacement' : `message-${index}`,
+            kind: 'text',
+            timestamp: index,
+            ...(index === 1 && replacement ? { actionType: 'replace' as const } : {}),
+          }));
 
-      internals._recoveringFromError = recovering;
-      internals.routeMessages(makeBatch(false));
-      internals._recoveringFromError = recovering;
-      internals.routeMessages(makeBatch(true));
+        internals._recoveringFromError = recovering;
+        internals.routeMessages(makeBatch(false));
+        internals._recoveringFromError = recovering;
+        internals.routeMessages(makeBatch(true));
 
-      const target = internals.backlogController
-        ?.drainPending()
-        .find((message) => message.id === 'target');
-      expect(target).toMatchObject({ text: 'replacement', actionType: 'replace' });
-      expect(addMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'target', text: 'replacement' })
-      );
-      rm.destroy();
-    });
+        const target = internals.backlogController
+          ?.drainPending()
+          .find((message) => message.id === 'target');
+        expect(target).toMatchObject({ text: 'replacement', actionType: 'replace' });
+        expect(addMessage).not.toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'target', text: 'replacement' })
+        );
+        rm.destroy();
+      }
+    );
 
     it('acceptForRenderer always accepts messages without id', () => {
       const rm = new RuntimeManager(createOpts());

@@ -28,10 +28,7 @@ function topLevelBlock(workflow: string, key: string): string {
 describe('project setup actions', () => {
   it('keeps CI and deep jobs on the immutable central action', () => {
     for (const [filename, jobs] of Object.entries(centralWorkflowJobs)) {
-      const workflow = readFileSync(
-        resolve(root, '.github/workflows', filename),
-        'utf8'
-      );
+      const workflow = readFileSync(resolve(root, '.github/workflows', filename), 'utf8');
 
       for (const job of jobs) {
         const jobSection = workflow.match(
@@ -50,7 +47,7 @@ describe('project setup actions', () => {
       expect(workflow).not.toContain('uses: actions/setup-node@');
       expect(workflow).not.toContain('run: pnpm install --frozen-lockfile');
       if (filename === 'ci.yaml' || filename === 'security.yaml') {
-        const changes = workflow.match(/  changes:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/)?.[0];
+        const changes = workflow.match(/ {2}changes:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/)?.[0];
         expect(changes).toContain("install-dependencies: 'false'");
       }
     }
@@ -69,14 +66,16 @@ describe('project setup actions', () => {
       expect(jobSection).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
-    const duplication = releaseWorkflow.match(/  duplication:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/u)?.[0] ?? '';
+    const duplication =
+      releaseWorkflow.match(/ {2}duplication:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/u)?.[0] ?? '';
     expect(duplication).toContain(`uses: ${centralAction}`);
     expect(duplication).toContain("install-dependencies: 'false'");
-    const provenance = releaseWorkflow.match(/  provenance:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/)?.[0] ?? '';
+    const provenance =
+      releaseWorkflow.match(/ {2}provenance:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/)?.[0] ?? '';
     expect(provenance).toContain(`uses: ${centralAction}`);
     expect(provenance).toContain("install-dependencies: 'false'");
     const publishSection = releaseWorkflow.match(
-      /  publish:\n[\s\S]*?(?=\n  [a-z][\w-]*:|$)/
+      / {2}publish:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/
     )?.[0];
     expect(publishSection).toBeDefined();
     if (!publishSection) throw new Error('Release publish job not found');
@@ -88,7 +87,9 @@ describe('project setup actions', () => {
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
-    expect(provenance).toContain('run: node --experimental-strip-types scripts/release/verify-source.ts');
+    expect(provenance).toContain(
+      'run: node --experimental-strip-types scripts/release/verify-source.ts'
+    );
     expect(releaseWorkflow).toContain('make_latest: legacy');
     expect(releaseWorkflow).not.toContain('make_latest: true');
     expect(publishSection).toContain('group: release-publish');
@@ -110,9 +111,7 @@ describe('project setup actions', () => {
     );
     expect(releaseWorkflow).not.toContain('publish_branch: release');
     expect(releaseWorkflow).not.toContain('purge.jsdelivr.net');
-    expect(releaseWorkflow).toContain(
-      'RELEASE_SHA: ${{ needs.provenance.outputs.release-sha }}'
-    );
+    expect(releaseWorkflow).toContain('RELEASE_SHA: ${{ needs.provenance.outputs.release-sha }}');
     expect(releasePrepare).toContain("execFileSync('git', ['rev-parse', 'HEAD']");
     expect(releasePrepare).toContain('expectedCommit !== checkedOutCommit');
     expect(releasePrepare).toContain('const commit = releaseCommit;');

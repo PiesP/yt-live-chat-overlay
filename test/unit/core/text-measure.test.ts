@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi } from 'vitest';
 import type { ChatMessage } from '@app-types';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import {
@@ -11,6 +10,7 @@ import {
   measureTextWidth,
 } from '@renderer/text-measure';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('getFontString', () => {
   const defaultFamily = DEFAULT_FONT_FAMILY;
@@ -199,9 +199,7 @@ describe('text measurement caches', () => {
       width: 5,
     }));
     const context = { measureText } as unknown as CanvasRenderingContext2D;
-    const getContext = vi
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue(context);
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
     const font = '16px sans-serif';
 
     clearTextMeasurementCaches();
@@ -223,9 +221,7 @@ describe('text measurement caches', () => {
   it('returns and caches a finite width when Canvas omits ink bounds', async () => {
     const measureText = vi.fn(() => ({ width: 42 }) as TextMetrics);
     const context = { measureText } as unknown as CanvasRenderingContext2D;
-    const getContext = vi
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue(context);
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
 
     try {
       vi.resetModules();
@@ -257,9 +253,7 @@ describe('text measurement caches', () => {
       } as TextMetrics;
     });
     const context = { measureText } as unknown as CanvasRenderingContext2D;
-    const getContext = vi
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue(context);
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
     const message = {
       text: 'hello',
       content: [{ type: 'text', content: 'hello' }],

@@ -1,9 +1,8 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { RendererBase } from '@renderer/renderer-base';
-import type { ConnectionStatus } from '@renderer/renderer-base';
 import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Test subclass ─────────────────────────────────────────────────────────
 
@@ -167,20 +166,23 @@ describe('RendererBase', () => {
     { height: null, expected: 20 },
     { height: 450, expected: 20 },
     { height: 400, expected: 20 },
-  ])('preserves the visible configured font size at viewport height $height', ({ height, expected }) => {
-    vi.spyOn(overlay, 'getDimensions').mockReturnValue(
-      height === null ? null : { width: 1920, height }
-    );
-    const renderer = createRenderer({
-      ...defaultSettings,
-      fontSize: 20,
-      fontBaseViewportHeight: 720,
-      fontMinSize: 10,
-      fontMaxSize: 40,
-    });
+  ])(
+    'preserves the visible configured font size at viewport height $height',
+    ({ height, expected }) => {
+      vi.spyOn(overlay, 'getDimensions').mockReturnValue(
+        height === null ? null : { width: 1920, height }
+      );
+      const renderer = createRenderer({
+        ...defaultSettings,
+        fontSize: 20,
+        fontBaseViewportHeight: 720,
+        fontMinSize: 10,
+        fontMaxSize: 40,
+      });
 
-    expect(renderer.effectiveFontSize).toBe(expected);
-  });
+      expect(renderer.effectiveFontSize).toBe(expected);
+    }
+  );
 
   // ── Constructor ─────────────────────────────────────────────────────
 
@@ -209,14 +211,16 @@ describe('RendererBase', () => {
         burstHighThreshold: 19,
         burstExtremeThreshold: 41,
       });
-      const detector = (r as unknown as {
-        burstDetector: {
-          rateSampleWindow: number;
-          elevatedThreshold: number;
-          highThreshold: number;
-          extremeThreshold: number;
-        };
-      }).burstDetector;
+      const detector = (
+        r as unknown as {
+          burstDetector: {
+            rateSampleWindow: number;
+            elevatedThreshold: number;
+            highThreshold: number;
+            extremeThreshold: number;
+          };
+        }
+      ).burstDetector;
 
       expect(detector).toMatchObject({
         rateSampleWindow: 24,
@@ -533,7 +537,13 @@ describe('RendererBase', () => {
   describe('setConnectionStatus', () => {
     it('does not throw for any status', () => {
       const r = createRenderer();
-      const statuses: ConnectionStatus[] = ['connected', 'connecting', 'degraded', 'disconnected', 'standby'];
+      const statuses: ConnectionStatus[] = [
+        'connected',
+        'connecting',
+        'degraded',
+        'disconnected',
+        'standby',
+      ];
       for (const status of statuses) {
         expect(() => r.setConnectionStatus(status)).not.toThrow();
       }

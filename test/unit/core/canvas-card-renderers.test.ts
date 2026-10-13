@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatMessage } from '@app-types';
-import { drawLeftRoundedRect, renderPaidCard } from '@renderer/canvas/card-renderers';
 import { LruMap } from '@piesp/browser-core/util';
-import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { drawLeftRoundedRect, renderPaidCard } from '@renderer/canvas/card-renderers';
 import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -24,8 +24,12 @@ function createMockCtx(): { ctx: CanvasRenderingContext2D; ops: PathOp[] } {
   const ops: PathOp[] = [];
 
   const ctx = {
-    beginPath: vi.fn(() => { ops.push({ name: 'beginPath', args: [] }); }),
-    closePath: vi.fn(() => { ops.push({ name: 'closePath', args: [] }); }),
+    beginPath: vi.fn(() => {
+      ops.push({ name: 'beginPath', args: [] });
+    }),
+    closePath: vi.fn(() => {
+      ops.push({ name: 'closePath', args: [] });
+    }),
     moveTo: vi.fn((x: number, y: number) => {
       ops.push({ name: 'moveTo', args: [x, y] });
     }),

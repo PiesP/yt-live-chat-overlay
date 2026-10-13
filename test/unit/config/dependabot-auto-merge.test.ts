@@ -4,19 +4,23 @@ import { describe, expect, it } from 'vitest';
 
 const gateWorkflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/dependabot-auto-merge.yaml'),
-  'utf8',
+  'utf8'
 );
 const applyWorkflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/dependabot-auto-merge-apply.yaml'),
-  'utf8',
+  'utf8'
 );
 
 describe('Dependabot auto-merge security', () => {
   it('evaluates only Dependabot events with read-only permissions', () => {
     expect(gateWorkflow).toContain("github.event.sender.login == 'dependabot[bot]'");
     expect(gateWorkflow).toContain("github.event.pull_request.user.login == 'dependabot[bot]'");
-    expect(gateWorkflow).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-    expect(gateWorkflow).toContain('github.event.pull_request.base.ref == github.event.repository.default_branch');
+    expect(gateWorkflow).toContain(
+      'github.event.pull_request.head.repo.full_name == github.repository'
+    );
+    expect(gateWorkflow).toContain(
+      'github.event.pull_request.base.ref == github.event.repository.default_branch'
+    );
     expect(gateWorkflow).toContain('github.event.pull_request.draft == false');
     expect(gateWorkflow).toContain('contents: read');
     expect(gateWorkflow).toContain('pull-requests: read');
@@ -36,17 +40,23 @@ describe('Dependabot auto-merge security', () => {
     expect(applyWorkflow).toContain('run-id: ${{ github.event.workflow_run.id }}');
     expect(applyWorkflow).toContain('digest-mismatch: error');
     expect(applyWorkflow).toMatch(
-      /permissions:\n  actions: read\n  contents: read\n  pull-requests: read/,
+      /permissions:\n {2}actions: read\n {2}contents: read\n {2}pull-requests: read/
     );
     expect(applyWorkflow).toMatch(
-      /approve:\n[\s\S]*?needs: validate\n[\s\S]*?if: needs\.validate\.outputs\.eligible == 'true'[\s\S]*?permissions:\n      contents: write\n      pull-requests: write/,
+      /approve:\n[\s\S]*?needs: validate\n[\s\S]*?if: needs\.validate\.outputs\.eligible == 'true'[\s\S]*?permissions:\n {6}contents: write\n {6}pull-requests: write/
     );
   });
 
   it('revalidates every commit and approves only the unchanged head', () => {
-    const modes = [...applyWorkflow.matchAll(/run: node --experimental-strip-types scripts\/ci\/dependabot-apply\.ts (\w+)/g)].map(match => match[1]);
+    const modes = [
+      ...applyWorkflow.matchAll(
+        /run: node --experimental-strip-types scripts\/ci\/dependabot-apply\.ts (\w+)/g
+      ),
+    ].map((match) => match[1]);
     expect(modes).toEqual(['gate', 'validate', 'manual', 'recheck', 'approve', 'merge']);
-    expect(applyWorkflow.match(/ref: \$\{\{ github\.event\.repository\.default_branch \}\}/g)).toHaveLength(2);
+    expect(
+      applyWorkflow.match(/ref: \$\{\{ github\.event\.repository\.default_branch \}\}/g)
+    ).toHaveLength(2);
     expect(applyWorkflow.match(/install-dependencies: 'false'/g)).toHaveLength(2);
     expect(applyWorkflow).toContain('HEAD_SHA: ${{ needs.validate.outputs.head_sha }}');
     expect(applyWorkflow).toContain('BASE_REF: ${{ needs.validate.outputs.base_ref }}');

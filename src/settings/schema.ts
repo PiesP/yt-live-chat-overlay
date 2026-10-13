@@ -19,6 +19,7 @@ import { resolveLimits } from '@settings/limits';
 import {
   AUTHOR_COLOR_KEYS,
   ROOT_SETTING_META,
+  type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
   VISUAL_ROOT_KEYS,
 } from '@settings/meta';
@@ -174,7 +175,7 @@ export function normalizeBackgroundColor(value: unknown, fallback: string): stri
 
 // ── Normalization ───────────────────────────────────────────────────────────────
 
-const STRING_VALIDATORS: Partial<Record<keyof OverlaySettings, (v: string) => boolean>> = {
+const STRING_VALIDATORS: Record<ScalarKeyOf<string>, (v: string) => boolean> = {
   backlogMode: (v) => VALID_BACKLOG_MODES.includes(v as (typeof VALID_BACKLOG_MODES)[number]),
   danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
   logLevel: (v) => isLogLevel(v),
@@ -188,38 +189,36 @@ const STRING_VALIDATORS: Partial<Record<keyof OverlaySettings, (v: string) => bo
   translationSource: (v) => TRANSLATION_SOURCE_VALUES.includes(v as TranslationSource),
 };
 
-/**
- * Apply validated scalar settings from `settings` onto `out` (mutating in place).
- * Each key is type-routed via ROOT_SETTING_META, so the assignment is guaranteed
- * to match the target field's declared type. This avoids `as unknown as` while
- * still working around OverlaySettings lacking an index signature.
- */
+type ScalarKeyOf<T> = {
+  [K in RootScalarSettingKey]: OverlaySettings[K] extends T ? K : never;
+}[RootScalarSettingKey];
+
+/** Apply validated scalar settings from `settings` onto `out` in place. */
 function mutateScalarSettings(
   out: OverlaySettings,
   settings: Readonly<OverlaySettings>,
   defaults: OverlaySettings
 ): void {
-  const mutableOut = out as unknown as Record<string, unknown>;
-  const mutableDefaults = defaults as unknown as Record<string, unknown>;
-  for (const key of Object.keys(ROOT_SETTING_META) as (keyof OverlaySettings)[]) {
-    const meta = (ROOT_SETTING_META as Record<string, { type: string }>)[key as string];
-    const raw = (settings as unknown as Record<string, unknown>)[key as string];
-    if (meta?.type === 'boolean') {
+  const setString = <K extends ScalarKeyOf<string>>(key: K, value: OverlaySettings[K]): void => {
+    out[key] = value;
+  };
+  for (const key of Object.keys(ROOT_SETTING_META) as RootScalarSettingKey[]) {
+    const meta = ROOT_SETTING_META[key];
+    const raw: unknown = settings[key];
+    if (meta.type === 'boolean') {
       if (typeof raw === 'boolean') {
-        mutableOut[key as string] = raw;
+        // The mapped metadata contract ties this tag to boolean setting keys.
+        out[key as ScalarKeyOf<boolean>] = raw;
       }
-    } else if (meta?.type === 'number') {
-      const defaultVal = mutableDefaults[key as string];
-      if (typeof defaultVal === 'number') {
-        const clamped = clampNumber(raw, defaultVal, resolveLimits(key as string));
-        mutableOut[key as string] = WHOLE_MEGABYTE_SETTING_KEYS.has(key)
-          ? Math.round(clamped)
-          : clamped;
-      }
+    } else if (meta.type === 'number') {
+      const numericKey = key as ScalarKeyOf<number>;
+      const clamped = clampNumber(raw, defaults[numericKey], resolveLimits(numericKey));
+      out[numericKey] = WHOLE_MEGABYTE_SETTING_KEYS.has(numericKey) ? Math.round(clamped) : clamped;
     } else {
-      const validator = STRING_VALIDATORS[key as keyof OverlaySettings];
-      if (typeof raw === 'string' && validator?.(raw)) {
-        mutableOut[key as string] = raw;
+      const validator = STRING_VALIDATORS[key as ScalarKeyOf<string>];
+      if (typeof raw === 'string' && validator(raw)) {
+        // Runtime validators refine the string union for this metadata key.
+        setString(key as ScalarKeyOf<string>, raw as OverlaySettings[ScalarKeyOf<string>]);
       }
     }
   }
@@ -234,8 +233,6 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     typeof v === 'boolean' ? v : fallback;
 
   // Root scalar settings: type-routed via ROOT_SETTING_META.
-  // Write into a mutable copy since OverlaySettings has no index signature.
-  // Each write is guarded by the type-checking if/else branches inside the helper.
   mutateScalarSettings(out, settings, d);
 
   for (const key of SHOW_AUTHOR_KEYS) {
@@ -252,11 +249,7 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 
   out.outline.enabled = pickBool(settings.outline.enabled, d.outline.enabled);
   for (const key of ['widthPx', 'opacity'] as const) {
-    (out.outline as unknown as Record<string, unknown>)[key] = clampNumber(
-      settings.outline[key],
-      d.outline[key],
-      resolveLimits(key)
-    );
+    out.outline[key] = clampNumber(settings.outline[key], d.outline[key], resolveLimits(key));
   }
 
   // ── Cross-field pair constraints ──────────────────────────────────────────
@@ -270,11 +263,11 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
   ] as const;
 
   for (const [minKey, maxKey] of PAIR_CONSTRAINTS) {
-    const minVal = (out as unknown as Record<string, number>)[minKey];
-    const maxVal = (out as unknown as Record<string, number>)[maxKey];
-    if (typeof minVal === 'number' && typeof maxVal === 'number' && minVal > maxVal) {
-      (out as unknown as Record<string, number>)[minKey] = maxVal;
-      (out as unknown as Record<string, number>)[maxKey] = minVal;
+    const minVal = out[minKey];
+    const maxVal = out[maxKey];
+    if (minVal > maxVal) {
+      out[minKey] = maxVal;
+      out[maxKey] = minVal;
     }
   }
 

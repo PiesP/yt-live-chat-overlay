@@ -3,22 +3,22 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import {
-  MAX_ADD_MESSAGES_PER_BATCH,
-  isValidWorkerBatchReceipt,
-  isValidWorkerClearStateAck,
-  isValidControlMessage,
-  isValidWorkerErrorMessage,
-  isValidWorkerMessageSnapshot,
-  isValidWorkerStatsMessage,
-} from '@renderer/worker/protocol-guards';
-import { RenderWorkerManager } from '@renderer/worker/manager';
-import { WorkerRenderer } from '@renderer/worker/renderer';
-import { DEFAULT_SETTINGS } from '@settings/schema';
-import { resolveLimits } from '@settings/limits';
-import {
   MAX_RENDER_CONTENT_SEGMENTS,
   MAX_RENDER_FIELD_CODE_POINTS,
 } from '@chat/render-resource-limits';
+import { RenderWorkerManager } from '@renderer/worker/manager';
+import {
+  isValidControlMessage,
+  isValidWorkerBatchReceipt,
+  isValidWorkerClearStateAck,
+  isValidWorkerErrorMessage,
+  isValidWorkerMessageSnapshot,
+  isValidWorkerStatsMessage,
+  MAX_ADD_MESSAGES_PER_BATCH,
+} from '@renderer/worker/protocol-guards';
+import { WorkerRenderer } from '@renderer/worker/renderer';
+import { resolveLimits } from '@settings/limits';
+import { DEFAULT_SETTINGS } from '@settings/schema';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockContext = {
@@ -114,17 +114,29 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
 
 function validMotion(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    id: 'active', mode: 'scroll', startX: 640, width: 120, height: 24,
-    y: 20, laneIndex: 1, laneSlotCount: 1, durationMs: 5_000,
-    startEpochMs: 1_000, fadeStartEpochMs: 1_000, speedTier: 1,
+    id: 'active',
+    mode: 'scroll',
+    startX: 640,
+    width: 120,
+    height: 24,
+    y: 20,
+    laneIndex: 1,
+    laneSlotCount: 1,
+    durationMs: 5_000,
+    startEpochMs: 1_000,
+    fadeStartEpochMs: 1_000,
+    speedTier: 1,
     ...overrides,
   };
 }
 
 function validMotionSnapshot(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    capturedAtEpochMs: 1_500, effectiveNowEpochMs: 1_400,
-    isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+    capturedAtEpochMs: 1_500,
+    effectiveNowEpochMs: 1_400,
+    isPaused: true,
+    viewportWidthPx: 640,
+    exitPaddingPx: 100,
     activeMotions: [validMotion()],
     ...overrides,
   };
@@ -182,10 +194,16 @@ function initializeRenderer(): WorkerRenderer {
 
 beforeEach(() => {
   vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
-  vi.stubGlobal('ImageBitmap', class {
-    close(): void {}
-  });
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'ImageBitmap',
+    class {
+      close(): void {}
+    }
+  );
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1)
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   Object.defineProperty(self, 'postMessage', {
     value: vi.fn(),
@@ -302,14 +320,19 @@ describe('renderer worker protocol guards', () => {
         geometries: Array.from({ length: MAX_STATS_MESSAGE_IDS + 1 }, () => valid.geometries[0]),
       })
     ).toBe(false);
-    expect(isValidControlMessage({
-      type: 'updateMessageGeometries',
-      geometries: Array.from({ length: MAX_STATS_MESSAGE_IDS }, () => valid.geometries[0]),
-    })).toBe(true);
+    expect(
+      isValidControlMessage({
+        type: 'updateMessageGeometries',
+        geometries: Array.from({ length: MAX_STATS_MESSAGE_IDS }, () => valid.geometries[0]),
+      })
+    ).toBe(true);
     for (const geometry of [null, 1, 'message']) {
-      expect(isValidControlMessage({
-        type: 'updateMessageGeometries', geometries: [geometry],
-      })).toBe(false);
+      expect(
+        isValidControlMessage({
+          type: 'updateMessageGeometries',
+          geometries: [geometry],
+        })
+      ).toBe(false);
     }
   });
 
@@ -440,10 +463,17 @@ describe('renderer worker protocol guards', () => {
       ).toBe(false);
     }
     for (const translationGeneration of [-1, 1.5, Number.NaN, '1']) {
-      expect(isValidControlMessage({
-        type: 'updateTranslation', id: 'message', translatedText: 'text',
-        width: 180, height: 52, translationHeight: 18, translationGeneration,
-      })).toBe(false);
+      expect(
+        isValidControlMessage({
+          type: 'updateTranslation',
+          id: 'message',
+          translatedText: 'text',
+          width: 180,
+          height: 52,
+          translationHeight: 18,
+          translationGeneration,
+        })
+      ).toBe(false);
     }
   });
 
@@ -507,9 +537,12 @@ describe('renderer worker protocol guards', () => {
     );
     expect(isValidControlMessage({ type: 'updateConfig', config: { opacity: -0.1 } })).toBe(false);
     for (const translationGeneration of [-1, 1.5, Number.NaN, '1']) {
-      expect(isValidControlMessage({
-        type: 'updateConfig', config: { translationGeneration },
-      })).toBe(false);
+      expect(
+        isValidControlMessage({
+          type: 'updateConfig',
+          config: { translationGeneration },
+        })
+      ).toBe(false);
     }
   });
 
@@ -549,7 +582,9 @@ describe('renderer worker protocol guards', () => {
       isValidControlMessage({ type: 'addMessages', messages: Array(1001).fill(message) })
     ).toBe(false);
     for (const epoch of [-1, 1.5, Number.NaN, '1']) {
-      expect(isValidControlMessage({ type: 'addMessages', messages: [message], epoch })).toBe(false);
+      expect(isValidControlMessage({ type: 'addMessages', messages: [message], epoch })).toBe(
+        false
+      );
     }
   });
 
@@ -673,18 +708,27 @@ describe('renderer worker protocol guards', () => {
 
   it('validates drop-reason totals and rejects malformed reason records', () => {
     expect(isValidWorkerStatsMessage(validStats({ dropReasons: {} }))).toBe(true);
-    expect(isValidWorkerStatsMessage(validStats({
-      totalDrops: 1, dropReasons: { queue_priority: 1 },
-    }))).toBe(true);
+    expect(
+      isValidWorkerStatsMessage(
+        validStats({
+          totalDrops: 1,
+          dropReasons: { queue_priority: 1 },
+        })
+      )
+    ).toBe(true);
     for (const dropReasons of [null, [], { unknown: 0 }, { queue_priority: -1 }]) {
       expect(isValidWorkerStatsMessage(validStats({ dropReasons }))).toBe(false);
     }
-    expect(isValidWorkerStatsMessage(validStats({ dropReasons: { queue_priority: 1 } }))).toBe(false);
+    expect(isValidWorkerStatsMessage(validStats({ dropReasons: { queue_priority: 1 } }))).toBe(
+      false
+    );
   });
 
   it('accepts exact batch receipt limits and rejects malformed receipts', () => {
     const receipt = {
-      type: 'batchReceipt', epoch: 0, batchSequence: 1,
+      type: 'batchReceipt',
+      epoch: 0,
+      batchSequence: 1,
       pendingQueueDepth: MAX_ADD_MESSAGES_PER_BATCH,
       admittedMessages: MAX_ADD_MESSAGES_PER_BATCH,
       minimumPendingPriority: null,
@@ -692,12 +736,18 @@ describe('renderer worker protocol guards', () => {
     expect(isValidWorkerBatchReceipt(receipt)).toBe(true);
     expect(isValidWorkerBatchReceipt(null)).toBe(false);
     expect(isValidWorkerBatchReceipt({ ...receipt, type: 'stats' })).toBe(false);
-    expect(isValidWorkerBatchReceipt({
-      ...receipt, pendingQueueDepth: MAX_ADD_MESSAGES_PER_BATCH + 1,
-    })).toBe(false);
-    expect(isValidWorkerBatchReceipt({
-      ...receipt, admittedMessages: MAX_ADD_MESSAGES_PER_BATCH + 1,
-    })).toBe(false);
+    expect(
+      isValidWorkerBatchReceipt({
+        ...receipt,
+        pendingQueueDepth: MAX_ADD_MESSAGES_PER_BATCH + 1,
+      })
+    ).toBe(false);
+    expect(
+      isValidWorkerBatchReceipt({
+        ...receipt,
+        admittedMessages: MAX_ADD_MESSAGES_PER_BATCH + 1,
+      })
+    ).toBe(false);
   });
 
   it('requires an epoch-bearing clear-state acknowledgement', () => {
@@ -716,9 +766,9 @@ describe('renderer worker protocol guards', () => {
 
   it('bounds snapshot ID arrays and rejects malformed IDs', () => {
     const exactLimitIds = messageIds(MAX_STATS_MESSAGE_IDS);
-    expect(
-      isValidWorkerMessageSnapshot(validSnapshot({ activeMessageIds: exactLimitIds }))
-    ).toBe(true);
+    expect(isValidWorkerMessageSnapshot(validSnapshot({ activeMessageIds: exactLimitIds }))).toBe(
+      true
+    );
     expect(
       isValidWorkerMessageSnapshot(
         validSnapshot({ activeMessageIds: [...exactLimitIds, 'over-limit'] })
@@ -738,74 +788,137 @@ describe('renderer worker protocol guards', () => {
 
   it('validates bounded, unique active motion for IDs in the same snapshot epoch', () => {
     const motion = {
-      id: 'active', mode: 'scroll', startX: 640, width: 120, height: 24,
-      y: 20, laneIndex: 1, laneSlotCount: 1, durationMs: 5_000,
-      startEpochMs: 1_000, fadeStartEpochMs: 1_000, speedTier: 1,
+      id: 'active',
+      mode: 'scroll',
+      startX: 640,
+      width: 120,
+      height: 24,
+      y: 20,
+      laneIndex: 1,
+      laneSlotCount: 1,
+      durationMs: 5_000,
+      startEpochMs: 1_000,
+      fadeStartEpochMs: 1_000,
+      speedTier: 1,
     };
     const motionSnapshot = {
-      capturedAtEpochMs: 1_500, effectiveNowEpochMs: 1_400,
-      isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+      capturedAtEpochMs: 1_500,
+      effectiveNowEpochMs: 1_400,
+      isPaused: true,
+      viewportWidthPx: 640,
+      exitPaddingPx: 100,
       activeMotions: [motion],
     };
     const valid = validSnapshot({ epoch: 2, activeMessageIds: ['active'], motionSnapshot });
     expect(isValidWorkerMessageSnapshot(valid)).toBe(true);
-    expect(isValidWorkerMessageSnapshot(validSnapshot({
-      activeMessageIds: ['active'], motionSnapshot,
-    }))).toBe(false);
-    expect(isValidWorkerMessageSnapshot({ ...valid,
-      motionSnapshot: { ...motionSnapshot, activeMotions: [motion, motion] },
-    })).toBe(false);
-    expect(isValidWorkerMessageSnapshot({ ...valid,
-      motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, id: 'unknown' }] },
-    })).toBe(false);
-    expect(isValidWorkerMessageSnapshot({ ...valid,
-      motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, durationMs: NaN }] },
-    })).toBe(false);
-    expect(isValidWorkerMessageSnapshot({ ...valid,
-      motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, trackDrops: 'no' }] },
-    })).toBe(false);
-    expect(isValidWorkerMessageSnapshot({ ...valid,
-      motionSnapshot: { ...motionSnapshot, effectiveNowEpochMs: 1_600 },
-    })).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot(
+        validSnapshot({
+          activeMessageIds: ['active'],
+          motionSnapshot,
+        })
+      )
+    ).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot({
+        ...valid,
+        motionSnapshot: { ...motionSnapshot, activeMotions: [motion, motion] },
+      })
+    ).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot({
+        ...valid,
+        motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, id: 'unknown' }] },
+      })
+    ).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot({
+        ...valid,
+        motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, durationMs: NaN }] },
+      })
+    ).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot({
+        ...valid,
+        motionSnapshot: { ...motionSnapshot, activeMotions: [{ ...motion, trackDrops: 'no' }] },
+      })
+    ).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot({
+        ...valid,
+        motionSnapshot: { ...motionSnapshot, effectiveNowEpochMs: 1_600 },
+      })
+    ).toBe(false);
     expect(isValidWorkerMessageSnapshot(validSnapshot())).toBe(true);
   });
 
   it('accepts each supported motion mode and rejects unsupported or malformed entries', () => {
     for (const mode of ['scroll', 'reverse', 'top', 'bottom']) {
-      expect(isValidWorkerMessageSnapshot(snapshotWithMotion({
-        activeMotions: [validMotion({ mode })],
-      }))).toBe(true);
+      expect(
+        isValidWorkerMessageSnapshot(
+          snapshotWithMotion({
+            activeMotions: [validMotion({ mode })],
+          })
+        )
+      ).toBe(true);
     }
-    for (const motion of [null, 1, validMotion({ id: 1 }), validMotion({ id: '' }),
-      validMotion({ mode: '' }), validMotion({ mode: 'diagonal' })]) {
-      expect(isValidWorkerMessageSnapshot(snapshotWithMotion({
-        activeMotions: [motion],
-      }))).toBe(false);
+    for (const motion of [
+      null,
+      1,
+      validMotion({ id: 1 }),
+      validMotion({ id: '' }),
+      validMotion({ mode: '' }),
+      validMotion({ mode: 'diagonal' }),
+    ]) {
+      expect(
+        isValidWorkerMessageSnapshot(
+          snapshotWithMotion({
+            activeMotions: [motion],
+          })
+        )
+      ).toBe(false);
     }
   });
 
   it('accepts exact motion bounds but rejects values just outside them', () => {
     const maximum = validMotion({
-      startX: -1_000_000, width: 1_000_000, height: 1_000_000,
-      y: -1_000_000, laneIndex: 16_384, laneSlotCount: 16_384,
-      durationMs: 1_000_000, startEpochMs: Number.MAX_SAFE_INTEGER,
-      fadeStartEpochMs: Number.MAX_SAFE_INTEGER, speedTier: 3,
+      startX: -1_000_000,
+      width: 1_000_000,
+      height: 1_000_000,
+      y: -1_000_000,
+      laneIndex: 16_384,
+      laneSlotCount: 16_384,
+      durationMs: 1_000_000,
+      startEpochMs: Number.MAX_SAFE_INTEGER,
+      fadeStartEpochMs: Number.MAX_SAFE_INTEGER,
+      speedTier: 3,
     });
     const snapshot = snapshotWithMotion({
       capturedAtEpochMs: Number.MAX_SAFE_INTEGER,
       effectiveNowEpochMs: Number.MAX_SAFE_INTEGER,
-      viewportWidthPx: 1_000_000, exitPaddingPx: 1_000_000,
+      viewportWidthPx: 1_000_000,
+      exitPaddingPx: 1_000_000,
       activeMotions: [maximum],
     });
     expect(isValidWorkerMessageSnapshot(snapshot)).toBe(true);
     for (const invalid of [
-      { startX: 1_000_001 }, { width: 1_000_001 }, { height: 1_000_001 },
-      { y: -1_000_001 }, { laneIndex: 16_385 }, { laneSlotCount: 0 },
-      { laneSlotCount: 16_385 }, { durationMs: 1_000_001 }, { speedTier: 4 },
+      { startX: 1_000_001 },
+      { width: 1_000_001 },
+      { height: 1_000_001 },
+      { y: -1_000_001 },
+      { laneIndex: 16_385 },
+      { laneSlotCount: 0 },
+      { laneSlotCount: 16_385 },
+      { durationMs: 1_000_001 },
+      { speedTier: 4 },
     ]) {
-      expect(isValidWorkerMessageSnapshot(snapshotWithMotion({
-        activeMotions: [validMotion(invalid)],
-      }))).toBe(false);
+      expect(
+        isValidWorkerMessageSnapshot(
+          snapshotWithMotion({
+            activeMotions: [validMotion(invalid)],
+          })
+        )
+      ).toBe(false);
     }
   });
 
@@ -820,7 +933,8 @@ describe('renderer worker protocol guards', () => {
 
   it('validates snapshot clocks, geometry, pause state, and motion-list size', () => {
     for (const invalid of [
-      null, [],
+      null,
+      [],
       validMotionSnapshot({ capturedAtEpochMs: Number.NaN, effectiveNowEpochMs: 0 }),
       validMotionSnapshot({ effectiveNowEpochMs: Number.NaN }),
       validMotionSnapshot({ effectiveNowEpochMs: 1_501 }),
@@ -828,17 +942,28 @@ describe('renderer worker protocol guards', () => {
       validMotionSnapshot({ viewportWidthPx: 1_000_001 }),
       validMotionSnapshot({ exitPaddingPx: 1_000_001 }),
     ]) {
-      expect(isValidWorkerMessageSnapshot(validSnapshot({
-        epoch: 2, activeMessageIds: ['active'], motionSnapshot: invalid,
-      }))).toBe(false);
+      expect(
+        isValidWorkerMessageSnapshot(
+          validSnapshot({
+            epoch: 2,
+            activeMessageIds: ['active'],
+            motionSnapshot: invalid,
+          })
+        )
+      ).toBe(false);
     }
 
     const ids = messageIds(MAX_STATS_MESSAGE_IDS);
     const motions = ids.map((id) => validMotion({ id }));
-    expect(isValidWorkerMessageSnapshot(validSnapshot({
-      epoch: 2, activeMessageIds: ids,
-      motionSnapshot: validMotionSnapshot({ activeMotions: motions }),
-    }))).toBe(true);
+    expect(
+      isValidWorkerMessageSnapshot(
+        validSnapshot({
+          epoch: 2,
+          activeMessageIds: ids,
+          motionSnapshot: validMotionSnapshot({ activeMotions: motions }),
+        })
+      )
+    ).toBe(true);
   });
 
   it('requires every snapshot identity field with safe integer counters', () => {
@@ -849,7 +974,12 @@ describe('renderer worker protocol guards', () => {
       { ...validSnapshot(), processedBatchSequence: -1 },
       { ...validSnapshot(), processedBatchSequence: 1.5 },
       { ...validSnapshot(), processedBatchSequence: Number.POSITIVE_INFINITY },
-      { type: 'messageSnapshot', activeMessageIds: [], pendingMessageIds: [], processedBatchSequence: 0 },
+      {
+        type: 'messageSnapshot',
+        activeMessageIds: [],
+        pendingMessageIds: [],
+        processedBatchSequence: 0,
+      },
       { type: 'messageSnapshot', requestId: 0, pendingMessageIds: [], processedBatchSequence: 0 },
       { type: 'messageSnapshot', requestId: 0, activeMessageIds: [], processedBatchSequence: 0 },
       { type: 'messageSnapshot', requestId: 0, activeMessageIds: [], pendingMessageIds: [] },
@@ -869,7 +999,10 @@ describe('renderer worker protocol guards', () => {
     expect(
       isValidControlMessage({
         type: 'addMessages',
-        messages: [{ ...message, trackDrops: true }, { ...message, trackDrops: false }],
+        messages: [
+          { ...message, trackDrops: true },
+          { ...message, trackDrops: false },
+        ],
       })
     ).toBe(true);
     expect(

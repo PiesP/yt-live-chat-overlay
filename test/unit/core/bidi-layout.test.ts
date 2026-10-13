@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getBidiLayoutCacheUsage,
   resetBidiLayoutCaches,
@@ -9,6 +8,7 @@ import {
   resolveVisualInlineLines,
   resolveVisualInlinePieces,
 } from '@renderer/canvas/bidi-layout';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const measureText = (text: string): number => Array.from(text).length * 10;
 
@@ -64,10 +64,7 @@ describe('Canvas bidi inline layout', () => {
 
   it('keeps astral and ZWJ graphemes atomic while preserving their bidi class', () => {
     const source = 'مرحبا 👨‍👩‍👧‍👦 𐤀 English';
-    const result = resolveVisualInlinePieces(
-      [{ type: 'text', text: source }],
-      measureText
-    );
+    const result = resolveVisualInlinePieces([{ type: 'text', text: source }], measureText);
     const renderedText = result
       .filter((piece) => piece.type === 'text')
       .map((piece) => piece.text)

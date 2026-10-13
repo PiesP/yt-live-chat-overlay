@@ -18,9 +18,9 @@ function stubChrome(): void {
 }
 
 afterEach(() => {
-  document
-    .querySelectorAll('script[src^="chrome-extension://"]')
-    .forEach((script) => script.remove());
+  document.querySelectorAll('script[src^="chrome-extension://"]').forEach((script) => {
+    script.remove();
+  });
   delete window.__ytExtensionBridge;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

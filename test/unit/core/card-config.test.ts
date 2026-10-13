@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { toWorkerConfig, SUPERCHAT_CARD_CONFIG, MEMBERSHIP_CARD_CONFIG } from '@renderer/card-config';
+import {
+  MEMBERSHIP_CARD_CONFIG,
+  SUPERCHAT_CARD_CONFIG,
+  toWorkerConfig,
+} from '@renderer/card-config';
+import { describe, expect, it } from 'vitest';
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -39,7 +43,7 @@ const makeSettings = (overrides = {}) =>
     membershipMaxBodyLines: 2,
     showSuperChatAmount: true,
     ...overrides,
-  } as unknown as Parameters<typeof toWorkerConfig>[2]);
+  }) as unknown as Parameters<typeof toWorkerConfig>[2];
 
 // ── toWorkerConfig for SuperChat ─────────────────────────────────────
 
@@ -80,7 +84,9 @@ describe('toWorkerConfig (SuperChat)', () => {
 
   it('hides author when settings.showAuthor.superChat is false', () => {
     const msg = makeSuperChatMessage();
-    const settings = makeSettings({ showAuthor: { ...makeSettings().showAuthor, superChat: false } });
+    const settings = makeSettings({
+      showAuthor: { ...makeSettings().showAuthor, superChat: false },
+    });
     const result = toWorkerConfig(SUPERCHAT_CARD_CONFIG, msg, settings);
 
     expect(result.authorShow).toBe(false);

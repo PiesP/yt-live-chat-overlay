@@ -9,6 +9,7 @@
  */
 
 import type { OverlaySettings } from '@app-types';
+import type { WorkerConfig } from './types';
 
 /**
  * Minimal worker manager shape used by the shared dispatch functions.
@@ -23,7 +24,7 @@ export interface WorkerManagerLike {
  */
 export function sendUpdateConfigToWorker(
   manager: WorkerManagerLike,
-  config: Record<string, unknown>
+  config: Partial<WorkerConfig>
 ): void {
   manager.worker?.postMessage({ type: 'updateConfig', config });
 }
@@ -56,11 +57,12 @@ export function sendClearStateToWorker(manager: WorkerManagerLike, epoch?: numbe
  * the subset of keys the worker needs. Shared helper used by both
  * the manager's updateSettings() implementation.
  */
-export function buildPartialWorkerConfig(
+export function buildPartialWorkerConfig<K extends keyof OverlaySettings>(
   settings: OverlaySettings,
-  keys: (keyof OverlaySettings)[]
-): Record<string, unknown> {
-  const config = {} as Record<string, unknown>;
+  keys: readonly K[]
+): Pick<OverlaySettings, K> {
+  // The loop fills every requested key; Pick preserves each key's value type.
+  const config = {} as Pick<OverlaySettings, K>;
   for (const key of keys) {
     config[key] = settings[key];
   }

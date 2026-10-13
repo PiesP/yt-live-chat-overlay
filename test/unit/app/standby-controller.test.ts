@@ -22,7 +22,7 @@ describe('StandbyController', () => {
     return new StandbyController(
       () => opts?.signal ?? new AbortController().signal,
       opts?.isDisposed ?? (() => false),
-      opts?.onStreamDetected ?? vi.fn(),
+      opts?.onStreamDetected ?? vi.fn()
     );
   }
 

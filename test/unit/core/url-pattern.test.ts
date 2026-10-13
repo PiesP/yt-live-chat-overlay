@@ -2,8 +2,8 @@
  * Tests for url-pattern.ts — YouTube URL pattern matching.
  */
 
-import { describe, it, expect } from 'vitest';
-import { isYouTubeWatch, isYouTubeLive } from '@chat/youtube/url-pattern';
+import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
+import { describe, expect, it } from 'vitest';
 
 describe('isYouTubeWatch', () => {
   it('returns true for youtube.com/watch', () => {

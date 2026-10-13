@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, expect, it } from 'vitest';
+import type { OverlaySettings } from '@app-types';
 import {
-  DEFAULT_SETTINGS,
-  SETTINGS_VERSION,
-  STORAGE_KEY,
   applySettingsPatch,
   cloneSettings,
+  DEFAULT_SETTINGS,
   getOutlineDisplayScale,
   getRootDisplayMeta,
   normalizeStoredSettings,
   resolveLimits,
   resolveOutlineLimits,
+  SETTINGS_VERSION,
+  STORAGE_KEY,
   shouldResetRendererForSettingsChange,
 } from '@settings/schema';
-import type { OverlaySettings } from '@app-types';
+import { describe, expect, it } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════
 // Constants
@@ -53,6 +53,47 @@ describe('polling interval normalization', () => {
       expect(settings.minPollIntervalMs).toBeGreaterThan(0);
       expect(settings.minPollIntervalMs).toBeLessThanOrEqual(settings.maxPollIntervalMs);
     }
+  });
+});
+
+describe('scalar and nested normalization boundaries', () => {
+  it('coerces finite numbers, rounds cache budgets, and swaps inverted duration pairs', () => {
+    const result = normalizeStoredSettings({
+      speedPxPerSec: '499',
+      emojiCacheMb: '2.5',
+      scrollDurationMinMs: 20_000,
+      scrollDurationMaxMs: 5_000,
+      outline: { widthPx: '9', opacity: '-1', enabled: 'yes' },
+    });
+
+    expect(result.speedPxPerSec).toBe(499);
+    expect(result.emojiCacheMb).toBe(3);
+    expect([result.scrollDurationMinMs, result.scrollDurationMaxMs]).toEqual([5_000, 15_000]);
+    expect(result.outline).toEqual({
+      enabled: DEFAULT_SETTINGS.outline.enabled,
+      widthPx: 8,
+      opacity: 0.5,
+    });
+  });
+
+  it('rejects malformed scalar and nested values independently', () => {
+    const result = normalizeStoredSettings({
+      allowShortTextMessages: 'false',
+      fontFamily: 'Bad; font',
+      translationMode: 'side-by-side',
+      opacity: 'not a number',
+      outline: { widthPx: Number.POSITIVE_INFINITY, opacity: 0.4 },
+      showAuthor: { normal: 'true', member: true },
+    });
+
+    expect(result.allowShortTextMessages).toBe(DEFAULT_SETTINGS.allowShortTextMessages);
+    expect(result.fontFamily).toBe(DEFAULT_SETTINGS.fontFamily);
+    expect(result.translationMode).toBe(DEFAULT_SETTINGS.translationMode);
+    expect(result.opacity).toBe(DEFAULT_SETTINGS.opacity);
+    expect(result.outline.widthPx).toBe(DEFAULT_SETTINGS.outline.widthPx);
+    expect(result.outline.opacity).toBe(0.5);
+    expect(result.showAuthor.normal).toBe(DEFAULT_SETTINGS.showAuthor.normal);
+    expect(result.showAuthor.member).toBe(true);
   });
 });
 
@@ -793,8 +834,8 @@ describe('normalizeStoredSettings', () => {
 // isLogLevel
 // ═══════════════════════════════════════════════════════════
 
-import { clampNumber, isColorValue, isLogLevel } from '@settings/schema';
 import { migrateSettings } from '@settings/defaults';
+import { clampNumber, isColorValue, isLogLevel } from '@settings/schema';
 
 describe('isLogLevel', () => {
   it("'warn' returns true", () => {

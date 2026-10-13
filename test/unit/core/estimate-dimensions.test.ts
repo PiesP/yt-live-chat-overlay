@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 // Mock text-measure BEFORE importing the module under test
 vi.mock('@renderer/text-measure', () => ({
-  getFontString: vi.fn((size: number, weight: string, family: string) =>
-    `${weight} ${size}px ${family}`
+  getFontString: vi.fn(
+    (size: number, weight: string, family: string) => `${weight} ${size}px ${family}`
   ),
   measureTextWidth: vi.fn((text: string) => text.length * 8),
-  measureTextTopBounds: vi.fn((_font: string, size: number) => ({ above: 0, below: Math.round(size * 1.2) })),
+  measureTextTopBounds: vi.fn((_font: string, size: number) => ({
+    above: 0,
+    below: Math.round(size * 1.2),
+  })),
   measureTextHeight: vi.fn((_font: string, size: number) => Math.round(size * 1.2)),
   clearTextMeasurementCaches: vi.fn(),
   getTextMeasurementGeneration: () => 0,
@@ -25,7 +28,7 @@ vi.mock('@renderer/canvas/shared', () => ({
         totalWidth += seg.type === 'text' ? seg.content.length * 8 : 16;
       }
       const linesPerRow = Math.max(1, Math.floor(maxWidth / 8));
-      const lineCount = Math.max(1, Math.ceil((totalWidth / 8) / linesPerRow));
+      const lineCount = Math.max(1, Math.ceil(totalWidth / 8 / linesPerRow));
       return {
         lines: Array.from({ length: lineCount }, () => []),
         maxLineWidth: Math.min(maxWidth, totalWidth),
@@ -49,13 +52,10 @@ vi.mock('@renderer/canvas/shared', () => ({
   toSharedContentSegments: vi.fn((c: unknown) => c),
 }));
 
-import {
-  estimateMessageDimensions,
-  estimateTranslatedMessageDimensions,
-} from '@renderer/shared';
+import type { ChatMessage } from '@app-types';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
-import type { ChatMessage } from '@app-types';
+import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
 import { rendererLayout, spacing } from '@util/design-tokens';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -77,7 +77,10 @@ function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 
 describe('estimateMessageDimensions — regular text', () => {
   it('returns { width, height } for a plain text message', () => {
-    const msg = makeMessage({ text: 'test message', content: [{ type: 'text', content: 'test message' }] });
+    const msg = makeMessage({
+      text: 'test message',
+      content: [{ type: 'text', content: 'test message' }],
+    });
     const dims = estimateMessageDimensions(msg, 16, false);
     expect(dims.width).toBeGreaterThan(0);
     expect(dims.height).toBeGreaterThan(0);
@@ -298,8 +301,7 @@ describe('estimateMessageDimensions — superchat', () => {
       false
     );
     const badgeHeight =
-      Math.round(16 * rendererLayout.authorFontScale) +
-      rendererLayout.superchatBadge.paddingV * 2;
+      Math.round(16 * rendererLayout.authorFontScale) + rendererLayout.superchatBadge.paddingV * 2;
 
     expect(withBadge.height - withoutBadge.height).toBe(badgeHeight + spacing.xs);
     expect(withoutBadge.height).toBe(

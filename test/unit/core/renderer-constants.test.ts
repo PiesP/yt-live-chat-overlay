@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { hashStringForTier } from '@renderer/constants';
 import { desaturateColor } from '@renderer/color-utils';
+import { hashStringForTier } from '@renderer/constants';
+import { describe, expect, it } from 'vitest';
 
 // ── hashStringForTier ────────────────────────────────────────────────
 

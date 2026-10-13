@@ -65,9 +65,11 @@ function runTaskkillTree(pid) {
       rejectTaskkill(new Error('Windows did not expose an absolute SystemRoot directory'));
       return;
     }
-    const taskkill = spawn(win32.join(systemRoot, 'System32', 'taskkill.exe'), [
-      '/PID', String(pid), '/T', '/F',
-    ], { stdio: 'ignore', windowsHide: true });
+    const taskkill = spawn(
+      win32.join(systemRoot, 'System32', 'taskkill.exe'),
+      ['/PID', String(pid), '/T', '/F'],
+      { stdio: 'ignore', windowsHide: true }
+    );
     taskkill.once('error', rejectTaskkill);
     taskkill.once('exit', (code) => {
       if (code === 0) resolveTaskkill();
@@ -104,10 +106,7 @@ async function terminateOwnedProcessTree(child) {
 /** Run every cleanup phase and remove the profile only after process termination. */
 export async function cleanupFirefoxResources(
   { child, detachSocket = () => {}, profileDir, root, socket },
-  {
-    removeProfile = removeOwnedProfile,
-    terminateProcessTree = terminateOwnedProcessTree,
-  } = {}
+  { removeProfile = removeOwnedProfile, terminateProcessTree = terminateOwnedProcessTree } = {}
 ) {
   const errors = [];
   try {
@@ -127,19 +126,27 @@ export async function cleanupFirefoxResources(
     await terminateProcessTree(child);
     processTerminated = true;
   } catch (error) {
-    errors.push(new Error(`Failed to terminate the task-owned Firefox tree: ${errorMessage(error)}`));
+    errors.push(
+      new Error(`Failed to terminate the task-owned Firefox tree: ${errorMessage(error)}`)
+    );
   }
   if (processTerminated) {
     try {
       await removeProfile(root, profileDir);
     } catch (error) {
-      errors.push(new Error(`Failed to remove the task-owned Firefox profile: ${errorMessage(error)}`));
+      errors.push(
+        new Error(`Failed to remove the task-owned Firefox profile: ${errorMessage(error)}`)
+      );
     }
   }
   if (errors.length > 0) throw new AggregateError(errors, 'Firefox resource cleanup failed');
 }
 
-export function buildFirefoxLaunchArguments({ profileDir, headless = false, platform = process.platform }) {
+export function buildFirefoxLaunchArguments({
+  profileDir,
+  headless = false,
+  platform = process.platform,
+}) {
   if (typeof profileDir !== 'string' || profileDir.length === 0) {
     throw new TypeError('profileDir must be a non-empty string');
   }

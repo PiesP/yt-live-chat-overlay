@@ -10,8 +10,11 @@
 
 import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@app/bootstrap-resolver';
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
-import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
-import { getLiveChatPayload } from '@chat/youtube/api';
+import {
+  type ChatBootstrapData,
+  getLiveChatPayload,
+  type LiveChatPayload,
+} from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';

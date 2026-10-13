@@ -1,20 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-schema.json",
-  "mutate": [
-    "src/**/*.ts",
-    "!src/**/*.d.ts",
-    "!src/types/**",
-    "!src/main.ts"
-  ],
+  "mutate": ["src/**/*.ts", "!src/**/*.d.ts", "!src/types/**", "!src/main.ts"],
   "testRunner": "vitest",
   "vitest": {
     "configFile": "vitest.config.ts",
     "related": false
   },
-  "reporters": [
-    "progress",
-    "clear-text"
-  ],
+  "reporters": ["progress", "clear-text"],
   "coverageAnalysis": "all",
   "thresholds": {
     "high": 80,
@@ -24,9 +16,7 @@
   "inPlace": true,
   "concurrency": 1,
   "timeoutMS": 120000,
-  "plugins": [
-    "@stryker-mutator/vitest-runner"
-  ],
+  "plugins": ["@stryker-mutator/vitest-runner"],
   "mutator": {
     "excludedMutations": [
       "StringLiteral",

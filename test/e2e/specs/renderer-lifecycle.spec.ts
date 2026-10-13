@@ -9,13 +9,13 @@
  * across the render loop cycle.
  */
 
-import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { expect, test } from '@playwright/test';
 import {
-  setupOverlayPage,
   applySettings,
   getSettings,
   OVERLAY_ID,
+  setupOverlayPage,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 
@@ -23,7 +23,7 @@ test.describe('Renderer Lifecycle', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`,
+        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`
       );
     }
   });
@@ -59,7 +59,7 @@ test.describe('Renderer Lifecycle', () => {
 
     // Restart the overlay
     await page.evaluate(() => {
-      const w = (window as unknown) as Record<string, unknown>;
+      const w = window as unknown as Record<string, unknown>;
       const handle = w.__ytChatOverlay as { restartRuntime?: () => Promise<void> } | undefined;
       return handle?.restartRuntime?.();
     });
@@ -102,7 +102,7 @@ test.describe('Renderer Lifecycle', () => {
 
     // Step 2: stop the overlay
     await page.evaluate(() => {
-      const w = (window as unknown) as Record<string, unknown>;
+      const w = window as unknown as Record<string, unknown>;
       const handle = w.__ytChatOverlay as { stop?: () => Promise<void> } | undefined;
       return handle?.stop?.();
     });
@@ -111,7 +111,7 @@ test.describe('Renderer Lifecycle', () => {
 
     // Step 4: start() after stop() is a no-op — runtime was destroyed
     await page.evaluate(() => {
-      const w = (window as unknown) as Record<string, unknown>;
+      const w = window as unknown as Record<string, unknown>;
       const handle = w.__ytChatOverlay as { start?: () => Promise<void> } | undefined;
       return handle?.start?.();
     });

@@ -4,35 +4,87 @@
 import { runInNewContext } from 'node:vm';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vitest';
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { assertBacklogMotion, assertBacklogReflow, assertSpacingPhase, canvasProbePrelude, findOverlappingActivePair, instrumentCanvasPageScript, measureAllocationRowPitch, measureMixedHeightClearance, measureVisibleRowPitch, MIXED_BURST_SETTINGS, MIXED_PRESSURE_CHUNK_SIZE, MIXED_PRESSURE_COUNT, mixedPressureBatches, PLACEMENT_SCENARIOS, runPlacementTimingFixture, spacingFixtureIds, summarizeExactWorkerProbe, summarizeSamples, workerProbePrelude, workerProbeSuffix } from '../../../validation/windows/placement-timing.mjs';
+import {
+  assertBacklogMotion,
+  assertBacklogReflow,
+  assertSpacingPhase,
+  canvasProbePrelude,
+  findOverlappingActivePair,
+  instrumentCanvasPageScript,
+  MIXED_BURST_SETTINGS,
+  MIXED_PRESSURE_CHUNK_SIZE,
+  MIXED_PRESSURE_COUNT,
+  measureAllocationRowPitch,
+  measureMixedHeightClearance,
+  measureVisibleRowPitch,
+  mixedPressureBatches,
+  PLACEMENT_SCENARIOS,
+  runPlacementTimingFixture,
+  spacingFixtureIds,
+  summarizeExactWorkerProbe,
+  summarizeSamples,
+  workerProbePrelude,
+  workerProbeSuffix,
+  // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
+} from '../../../validation/windows/placement-timing.mjs';
 
 function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
   const prefix = `WINDOWS196_GAP${gap}_`;
-  const active = origins.map((y, index) => ({ id: `${prefix}${index}`,
-    x: index === offscreenIndex ? 900 : 10, y, width: 100, height: 44,
-    startAtEpochMs: 900, endAtEpochMs: 1100 }));
-  const draws = active.map(({ id, x, y }) => ({ id, frameId: 7, alpha: 1,
+  const active = origins.map((y, index) => ({
+    id: `${prefix}${index}`,
+    x: index === offscreenIndex ? 900 : 10,
+    y,
+    width: 100,
+    height: 44,
+    startAtEpochMs: 900,
+    endAtEpochMs: 1100,
+  }));
+  const draws = active.map(({ id, x, y }) => ({
+    id,
+    frameId: 7,
+    alpha: 1,
     rect: { left: x, top: y, right: x + 100, bottom: y + 32 },
-    japanese: { text: '東京', rect: { left: x, top: y, right: x + 50, bottom: y + 32 } } }));
+    japanese: { text: '東京', rect: { left: x, top: y, right: x + 50, bottom: y + 32 } },
+  }));
   const config = { renderer, fontSize: 32, laneSpacing: gap };
-  return { exact: { activeNow: active, config },
-    renderFrame: { frameId: 7, complete: true, truncated: false,
-      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
-      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
-      config, active, draws } };
+  return {
+    exact: { activeNow: active, config },
+    renderFrame: {
+      frameId: 7,
+      complete: true,
+      truncated: false,
+      startedAtEpochMs: 1000,
+      finishedAtEpochMs: 1001,
+      logicalWidth: 800,
+      logicalHeight: 400,
+      backingRatioX: 2,
+      backingRatioY: 2,
+      config,
+      active,
+      draws,
+    },
+  };
 }
 
 describe('Windows placement timing probe', () => {
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
     const names = PLACEMENT_SCENARIOS.map((scenario: { name: string }) => scenario.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toEqual(expect.arrayContaining([
-      'worker-top', 'worker-bottom', 'worker-reduced-toggle', 'worker-safe-density',
-      'worker-congestion', 'worker-translation', 'worker-replay',
-      'worker-spacing-speed', 'main-spacing-speed',
-      'worker-mixed-gap', 'main-mixed-gap',
-    ]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'worker-top',
+        'worker-bottom',
+        'worker-reduced-toggle',
+        'worker-safe-density',
+        'worker-congestion',
+        'worker-translation',
+        'worker-replay',
+        'worker-spacing-speed',
+        'main-spacing-speed',
+        'worker-mixed-gap',
+        'main-mixed-gap',
+      ])
+    );
   });
 
   it('routes distinct Japanese message IDs to the zero-gap and eight-gap batches', () => {
@@ -46,16 +98,35 @@ describe('Windows placement timing probe', () => {
 
   it('routes bounded parser callbacks that reach real half-cell density', () => {
     const pressure = ['2', '4', '5'].map((phase) => mixedPressureBatches(phase));
-    const actions = pressure.flatMap((batches) => batches.flatMap((batch: {
-      actions: unknown[] }) => batch.actions));
-    const ids = actions.map((action: { addChatItemAction: { item: {
-      liveChatTextMessageRenderer: { id: string } } } }) =>
-      action.addChatItemAction.item.liveChatTextMessageRenderer.id);
+    const actions = pressure.flatMap((batches) =>
+      batches.flatMap((batch: { actions: unknown[] }) => batch.actions)
+    );
+    const ids = actions.map(
+      (action: {
+        addChatItemAction: {
+          item: {
+            liveChatTextMessageRenderer: { id: string };
+          };
+        };
+      }) => action.addChatItemAction.item.liveChatTextMessageRenderer.id
+    );
     expect(MIXED_PRESSURE_CHUNK_SIZE).toBeLessThan(5);
-    expect(pressure.every((batches) => batches.every((batch: { actions: unknown[] }) =>
-      batch.actions.length > 0 && batch.actions.length < 5))).toBe(true);
-    expect(pressure.every((batches) => batches.reduce((count: number,
-      batch: { actions: unknown[] }) => count + batch.actions.length, 0) === MIXED_PRESSURE_COUNT)).toBe(true);
+    expect(
+      pressure.every((batches) =>
+        batches.every(
+          (batch: { actions: unknown[] }) => batch.actions.length > 0 && batch.actions.length < 5
+        )
+      )
+    ).toBe(true);
+    expect(
+      pressure.every(
+        (batches) =>
+          batches.reduce(
+            (count: number, batch: { actions: unknown[] }) => count + batch.actions.length,
+            0
+          ) === MIXED_PRESSURE_COUNT
+      )
+    ).toBe(true);
     const keys = pressure.flatMap((batches) => batches.map((batch: { key: string }) => batch.key));
     expect(new Set(keys).size).toBe(keys.length);
     expect(new Set(ids).size).toBe(MIXED_PRESSURE_COUNT * pressure.length);
@@ -100,246 +171,495 @@ describe('Windows placement timing probe', () => {
     expect(measureAllocationRowPitch(messages.slice(0, 1))).toBeNull();
   });
 
-  it.each(['main', 'worker'])('accepts healthy sparse %s phase observations without comparing cohort pitch', (renderer) => {
-    for (const offscreenMiddle of [false, true]) {
-      const gap0 = spacingSnapshot(renderer, 0, offscreenMiddle ? [0, 44, 88] : [0, 88],
-        offscreenMiddle ? 1 : -1);
-      const gap8 = spacingSnapshot(renderer, 8, [0, 52]);
-      const before = assertSpacingPhase(gap0, 'WINDOWS196_GAP0_', 0, renderer);
-      const after = assertSpacingPhase(gap8, 'WINDOWS196_GAP8_', 8, renderer);
-      expect(before).toMatchObject({ allocationPitchPx: offscreenMiddle ? 44 : 88,
-        visibleRowPitch: { status: 'measured', pitchPx: 88,
-          japaneseVisibleRowOriginsPx: [0, 88] } });
-      expect(after).toMatchObject({ allocationPitchPx: 52,
-        visibleRowPitch: { status: 'measured', pitchPx: 52,
-          japaneseVisibleRowOriginsPx: [0, 52] } });
-      if (offscreenMiddle) {
-        expect(before.visibleRowPitch.excluded).toContainEqual({
-          id: 'WINDOWS196_GAP0_1', reason: 'offscreen_row',
+  it.each(['main', 'worker'])(
+    'accepts healthy sparse %s phase observations without comparing cohort pitch',
+    (renderer) => {
+      for (const offscreenMiddle of [false, true]) {
+        const gap0 = spacingSnapshot(
+          renderer,
+          0,
+          offscreenMiddle ? [0, 44, 88] : [0, 88],
+          offscreenMiddle ? 1 : -1
+        );
+        const gap8 = spacingSnapshot(renderer, 8, [0, 52]);
+        const before = assertSpacingPhase(gap0, 'WINDOWS196_GAP0_', 0, renderer);
+        const after = assertSpacingPhase(gap8, 'WINDOWS196_GAP8_', 8, renderer);
+        expect(before).toMatchObject({
+          allocationPitchPx: offscreenMiddle ? 44 : 88,
+          visibleRowPitch: {
+            status: 'measured',
+            pitchPx: 88,
+            japaneseVisibleRowOriginsPx: [0, 88],
+          },
         });
-        expect(after.allocationPitchPx).toBeGreaterThan(before.allocationPitchPx);
-      } else {
-        // The old allocation assertion rejects case A, before the visibility comparison.
-        expect(() => expect(after.allocationPitchPx).toBeGreaterThanOrEqual(before.allocationPitchPx))
-          .toThrow();
+        expect(after).toMatchObject({
+          allocationPitchPx: 52,
+          visibleRowPitch: {
+            status: 'measured',
+            pitchPx: 52,
+            japaneseVisibleRowOriginsPx: [0, 52],
+          },
+        });
+        if (offscreenMiddle) {
+          expect(before.visibleRowPitch.excluded).toContainEqual({
+            id: 'WINDOWS196_GAP0_1',
+            reason: 'offscreen_row',
+          });
+          expect(after.allocationPitchPx).toBeGreaterThan(before.allocationPitchPx);
+        } else {
+          // The old allocation assertion rejects case A, before the visibility comparison.
+          expect(() =>
+            expect(after.allocationPitchPx).toBeGreaterThanOrEqual(before.allocationPitchPx)
+          ).toThrow();
+        }
+        // Case B passes the allocation comparison but fails the old visible comparison.
+        expect(() =>
+          expect(after.visibleRowPitch.pitchPx).toBeGreaterThanOrEqual(
+            before.visibleRowPitch.pitchPx
+          )
+        ).toThrow();
       }
-      // Case B passes the allocation comparison but fails the old visible comparison.
-      expect(() => expect(after.visibleRowPitch.pitchPx)
-        .toBeGreaterThanOrEqual(before.visibleRowPitch.pitchPx)).toThrow();
+      const adjacent0 = assertSpacingPhase(
+        spacingSnapshot(renderer, 0, [0, 44]),
+        'WINDOWS196_GAP0_',
+        0,
+        renderer
+      );
+      const adjacent8 = assertSpacingPhase(
+        spacingSnapshot(renderer, 8, [0, 52]),
+        'WINDOWS196_GAP8_',
+        8,
+        renderer
+      );
+      expect(adjacent0.visibleRowPitch.pitchPx).toBe(44);
+      expect(adjacent8.visibleRowPitch.pitchPx).toBe(52);
     }
-    const adjacent0 = assertSpacingPhase(spacingSnapshot(renderer, 0, [0, 44]),
-      'WINDOWS196_GAP0_', 0, renderer);
-    const adjacent8 = assertSpacingPhase(spacingSnapshot(renderer, 8, [0, 52]),
-      'WINDOWS196_GAP8_', 8, renderer);
-    expect(adjacent0.visibleRowPitch.pitchPx).toBe(44);
-    expect(adjacent8.visibleRowPitch.pitchPx).toBe(52);
-  });
+  );
 
-  it.each(['main', 'worker'])('keeps missing and incoherent %s phase evidence unavailable', (renderer) => {
-    const valid = spacingSnapshot(renderer, 8, [0, 52]);
-    for (const [name, frame] of [
-      ['no rows', { ...valid.renderFrame, active: [], draws: [] }],
-      ['one row', { ...valid.renderFrame, active: valid.renderFrame.active.slice(0, 1),
-        draws: valid.renderFrame.draws.slice(0, 1) }],
-      ['incomplete', { ...valid.renderFrame, complete: false }],
-      ['truncated', { ...valid.renderFrame, truncated: true }],
-      ['wrong frame', { ...valid.renderFrame, draws: valid.renderFrame.draws.map((draw) =>
-        ({ ...draw, frameId: 8 })) }],
-      ['invalid viewport', { ...valid.renderFrame, logicalWidth: 0 }],
-      ['zero alpha', { ...valid.renderFrame, draws: valid.renderFrame.draws.map((draw) =>
-        ({ ...draw, alpha: 0 })) }],
-      ['no Japanese ink', { ...valid.renderFrame, draws: valid.renderFrame.draws.map((draw) =>
-        ({ ...draw, japanese: null })) }],
-    ] as const) {
-      const measured = measureVisibleRowPitch(frame, 'WINDOWS196_GAP8_');
-      if (name !== 'no Japanese ink') {
-        expect(measured.pitchPx, name).toBeNull();
-        expect(['unknown', 'insufficient'], name).toContain(measured.status);
-        expect(measured.reason, name).toEqual(expect.any(String));
-      } else {
-        expect(measured).toMatchObject({ status: 'measured', pitchPx: 52,
-          japaneseVisibleRowOriginsPx: [] });
+  it.each(['main', 'worker'])(
+    'keeps missing and incoherent %s phase evidence unavailable',
+    (renderer) => {
+      const valid = spacingSnapshot(renderer, 8, [0, 52]);
+      for (const [name, frame] of [
+        ['no rows', { ...valid.renderFrame, active: [], draws: [] }],
+        [
+          'one row',
+          {
+            ...valid.renderFrame,
+            active: valid.renderFrame.active.slice(0, 1),
+            draws: valid.renderFrame.draws.slice(0, 1),
+          },
+        ],
+        ['incomplete', { ...valid.renderFrame, complete: false }],
+        ['truncated', { ...valid.renderFrame, truncated: true }],
+        [
+          'wrong frame',
+          {
+            ...valid.renderFrame,
+            draws: valid.renderFrame.draws.map((draw) => ({ ...draw, frameId: 8 })),
+          },
+        ],
+        ['invalid viewport', { ...valid.renderFrame, logicalWidth: 0 }],
+        [
+          'zero alpha',
+          {
+            ...valid.renderFrame,
+            draws: valid.renderFrame.draws.map((draw) => ({ ...draw, alpha: 0 })),
+          },
+        ],
+        [
+          'no Japanese ink',
+          {
+            ...valid.renderFrame,
+            draws: valid.renderFrame.draws.map((draw) => ({ ...draw, japanese: null })),
+          },
+        ],
+      ] as const) {
+        const measured = measureVisibleRowPitch(frame, 'WINDOWS196_GAP8_');
+        if (name !== 'no Japanese ink') {
+          expect(measured.pitchPx, name).toBeNull();
+          expect(['unknown', 'insufficient'], name).toContain(measured.status);
+          expect(measured.reason, name).toEqual(expect.any(String));
+        } else {
+          expect(measured).toMatchObject({
+            status: 'measured',
+            pitchPx: 52,
+            japaneseVisibleRowOriginsPx: [],
+          });
+        }
+        expect(
+          () =>
+            assertSpacingPhase({ ...valid, renderFrame: frame }, 'WINDOWS196_GAP8_', 8, renderer),
+          name
+        ).toThrow(/two visible Japanese rows/);
       }
-      expect(() => assertSpacingPhase({ ...valid, renderFrame: frame },
-        'WINDOWS196_GAP8_', 8, renderer), name).toThrow(/two visible Japanese rows/);
+      expect(() => assertSpacingPhase(valid, 'WINDOWS196_GAP8_', 0, renderer)).toThrow(
+        /phase Lane Gap/
+      );
+      expect(() =>
+        assertSpacingPhase(
+          {
+            ...valid,
+            exact: { ...valid.exact, config: { ...valid.exact.config, laneSpacing: 0 } },
+          },
+          'WINDOWS196_GAP8_',
+          8,
+          renderer
+        )
+      ).toThrow(/snapshot did not use/);
+      expect(() =>
+        assertSpacingPhase(valid, 'WINDOWS196_GAP8_', 8, renderer === 'main' ? 'worker' : 'main')
+      ).toThrow(/wrong renderer/);
     }
-    expect(() => assertSpacingPhase(valid, 'WINDOWS196_GAP8_', 0, renderer))
-      .toThrow(/phase Lane Gap/);
-    expect(() => assertSpacingPhase({ ...valid, exact: { ...valid.exact,
-      config: { ...valid.exact.config, laneSpacing: 0 } } }, 'WINDOWS196_GAP8_', 8, renderer))
-      .toThrow(/snapshot did not use/);
-    expect(() => assertSpacingPhase(valid, 'WINDOWS196_GAP8_', 8,
-      renderer === 'main' ? 'worker' : 'main')).toThrow(/wrong renderer/);
-  });
+  );
 
-  it.each(['main', 'worker'])('measures only two painted, eligible row origins in one %s frame', (renderer) => {
-    const row = (id: string, x: number, y: number) => ({ id, x, y, width: 100,
-      height: 32, startAtEpochMs: 900, endAtEpochMs: 1100 });
-    const draw = (id: string, top: number, alpha = 1, frameId = 7) => ({ id, frameId, alpha,
-      rect: { left: 10, top, right: 110, bottom: top + 32 },
-      japanese: { text: '東京', rect: { left: 10, top, right: 50, bottom: top + 32 } } });
-    const frame = { frameId: 7, complete: true, truncated: false,
-      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
-      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
-      config: { renderer, fontSize: 32, laneSpacing: 0 },
-      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 88),
-        row('WINDOWS196_GAP0_C', 810, 44)],
-      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 88),
-        draw('WINDOWS196_GAP0_C', 44)] };
-    expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
-      includedIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
-      excluded: [{ id: 'WINDOWS196_GAP0_C', reason: 'offscreen_row' }],
-      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
-      japaneseVisibleRowOriginsPx: [0, 88] });
-    const sameJapaneseRow = measureVisibleRowPitch({ ...frame,
-      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 0),
-        row('WINDOWS196_GAP0_C', 10, 88)],
-      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 0),
-        { ...draw('WINDOWS196_GAP0_C', 88), japanese: null }] });
-    expect(sameJapaneseRow).toMatchObject({ status: 'measured', pitchPx: 88,
-      japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
-      japaneseVisibleRowOriginsPx: [0] });
-    expect(sameJapaneseRow.japaneseVisibleRowOriginsPx).toHaveLength(1);
-    expect(measureVisibleRowPitch({ ...frame, active: frame.active.slice(0, 1),
-      draws: frame.draws.slice(0, 1) }))
-      .toMatchObject({ status: 'insufficient', pitchPx: null });
-    expect(measureVisibleRowPitch({ ...frame,
-      active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 0)],
-      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 0)] }))
-      .toMatchObject({ status: 'insufficient', pitchPx: null });
-    expect(measureVisibleRowPitch({ ...frame, active: frame.active.map((entry) => ({
-      ...entry, x: 900,
-    })) })).toMatchObject({ status: 'insufficient', pitchPx: null });
-    expect(measureVisibleRowPitch({ ...frame, draws: [draw('WINDOWS196_GAP0_A', 0),
-      draw('WINDOWS196_GAP0_B', 10)] })).toMatchObject({ status: 'unknown', pitchPx: null,
-      reason: 'draw_row_mismatch' });
-    expect(measureVisibleRowPitch({ ...frame, draws: [...frame.draws,
-      draw('WINDOWS196_GAP0_MISSING', 132)] })).toMatchObject({ status: 'unknown',
-      pitchPx: null, reason: 'draw_without_active_row' });
-  });
+  it.each(['main', 'worker'])(
+    'measures only two painted, eligible row origins in one %s frame',
+    (renderer) => {
+      const row = (id: string, x: number, y: number) => ({
+        id,
+        x,
+        y,
+        width: 100,
+        height: 32,
+        startAtEpochMs: 900,
+        endAtEpochMs: 1100,
+      });
+      const draw = (id: string, top: number, alpha = 1, frameId = 7) => ({
+        id,
+        frameId,
+        alpha,
+        rect: { left: 10, top, right: 110, bottom: top + 32 },
+        japanese: { text: '東京', rect: { left: 10, top, right: 50, bottom: top + 32 } },
+      });
+      const frame = {
+        frameId: 7,
+        complete: true,
+        truncated: false,
+        startedAtEpochMs: 1000,
+        finishedAtEpochMs: 1001,
+        logicalWidth: 800,
+        logicalHeight: 400,
+        backingRatioX: 2,
+        backingRatioY: 2,
+        config: { renderer, fontSize: 32, laneSpacing: 0 },
+        active: [
+          row('WINDOWS196_GAP0_A', 10, 0),
+          row('WINDOWS196_GAP0_B', 10, 88),
+          row('WINDOWS196_GAP0_C', 810, 44),
+        ],
+        draws: [
+          draw('WINDOWS196_GAP0_A', 0),
+          draw('WINDOWS196_GAP0_B', 88),
+          draw('WINDOWS196_GAP0_C', 44),
+        ],
+      };
+      expect(measureVisibleRowPitch(frame)).toMatchObject({
+        status: 'measured',
+        pitchPx: 88,
+        includedIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+        excluded: [{ id: 'WINDOWS196_GAP0_C', reason: 'offscreen_row' }],
+        japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+        japaneseVisibleRowOriginsPx: [0, 88],
+      });
+      const sameJapaneseRow = measureVisibleRowPitch({
+        ...frame,
+        active: [
+          row('WINDOWS196_GAP0_A', 10, 0),
+          row('WINDOWS196_GAP0_B', 10, 0),
+          row('WINDOWS196_GAP0_C', 10, 88),
+        ],
+        draws: [
+          draw('WINDOWS196_GAP0_A', 0),
+          draw('WINDOWS196_GAP0_B', 0),
+          { ...draw('WINDOWS196_GAP0_C', 88), japanese: null },
+        ],
+      });
+      expect(sameJapaneseRow).toMatchObject({
+        status: 'measured',
+        pitchPx: 88,
+        japaneseVisibleIds: ['WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B'],
+        japaneseVisibleRowOriginsPx: [0],
+      });
+      expect(sameJapaneseRow.japaneseVisibleRowOriginsPx).toHaveLength(1);
+      expect(
+        measureVisibleRowPitch({
+          ...frame,
+          active: frame.active.slice(0, 1),
+          draws: frame.draws.slice(0, 1),
+        })
+      ).toMatchObject({ status: 'insufficient', pitchPx: null });
+      expect(
+        measureVisibleRowPitch({
+          ...frame,
+          active: [row('WINDOWS196_GAP0_A', 10, 0), row('WINDOWS196_GAP0_B', 10, 0)],
+          draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 0)],
+        })
+      ).toMatchObject({ status: 'insufficient', pitchPx: null });
+      expect(
+        measureVisibleRowPitch({
+          ...frame,
+          active: frame.active.map((entry) => ({
+            ...entry,
+            x: 900,
+          })),
+        })
+      ).toMatchObject({ status: 'insufficient', pitchPx: null });
+      expect(
+        measureVisibleRowPitch({
+          ...frame,
+          draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 10)],
+        })
+      ).toMatchObject({ status: 'unknown', pitchPx: null, reason: 'draw_row_mismatch' });
+      expect(
+        measureVisibleRowPitch({
+          ...frame,
+          draws: [...frame.draws, draw('WINDOWS196_GAP0_MISSING', 132)],
+        })
+      ).toMatchObject({ status: 'unknown', pitchPx: null, reason: 'draw_without_active_row' });
+    }
+  );
 
   it('excludes future, expired, undrawn and transparent rows, and rejects incoherent frames', () => {
-    const row = (id: string, y: number, start = 900, end = 1100) => ({ id, x: 10, y,
-      width: 100, height: 30, startAtEpochMs: start, endAtEpochMs: end });
-    const draw = (id: string, top: number, alpha = 1, frameId = 9) => ({ id, frameId, alpha,
-      rect: { left: 10, top, right: 110, bottom: top + 30 } });
-    const frame = { frameId: 9, complete: true, truncated: false,
-      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
-      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
+    const row = (id: string, y: number, start = 900, end = 1100) => ({
+      id,
+      x: 10,
+      y,
+      width: 100,
+      height: 30,
+      startAtEpochMs: start,
+      endAtEpochMs: end,
+    });
+    const draw = (id: string, top: number, alpha = 1, frameId = 9) => ({
+      id,
+      frameId,
+      alpha,
+      rect: { left: 10, top, right: 110, bottom: top + 30 },
+    });
+    const frame = {
+      frameId: 9,
+      complete: true,
+      truncated: false,
+      startedAtEpochMs: 1000,
+      finishedAtEpochMs: 1001,
+      logicalWidth: 800,
+      logicalHeight: 400,
+      backingRatioX: 2,
+      backingRatioY: 2,
       config: { renderer: 'main', fontSize: 32, laneSpacing: 0 },
-      active: [row('WINDOWS196_GAP0_A', 0), row('WINDOWS196_GAP0_B', 88),
+      active: [
+        row('WINDOWS196_GAP0_A', 0),
+        row('WINDOWS196_GAP0_B', 88),
         row('WINDOWS196_GAP0_FUTURE', 44, 1050, 1200),
         row('WINDOWS196_GAP0_EXPIRED', 66, 850, 990),
-        row('WINDOWS196_GAP0_NODRAW', 132), row('WINDOWS196_GAP0_ZERO', 176)],
-      draws: [draw('WINDOWS196_GAP0_A', 0), draw('WINDOWS196_GAP0_B', 88),
-        draw('WINDOWS196_GAP0_FUTURE', 44), draw('WINDOWS196_GAP0_EXPIRED', 66),
-        draw('WINDOWS196_GAP0_ZERO', 176, 0)] };
-    expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
+        row('WINDOWS196_GAP0_NODRAW', 132),
+        row('WINDOWS196_GAP0_ZERO', 176),
+      ],
+      draws: [
+        draw('WINDOWS196_GAP0_A', 0),
+        draw('WINDOWS196_GAP0_B', 88),
+        draw('WINDOWS196_GAP0_FUTURE', 44),
+        draw('WINDOWS196_GAP0_EXPIRED', 66),
+        draw('WINDOWS196_GAP0_ZERO', 176, 0),
+      ],
+    };
+    expect(measureVisibleRowPitch(frame)).toMatchObject({
+      status: 'measured',
+      pitchPx: 88,
       excluded: [
         { id: 'WINDOWS196_GAP0_FUTURE', reason: 'future' },
         { id: 'WINDOWS196_GAP0_EXPIRED', reason: 'expired' },
         { id: 'WINDOWS196_GAP0_NODRAW', reason: 'no_current_frame_draw' },
         { id: 'WINDOWS196_GAP0_ZERO', reason: 'zero_alpha' },
-      ] });
+      ],
+    });
     for (const bad of [
-      { ...frame, complete: false }, { ...frame, truncated: true },
-      { ...frame, logicalWidth: null }, { ...frame, finishedAtEpochMs: null },
-      { ...frame, draws: null }, { ...frame, config: {} },
+      { ...frame, complete: false },
+      { ...frame, truncated: true },
+      { ...frame, logicalWidth: null },
+      { ...frame, finishedAtEpochMs: null },
+      { ...frame, draws: null },
+      { ...frame, config: {} },
     ]) {
       expect(measureVisibleRowPitch(bad)).toMatchObject({ status: 'unknown', pitchPx: null });
     }
-    expect(measureVisibleRowPitch({ ...frame, draws: [draw('WINDOWS196_GAP0_A', 0, 1, 8),
-      draw('WINDOWS196_GAP0_B', 88)] })).toMatchObject({ status: 'unknown', pitchPx: null,
-      reason: 'draw_frame_mismatch' });
-    expect(measureVisibleRowPitch({ ...frame, active: [row('WINDOWS196_GAP0_A', 0, 1000.5),
-      row('WINDOWS196_GAP0_B', 88)], draws: frame.draws.slice(0, 2) }))
-      .toMatchObject({ status: 'unknown', pitchPx: null,
-      reason: 'eligibility_changed_during_frame' });
+    expect(
+      measureVisibleRowPitch({
+        ...frame,
+        draws: [draw('WINDOWS196_GAP0_A', 0, 1, 8), draw('WINDOWS196_GAP0_B', 88)],
+      })
+    ).toMatchObject({ status: 'unknown', pitchPx: null, reason: 'draw_frame_mismatch' });
+    expect(
+      measureVisibleRowPitch({
+        ...frame,
+        active: [row('WINDOWS196_GAP0_A', 0, 1000.5), row('WINDOWS196_GAP0_B', 88)],
+        draws: frame.draws.slice(0, 2),
+      })
+    ).toMatchObject({
+      status: 'unknown',
+      pitchPx: null,
+      reason: 'eligibility_changed_during_frame',
+    });
   });
 
-  it.each(['main', 'worker'])('requires two simultaneous painted mixed-height rows in a complete %s frame', (renderer) => {
-    const row = (id: string, x: number, y: number, height: number,
-      startAtEpochMs = 900, endAtEpochMs = 1100) => ({ id, x, y,
-        width: 100, height, startAtEpochMs, endAtEpochMs });
-    const draw = (id: string, x: number, y: number, height: number, alpha = 1) => ({
-      id, frameId: 11, alpha,
-      rect: { left: x, top: y, right: x + 100, bottom: y + height },
-    });
-    const regular = row('WINDOWS204_MIX_REGULAR', 10, 5, 46);
-    const paid = row('WINDOWS204_MIX_PAID', 10, 59, 44);
-    const frame = { frameId: 11, complete: true, truncated: false,
-      startedAtEpochMs: 1000, finishedAtEpochMs: 1001,
-      logicalWidth: 800, logicalHeight: 400, backingRatioX: 2, backingRatioY: 2,
-      config: { renderer, fontSize: 32, laneSpacing: 8, mode: 'top', laneDensityFactor: 0.5,
-        safeTop: 0, safeBottom: 0 },
-      active: [regular, paid],
-      draws: [draw(regular.id, 10, 5, 46), draw(paid.id, 10, 59, 44)] };
-    expect(measureMixedHeightClearance(frame)).toMatchObject({ status: 'measured',
-      minimumGapPx: 8, paintedIds: [regular.id, paid.id],
-      pairs: [{ ids: [regular.id, paid.id], gapPx: 8 }] });
-    expect(measureMixedHeightClearance({ ...frame,
-      config: { ...frame.config, laneDensityFactor: 0.75 } })).toMatchObject({
-      status: 'unknown', reason: 'wrong_lane_density', observedLaneDensityFactor: 0.75,
-    });
-    const violation = { ...frame, active: [regular, { ...paid, y: 52 }],
-      draws: [frame.draws[0], draw(paid.id, 10, 52, 44)] };
-    expect(measureMixedHeightClearance(violation)).toMatchObject({ status: 'violation',
-      minimumGapPx: 1, pairs: [{ gapPx: 1 }] });
-    expect(measureMixedHeightClearance({ ...frame, active: [regular, { ...paid, y: 5 }],
-      draws: [frame.draws[0], draw(paid.id, 10, 5, 44)] })).toMatchObject({
-      status: 'violation', minimumGapPx: -46,
-    });
-    for (const safeZone of [{ safeTop: 0.1, safeBottom: 0 }, { safeTop: 0, safeBottom: 0.8 }]) {
-      expect(measureMixedHeightClearance({ ...frame, config: { ...frame.config, ...safeZone } }))
-        .toMatchObject({ status: 'violation', reason: expect.stringContaining('content_outside_safe_zone_') });
+  it.each(['main', 'worker'])(
+    'requires two simultaneous painted mixed-height rows in a complete %s frame',
+    (renderer) => {
+      const row = (
+        id: string,
+        x: number,
+        y: number,
+        height: number,
+        startAtEpochMs = 900,
+        endAtEpochMs = 1100
+      ) => ({ id, x, y, width: 100, height, startAtEpochMs, endAtEpochMs });
+      const draw = (id: string, x: number, y: number, height: number, alpha = 1) => ({
+        id,
+        frameId: 11,
+        alpha,
+        rect: { left: x, top: y, right: x + 100, bottom: y + height },
+      });
+      const regular = row('WINDOWS204_MIX_REGULAR', 10, 5, 46);
+      const paid = row('WINDOWS204_MIX_PAID', 10, 59, 44);
+      const frame = {
+        frameId: 11,
+        complete: true,
+        truncated: false,
+        startedAtEpochMs: 1000,
+        finishedAtEpochMs: 1001,
+        logicalWidth: 800,
+        logicalHeight: 400,
+        backingRatioX: 2,
+        backingRatioY: 2,
+        config: {
+          renderer,
+          fontSize: 32,
+          laneSpacing: 8,
+          mode: 'top',
+          laneDensityFactor: 0.5,
+          safeTop: 0,
+          safeBottom: 0,
+        },
+        active: [regular, paid],
+        draws: [draw(regular.id, 10, 5, 46), draw(paid.id, 10, 59, 44)],
+      };
+      expect(measureMixedHeightClearance(frame)).toMatchObject({
+        status: 'measured',
+        minimumGapPx: 8,
+        paintedIds: [regular.id, paid.id],
+        pairs: [{ ids: [regular.id, paid.id], gapPx: 8 }],
+      });
+      expect(
+        measureMixedHeightClearance({
+          ...frame,
+          config: { ...frame.config, laneDensityFactor: 0.75 },
+        })
+      ).toMatchObject({
+        status: 'unknown',
+        reason: 'wrong_lane_density',
+        observedLaneDensityFactor: 0.75,
+      });
+      const violation = {
+        ...frame,
+        active: [regular, { ...paid, y: 52 }],
+        draws: [frame.draws[0], draw(paid.id, 10, 52, 44)],
+      };
+      expect(measureMixedHeightClearance(violation)).toMatchObject({
+        status: 'violation',
+        minimumGapPx: 1,
+        pairs: [{ gapPx: 1 }],
+      });
+      expect(
+        measureMixedHeightClearance({
+          ...frame,
+          active: [regular, { ...paid, y: 5 }],
+          draws: [frame.draws[0], draw(paid.id, 10, 5, 44)],
+        })
+      ).toMatchObject({
+        status: 'violation',
+        minimumGapPx: -46,
+      });
+      for (const safeZone of [
+        { safeTop: 0.1, safeBottom: 0 },
+        { safeTop: 0, safeBottom: 0.8 },
+      ]) {
+        expect(
+          measureMixedHeightClearance({ ...frame, config: { ...frame.config, ...safeZone } })
+        ).toMatchObject({
+          status: 'violation',
+          reason: expect.stringContaining('content_outside_safe_zone_'),
+        });
+      }
+      for (const changed of [
+        { ...frame, active: frame.active.slice(0, 1), draws: frame.draws.slice(0, 1) },
+        { ...frame, active: [regular, { ...paid, height: 46 }] },
+        {
+          ...frame,
+          active: [regular, { ...paid, x: 130 }],
+          draws: [frame.draws[0], draw(paid.id, 130, 59, 44)],
+        },
+        { ...frame, active: [regular, { ...paid, startAtEpochMs: 1050 }] },
+        {
+          ...frame,
+          active: [regular, { ...paid, x: 810 }],
+          draws: [frame.draws[0], draw(paid.id, 810, 59, 44)],
+        },
+        { ...frame, draws: frame.draws.slice(0, 1) },
+        { ...frame, draws: [frame.draws[0], draw(paid.id, 10, 59, 44, 0)] },
+      ]) {
+        expect(measureMixedHeightClearance(changed).status).not.toBe('measured');
+      }
+      for (const changed of [
+        { ...frame, complete: false },
+        { ...frame, truncated: true },
+        { ...frame, finishedAtEpochMs: null },
+        { ...frame, draws: [{ ...frame.draws[0], frameId: 12 }, frame.draws[1]] },
+        { ...frame, config: { ...frame.config, laneSpacing: 0 } },
+      ]) {
+        expect(measureMixedHeightClearance(changed).status).toBe('unknown');
+      }
     }
-    for (const changed of [
-      { ...frame, active: frame.active.slice(0, 1), draws: frame.draws.slice(0, 1) },
-      { ...frame, active: [regular, { ...paid, height: 46 }] },
-      { ...frame, active: [regular, { ...paid, x: 130 }],
-        draws: [frame.draws[0], draw(paid.id, 130, 59, 44)] },
-      { ...frame, active: [regular, { ...paid, startAtEpochMs: 1050 }] },
-      { ...frame, active: [regular, { ...paid, x: 810 }],
-        draws: [frame.draws[0], draw(paid.id, 810, 59, 44)] },
-      { ...frame, draws: frame.draws.slice(0, 1) },
-      { ...frame, draws: [frame.draws[0], draw(paid.id, 10, 59, 44, 0)] },
-    ]) {
-      expect(measureMixedHeightClearance(changed).status).not.toBe('measured');
-    }
-    for (const changed of [
-      { ...frame, complete: false }, { ...frame, truncated: true },
-      { ...frame, finishedAtEpochMs: null },
-      { ...frame, draws: [{ ...frame.draws[0], frameId: 12 }, frame.draws[1]] },
-      { ...frame, config: { ...frame.config, laneSpacing: 0 } },
-    ]) {
-      expect(measureMixedHeightClearance(changed).status).toBe('unknown');
-    }
-  });
+  );
 
   it('rejects clamped or burst-accelerated Backlog motion while retaining baseline comparison', () => {
-    const motion = { id: 'WINDOWS195_BACKLOG_LONG', kind: 'activated', isBacklog: true,
-      width: 2200, durationMs: 7160, travelDistancePx: 3580,
-      burstSpeedMultiplier: 1.35, actualVelocityPxPerMs: 0.5 };
+    const motion = {
+      id: 'WINDOWS195_BACKLOG_LONG',
+      kind: 'activated',
+      isBacklog: true,
+      width: 2200,
+      durationMs: 7160,
+      travelDistancePx: 3580,
+      burstSpeedMultiplier: 1.35,
+      actualVelocityPxPerMs: 0.5,
+    };
     expect(() => assertBacklogMotion(motion, 'worker')).not.toThrow();
-    expect(() => assertBacklogMotion({ ...motion, burstSpeedMultiplier: null }, 'worker'))
-      .toThrow(/finite burst multiplier/);
-    expect(() => assertBacklogMotion({ ...motion, burstSpeedMultiplier: null }, 'main'))
-      .not.toThrow();
+    expect(() => assertBacklogMotion({ ...motion, burstSpeedMultiplier: null }, 'worker')).toThrow(
+      /finite burst multiplier/
+    );
+    expect(() =>
+      assertBacklogMotion({ ...motion, burstSpeedMultiplier: null }, 'main')
+    ).not.toThrow();
     expect(() => assertBacklogMotion({ ...motion, durationMs: 5000 }, 'worker')).toThrow(/clamped/);
-    const accelerated = { ...motion, durationMs: 3580 / 0.675,
-      actualVelocityPxPerMs: 0.675 };
+    const accelerated = { ...motion, durationMs: 3580 / 0.675, actualVelocityPxPerMs: 0.675 };
     expect(() => assertBacklogMotion(accelerated, 'worker')).toThrow(/extra burst/);
     expect(() => assertBacklogMotion(accelerated, 'worker', true)).not.toThrow();
   });
 
   it('keeps Canvas exact observations out of Worker-only timing fields', () => {
-    const canvas = { exact: { dispositions: [{ id: 'WINDOWS196_GAP0_A' }],
-      activeNow: [{ id: 'WINDOWS196_GAP0_A' }] } };
+    const canvas = {
+      exact: {
+        dispositions: [{ id: 'WINDOWS196_GAP0_A' }],
+        activeNow: [{ id: 'WINDOWS196_GAP0_A' }],
+      },
+    };
     expect(summarizeExactWorkerProbe(canvas, 'main')).toEqual({
-      exactWorkerFrameMs: null, exactWorkerDrainMs: null, exactWorker: null,
+      exactWorkerFrameMs: null,
+      exactWorkerDrainMs: null,
+      exactWorker: null,
     });
-    const worker = { exact: { frames: [{ workMs: 2 }], drains: [{ workMs: 1 }],
-      dispositions: [], active: [] } };
+    const worker = {
+      exact: { frames: [{ workMs: 2 }], drains: [{ workMs: 1 }], dispositions: [], active: [] },
+    };
     expect(summarizeExactWorkerProbe(worker, 'worker')).toMatchObject({
       exactWorkerFrameMs: { count: 1, p95: 2 },
       exactWorkerDrainMs: { count: 1, p95: 1 },
@@ -347,28 +667,35 @@ describe('Windows placement timing probe', () => {
   });
 
   it('requires real video growth and retention of the same Backlog ID after reflow', () => {
-    const before = { config: { logicalWidth: 858, logicalHeight: 482, fontSize: 32 },
-      activeNow: [{ id: 'WINDOWS195_BACKLOG_LONG' }] };
-    const after = { config: { logicalWidth: 998, logicalHeight: 561, fontSize: 32 },
-      activeNow: [{ id: 'WINDOWS195_BACKLOG_LONG' }] };
+    const before = {
+      config: { logicalWidth: 858, logicalHeight: 482, fontSize: 32 },
+      activeNow: [{ id: 'WINDOWS195_BACKLOG_LONG' }],
+    };
+    const after = {
+      config: { logicalWidth: 998, logicalHeight: 561, fontSize: 32 },
+      activeNow: [{ id: 'WINDOWS195_BACKLOG_LONG' }],
+    };
     expect(() => assertBacklogReflow(before, after, 'WINDOWS195_BACKLOG_LONG')).not.toThrow();
-    expect(() => assertBacklogReflow(before, { ...after, config: before.config },
-      'WINDOWS195_BACKLOG_LONG')).toThrow(/video geometry/);
-    expect(() => assertBacklogReflow(before, { ...after, activeNow: [] },
-      'WINDOWS195_BACKLOG_LONG')).toThrow(/disappeared/);
+    expect(() =>
+      assertBacklogReflow(before, { ...after, config: before.config }, 'WINDOWS195_BACKLOG_LONG')
+    ).toThrow(/video geometry/);
+    expect(() =>
+      assertBacklogReflow(before, { ...after, activeNow: [] }, 'WINDOWS195_BACKLOG_LONG')
+    ).toThrow(/disappeared/);
   });
 
   it('adds a Canvas probe only at the expected packaged app entry', () => {
-    const source = 'function getRegularCardInsets() { return { vertical: 1 }; }\n' +
+    const source =
+      'function getRegularCardInsets() { return { vertical: 1 }; }\n' +
       'var CanvasRenderer = class CanvasRenderer extends RendererBase {};' +
       '\n\tmain();\n})();';
     const instrumented = instrumentCanvasPageScript(source, 'function probe() {}');
     expect(instrumented).toContain(';(function probe() {})(CanvasRenderer, getRegularCardInsets);');
-    expect(instrumented?.replace('\n\t;(function probe() {})(CanvasRenderer, getRegularCardInsets);', ''))
-      .toBe(source);
+    expect(
+      instrumented?.replace('\n\t;(function probe() {})(CanvasRenderer, getRegularCardInsets);', '')
+    ).toBe(source);
     expect(instrumentCanvasPageScript(source.replace('RendererBase', 'OtherBase'))).toBeNull();
-    expect(instrumentCanvasPageScript(source.replace('})();', '\n\tmain();\n})();')))
-      .toBeNull();
+    expect(instrumentCanvasPageScript(source.replace('})();', '\n\tmain();\n})();'))).toBeNull();
   });
 
   it('observes Canvas queue and committed motion from an emitted-script-shaped closure', () => {
@@ -404,66 +731,109 @@ describe('Windows placement timing probe', () => {
     };
     const script = instrumentCanvasPageScript(source.replace('      main();', '\tmain();'));
     expect(script).not.toBeNull();
-    runInNewContext(script!, { __ytPlacementProbe: state,
-      performance: { timeOrigin: 1000, now: () => 1 } });
-    const exact = state.exact as { peaks: { pending: number; active: number };
-      dispositions: Array<{ id: string; laneHeight: number; travelDistancePx: number;
-        burstSpeedMultiplier: number | null }> };
+    runInNewContext(script!, {
+      __ytPlacementProbe: state,
+      performance: { timeOrigin: 1000, now: () => 1 },
+    });
+    const exact = state.exact as {
+      peaks: { pending: number; active: number };
+      dispositions: Array<{
+        id: string;
+        laneHeight: number;
+        travelDistancePx: number;
+        burstSpeedMultiplier: number | null;
+      }>;
+    };
     expect(state.canvasSourceHooked).toBe(true);
     expect(exact.peaks).toEqual({ pending: 1, active: 1 });
-    expect(exact.dispositions[0]).toMatchObject({ id: 'WINDOWS195_BACKLOG_LONG',
-      laneHeight: 34, travelDistancePx: 3580, burstSpeedMultiplier: null });
+    expect(exact.dispositions[0]).toMatchObject({
+      id: 'WINDOWS195_BACKLOG_LONG',
+      laneHeight: 34,
+      travelDistancePx: 3580,
+      burstSpeedMultiplier: null,
+    });
     expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
   });
 
-  it.each(['main', 'worker'])('joins native %s draws and row origins in the same complete frame', (renderer) => {
-    const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
-    const overlay = { width: renderer === 'main' ? 800 : 1600,
-      height: renderer === 'main' ? 400 : 800, closest: () => ({}) };
-    const bitmapA = { width: 200, height: 50, closest: () => null };
-    const bitmapB = { width: 200, height: 50, closest: () => null };
-    let nativeDraws = 0;
-    let failNativeDraw = false;
-    let clock = 100;
-    class FakeContext {
-      canvas: { width: number; height: number; closest: () => object | null };
-      globalAlpha = 1;
-      font = 'bold 32px sans-serif';
-      lineWidth = 2;
-      constructor(canvas: { width: number; height: number; closest: () => object | null }) {
-        this.canvas = canvas;
+  it.each(['main', 'worker'])(
+    'joins native %s draws and row origins in the same complete frame',
+    (renderer) => {
+      const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
+      const overlay = {
+        width: renderer === 'main' ? 800 : 1600,
+        height: renderer === 'main' ? 400 : 800,
+        closest: () => ({}),
+      };
+      const bitmapA = { width: 200, height: 50, closest: () => null };
+      const bitmapB = { width: 200, height: 50, closest: () => null };
+      let nativeDraws = 0;
+      let failNativeDraw = false;
+      let clock = 100;
+      class FakeContext {
+        canvas: { width: number; height: number; closest: () => object | null };
+        globalAlpha = 1;
+        font = 'bold 32px sans-serif';
+        lineWidth = 2;
+        constructor(canvas: { width: number; height: number; closest: () => object | null }) {
+          this.canvas = canvas;
+        }
+        fillText(_text: string, _x: number, _y: number) {
+          if (failNativeDraw) throw new Error('Native draw failed');
+          nativeDraws++;
+        }
+        strokeText(_text: string, _x: number, _y: number) {
+          nativeDraws++;
+        }
+        drawImage(..._args: unknown[]) {
+          nativeDraws++;
+        }
+        clearRect(..._args: number[]) {}
+        measureText(text: string) {
+          return {
+            width: text.length * 10,
+            actualBoundingBoxLeft: 0,
+            actualBoundingBoxRight: text.length * 10,
+            actualBoundingBoxAscent: 20,
+            actualBoundingBoxDescent: 5,
+          };
+        }
+        getTransform() {
+          return { a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 };
+        }
       }
-      fillText(_text: string, _x: number, _y: number) {
-        if (failNativeDraw) throw new Error('Native draw failed');
-        nativeDraws++;
-      }
-      strokeText(_text: string, _x: number, _y: number) { nativeDraws++; }
-      drawImage(..._args: unknown[]) { nativeDraws++; }
-      clearRect(..._args: number[]) {}
-      measureText(text: string) { return { width: text.length * 10, actualBoundingBoxLeft: 0,
-        actualBoundingBoxRight: text.length * 10,
-        actualBoundingBoxAscent: 20, actualBoundingBoxDescent: 5 }; }
-      getTransform() { return { a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }; }
-    }
-    const sandbox = { CanvasRenderingContext2D: FakeContext,
-      OffscreenCanvasRenderingContext2D: FakeContext, FakeContext, overlay, bitmapA, bitmapB,
-      self: undefined as unknown, performance: { timeOrigin: 1000, now: () => clock++ },
-      requestAnimationFrame: (_callback: (time: number) => void) => 1,
-      addEventListener: (type: string, listener: (event: { origin: string; data: unknown }) => void) => {
-        listeners[type] = listener;
-      },
-      postMessage: (_message: unknown) => {},
-      MutationObserver: class { observe() {} }, document: { querySelectorAll: () => [] },
-      Blob: class {}, Worker: class {}, HTMLCanvasElement: class {},
-    };
-    const idA = 'WINDOWS196_GAP0_A';
-    const idB = 'WINDOWS196_GAP0_B';
-    const active = `[{ id: '${idA}', x: 10, y: 0, width: 100, height: 32,
+      const sandbox = {
+        CanvasRenderingContext2D: FakeContext,
+        OffscreenCanvasRenderingContext2D: FakeContext,
+        FakeContext,
+        overlay,
+        bitmapA,
+        bitmapB,
+        self: undefined as unknown,
+        performance: { timeOrigin: 1000, now: () => clock++ },
+        requestAnimationFrame: (_callback: (time: number) => void) => 1,
+        addEventListener: (
+          type: string,
+          listener: (event: { origin: string; data: unknown }) => void
+        ) => {
+          listeners[type] = listener;
+        },
+        postMessage: (_message: unknown) => {},
+        MutationObserver: class {
+          observe() {}
+        },
+        document: { querySelectorAll: () => [] },
+        Blob: class {},
+        Worker: class {},
+        HTMLCanvasElement: class {},
+      };
+      const idA = 'WINDOWS196_GAP0_A';
+      const idB = 'WINDOWS196_GAP0_B';
+      const active = `[{ id: '${idA}', x: 10, y: 0, width: 100, height: 32,
       startTime: -100, pausedDuration: 0, duration: 1000 },
       { id: '${idB}', x: 10, y: 88, width: 100, height: 32,
       startTime: -100, pausedDuration: 0, duration: 1000 }]`;
-    if (renderer === 'main') {
-      const source = `(() => {
+      if (renderer === 'main') {
+        const source = `(() => {
         class RendererBase {}
         function getRegularCardInsets() { return { vertical: 1 }; }
         var CanvasRenderer = class CanvasRenderer extends RendererBase {
@@ -489,11 +859,11 @@ describe('Windows placement timing probe', () => {
           fixtureRenderer.paint = true; fixtureRenderer.renderFrame(); }
 \tmain();
       })();`;
-      const script = instrumentCanvasPageScript(source);
-      expect(script).not.toBeNull();
-      runInNewContext(`${canvasProbePrelude({ tokens: [idA, idB] })}\n${script}`, sandbox);
-    } else {
-      const source = `var sample = {
+        const script = instrumentCanvasPageScript(source);
+        expect(script).not.toBeNull();
+        runInNewContext(`${canvasProbePrelude({ tokens: [idA, idB] })}\n${script}`, sandbox);
+      } else {
+        const source = `var sample = {
         ctx: new FakeContext(overlay), canvas: overlay,
         config: { fontSize: 32, laneSpacing: 0 }, logicalWidth: 800, logicalHeight: 400,
         activeMessages: ${active}, pendingQueue: [], numLanes: 20, laneHeight: 34,
@@ -507,46 +877,77 @@ describe('Windows placement timing probe', () => {
           }
         }, handleMessage() {},
       }; self.onmessage=e=>{sample.handleMessage(e)};`;
-      const suffix = workerProbeSuffix(source);
-      expect(suffix).not.toBeNull();
-      runInNewContext(`self = globalThis; ${workerProbePrelude([idA, idB])}\n${source}${suffix}`, sandbox);
-      listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
-      runInNewContext(`new FakeContext(bitmapA).fillText('東京 ${idA}', 0, 20);
+        const suffix = workerProbeSuffix(source);
+        expect(suffix).not.toBeNull();
+        runInNewContext(
+          `self = globalThis; ${workerProbePrelude([idA, idB])}\n${source}${suffix}`,
+          sandbox
+        );
+        listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
+        runInNewContext(
+          `new FakeContext(bitmapA).fillText('東京 ${idA}', 0, 20);
         new FakeContext(bitmapB).fillText('東京 ${idB}', 0, 20);
-        sample.paint = true; sample.renderFrame();`, sandbox);
+        sample.paint = true; sample.renderFrame();`,
+          sandbox
+        );
+        expect(nativeDraws).toBeGreaterThan(0);
+      }
+      const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+      expect(frame).toMatchObject({
+        frameId: 1,
+        complete: true,
+        logicalWidth: 800,
+        logicalHeight: 400,
+        backingRatioX: 2,
+        backingRatioY: 2,
+      });
+      expect(frame.draws[0].rect).toMatchObject({ left: 10 });
       expect(nativeDraws).toBeGreaterThan(0);
+      if (renderer === 'main') {
+        expect(measureVisibleRowPitch(frame)).toMatchObject({
+          status: 'measured',
+          pitchPx: 88,
+          japaneseVisibleIds: [idA, idB],
+          japaneseVisibleRowOriginsPx: [0, 88],
+        });
+        runInNewContext('fixtureRenderer.paint = false; fixtureRenderer.renderFrame();', sandbox);
+      } else {
+        expect(measureVisibleRowPitch(frame)).toMatchObject({
+          status: 'measured',
+          pitchPx: 88,
+          japaneseVisibleIds: [idA, idB],
+          japaneseVisibleRowOriginsPx: [0, 88],
+        });
+        runInNewContext('sample.paint = false; sample.renderFrame();', sandbox);
+      }
+      const next = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+      expect(next.frameId).toBe(2);
+      expect(next.draws).toHaveLength(0);
+      expect(measureVisibleRowPitch(next)).toMatchObject({
+        status: 'insufficient',
+        pitchPx: null,
+        reason: 'fewer_than_two_distinct_visible_rows',
+      });
+      if (renderer === 'main') {
+        runInNewContext(
+          'fixtureRenderer.paint = true; fixtureRenderer.distortRatio = true; fixtureRenderer.renderFrame();',
+          sandbox
+        );
+        const incoherent = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+        expect(incoherent.complete).toBe(false);
+        expect(measureVisibleRowPitch(incoherent)).toMatchObject({
+          status: 'unknown',
+          pitchPx: null,
+        });
+        failNativeDraw = true;
+        expect(() => runInNewContext('fixtureRenderer.renderFrame();', sandbox)).toThrow(
+          'Native draw failed'
+        );
+        const failedDraw = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+        expect(failedDraw).toMatchObject({ complete: false, draws: [] });
+      }
     }
-    const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
-    expect(frame).toMatchObject({ frameId: 1, complete: true, logicalWidth: 800,
-      logicalHeight: 400, backingRatioX: 2, backingRatioY: 2 });
-    expect(frame.draws[0].rect).toMatchObject({ left: 10 });
-    expect(nativeDraws).toBeGreaterThan(0);
-    if (renderer === 'main') {
-      expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
-        japaneseVisibleIds: [idA, idB], japaneseVisibleRowOriginsPx: [0, 88] });
-      runInNewContext('fixtureRenderer.paint = false; fixtureRenderer.renderFrame();', sandbox);
-    } else {
-      expect(measureVisibleRowPitch(frame)).toMatchObject({ status: 'measured', pitchPx: 88,
-        japaneseVisibleIds: [idA, idB], japaneseVisibleRowOriginsPx: [0, 88] });
-      runInNewContext('sample.paint = false; sample.renderFrame();', sandbox);
-    }
-    const next = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
-    expect(next.frameId).toBe(2);
-    expect(next.draws).toHaveLength(0);
-    expect(measureVisibleRowPitch(next)).toMatchObject({ status: 'insufficient', pitchPx: null,
-      reason: 'fewer_than_two_distinct_visible_rows' });
-    if (renderer === 'main') {
-      runInNewContext('fixtureRenderer.paint = true; fixtureRenderer.distortRatio = true; fixtureRenderer.renderFrame();', sandbox);
-      const incoherent = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
-      expect(incoherent.complete).toBe(false);
-      expect(measureVisibleRowPitch(incoherent)).toMatchObject({ status: 'unknown', pitchPx: null });
-      failNativeDraw = true;
-      expect(() => runInNewContext('fixtureRenderer.renderFrame();', sandbox))
-        .toThrow('Native draw failed');
-      const failedDraw = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
-      expect(failedDraw).toMatchObject({ complete: false, draws: [] });
-    }
-  });
+  );
 
   it('detects visible active rectangles that overlap after reflow', () => {
     const a = { id: 'a', x: 10, y: 10, width: 50, height: 20 };
@@ -557,31 +958,67 @@ describe('Windows placement timing probe', () => {
   });
 
   it('retains bounded timing and geometry when a scenario fails before its final assertion', async () => {
-    const raw = { sourcePrefixed: true, sourceHooked: true, requestAtEpochMs: 1000,
-      frames: [], bounds: [], firstEntry: {}, ingress: {}, overflow: 0,
-      workers: [{ ready: true, stats: [], sample: {
-        frames: [{ workMs: 4, preClearMs: 2 }], bounds: [{ id: 'WINDOWS193_SHORT',
-          left: 10, top: 10, right: 20, bottom: 20 }], firstEntry: { WINDOWS193_SHORT: 1010 },
-        ingress: { WINDOWS193_SHORT: 1000 }, overflow: 0,
-        exact: { frames: [{ workMs: 3 }], drains: [{ workMs: 1 }],
-          dispositions: [], active: [], activeNow: [], config: {}, overflow: 0 },
-      } }],
+    const raw = {
+      sourcePrefixed: true,
+      sourceHooked: true,
+      requestAtEpochMs: 1000,
+      frames: [],
+      bounds: [],
+      firstEntry: {},
+      ingress: {},
+      overflow: 0,
+      workers: [
+        {
+          ready: true,
+          stats: [],
+          sample: {
+            frames: [{ workMs: 4, preClearMs: 2 }],
+            bounds: [{ id: 'WINDOWS193_SHORT', left: 10, top: 10, right: 20, bottom: 20 }],
+            firstEntry: { WINDOWS193_SHORT: 1010 },
+            ingress: { WINDOWS193_SHORT: 1000 },
+            overflow: 0,
+            exact: {
+              frames: [{ workMs: 3 }],
+              drains: [{ workMs: 1 }],
+              dispositions: [],
+              active: [],
+              activeNow: [],
+              config: {},
+              overflow: 0,
+            },
+          },
+        },
+      ],
     };
-    const page = { setViewportSize: async () => {}, emulateMedia: async () => {},
-      route: async () => { throw new Error('Synthetic fixture setup failure'); },
-      screenshot: async () => {}, isClosed: () => false, close: async () => {},
-      evaluate: async (fn: () => unknown) => fn.toString().includes('const probe = window.__ytPlacementProbe')
-        ? raw : undefined,
+    const page = {
+      setViewportSize: async () => {},
+      emulateMedia: async () => {},
+      route: async () => {
+        throw new Error('Synthetic fixture setup failure');
+      },
+      screenshot: async () => {},
+      isClosed: () => false,
+      close: async () => {},
+      evaluate: async (fn: () => unknown) =>
+        fn.toString().includes('const probe = window.__ytPlacementProbe') ? raw : undefined,
       waitForTimeout: async () => {},
     };
     const result = await runPlacementTimingFixture({
-      context: { newPage: async () => page }, root: process.cwd(), output: '/tmp', extensionId: 'fixture',
+      context: { newPage: async () => page },
+      root: process.cwd(),
+      output: '/tmp',
+      extensionId: 'fixture',
     });
     expect(result.status).toBe('failed');
     expect(result.scenarios).toHaveLength(PLACEMENT_SCENARIOS.length);
-    expect(result.scenarios[0]).toMatchObject({ status: 'failed', errorType: 'Error',
-      frameWorkMs: { count: 1, p95: 4 }, exactWorkerDrainMs: { count: 1, p95: 1 },
-      bounds: [{ id: 'WINDOWS193_SHORT' }], screenshot: 'placement-worker-scroll.png' });
+    expect(result.scenarios[0]).toMatchObject({
+      status: 'failed',
+      errorType: 'Error',
+      frameWorkMs: { count: 1, p95: 4 },
+      exactWorkerDrainMs: { count: 1, p95: 1 },
+      bounds: [{ id: 'WINDOWS193_SHORT' }],
+      screenshot: 'placement-worker-scroll.png',
+    });
   });
 
   it('accepts only explicit, known spacing scenario names for a narrow run', async () => {
@@ -600,14 +1037,23 @@ describe('Windows placement timing probe', () => {
   it('summarizes bounded, nonnegative frame samples without treating invalid values as work', () => {
     expect(summarizeSamples([])).toEqual({ count: 0, p50: null, p95: null, max: null });
     expect(summarizeSamples([10, 1, Infinity, -1, 3, 2, 4])).toEqual({
-      count: 5, p50: 3, p95: 10, max: 10,
+      count: 5,
+      p50: 3,
+      p95: 10,
+      max: 10,
     });
   });
 
   it.each([1, 2])('associates a cached bitmap with viewport bounds at scale %s', (scale) => {
     const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
-    const messages: Array<{ type: string; sample?: { firstEntry: Record<string, number>; bounds: unknown[];
-      ink: Array<{ sourceInk?: { fill?: { font: string }; stroke?: { lineWidth: number } } }> } }> = [];
+    const messages: Array<{
+      type: string;
+      sample?: {
+        firstEntry: Record<string, number>;
+        bounds: unknown[];
+        ink: Array<{ sourceInk?: { fill?: { font: string }; stroke?: { lineWidth: number } } }>;
+      };
+    }> = [];
     const overlay = { width: 640 * scale, height: 360 * scale };
     const bitmap = { width: 100, height: 24 };
     let now = 5;
@@ -617,29 +1063,47 @@ describe('Windows placement timing probe', () => {
       font = 'bold 32px sans-serif';
       lineWidth = 2;
 
-      constructor(canvas: typeof overlay) { this.canvas = canvas; }
+      constructor(canvas: typeof overlay) {
+        this.canvas = canvas;
+      }
       fillText(_text: string, _x: number, _y: number) {}
       strokeText(_text: string, _x: number, _y: number) {}
       drawImage(_image: object, _x: number, _y: number, _width: number, _height: number) {}
       clearRect(_x: number, _y: number, _width: number, _height: number) {}
-      measureText() { return { width: 100, actualBoundingBoxAscent: 20, actualBoundingBoxDescent: 4 }; }
-      getTransform() { return { a: scale, b: 0, c: 0, d: scale, e: 0, f: 0 }; }
+      measureText() {
+        return { width: 100, actualBoundingBoxAscent: 20, actualBoundingBoxDescent: 4 };
+      }
+      getTransform() {
+        return { a: scale, b: 0, c: 0, d: scale, e: 0, f: 0 };
+      }
     }
     const sandbox = {
       OffscreenCanvasRenderingContext2D: FakeContext,
       performance: { timeOrigin: 1000, now: () => now++ },
       requestAnimationFrame: (callback: (time: number) => void) => callback(0),
-      addEventListener: (type: string, listener: (event: { origin: string; data: unknown }) => void) => {
+      addEventListener: (
+        type: string,
+        listener: (event: { origin: string; data: unknown }) => void
+      ) => {
         listeners[type] = listener;
       },
-      postMessage: (message: { type: string; sample?: { firstEntry: Record<string, number>; bounds: unknown[];
-        ink: Array<{ sourceInk?: { fill?: { font: string }; stroke?: { lineWidth: number } } }> } }) => {
+      postMessage: (message: {
+        type: string;
+        sample?: {
+          firstEntry: Record<string, number>;
+          bounds: unknown[];
+          ink: Array<{ sourceInk?: { fill?: { font: string }; stroke?: { lineWidth: number } } }>;
+        };
+      }) => {
         messages.push(message);
       },
     };
     runInNewContext(workerProbePrelude(['WINDOWS193_SHORT']), sandbox);
     listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
-    listeners.message?.({ origin: '', data: { type: 'addMessages', messages: [{ id: 'WINDOWS193_SHORT' }] } });
+    listeners.message?.({
+      origin: '',
+      data: { type: 'addMessages', messages: [{ id: 'WINDOWS193_SHORT' }] },
+    });
     sandbox.requestAnimationFrame(() => {
       const cache = new FakeContext(bitmap);
       cache.fillText('WINDOWS193_SHORT', 0, 0);
@@ -659,11 +1123,15 @@ describe('Windows placement timing probe', () => {
     expect(sample?.firstEntry.WINDOWS193_SHORT).toBeGreaterThan(1000);
     expect(sample?.bounds).toHaveLength(1);
     expect(sample?.bounds[0]).toMatchObject({
-      id: 'WINDOWS193_SHORT', left: 500 * scale, top: 20 * scale,
-      right: 600 * scale, bottom: 44 * scale,
+      id: 'WINDOWS193_SHORT',
+      left: 500 * scale,
+      top: 20 * scale,
+      right: 600 * scale,
+      bottom: 44 * scale,
     });
     expect(sample?.ink[0]?.sourceInk).toMatchObject({
-      fill: { font: 'bold 32px sans-serif' }, stroke: { lineWidth: 2 },
+      fill: { font: 'bold 32px sans-serif' },
+      stroke: { lineWidth: 2 },
     });
   });
 
@@ -682,35 +1150,62 @@ describe('Windows placement timing probe', () => {
     const suffix = workerProbeSuffix(source);
     expect(suffix).toContain('(sample)');
     const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
-    const messages: Array<{ sample?: { exact?: {
-      drops: Record<string, number>;
-      drains: unknown[]; frames: unknown[]; dispositions: Array<{ queueResidenceMs: number }>;
-    } } }> = [];
+    const messages: Array<{
+      sample?: {
+        exact?: {
+          drops: Record<string, number>;
+          drains: unknown[];
+          frames: unknown[];
+          dispositions: Array<{ queueResidenceMs: number }>;
+        };
+      };
+    }> = [];
     let now = 1;
     const sandbox = {
       performance: { timeOrigin: 1000, now: () => now++ },
       requestAnimationFrame: (_callback: (time: number) => void) => 1,
-      addEventListener: (type: string, listener: (event: { origin: string; data: unknown }) => void) => {
+      addEventListener: (
+        type: string,
+        listener: (event: { origin: string; data: unknown }) => void
+      ) => {
         listeners[type] = listener;
       },
-      postMessage: (message: { sample?: { exact?: {
-        drops: Record<string, number>;
-      drains: unknown[]; frames: unknown[]; dispositions: Array<{ queueResidenceMs: number }>;
-      } } }) => { messages.push(message); },
+      postMessage: (message: {
+        sample?: {
+          exact?: {
+            drops: Record<string, number>;
+            drains: unknown[];
+            frames: unknown[];
+            dispositions: Array<{ queueResidenceMs: number }>;
+          };
+        };
+      }) => {
+        messages.push(message);
+      },
     };
-    runInNewContext(`self = globalThis; ${workerProbePrelude(['WINDOWS193_SHORT'])}${source}${suffix}`,
-      sandbox);
-    runInNewContext(`sample.enqueueMessage({ id: 'WINDOWS193_SHORT' }); sample.renderFrame();
+    runInNewContext(
+      `self = globalThis; ${workerProbePrelude(['WINDOWS193_SHORT'])}${source}${suffix}`,
+      sandbox
+    );
+    runInNewContext(
+      `sample.enqueueMessage({ id: 'WINDOWS193_SHORT' }); sample.renderFrame();
       sample.recordDrop({ id: 'WINDOWS193_DROP' }, 'reflow_capacity');
-      sample.recordDrop({ id: 'WINDOWS193_UNTRACKED', trackDrops: false }, 'oversized');`, sandbox);
+      sample.recordDrop({ id: 'WINDOWS193_UNTRACKED', trackDrops: false }, 'oversized');`,
+      sandbox
+    );
     listeners.message?.({ origin: '', data: { type: 'ytPlacementFlush' } });
     const exact = messages.at(-1)?.sample?.exact;
     expect(exact?.drains).toHaveLength(1);
     expect(exact?.frames).toHaveLength(1);
     expect(exact?.dispositions[0]).toMatchObject({
-      kind: 'activated', id: 'WINDOWS193_SHORT', queueResidenceMs: expect.any(Number),
+      kind: 'activated',
+      id: 'WINDOWS193_SHORT',
+      queueResidenceMs: expect.any(Number),
     });
     expect(exact?.drops).toEqual({ reflow_capacity: 1 });
-    expect(runInNewContext('sample.lastDrop', sandbox)).toEqual(['WINDOWS193_UNTRACKED', 'oversized']);
+    expect(runInNewContext('sample.lastDrop', sandbox)).toEqual([
+      'WINDOWS193_UNTRACKED',
+      'oversized',
+    ]);
   });
 });

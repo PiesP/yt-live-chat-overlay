@@ -620,6 +620,7 @@ export abstract class RendererBase {
     if (msgs.length < 2) return [];
     const intervals: number[] = [];
     for (let i = 1; i < msgs.length; i++) {
+      // biome-ignore lint/style/noNonNullAssertion: both adjacent indices are inside the bounded loop.
       const delta = msgs[i]!.timestamp - msgs[i - 1]!.timestamp;
       if (delta >= 0) intervals.push(delta);
     }

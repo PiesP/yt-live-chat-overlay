@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
 import {
   extractInitialChatContinuation,
   extractNextLiveContinuation,
-  extractReplayContinuation,
   extractPlayerSeekContinuation,
+  extractReplayContinuation,
 } from '@chat/youtube/continuation';
+import { describe, expect, it } from 'vitest';
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -183,9 +183,7 @@ describe('extractReplayContinuation', () => {
   });
 
   it('returns null when only other continuation types exist', () => {
-    const result = extractReplayContinuation([
-      makeContinuation('timedContinuationData', 'timed'),
-    ]);
+    const result = extractReplayContinuation([makeContinuation('timedContinuationData', 'timed')]);
     expect(result).toBeNull();
   });
 });

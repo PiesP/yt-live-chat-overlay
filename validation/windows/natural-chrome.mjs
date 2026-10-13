@@ -66,12 +66,7 @@ async function waitForChildExit(child, timeoutMs = CHILD_EXIT_MS) {
   });
 }
 
-export async function readDevToolsEndpoint(
-  profile,
-  child,
-  childState,
-  { sleep = delay } = {}
-) {
+export async function readDevToolsEndpoint(profile, child, childState, { sleep = delay } = {}) {
   const portFile = join(profile, 'DevToolsActivePort');
   const deadline = Date.now() + DEVTOOLS_WAIT_MS;
   while (Date.now() < deadline) {
@@ -92,7 +87,10 @@ export async function readDevToolsEndpoint(
       let totalBytes = 0;
       while (totalBytes < buffer.length) {
         const { bytesRead } = await portHandle.read(
-          buffer, totalBytes, buffer.length - totalBytes, totalBytes
+          buffer,
+          totalBytes,
+          buffer.length - totalBytes,
+          totalBytes
         );
         if (bytesRead === 0) break;
         totalBytes += bytesRead;
@@ -101,7 +99,8 @@ export async function readDevToolsEndpoint(
         totalBytes >= 3 && totalBytes <= DEVTOOLS_FILE_MAX_BYTES,
         'DevToolsActivePort has an invalid file shape'
       );
-      const [portText, webSocketPath, ...extra] = buffer.toString('utf8', 0, totalBytes)
+      const [portText, webSocketPath, ...extra] = buffer
+        .toString('utf8', 0, totalBytes)
         .trim()
         .split(/\r?\n/u);
       assert.equal(extra.length, 0, 'DevToolsActivePort has extra records');
@@ -111,10 +110,7 @@ export async function readDevToolsEndpoint(
         Number.isInteger(port) && port >= 1 && port <= 65_535,
         'DevToolsActivePort has an invalid port'
       );
-      assert.match(
-        webSocketPath ?? '',
-        /^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u
-      );
+      assert.match(webSocketPath ?? '', /^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u);
       return `ws://127.0.0.1:${port}${webSocketPath}`;
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
@@ -146,9 +142,7 @@ async function discoverInstalledChrome(chromium, root, output, checkpoint) {
     });
     await checkpoint('natural-launch:discovery-browser', 'after');
     cdp = await context.browser().newBrowserCDPSession();
-    browserProcessId = readOwnedBrowserProcessId(
-      await cdp.send('SystemInfo.getProcessInfo')
-    );
+    browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
     browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
     return {
       browserVersion: context.browser().version(),
@@ -218,11 +212,7 @@ export async function captureSpawnedChromeIdentity(
   childState,
   profile,
   executablePath,
-  {
-    captureProcess = captureOwnedChromeProcess,
-    sleep = delay,
-    timeoutMs = IDENTITY_WAIT_MS,
-  } = {}
+  { captureProcess = captureOwnedChromeProcess, sleep = delay, timeoutMs = IDENTITY_WAIT_MS } = {}
 ) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -279,15 +269,17 @@ export async function cleanupFailedNaturalChrome(
     const stopped = await stopChild(child, childState, null);
     cleanup.directChildExited = stopped.exited;
     errors.push(...stopped.errors);
-    const spawnFailedWithoutPid = Boolean(childState.spawnError) &&
-      !Number.isSafeInteger(child.pid);
+    const spawnFailedWithoutPid =
+      Boolean(childState.spawnError) && !Number.isSafeInteger(child.pid);
     if (spawnFailedWithoutPid && stopped.exited && stopped.errors.length === 0) {
       cleanup.processTreeExited = true;
     } else {
       cleanup.profilePreserved = true;
-      errors.push(new Error(
-        'Chrome process-tree exit could not be proven without a captured identity; profile preserved'
-      ));
+      errors.push(
+        new Error(
+          'Chrome process-tree exit could not be proven without a captured identity; profile preserved'
+        )
+      );
     }
   }
   if (cleanup.processTreeExited) {
@@ -385,10 +377,8 @@ export async function launchOwnedNaturalChrome({
       'Owned Chrome process identity changed between spawn and CDP verification'
     );
     const cleanupCdp = {
-      send: (method, parameters) => boundedProtocolOperation(
-        () => browserCdp.send(method, parameters),
-        method
-      ),
+      send: (method, parameters) =>
+        boundedProtocolOperation(() => browserCdp.send(method, parameters), method),
     };
     return {
       browser,
@@ -399,10 +389,8 @@ export async function launchOwnedNaturalChrome({
       context,
       profile,
       cleanupContext: {
-        close: () => boundedProtocolOperation(
-          () => browserCdp.send('Browser.close'),
-          'Browser.close'
-        ),
+        close: () =>
+          boundedProtocolOperation(() => browserCdp.send('Browser.close'), 'Browser.close'),
         browser: () => ({
           close: () => boundedProtocolOperation(() => browser.close(), 'browser.close'),
         }),
@@ -426,24 +414,28 @@ export async function launchOwnedNaturalChrome({
       root,
     });
     try {
-      await writeFile(join(output, 'natural-chrome-launch-result.json'), JSON.stringify({
-        schemaVersion: 1,
-        kind: 'natural-chrome-launch',
-        status: 'failed',
-        errorType: error instanceof Error ? error.name : typeof error,
-        cleanup: {
-          ...cleanup,
-          errorCount: cleanupErrors.length,
-        },
-      }, null, 2));
+      await writeFile(
+        join(output, 'natural-chrome-launch-result.json'),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            kind: 'natural-chrome-launch',
+            status: 'failed',
+            errorType: error instanceof Error ? error.name : typeof error,
+            cleanup: {
+              ...cleanup,
+              errorCount: cleanupErrors.length,
+            },
+          },
+          null,
+          2
+        )
+      );
     } catch (evidenceError) {
       cleanupErrors.push(evidenceError);
     }
     if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        [error, ...cleanupErrors],
-        'Owned Chrome launch and cleanup failed'
-      );
+      throw new AggregateError([error, ...cleanupErrors], 'Owned Chrome launch and cleanup failed');
     }
     throw error;
   }

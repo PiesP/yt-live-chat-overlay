@@ -8,32 +8,68 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockCtx = {
   setTransform: vi.fn(),
   clearRect: vi.fn(),
-  measureText: vi.fn(() => ({ width: 100, actualBoundingBoxAscent: 16, actualBoundingBoxDescent: 4 })),
-  fillText: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(), drawImage: vi.fn(),
-  save: vi.fn(), restore: vi.fn(), translate: vi.fn(),
-  beginPath: vi.fn(), closePath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
-  arc: vi.fn(), arcTo: vi.fn(), fill: vi.fn(), stroke: vi.fn(), clip: vi.fn(),
+  measureText: vi.fn(() => ({
+    width: 100,
+    actualBoundingBoxAscent: 16,
+    actualBoundingBoxDescent: 4,
+  })),
+  fillText: vi.fn(),
+  fillRect: vi.fn(),
+  strokeRect: vi.fn(),
+  drawImage: vi.fn(),
+  save: vi.fn(),
+  restore: vi.fn(),
+  translate: vi.fn(),
+  beginPath: vi.fn(),
+  closePath: vi.fn(),
+  moveTo: vi.fn(),
+  lineTo: vi.fn(),
+  arc: vi.fn(),
+  arcTo: vi.fn(),
+  fill: vi.fn(),
+  stroke: vi.fn(),
+  clip: vi.fn(),
   createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
   createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
   putImageData: vi.fn(),
   getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(100) })),
-  font: '', textBaseline: 'top', textAlign: 'left',
-  textRendering: 'optimizeSpeed', fontKerning: 'none',
-  fillStyle: '', strokeStyle: '', lineWidth: 1,
-  globalAlpha: 1, filter: 'none', imageSmoothingEnabled: true,
+  font: '',
+  textBaseline: 'top',
+  textAlign: 'left',
+  textRendering: 'optimizeSpeed',
+  fontKerning: 'none',
+  fillStyle: '',
+  strokeStyle: '',
+  lineWidth: 1,
+  globalAlpha: 1,
+  filter: 'none',
+  imageSmoothingEnabled: true,
 };
 
 const MockOffscreenCanvas = class {
-  getContext() { return mockCtx; }
+  getContext() {
+    return mockCtx;
+  }
 };
 
 vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
-vi.stubGlobal('ImageBitmap', class { close() {} });
+vi.stubGlobal(
+  'ImageBitmap',
+  class {
+    close() {}
+  }
+);
 vi.stubGlobal('OffscreenCanvasRenderingContext2D', class {});
-vi.stubGlobal('createImageBitmap', vi.fn(() => Promise.resolve({ close: vi.fn() })));
+vi.stubGlobal(
+  'createImageBitmap',
+  vi.fn(() => Promise.resolve({ close: vi.fn() }))
+);
 
 let rAFId = 1;
-vi.stubGlobal('requestAnimationFrame', vi.fn(() => rAFId++));
+vi.stubGlobal(
+  'requestAnimationFrame',
+  vi.fn(() => rAFId++)
+);
 vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
 // PostMessage spy — attach to the actual self/window BEFORE module import
@@ -53,46 +89,76 @@ vi.spyOn(performance, 'now').mockReturnValue(10000);
 // Import module — it sets self.onmessage at module scope
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
-import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
-import {
-  getBidiLayoutCacheUsage,
-  resolveTextDirection,
-} from '@renderer/canvas/bidi-layout';
-import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
-import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
-import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
+import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
 import type { CardConfigWorker } from '@renderer/card-config';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
+import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
+import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function makeMinimalConfig(): Record<string, unknown> {
   return {
-    fontSize: 16, speedPxPerSec: 100, fontFamily: 'sans-serif',
-    opacity: 1, safeTop: 0.05, safeBottom: 0.05, laneSpacing: 4,
-    maxConcurrentMessages: 200, danmakuMode: 'scroll',
-    backlogSpeedMultiplier: 1, depthLayersEnabled: false,
-    depthFarSpeedMul: 1, depthNearSpeedMul: 1, depthFarOpacityMul: 0.6,
-    motionBlurEnabled: false, motionBlurAlpha: 0.03,
-    backlogOpacityMultiplier: 0.5, fadeDurationMs: 300,
-    maxMessageAgeMs: 30000, color: '#fff', authorColors: {}, backgroundColors: {},
-    modOwnerDurationMultiplier: 1.5, outlineWidthPx: 2, outlineOpacity: 0.8,
-    superChatOpacity: 0.85, superChatMaxBodyLines: 2,
-    membershipMaxBodyLines: 2, showAuthor: {},
-    translationEnabled: false, translationMode: 'dual',
-    showSuperChatAmount: true, exitPaddingPx: 100,
-    scrollDurationMinMs: 1000, scrollDurationMaxMs: 15000,
-    topBottomDurationMs: 5000, headwayGapRatio: 0.08,
-    queueMaxSize: 500, backgroundQueueMax: 200, emojiCacheMb: 4,
-    photoCacheMb: 2, stickerCacheMb: 2, textCacheMb: 4,
-    translationBatchSize: 5, emojiFetchLimit: 10,
-    failedEmojiRetryMins: 5, staggerMaxDelayMs: 200,
-    staggerMediumDelayMs: 100, emojiFetchTimeoutMs: 5000,
-    ignoreReducedMotion: false, reducedMotion: false,
-    preserveUserColor: false, isReplayMode: false,
-    fontBaseViewportHeight: 1080, fontMinSize: 10, fontMaxSize: 120,
+    fontSize: 16,
+    speedPxPerSec: 100,
+    fontFamily: 'sans-serif',
+    opacity: 1,
+    safeTop: 0.05,
+    safeBottom: 0.05,
+    laneSpacing: 4,
+    maxConcurrentMessages: 200,
+    danmakuMode: 'scroll',
+    backlogSpeedMultiplier: 1,
+    depthLayersEnabled: false,
+    depthFarSpeedMul: 1,
+    depthNearSpeedMul: 1,
+    depthFarOpacityMul: 0.6,
+    motionBlurEnabled: false,
+    motionBlurAlpha: 0.03,
+    backlogOpacityMultiplier: 0.5,
+    fadeDurationMs: 300,
+    maxMessageAgeMs: 30000,
+    color: '#fff',
+    authorColors: {},
+    backgroundColors: {},
+    modOwnerDurationMultiplier: 1.5,
+    outlineWidthPx: 2,
+    outlineOpacity: 0.8,
+    superChatOpacity: 0.85,
+    superChatMaxBodyLines: 2,
+    membershipMaxBodyLines: 2,
+    showAuthor: {},
+    translationEnabled: false,
+    translationMode: 'dual',
+    showSuperChatAmount: true,
+    exitPaddingPx: 100,
+    scrollDurationMinMs: 1000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    headwayGapRatio: 0.08,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    emojiCacheMb: 4,
+    photoCacheMb: 2,
+    stickerCacheMb: 2,
+    textCacheMb: 4,
+    translationBatchSize: 5,
+    emojiFetchLimit: 10,
+    failedEmojiRetryMins: 5,
+    staggerMaxDelayMs: 200,
+    staggerMediumDelayMs: 100,
+    emojiFetchTimeoutMs: 5000,
+    ignoreReducedMotion: false,
+    reducedMotion: false,
+    preserveUserColor: false,
+    isReplayMode: false,
+    fontBaseViewportHeight: 1080,
+    fontMinSize: 10,
+    fontMaxSize: 120,
     fontWeight: 'bold',
   };
 }
@@ -145,22 +211,55 @@ function prepareGradientPaidCard() {
     background: 'gradient',
     backgroundGradient: { topBoost: 0.12, bottomReduction: 0.15, minOpacity: 0.35 },
     decoration: 'none',
-    badgeEnabled: false, badgeFillColor: '', badgeStrokeColor: '',
-    badgeRadius: 0, badgePaddingH: 0, badgePaddingV: 0, badgeStrokeWidth: 0,
-    headerTagEnabled: false, headerTagFontSizeScale: 1, headerTagColor: '',
-    headerTagMarginTop: 0, headerTagMarginBottom: 0,
-    authorShow: false, authorNameMaxWidth: 0, bodyMaxLines: 1, bodyMarginTop: 0,
-    stickerEnabled: false, stickerSizeScale: 1, stickerMarginTop: 0,
-    showBadgeAmount: false, padding: { horizontal: 0, vertical: 0 },
-    cardRadius: 0, textColor: '#fff', resolveColorRgb: { r: 0, g: 0, b: 0 },
-    needsGradientCache: true, needsElapsed: false,
+    badgeEnabled: false,
+    badgeFillColor: '',
+    badgeStrokeColor: '',
+    badgeRadius: 0,
+    badgePaddingH: 0,
+    badgePaddingV: 0,
+    badgeStrokeWidth: 0,
+    headerTagEnabled: false,
+    headerTagFontSizeScale: 1,
+    headerTagColor: '',
+    headerTagMarginTop: 0,
+    headerTagMarginBottom: 0,
+    authorShow: false,
+    authorNameMaxWidth: 0,
+    bodyMaxLines: 1,
+    bodyMarginTop: 0,
+    stickerEnabled: false,
+    stickerSizeScale: 1,
+    stickerMarginTop: 0,
+    showBadgeAmount: false,
+    padding: { horizontal: 0, vertical: 0 },
+    cardRadius: 0,
+    textColor: '#fff',
+    resolveColorRgb: { r: 0, g: 0, b: 0 },
+    needsGradientCache: true,
+    needsElapsed: false,
   };
   const message: ActiveMessage = {
-    id: 'paid-gradient', x: 100, y: 20, startX: 100, width: 120, height: 40,
-    startTime: 0, fadeStartTime: 0, duration: 30_000, invDuration: 1 / 30_000,
-    pausedDuration: 0, laneIndex: 0, laneSlotCount: 1, laneArrayIndices: [],
-    speedTier: 1, text: '', color: '#fff', content: [], ghostText: '',
-    kind: 'superchat', cardConfigWorker: card,
+    id: 'paid-gradient',
+    x: 100,
+    y: 20,
+    startX: 100,
+    width: 120,
+    height: 40,
+    startTime: 0,
+    fadeStartTime: 0,
+    duration: 30_000,
+    invDuration: 1 / 30_000,
+    pausedDuration: 0,
+    laneIndex: 0,
+    laneSlotCount: 1,
+    laneArrayIndices: [],
+    speedTier: 1,
+    text: '',
+    color: '#fff',
+    content: [],
+    ghostText: '',
+    kind: 'superchat',
+    cardConfigWorker: card,
   };
   const internals = renderer as unknown as {
     activeMessages: ActiveMessage[];
@@ -181,49 +280,110 @@ function prepareGradientPaidCard() {
 
 describe('Worker reservation safety', () => {
   it.each([
-    { name: 'mixed heights with only 1px clearance', activeY: 5, activeHeight: 46, candidateY: 52, allowed: false },
-    { name: 'exactly 8px of clearance', activeY: 0, activeHeight: 44, candidateY: 52, allowed: true },
-    { name: 'fractional safe-zone origin at exact clearance', activeY: 15.99, activeHeight: 44, candidateY: 67.99, allowed: true },
-    { name: 'fractional origin with 7.9px clearance', activeY: 15.99, activeHeight: 44.1, candidateY: 67.99, allowed: false },
-  ])('checks normal Worker admission for $name', ({ activeY, activeHeight, candidateY, allowed }) => {
-    const renderer = initializeRenderer({
-      danmakuMode: 'top', laneSpacing: 8, safeTop: activeY === 15.99 ? 15.99 / 360 : 0,
-    });
-    const placement = {
-      laneIndex: 4, waitMs: 0, laneY: candidateY, slotCount: 4, verticalOffset: 0,
-    };
-    const active = {
-      y: activeY, height: activeHeight, width: 100, startX: 270,
-      startTime: 0, pausedDuration: 0, duration: 5000, invDuration: 1 / 5000,
-    };
-    const internals = renderer as unknown as {
-      activeMessagesByLane: Map<number, typeof active[]>;
-      checkCollision(
-        candidatePlacement: typeof placement,
-        entry: WorkerMessage,
-        speedTier: number,
-        batchIndex: number,
-        previousStaggerDelayMs: number,
-        now: number,
-        width: number,
-        precomputedMotion: ReturnType<typeof motionPlanFromMessage>
-      ): boolean;
-    };
-    for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
-      internals.activeMessagesByLane.set(lane, [active]);
+    {
+      name: 'mixed heights with only 1px clearance',
+      activeY: 5,
+      activeHeight: 46,
+      candidateY: 52,
+      allowed: false,
+    },
+    {
+      name: 'exactly 8px of clearance',
+      activeY: 0,
+      activeHeight: 44,
+      candidateY: 52,
+      allowed: true,
+    },
+    {
+      name: 'fractional safe-zone origin at exact clearance',
+      activeY: 15.99,
+      activeHeight: 44,
+      candidateY: 67.99,
+      allowed: true,
+    },
+    {
+      name: 'fractional origin with 7.9px clearance',
+      activeY: 15.99,
+      activeHeight: 44.1,
+      candidateY: 67.99,
+      allowed: false,
+    },
+  ])(
+    'checks normal Worker admission for $name',
+    ({ activeY, activeHeight, candidateY, allowed }) => {
+      const renderer = initializeRenderer({
+        danmakuMode: 'top',
+        laneSpacing: 8,
+        safeTop: activeY === 15.99 ? 15.99 / 360 : 0,
+      });
+      const placement = {
+        laneIndex: 4,
+        waitMs: 0,
+        laneY: candidateY,
+        slotCount: 4,
+        verticalOffset: 0,
+      };
+      const active = {
+        y: activeY,
+        height: activeHeight,
+        width: 100,
+        startX: 270,
+        startTime: 0,
+        pausedDuration: 0,
+        duration: 5000,
+        invDuration: 1 / 5000,
+      };
+      const internals = renderer as unknown as {
+        activeMessagesByLane: Map<number, (typeof active)[]>;
+        checkCollision(
+          candidatePlacement: typeof placement,
+          entry: WorkerMessage,
+          speedTier: number,
+          batchIndex: number,
+          previousStaggerDelayMs: number,
+          now: number,
+          width: number,
+          precomputedMotion: ReturnType<typeof motionPlanFromMessage>
+        ): boolean;
+      };
+      for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
+        internals.activeMessagesByLane.set(lane, [active]);
+      }
+      const motion = motionPlanFromMessage(
+        {
+          startTime: 1000,
+          pausedDuration: 0,
+          startX: 270,
+          width: 100,
+          duration: 5000,
+        },
+        'top',
+        640,
+        100
+      );
+      expect(
+        internals.checkCollision(
+          placement,
+          makeWorkerMessage({ width: 100, height: 44 }),
+          1,
+          0,
+          0,
+          1000,
+          640,
+          motion
+        )
+      ).toBe(allowed);
     }
-    const motion = motionPlanFromMessage({
-      startTime: 1000, pausedDuration: 0, startX: 270, width: 100, duration: 5000,
-    }, 'top', 640, 100);
-    expect(internals.checkCollision(
-      placement, makeWorkerMessage({ width: 100, height: 44 }), 1, 0, 0, 1000, 640, motion
-    )).toBe(allowed);
-  });
+  );
 
   it('reflows a geometry update without losing the fixed-row gap or lane index', () => {
     vi.spyOn(performance, 'now').mockReturnValue(10_000);
     const renderer = initializeRenderer({
-      danmakuMode: 'top', laneSpacing: 8, safeTop: 0, safeBottom: 0, outlineWidthPx: 0,
+      danmakuMode: 'top',
+      laneSpacing: 8,
+      safeTop: 0,
+      safeBottom: 0,
+      outlineWidthPx: 0,
     });
     renderer.handleMessage(makeEvent({ type: 'laneDensity', factor: 0.5 }));
     const internals = renderer as unknown as {
@@ -233,19 +393,23 @@ describe('Worker reservation safety', () => {
       drainQueue(now: number, width: number, height: number): void;
     };
     const baselineHeight = internals.laneHeight * 4 - 8;
-    renderer.handleMessage(makeEvent({
-      type: 'addMessages',
-      messages: [
-        makeWorkerMessage({ id: 'first', height: baselineHeight }),
-        makeWorkerMessage({ id: 'second', height: baselineHeight }),
-      ],
-    }));
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({ id: 'first', height: baselineHeight }),
+          makeWorkerMessage({ id: 'second', height: baselineHeight }),
+        ],
+      })
+    );
     internals.drainQueue(10_000, 640, 360);
     expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
-    renderer.handleMessage(makeEvent({
-      type: 'updateMessageGeometries',
-      geometries: [{ id: 'first', width: 100, height: baselineHeight + 2 }],
-    }));
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateMessageGeometries',
+        geometries: [{ id: 'first', width: 100, height: baselineHeight + 2 }],
+      })
+    );
     const [first, second] = internals.activeMessages;
     expect(internals.activeMessages).toHaveLength(2);
     if (!first || !second) throw new Error('Worker row was lost during reflow');
@@ -264,8 +428,15 @@ describe('Worker reservation safety', () => {
       findPlacement: ReturnType<typeof vi.fn>;
       drainQueue(now: number, width: number, height: number): void;
     };
-    internals.pendingQueue.push(...[200, 100, 0].map((priority) => makeWorkerMessage({ id: `priority-${priority}`, priority })));
-    internals.findPlacement = vi.fn(() => { clock += 2; return null; });
+    internals.pendingQueue.push(
+      ...[200, 100, 0].map((priority) =>
+        makeWorkerMessage({ id: `priority-${priority}`, priority })
+      )
+    );
+    internals.findPlacement = vi.fn(() => {
+      clock += 2;
+      return null;
+    });
     internals.drainQueue(0, 640, 360);
     expect(internals.findPlacement.mock.calls.map((args) => args[1])).toHaveLength(2);
     // Pending identity cursors, rather than dequeues, retain every failure.
@@ -281,14 +452,21 @@ describe('Worker reservation safety', () => {
     vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const renderer = initializeRenderer({
-      danmakuMode: mode, reducedMotion, speedPxPerSec: 350, laneSpacing: 0,
-      scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
-      outlineWidthPx: 0, outlineOpacity: 0,
+      danmakuMode: mode,
+      reducedMotion,
+      speedPxPerSec: 350,
+      laneSpacing: 0,
+      scrollDurationMinMs: 5000,
+      scrollDurationMaxMs: 30000,
+      outlineWidthPx: 0,
+      outlineOpacity: 0,
     });
     const internals = renderer as unknown as {
       laneHeap: [number, number][];
       laneIndexToHeapIndex: Map<number, number>;
-      numLanes: number; laneHeight: number; logicalHeight: number;
+      numLanes: number;
+      laneHeight: number;
+      logicalHeight: number;
       activeMessages: ActiveMessage[];
       pendingQueue: WorkerMessage[];
       totalDrops: number;
@@ -296,36 +474,58 @@ describe('Worker reservation safety', () => {
       drainQueue(now: number, width: number, height: number): void;
       reflowActiveMessages(): void;
     };
-    internals.laneHeap = [[0, 0], [1, 0]];
-    internals.laneIndexToHeapIndex = new Map([[0, 0], [1, 1]]);
+    internals.laneHeap = [
+      [0, 0],
+      [1, 0],
+    ];
+    internals.laneIndexToHeapIndex = new Map([
+      [0, 0],
+      [1, 1],
+    ]);
     internals.numLanes = 2;
     internals.laneHeight = 20;
     internals.logicalHeight = 40;
     for (const id of ['first', 'short', 'long']) {
       internals.pendingQueue.push({
-        id, text: id, content: [{ type: 'text', content: id }],
-        priority: 0, isBacklog: false, kind: 'text', authorType: 'normal',
-        width: id === 'short' ? 100 : 600, height: 20,
+        id,
+        text: id,
+        content: [{ type: 'text', content: id }],
+        priority: 0,
+        isBacklog: false,
+        kind: 'text',
+        authorType: 'normal',
+        width: id === 'short' ? 100 : 600,
+        height: 20,
       });
     }
     return { renderer, internals };
   }
 
-  it.each(['scroll', 'reverse'] as const)('checks future reservations and uses an alternative lane in %s', (mode) => {
-    const { internals } = setup(mode);
-    internals.drainQueue(0, 640, 40);
-    expect(internals.activeMessages).toHaveLength(3);
-    const short = internals.activeMessages.find((m) => m.id === 'short');
-    const long = internals.activeMessages.find((m) => m.id === 'long');
-    expect(short?.startTime).toBeGreaterThan(0);
-    expect(long?.laneIndex).not.toBe(short?.laneIndex);
-    for (const a of internals.activeMessages) {
-      for (const b of internals.activeMessages) {
-        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
-        expect(motionPlansCollide(motionPlanFromMessage(a, mode, 640, 100), motionPlanFromMessage(b, mode, 640, 100), 0.08, 0)).toBe(false);
+  it.each(['scroll', 'reverse'] as const)(
+    'checks future reservations and uses an alternative lane in %s',
+    (mode) => {
+      const { internals } = setup(mode);
+      internals.drainQueue(0, 640, 40);
+      expect(internals.activeMessages).toHaveLength(3);
+      const short = internals.activeMessages.find((m) => m.id === 'short');
+      const long = internals.activeMessages.find((m) => m.id === 'long');
+      expect(short?.startTime).toBeGreaterThan(0);
+      expect(long?.laneIndex).not.toBe(short?.laneIndex);
+      for (const a of internals.activeMessages) {
+        for (const b of internals.activeMessages) {
+          if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+          expect(
+            motionPlansCollide(
+              motionPlanFromMessage(a, mode, 640, 100),
+              motionPlanFromMessage(b, mode, 640, 100),
+              0.08,
+              0
+            )
+          ).toBe(false);
+        }
       }
     }
-  });
+  );
 
   it('preserves future starts and resolves fixed capacity when reflow shrinks the lane range', () => {
     const { internals } = setup('top');
@@ -338,11 +538,20 @@ describe('Worker reservation safety', () => {
     expect(internals.totalDrops).toBe(1);
     expect(internals.dropReasons.reflow_capacity).toBe(1);
     expect(internals.activeMessages).toHaveLength(2);
-    expect(internals.activeMessages.every((m) => m.startTime === futureStarts.get(m.id))).toBe(true);
+    expect(internals.activeMessages.every((m) => m.startTime === futureStarts.get(m.id))).toBe(
+      true
+    );
     for (const a of internals.activeMessages) {
       for (const b of internals.activeMessages) {
         if (a === b) continue;
-        expect(motionPlansCollide(motionPlanFromMessage(a, 'top', 640, 100), motionPlanFromMessage(b, 'top', 640, 100), 0.08, 0)).toBe(false);
+        expect(
+          motionPlansCollide(
+            motionPlanFromMessage(a, 'top', 640, 100),
+            motionPlanFromMessage(b, 'top', 640, 100),
+            0.08,
+            0
+          )
+        ).toBe(false);
       }
     }
   });
@@ -362,14 +571,20 @@ describe('Worker reservation safety', () => {
     const { renderer, internals } = setup();
     internals.drainQueue(0, 640, 40);
     renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { reducedMotion: true } }));
-    expect(internals.activeMessages.every((m) => m.motion?.mode === 'top' && m.x === Math.floor((640 - m.width) / 2))).toBe(true);
+    expect(
+      internals.activeMessages.every(
+        (m) => m.motion?.mode === 'top' && m.x === Math.floor((640 - m.width) / 2)
+      )
+    ).toBe(true);
     for (const a of internals.activeMessages) {
       for (const b of internals.activeMessages) {
         if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
         expect(a.motion && b.motion && motionPlansCollide(a.motion, b.motion, 0.08, 0)).toBe(false);
       }
     }
-    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { ignoreReducedMotion: true } }));
+    renderer.handleMessage(
+      makeEvent({ type: 'updateConfig', config: { ignoreReducedMotion: true } })
+    );
     expect(internals.activeMessages.every((m) => m.motion?.mode === 'scroll')).toBe(true);
   });
 });
@@ -451,10 +666,16 @@ describe('Worker paid-card gradient cache integration', () => {
       ...mockCtx,
       createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
     };
-    renderer.handleMessage(makeEvent({
-      type: 'init', config: makeMinimalConfig(), canvas: { getContext: () => nextCtx },
-      dpr: 1, width: 640, height: 360,
-    }));
+    renderer.handleMessage(
+      makeEvent({
+        type: 'init',
+        config: makeMinimalConfig(),
+        canvas: { getContext: () => nextCtx },
+        dpr: 1,
+        width: 640,
+        height: 360,
+      })
+    );
     expect(cache.size).toBe(0);
     renderColor(7);
     expect(mockCtx.createLinearGradient).toHaveBeenCalledTimes(2);
@@ -822,17 +1043,23 @@ describe('Worker message protocol', () => {
 
   describe('init error case', () => {
     it('posts error when canvas getContext returns null', () => {
-      const BadCanvas = class { getContext() { return null; } };
+      const BadCanvas = class {
+        getContext() {
+          return null;
+        }
+      };
       vi.stubGlobal('OffscreenCanvas', BadCanvas);
 
-      getHandler()(makeEvent({
-        type: 'init',
-        config: makeMinimalConfig(),
-        canvas: new BadCanvas(),
-        dpr: 1,
-        width: 640,
-        height: 360,
-      }));
+      getHandler()(
+        makeEvent({
+          type: 'init',
+          config: makeMinimalConfig(),
+          canvas: new BadCanvas(),
+          dpr: 1,
+          width: 640,
+          height: 360,
+        })
+      );
 
       expect(postMessageSpy).toHaveBeenCalledWith({
         type: 'error',
@@ -868,14 +1095,16 @@ describe('Worker message protocol', () => {
 
   describe('resize', () => {
     it('handles resize without errors after init', () => {
-      getHandler()(makeEvent({
-        type: 'init',
-        config: makeMinimalConfig(),
-        canvas: new MockOffscreenCanvas(),
-        dpr: 1,
-        width: 640,
-        height: 360,
-      }));
+      getHandler()(
+        makeEvent({
+          type: 'init',
+          config: makeMinimalConfig(),
+          canvas: new MockOffscreenCanvas(),
+          dpr: 1,
+          width: 640,
+          height: 360,
+        })
+      );
       postMessageSpy.mockClear();
 
       getHandler()(makeEvent({ type: 'resize', width: 640, height: 360, dpr: 1 }));
@@ -1078,9 +1307,9 @@ describe('Worker message protocol', () => {
       };
       internals.activeMessagesByLane.set(0, [active]);
 
-      expect(
-        internals.checkCollision(placement, makeWorkerMessage(), 1, 0, 0, 10_000, 640)
-      ).toBe(true);
+      expect(internals.checkCollision(placement, makeWorkerMessage(), 1, 0, 0, 10_000, 640)).toBe(
+        true
+      );
       expect(
         internals.checkCollision(
           placement,
@@ -1131,9 +1360,13 @@ describe('Worker message protocol', () => {
       const second = { width: 64, height: 64, close: vi.fn() };
 
       for (const bitmap of [first, second]) {
-        renderer.handleMessage(makeEvent({
-          type: 'addMessages', messages: [], imageData: [{ url, bitmap, target: 'emoji' }],
-        }));
+        renderer.handleMessage(
+          makeEvent({
+            type: 'addMessages',
+            messages: [],
+            imageData: [{ url, bitmap, target: 'emoji' }],
+          })
+        );
       }
 
       expect(internals.emojiCache.get(url)).toBe(second);
@@ -1158,9 +1391,14 @@ describe('Worker message protocol', () => {
       const otherUrl = 'https://yt3.ggpht.com/other-bitmap';
       const bitmap = { width: 400, height: 400, close: vi.fn() };
       const other = { width: 400, height: 400, close: vi.fn() };
-      const register = (key: string, value: typeof bitmap) => renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [], imageData: [{ url: key, bitmap: value, target: 'emoji' }],
-      }));
+      const register = (key: string, value: typeof bitmap) =>
+        renderer.handleMessage(
+          makeEvent({
+            type: 'addMessages',
+            messages: [],
+            imageData: [{ url: key, bitmap: value, target: 'emoji' }],
+          })
+        );
 
       register(url, bitmap);
       register(otherUrl, other);
@@ -1195,17 +1433,23 @@ describe('Worker message protocol', () => {
       const firstUrl = 'https://yt3.ggpht.com/alias-first';
       const aliasUrl = 'https://yt3.ggpht.com/alias-second';
       const bitmap = { width: 64, height: 64, close: vi.fn() };
-      renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [],
-        imageData: [{ url: firstUrl, bitmap, target: 'emoji' }],
-      }));
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [{ url: firstUrl, bitmap, target: 'emoji' }],
+        })
+      );
       const retainedBytes = internals.emojiCache.currentBytes;
       postMessageSpy.mockClear();
 
-      renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [],
-        imageData: [{ url: aliasUrl, bitmap, target: 'emoji' }],
-      }));
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [{ url: aliasUrl, bitmap, target: 'emoji' }],
+        })
+      );
 
       expect(postMessageSpy).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'error', error: expect.any(String) })
@@ -1228,12 +1472,16 @@ describe('Worker message protocol', () => {
       const secondUrl = 'https://yt3.ggpht.com/second-bitmap';
       const first = { width: 400, height: 400, close: vi.fn() };
       const second = { width: 400, height: 400, close: vi.fn() };
-      renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [], imageData: [
-          { url: firstUrl, bitmap: first, target: 'emoji' },
-          { url: secondUrl, bitmap: second, target: 'emoji' },
-        ],
-      }));
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [
+            { url: firstUrl, bitmap: first, target: 'emoji' },
+            { url: secondUrl, bitmap: second, target: 'emoji' },
+          ],
+        })
+      );
 
       renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { emojiCacheMb: 1 } }));
 
@@ -1253,9 +1501,13 @@ describe('Worker message protocol', () => {
       const url = 'https://yt3.ggpht.com/oversized-bitmap';
       const bitmap = { width: 1_000, height: 1_000, close: vi.fn() };
 
-      renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [], imageData: [{ url, bitmap, target: 'emoji' }],
-      }));
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [{ url, bitmap, target: 'emoji' }],
+        })
+      );
 
       expect(internals.emojiCache.has(url)).toBe(false);
       expect(bitmap.close).toHaveBeenCalledOnce();
@@ -1403,11 +1655,14 @@ describe('Worker message protocol', () => {
             });
           })
       );
-      vi.mocked(createImageBitmap).mockImplementation(async () => ({
-        width: 1,
-        height: 1,
-        close: vi.fn(),
-      }) as unknown as ImageBitmap);
+      vi.mocked(createImageBitmap).mockImplementation(
+        async () =>
+          ({
+            width: 1,
+            height: 1,
+            close: vi.fn(),
+          }) as unknown as ImageBitmap
+      );
       const emojiUrls = Array.from(
         { length: 5 },
         (_, index) => `https://yt3.ggpht.com/queued-emoji-${index}`
@@ -1479,9 +1734,14 @@ describe('Worker message protocol', () => {
             );
           })
       );
-      vi.mocked(createImageBitmap).mockImplementation(async () => ({
-        width: 1, height: 1, close: vi.fn(),
-      }) as unknown as ImageBitmap);
+      vi.mocked(createImageBitmap).mockImplementation(
+        async () =>
+          ({
+            width: 1,
+            height: 1,
+            close: vi.fn(),
+          }) as unknown as ImageBitmap
+      );
 
       const first = internals.prefetchImages([firstUrl], internals.emojiCache, 'first');
       const obsolete = internals.prefetchImages([obsoleteUrl], internals.emojiCache, 'expired');
@@ -1620,15 +1880,17 @@ describe('Worker message protocol', () => {
       postMessageSpy.mockClear();
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 7 }));
 
-      expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'messageSnapshot',
-        requestId: 7,
-        epoch: 0,
-        activeMessageIds: [],
-        pendingMessageIds: ['pending-message'],
-        processedBatchSequence: 0,
-        motionSnapshot: expect.objectContaining({ activeMotions: [] }),
-      }));
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'messageSnapshot',
+          requestId: 7,
+          epoch: 0,
+          activeMessageIds: [],
+          pendingMessageIds: ['pending-message'],
+          processedBatchSequence: 0,
+          motionSnapshot: expect.objectContaining({ activeMotions: [] }),
+        })
+      );
     });
 
     it('uses the pending array as the single queue cursor while preserving every snapshot id', () => {
@@ -1641,23 +1903,28 @@ describe('Worker message protocol', () => {
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 8 }));
 
       expect(renderer).not.toHaveProperty('pendingQueueOffset');
-      expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'messageSnapshot',
-        requestId: 8,
-        epoch: 0,
-        activeMessageIds: [],
-        pendingMessageIds: ['pending-first', 'pending-second'],
-        processedBatchSequence: 0,
-        motionSnapshot: expect.objectContaining({ activeMotions: [] }),
-      }));
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'messageSnapshot',
+          requestId: 8,
+          epoch: 0,
+          activeMessageIds: [],
+          pendingMessageIds: ['pending-first', 'pending-second'],
+          processedBatchSequence: 0,
+          motionSnapshot: expect.objectContaining({ activeMotions: [] }),
+        })
+      );
     });
 
     it('snapshots the actual active timeline with a frozen clock during pause', () => {
       vi.spyOn(performance, 'now').mockReturnValue(10_000);
       const renderer = initializeRenderer();
-      renderer.handleMessage(makeEvent({
-        type: 'addMessages', messages: [makeWorkerMessage({ id: 'future-active', trackDrops: false })],
-      }));
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [makeWorkerMessage({ id: 'future-active', trackDrops: false })],
+        })
+      );
       const internals = renderer as unknown as {
         drainQueue(now: number, width: number, height: number): void;
         activeMessages: ActiveMessage[];
@@ -1675,23 +1942,39 @@ describe('Worker message protocol', () => {
       postMessageSpy.mockClear();
       renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 9, epoch: 0 }));
       const snapshot = postMessageSpy.mock.calls.at(-1)?.[0] as {
-        type: string; epoch: number; motionSnapshot: {
-          effectiveNowEpochMs: number; capturedAtEpochMs: number; isPaused: boolean;
-          viewportWidthPx: number; exitPaddingPx: number;
-          activeMotions: Array<{ id: string; trackDrops?: boolean; startEpochMs: number; fadeStartEpochMs: number;
-            startX: number; durationMs: number; laneIndex: number }>;
+        type: string;
+        epoch: number;
+        motionSnapshot: {
+          effectiveNowEpochMs: number;
+          capturedAtEpochMs: number;
+          isPaused: boolean;
+          viewportWidthPx: number;
+          exitPaddingPx: number;
+          activeMotions: Array<{
+            id: string;
+            trackDrops?: boolean;
+            startEpochMs: number;
+            fadeStartEpochMs: number;
+            startX: number;
+            durationMs: number;
+            laneIndex: number;
+          }>;
         };
       };
       expect(snapshot.epoch).toBe(0);
       expect(isValidWorkerMessageSnapshot(snapshot)).toBe(true);
       expect(snapshot.motionSnapshot).toMatchObject({
-        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+        isPaused: true,
+        viewportWidthPx: 640,
+        exitPaddingPx: 100,
         effectiveNowEpochMs: performance.timeOrigin + 10_000,
         capturedAtEpochMs: performance.timeOrigin + 10_600,
       });
       expect(snapshot.motionSnapshot.activeMotions).toEqual([
         expect.objectContaining({
-          id: active.id, startX: active.startX, durationMs: active.duration,
+          id: active.id,
+          startX: active.startX,
+          durationMs: active.duration,
           trackDrops: false,
           laneIndex: active.laneIndex,
           startEpochMs: performance.timeOrigin + 10_800,
@@ -1717,21 +2000,36 @@ describe('Worker message protocol', () => {
 
       renderer.handleMessage(
         makeEvent({
-          type: 'updateTranslation', id: 'one', translatedText: 'stale',
-          width: 120, height: 20, translationHeight: 0, translationGeneration: 0,
+          type: 'updateTranslation',
+          id: 'one',
+          translatedText: 'stale',
+          width: 120,
+          height: 20,
+          translationHeight: 0,
+          translationGeneration: 0,
         })
       );
       renderer.handleMessage(
         makeEvent({
-          type: 'updateTranslation', id: 'one', translatedText: 'latest',
-          width: 130, height: 20, translationHeight: 0, translationGeneration: 0,
+          type: 'updateTranslation',
+          id: 'one',
+          translatedText: 'latest',
+          width: 130,
+          height: 20,
+          translationHeight: 0,
+          translationGeneration: 0,
         })
       );
       for (const id of ['two', 'three']) {
         renderer.handleMessage(
           makeEvent({
-            type: 'updateTranslation', id, translatedText: `translated-${id}`,
-            width: 130, height: 20, translationHeight: 0, translationGeneration: 0,
+            type: 'updateTranslation',
+            id,
+            translatedText: `translated-${id}`,
+            width: 130,
+            height: 20,
+            translationHeight: 0,
+            translationGeneration: 0,
           })
         );
       }
@@ -1759,8 +2057,13 @@ describe('Worker message protocol', () => {
       };
       renderer.handleMessage(
         makeEvent({
-          type: 'updateTranslation', id: original.id, translatedText: 'old target',
-          width: 120, height: 20, translationHeight: 0, translationGeneration: 0,
+          type: 'updateTranslation',
+          id: original.id,
+          translatedText: 'old target',
+          width: 120,
+          height: 20,
+          translationHeight: 0,
+          translationGeneration: 0,
         })
       );
       renderer.handleMessage(
@@ -1770,8 +2073,13 @@ describe('Worker message protocol', () => {
 
       renderer.handleMessage(
         makeEvent({
-          type: 'updateTranslation', id: original.id, translatedText: 'wrong generation',
-          width: 120, height: 20, translationHeight: 0, translationGeneration: 0,
+          type: 'updateTranslation',
+          id: original.id,
+          translatedText: 'wrong generation',
+          width: 120,
+          height: 20,
+          translationHeight: 0,
+          translationGeneration: 0,
         })
       );
       renderer.handleMessage(
@@ -1868,9 +2176,7 @@ describe('Worker message protocol', () => {
       expect(internals.textMeasureCache.size).toBe(1);
       expect(internals.textBitmapCache.size).toBe(1);
 
-      renderer.handleMessage(
-        makeEvent({ type: 'updateConfig', config: { fontFamily: 'serif' } })
-      );
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { fontFamily: 'serif' } }));
       expect(internals.textMeasureCache.size).toBe(0);
       expect(internals.textBitmapCache.size).toBe(0);
     });

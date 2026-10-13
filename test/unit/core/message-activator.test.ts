@@ -2,12 +2,15 @@
  * Tests for MessageActivator — message pooling, activation, and translation ID guard.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ChatMessage } from '@app-types';
-import { MessageActivator } from '@util/message-activator';
-import type { ActivationCallbacks, MessageActivatorConfig } from '@util/message-activator';
 import { EMPTY_CHAT_MESSAGE } from '@renderer/constants';
 import type { TranslationService } from '@translation/service';
+import {
+  type ActivationCallbacks,
+  MessageActivator,
+  type MessageActivatorConfig,
+} from '@util/message-activator';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -177,7 +180,19 @@ describe('MessageActivator', () => {
       const msg = makeChatMessage({ userColor: '#ff0000' });
       const callbacks = makeCallbacks();
 
-      farActivator.activate(msg, 1000, 200, 30, 400, callbacks, undefined, undefined, undefined, 0, 0); // speedTier = FAR(0)
+      farActivator.activate(
+        msg,
+        1000,
+        200,
+        30,
+        400,
+        callbacks,
+        undefined,
+        undefined,
+        undefined,
+        0,
+        0
+      ); // speedTier = FAR(0)
 
       const cmArg = (callbacks.onActivated as ReturnType<typeof vi.fn>).mock.calls[0]![0];
       expect(cmArg.desaturatedUserColor).toBeDefined();
@@ -193,7 +208,19 @@ describe('MessageActivator', () => {
       const msg = makeChatMessage({ userColor: '#ff0000' });
       const callbacks = makeCallbacks();
 
-      farActivator.activate(msg, 1000, 200, 30, 400, callbacks, undefined, undefined, undefined, 0, 1); // speedTier = MID(1)
+      farActivator.activate(
+        msg,
+        1000,
+        200,
+        30,
+        400,
+        callbacks,
+        undefined,
+        undefined,
+        undefined,
+        0,
+        1
+      ); // speedTier = MID(1)
 
       const cmArg = (callbacks.onActivated as ReturnType<typeof vi.fn>).mock.calls[0]![0];
       expect(cmArg.desaturatedUserColor).toBeUndefined();
@@ -243,7 +270,11 @@ describe('MessageActivator', () => {
       // Message with empty content segments
       const svc = makeMockTranslationService(true);
       const act = new MessageActivator(svc, makeConfig());
-      const msg = makeChatMessage({ id: 'msg-1', text: '', content: [{ type: 'text' as const, content: '' }] });
+      const msg = makeChatMessage({
+        id: 'msg-1',
+        text: '',
+        content: [{ type: 'text' as const, content: '' }],
+      });
       const callbacks = makeCallbacks();
 
       act.activate(msg, 1000, 200, 30, 400, callbacks);

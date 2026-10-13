@@ -50,9 +50,9 @@ export function summarizePhaseHealth(samples, phase) {
   const times = selected
     .map((sample) => sample.video?.currentTime)
     .filter((value) => typeof value === 'number' && Number.isFinite(value));
-  const nonProgressingIntervalCount = times.slice(1).filter(
-    (value, index) => value - times[index] < 1
-  ).length;
+  const nonProgressingIntervalCount = times
+    .slice(1)
+    .filter((value, index) => value - times[index] < 1).length;
   const reasons = [];
   if (selected.length < 2) reasons.push('insufficient-phase-samples');
   if (healthy.length !== selected.length) reasons.push('sample-health-incomplete');
@@ -66,8 +66,7 @@ export function summarizePhaseHealth(samples, phase) {
     healthySampleCount: healthy.length,
     nonProgressingIntervalCount,
     // Position range includes seeks and resets; it is not elapsed playback time.
-    mediaTimeRangeSeconds:
-      times.length < 2 ? null : Math.max(...times) - Math.min(...times),
+    mediaTimeRangeSeconds: times.length < 2 ? null : Math.max(...times) - Math.min(...times),
   };
 }
 
@@ -114,10 +113,11 @@ export function durationEvidenceReasons({
   const reasons = [];
   if (
     !Array.isArray(visibilityProof) ||
-    !visibilityProof.some((value, index) =>
-      value === 'hidden' &&
-      visibilityProof.slice(0, index).includes('visible') &&
-      visibilityProof.slice(index + 1).includes('visible')
+    !visibilityProof.some(
+      (value, index) =>
+        value === 'hidden' &&
+        visibilityProof.slice(0, index).includes('visible') &&
+        visibilityProof.slice(index + 1).includes('visible')
     )
   ) {
     reasons.push('native-hidden-transition-unverified');
@@ -177,10 +177,7 @@ async function waitForVideoState(locator, predicate, timeoutMs, delay) {
   throw new Error('Public player did not reach the requested bounded playback state');
 }
 
-export async function exercisePlayerPausePlay(
-  page,
-  { timeoutMs = 5_000, delay = sleep } = {}
-) {
+export async function exercisePlayerPausePlay(page, { timeoutMs = 5_000, delay = sleep } = {}) {
   const video = page.locator('video').first();
   const before = await video.evaluate((element) => ({
     currentTime: Number.isFinite(element.currentTime) ? element.currentTime : null,
@@ -216,19 +213,24 @@ async function publicState(page) {
   return page.evaluate(() => {
     const video = document.querySelector('video');
     if (video instanceof HTMLVideoElement) video.muted = true;
-    const playerError = [...document.querySelectorAll(
-      '.ytp-error, .ytp-error-content-wrap, .ytp-error-content'
-    )].some((element) => {
+    const playerError = [
+      ...document.querySelectorAll('.ytp-error, .ytp-error-content-wrap, .ytp-error-content'),
+    ].some((element) => {
       const style = getComputedStyle(element);
-      return style.display !== 'none' && style.visibility !== 'hidden' &&
-        element.getClientRects().length > 0;
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        element.getClientRects().length > 0
+      );
     });
     return {
       visibility: document.visibilityState,
-      hud: document.querySelector('#yt-chat-overlay-debug')?.textContent
-        ?.replace(/\s+/gu, ' ').trim() ?? null,
-      canvasAttached:
-        document.querySelectorAll('#yt-live-chat-overlay canvas').length === 1,
+      hud:
+        document
+          .querySelector('#yt-chat-overlay-debug')
+          ?.textContent?.replace(/\s+/gu, ' ')
+          .trim() ?? null,
+      canvasAttached: document.querySelectorAll('#yt-live-chat-overlay canvas').length === 1,
       accessibilityRenderedNodeCount: document.querySelectorAll(
         '.yt-live-chat-overlay-live-region > p'
       ).length,
@@ -241,15 +243,16 @@ async function publicState(page) {
         visible: playerError,
         marker: playerError ? 'youtube-player-error-ui-visible' : null,
       },
-      video: video instanceof HTMLVideoElement
-        ? {
-            currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
-            errorCode: video.error?.code ?? null,
-            muted: video.muted,
-            paused: video.paused,
-            readyState: video.readyState,
-          }
-        : null,
+      video:
+        video instanceof HTMLVideoElement
+          ? {
+              currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
+              errorCode: video.error?.code ?? null,
+              muted: video.muted,
+              paused: video.paused,
+              readyState: video.readyState,
+            }
+          : null,
     };
   });
 }
@@ -320,11 +323,7 @@ async function observeAccessibleChange(page, baseline, startedAt, deadline, sign
       latest.count > 0 &&
       (latest.count !== baseline.count || latest.fingerprint !== baseline.fingerprint)
     ) {
-      return classifyResumeFingerprint(
-        baseline,
-        latest,
-        performance.now() - startedAt
-      );
+      return classifyResumeFingerprint(baseline, latest, performance.now() - startedAt);
     }
   }
   return classifyResumeFingerprint(baseline, latest, null);
@@ -457,14 +456,14 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       state: 'visible',
       timeout: remainingPreflight(30_000),
     });
-    await page.locator('video').first().evaluate((video) => {
-      video.muted = true;
-      void video.play().catch(() => {});
-    });
-    result.preflight.mediaReadiness = await waitForInitialMedia(
-      page,
-      remainingPreflight(90_000)
-    );
+    await page
+      .locator('video')
+      .first()
+      .evaluate((video) => {
+        video.muted = true;
+        void video.play().catch(() => {});
+      });
+    result.preflight.mediaReadiness = await waitForInitialMedia(page, remainingPreflight(90_000));
     assert.equal(
       result.preflight.mediaReadiness.status,
       'observed',
@@ -532,11 +531,7 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       visibility: 'hidden',
     });
     await persist('observe:transition-hidden', 'after');
-    for (
-      let offset = ACTIVE_MS + SAMPLE_MS;
-      offset <= ACTIVE_MS + HIDDEN_MS;
-      offset += SAMPLE_MS
-    ) {
+    for (let offset = ACTIVE_MS + SAMPLE_MS; offset <= ACTIVE_MS + HIDDEN_MS; offset += SAMPLE_MS) {
       await waitUntil(started + offset);
       await sample('hidden', offset);
     }
@@ -584,11 +579,7 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       result.failures.push(failure('observe:player-pause-play', error));
     }
     await persist('observe:player-pause-play', 'after');
-    for (
-      let offset = ACTIVE_MS + HIDDEN_MS + SAMPLE_MS;
-      offset <= TOTAL_MS;
-      offset += SAMPLE_MS
-    ) {
+    for (let offset = ACTIVE_MS + HIDDEN_MS + SAMPLE_MS; offset <= TOTAL_MS; offset += SAMPLE_MS) {
       await waitUntil(started + offset);
       await sample(offset === TOTAL_MS ? 'resumed-final' : 'resumed', offset);
     }
@@ -645,12 +636,13 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       unexpectedConsoleErrors: result.diagnostics.unexpectedConsoleErrors,
     });
     result.status = 'completed';
-    result.evidenceStatus =
-      result.evidenceStatusReasons.length === 0 ? 'observed' : 'unverified';
-    await page.screenshot({
-      path: join(output, 'live-duration-final.png'),
-      animations: 'disabled',
-    }).catch(() => {});
+    result.evidenceStatus = result.evidenceStatusReasons.length === 0 ? 'observed' : 'unverified';
+    await page
+      .screenshot({
+        path: join(output, 'live-duration-final.png'),
+        animations: 'disabled',
+      })
+      .catch(() => {});
     await persist('observe:complete', 'after');
     return result;
   } catch (error) {
@@ -660,11 +652,13 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
     result.diagnostics = captureDiagnostics(false);
     if (page && !page.isClosed()) {
       result.failureState = await publicState(page).catch(() => null);
-      await page.screenshot({
-        path: join(output, 'live-duration-failure.png'),
-        animations: 'disabled',
-        timeout: 3_000,
-      }).catch(() => {});
+      await page
+        .screenshot({
+          path: join(output, 'live-duration-failure.png'),
+          animations: 'disabled',
+          timeout: 3_000,
+        })
+        .catch(() => {});
     }
     await persist(`failure:${stage}`, 'after').catch(() => {});
     throw new Error(`Duration observation failed during ${stage}`, { cause: error });

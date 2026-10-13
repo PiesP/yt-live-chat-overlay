@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
-import { Settings } from '@settings/store';
+
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';
+import { Settings } from '@settings/store';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@platform/cross-tab-sync-adapters', () => ({
   getCrossTabSyncAdapter: vi.fn(() => ({
@@ -22,10 +23,11 @@ describe('Settings persistence', () => {
       value: string;
       resolve: () => void;
     }> = [];
-    const setItem = vi.fn((_key: string, value: string) =>
-      new Promise<void>((resolve) => {
-        pendingWrites.push({ value, resolve });
-      })
+    const setItem = vi.fn(
+      (_key: string, value: string) =>
+        new Promise<void>((resolve) => {
+          pendingWrites.push({ value, resolve });
+        })
     );
     const getItem = vi.fn().mockResolvedValue(null);
 

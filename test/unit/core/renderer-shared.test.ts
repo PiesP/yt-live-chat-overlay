@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { computeMessageOpacity as computeMessageOpacityPrimitive } from '@renderer/shared';
-import { SPEED_TIER } from '@renderer/constants';
-import type { OpacityConfig } from '@renderer/shared';
 import type { ChatMessage } from '@app-types';
+import { SPEED_TIER } from '@renderer/constants';
+import {
+  computeMessageOpacity as computeMessageOpacityPrimitive,
+  type OpacityConfig,
+} from '@renderer/shared';
+import { describe, expect, it } from 'vitest';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -187,8 +189,20 @@ describe('computeMessageOpacity', () => {
       // fade-in: 250 * 1/300 = 0.8333...
       // fade-out: (500-250) * 1/300 = 250/300 = 0.8333...
       // combined: 1 * 0.8333 * 0.8333 = 0.694...
-      const shortCfg = makeConfig({ fadeDurationMs: 300, backlogOpacityMultiplier: 1, depthLayersEnabled: false, ageFadeRate: 0 });
-      const result = computeMessageOpacity(makeMessage(), 250, 500, false, SPEED_TIER.NEAR, shortCfg);
+      const shortCfg = makeConfig({
+        fadeDurationMs: 300,
+        backlogOpacityMultiplier: 1,
+        depthLayersEnabled: false,
+        ageFadeRate: 0,
+      });
+      const result = computeMessageOpacity(
+        makeMessage(),
+        250,
+        500,
+        false,
+        SPEED_TIER.NEAR,
+        shortCfg
+      );
       expect(result).toBeCloseTo((250 / 300) * (250 / 300), 5);
     });
   });
@@ -282,11 +296,18 @@ describe('computeMessageOpacity', () => {
       });
       // Age fade only applies when isScrolling=true
       // At t=0: ageRatio=0, opacity = 1*(1-0) = 1
-      expect(computeMessageOpacity(makeMessage(), 0, 5000, true, SPEED_TIER.NEAR, cfg)).toBeCloseTo(1, 5);
+      expect(computeMessageOpacity(makeMessage(), 0, 5000, true, SPEED_TIER.NEAR, cfg)).toBeCloseTo(
+        1,
+        5
+      );
       // At t=5000: ageRatio=5000/10000=0.5, opacity = 1*(1-0.5) = 0.5
-      expect(computeMessageOpacity(makeMessage(), 5000, 5000, true, SPEED_TIER.NEAR, cfg)).toBeCloseTo(0.5, 5);
+      expect(
+        computeMessageOpacity(makeMessage(), 5000, 5000, true, SPEED_TIER.NEAR, cfg)
+      ).toBeCloseTo(0.5, 5);
       // At t=10000: ageRatio=10000/10000=1.0, opacity = 1*(1-1) = 0
-      expect(computeMessageOpacity(makeMessage(), 10000, 5000, true, SPEED_TIER.NEAR, cfg)).toBeCloseTo(0, 5);
+      expect(
+        computeMessageOpacity(makeMessage(), 10000, 5000, true, SPEED_TIER.NEAR, cfg)
+      ).toBeCloseTo(0, 5);
     });
 
     it('clamps age fade at 0 (no negative opacity)', () => {
@@ -496,7 +517,7 @@ describe('computeMessageOpacity', () => {
         ageFadeRate: 1 / 10000,
       });
       const results = [0, 1000, 2000, 3000, 4000, 5000].map((elapsed) =>
-        computeMessageOpacity(makeMessage(), elapsed, 5000, false, SPEED_TIER.NEAR, cfg),
+        computeMessageOpacity(makeMessage(), elapsed, 5000, false, SPEED_TIER.NEAR, cfg)
       );
       for (let i = 1; i < results.length; i++) {
         expect(results[i]).toBeLessThanOrEqual(results[i - 1]!);

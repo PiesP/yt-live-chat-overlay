@@ -19,11 +19,16 @@
  * - Verify accessibility attributes on the overlay/canvas elements
  */
 
-import AxeBuilder from '@axe-core/playwright';
-import { test, expect, type Locator, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import AxeBuilder from '@axe-core/playwright';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { getSettings, setupOverlayPage, USERSCRIPT_PATH, waitForStoredSettings } from '../fixtures/test-utils';
+import {
+  getSettings,
+  setupOverlayPage,
+  USERSCRIPT_PATH,
+  waitForStoredSettings,
+} from '../fixtures/test-utils';
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -63,7 +68,7 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Development userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm test:e2e' first.`,
+        `Development userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm test:e2e' first.`
       );
     }
   });
@@ -161,7 +166,9 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     await closeSettingsModal(page, modal);
   });
 
-  test('font groups have independent names and support keyboard edits through save and reopen', async ({ page }) => {
+  test('font groups have independent names and support keyboard edits through save and reopen', async ({
+    page,
+  }) => {
     await setupOverlayPage(page);
     const modal = await openSettingsModal(page);
     const firstTab = modal.locator('#tab-comments');
@@ -196,7 +203,10 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     await tabTo(page, custom);
     await page.keyboard.type('Georgia, serif');
     await expect(monospace).toHaveAttribute('aria-pressed', 'false');
-    await expect(modal.locator('.yt-chat-overlay-settings-font-preview-text')).toHaveCSS('font-family', /Georgia.*serif/);
+    await expect(modal.locator('.yt-chat-overlay-settings-font-preview-text')).toHaveCSS(
+      'font-family',
+      /Georgia.*serif/
+    );
 
     await closeSettingsModal(page, modal);
     await waitForStoredSettings(page, { fontWeight: 'normal', fontFamily: 'Georgia, serif' });

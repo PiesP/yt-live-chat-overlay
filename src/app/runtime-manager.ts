@@ -16,16 +16,13 @@ import {
 import { StandbyController } from '@app/standby-controller';
 import { VideoPauseController } from '@app/video-pause-controller';
 import type { ChatMessage, OverlayDimensions, OverlaySettings, Pauseable } from '@app-types';
-import type { DomWatcherUnsubscribe } from '@chat/dom-watcher';
-import { installDomChatWatcher } from '@chat/dom-watcher';
-import type { InterceptorUnsubscribe } from '@chat/fetch-interceptor';
-import { installFetchInterceptor } from '@chat/fetch-interceptor';
+import { type DomWatcherUnsubscribe, installDomChatWatcher } from '@chat/dom-watcher';
+import { type InterceptorUnsubscribe, installFetchInterceptor } from '@chat/fetch-interceptor';
 import { ChatPanelObserver, type ChatPanelState } from '@chat/panel-observer';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@chat/source-base';
 import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
-import type { ChatBootstrapResult } from '@chat/youtube/api';
-import { bootstrapChatSession } from '@chat/youtube/api';
+import { bootstrapChatSession, type ChatBootstrapResult } from '@chat/youtube/api';
 import { isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import type { ConnectionStatus, RendererBase } from '@renderer/renderer-base';
@@ -491,7 +488,7 @@ export class RuntimeManager {
     // does not ratchet across unrelated page navigations or manual restarts.
     this.consecutiveWatchdogRestarts = 0;
     // session.started is logged by the respective restart path:
-    // - startSession line ~658 for full restarts
+    // - startSession() for full restarts
     // - handleSessionRestart for chat-only restarts
   }
 
@@ -783,12 +780,14 @@ export class RuntimeManager {
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
+      const chatSource = this.chatSource;
+      if (!chatSource) throw new Error('Chat source missing after start');
 
       if (chatStarted === 'waiting') {
         // Start foreground listeners so the render loop pauses when the
         // tab is hidden — avoids wasted GPU/CPU during long standby waits.
         this.startForegroundListeners();
-        this.startChatPanelMonitor(this.chatSource!);
+        this.startChatPanelMonitor(chatSource);
         this.standbyController.enter();
         this.applyCurrentVisibilityState();
         log.info('runtime.standby.entered');
@@ -805,7 +804,7 @@ export class RuntimeManager {
       this.startForegroundListeners();
       this.startVideoPauseListeners();
       this.startChatWatchdog();
-      this.startChatPanelMonitor(this.chatSource!);
+      this.startChatPanelMonitor(chatSource);
       this.applyCurrentVisibilityState();
 
       log.info('runtime.session.started');
@@ -1044,12 +1043,14 @@ export class RuntimeManager {
     if (chatStarted !== 'started') {
       return chatStarted;
     }
+    const chatSource = this.chatSource;
+    if (!chatSource) return 'retryable';
 
     // The panel callback closes over its ChatSource. Rebind it after the
     // source replacement so DOM fallback messages cannot reach the stopped
     // source from the previous chat-only session.
     this.chatPanelObserver.stop();
-    this.startChatPanelMonitor(this.chatSource!);
+    this.startChatPanelMonitor(chatSource);
 
     // Resume renderer if it was paused
     this.renderer?.resume();

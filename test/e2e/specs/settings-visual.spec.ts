@@ -14,8 +14,8 @@
  * Run: pnpm exec playwright test --config test/e2e/playwright.config.ts settings-visual --headed
  */
 
-import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { expect, type Page, test } from '@playwright/test';
 import { applySettings, setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
 
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -92,12 +92,29 @@ test.describe('Settings UI Visual', () => {
   });
 
   for (const scenario of [
-    { name: 'dark appearance', media: { colorScheme: 'dark' as const }, width: 1280, language: 'en' },
-    { name: 'Forced Colors', media: { forcedColors: 'active' as const }, width: 640, language: 'en' },
-    { name: 'reduced motion', media: { reducedMotion: 'reduce' as const }, width: 640, language: 'en' },
+    {
+      name: 'dark appearance',
+      media: { colorScheme: 'dark' as const },
+      width: 1280,
+      language: 'en',
+    },
+    {
+      name: 'Forced Colors',
+      media: { forcedColors: 'active' as const },
+      width: 640,
+      language: 'en',
+    },
+    {
+      name: 'reduced motion',
+      media: { reducedMotion: 'reduce' as const },
+      width: 640,
+      language: 'en',
+    },
     { name: 'narrow Arabic RTL', media: {}, width: 401, language: 'ar' },
   ]) {
-    test(`keeps font groups, preview, and controls usable in ${scenario.name}`, async ({ page }) => {
+    test(`keeps font groups, preview, and controls usable in ${scenario.name}`, async ({
+      page,
+    }) => {
       await page.setViewportSize({ width: scenario.width, height: 720 });
       await page.emulateMedia(scenario.media);
       await setupSettingsPage(page);
@@ -108,16 +125,30 @@ test.describe('Settings UI Visual', () => {
       await expect(modal.locator('select[name="danmakuMode"]')).toBeVisible();
       await expect(modal.locator('input[name="opacity"]')).toBeVisible();
       await expect(modal.locator('.yt-chat-overlay-settings-font-preview-text')).toBeVisible();
-      const disclosure = modal.locator('#pane-comments details.yt-chat-overlay-settings-disclosure');
+      const disclosure = modal.locator(
+        '#pane-comments details.yt-chat-overlay-settings-disclosure'
+      );
       await disclosure.locator('summary').click();
-      const weightGroup = disclosure.locator('fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-weight-toggle)');
-      const familyGroup = disclosure.locator('fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-font-chips-wrapper)');
+      const weightGroup = disclosure.locator(
+        'fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-weight-toggle)'
+      );
+      const familyGroup = disclosure.locator(
+        'fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-font-chips-wrapper)'
+      );
       await expect(weightGroup).toBeVisible();
       await expect(familyGroup).toBeVisible();
-      await expect(familyGroup.locator('input.yt-chat-overlay-settings-font-custom-input')).toBeVisible();
+      await expect(
+        familyGroup.locator('input.yt-chat-overlay-settings-font-custom-input')
+      ).toBeVisible();
       const bounds = await modal.evaluate((element) => {
         const rect = element.getBoundingClientRect();
-        return { left: rect.left, right: rect.right, viewportWidth: window.innerWidth, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth };
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+        };
       });
       expect(bounds.left).toBeGreaterThanOrEqual(-1);
       expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth + 1);
@@ -127,87 +158,94 @@ test.describe('Settings UI Visual', () => {
     });
   }
 
-  for (const viewport of [{ width: 401, height: 592 }, { width: 1280, height: 720 }]) {
-  test(`keeps default controls and the opacity sample visible at ${viewport.width}x${viewport.height}`, async ({ page }) => {
-    await page.setViewportSize(viewport);
-    await openSettingsModal(page);
+  for (const viewport of [
+    { width: 401, height: 592 },
+    { width: 1280, height: 720 },
+  ]) {
+    test(`keeps default controls and the opacity sample visible at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await openSettingsModal(page);
 
-    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
-    await modal.evaluate(async (element) => {
-      await Promise.allSettled(element.getAnimations().map((animation) => animation.finished));
-    });
-    const pane = modal.locator('#pane-comments');
-    const previewText = pane.locator('.yt-chat-overlay-settings-font-preview-text');
-    const state = await pane.evaluate((element) => {
-      const text = element.querySelector<HTMLElement>(
-        '.yt-chat-overlay-settings-font-preview-text'
-      );
-      const stage = element.querySelector<HTMLElement>(
-        '.yt-chat-overlay-settings-font-preview-stage'
-      );
-      const requiredControls = [
+      const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+      await modal.evaluate(async (element) => {
+        await Promise.allSettled(element.getAnimations().map((animation) => animation.finished));
+      });
+      const pane = modal.locator('#pane-comments');
+      const previewText = pane.locator('.yt-chat-overlay-settings-font-preview-text');
+      const state = await pane.evaluate((element) => {
+        const text = element.querySelector<HTMLElement>(
+          '.yt-chat-overlay-settings-font-preview-text'
+        );
+        const stage = element.querySelector<HTMLElement>(
+          '.yt-chat-overlay-settings-font-preview-stage'
+        );
+        const requiredControls = [
+          'input[name="enabled"]',
+          'select[name="danmakuMode"]',
+          'input[name="fontSize"]',
+          'input[name="speedPxPerSec"]',
+          'input[name="opacity-slider"]',
+          'input[name="opacity"]',
+        ].map((selector) => element.querySelector<HTMLElement>(selector));
+        if (!text || !stage || requiredControls.some((control) => control === null)) {
+          throw new Error('Primary settings preview DOM is incomplete');
+        }
+        const paneRect = element.getBoundingClientRect();
+        const stageRect = stage.getBoundingClientRect();
+        const textRect = text.getBoundingClientRect();
+        const containsVertically = (outer: DOMRect, inner: DOMRect): boolean =>
+          inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+        const style = getComputedStyle(element);
+        return {
+          controlsVisible: requiredControls.every((control) =>
+            containsVertically(paneRect, control!.getBoundingClientRect())
+          ),
+          maskImage: style.maskImage,
+          opacity: getComputedStyle(text).opacity,
+          paneBottom: paneRect.bottom,
+          paneClientHeight: element.clientHeight,
+          paneScrollTop: element.scrollTop,
+          paneScrollHeight: element.scrollHeight,
+          sampleInsidePane: containsVertically(paneRect, textRect),
+          sampleInsideStage: containsVertically(stageRect, textRect),
+          stageBottom: stageRect.bottom,
+          stageTop: stageRect.top,
+          textBottom: textRect.bottom,
+          textTop: textRect.top,
+          webkitMaskImage: style.getPropertyValue('-webkit-mask-image'),
+        };
+      });
+
+      expect(state.maskImage).toBe('none');
+      expect(state.webkitMaskImage).toBe('none');
+      expect(state.opacity).toBe('1');
+      expect(state.paneScrollTop).toBe(0);
+      expect(state.controlsVisible, JSON.stringify(state)).toBe(true);
+      expect(state.sampleInsidePane, JSON.stringify(state)).toBe(true);
+      expect(state.sampleInsideStage, JSON.stringify(state)).toBe(true);
+      await expect(previewText).toBeVisible();
+
+      await expect(modal.locator('#tab-comments')).toBeFocused();
+      for (const selector of [
         'input[name="enabled"]',
         'select[name="danmakuMode"]',
         'input[name="fontSize"]',
         'input[name="speedPxPerSec"]',
         'input[name="opacity-slider"]',
         'input[name="opacity"]',
-      ].map((selector) => element.querySelector<HTMLElement>(selector));
-      if (!text || !stage || requiredControls.some((control) => control === null)) {
-        throw new Error('Primary settings preview DOM is incomplete');
+        '.yt-chat-overlay-settings-disclosure > summary',
+      ]) {
+        await page.keyboard.press('Tab');
+        await expect(modal.locator(selector)).toBeFocused();
       }
-      const paneRect = element.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
-      const textRect = text.getBoundingClientRect();
-      const containsVertically = (outer: DOMRect, inner: DOMRect): boolean =>
-        inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
-      const style = getComputedStyle(element);
-      return {
-        controlsVisible: requiredControls.every((control) =>
-          containsVertically(paneRect, control!.getBoundingClientRect())
-        ),
-        maskImage: style.maskImage,
-        opacity: getComputedStyle(text).opacity,
-        paneBottom: paneRect.bottom,
-        paneClientHeight: element.clientHeight,
-        paneScrollTop: element.scrollTop,
-        paneScrollHeight: element.scrollHeight,
-        sampleInsidePane: containsVertically(paneRect, textRect),
-        sampleInsideStage: containsVertically(stageRect, textRect),
-        stageBottom: stageRect.bottom,
-        stageTop: stageRect.top,
-        textBottom: textRect.bottom,
-        textTop: textRect.top,
-        webkitMaskImage: style.getPropertyValue('-webkit-mask-image'),
-      };
+      await page.keyboard.press('Enter');
+      await expect(modal.locator('.yt-chat-overlay-settings-disclosure')).toHaveAttribute(
+        'open',
+        ''
+      );
     });
-
-    expect(state.maskImage).toBe('none');
-    expect(state.webkitMaskImage).toBe('none');
-    expect(state.opacity).toBe('1');
-    expect(state.paneScrollTop).toBe(0);
-    expect(state.controlsVisible, JSON.stringify(state)).toBe(true);
-    expect(state.sampleInsidePane, JSON.stringify(state)).toBe(true);
-    expect(state.sampleInsideStage, JSON.stringify(state)).toBe(true);
-    await expect(previewText).toBeVisible();
-
-    await expect(modal.locator('#tab-comments')).toBeFocused();
-    for (const selector of [
-      'input[name="enabled"]',
-      'select[name="danmakuMode"]',
-      'input[name="fontSize"]',
-      'input[name="speedPxPerSec"]',
-      'input[name="opacity-slider"]',
-      'input[name="opacity"]',
-      '.yt-chat-overlay-settings-disclosure > summary',
-    ]) {
-      await page.keyboard.press('Tab');
-      await expect(modal.locator(selector)).toBeFocused();
-    }
-    await page.keyboard.press('Enter');
-    await expect(modal.locator('.yt-chat-overlay-settings-disclosure')).toHaveAttribute('open', '');
-  });
-
   }
 
   test('keeps frequent controls prominent and previews normalized fine-tuning values', async ({
@@ -389,9 +427,7 @@ test.describe('Settings UI Visual', () => {
     expect(state.bottomFraction).toBeCloseTo(0.5, 2);
   });
 
-  test('separates translation capability status from editable preferences', async ({
-    page,
-  }) => {
+  test('separates translation capability status from editable preferences', async ({ page }) => {
     await openSettingsModal(page);
 
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
@@ -484,8 +520,9 @@ test.describe('Settings UI Visual', () => {
     await expect(toast).toContainText(/Settings imported successfully/i);
 
     const settings = await page.evaluate(() => {
-      const handle = (window as unknown as { __ytChatOverlay?: { getSettings: () => Record<string, unknown> } })
-        .__ytChatOverlay;
+      const handle = (
+        window as unknown as { __ytChatOverlay?: { getSettings: () => Record<string, unknown> } }
+      ).__ytChatOverlay;
       return handle?.getSettings();
     });
     expect(settings?.fontSize).toBe(44);

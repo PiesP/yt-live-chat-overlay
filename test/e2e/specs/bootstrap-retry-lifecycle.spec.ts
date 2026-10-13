@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import {
   DEFAULT_SETTINGS,
   injectUserscript,
@@ -37,10 +37,7 @@ declare global {
   }
 }
 
-type ProbeScenario =
-  | 'retry-recovers'
-  | 'navigation-cancels-retry'
-  | 'termination-cancels-retry';
+type ProbeScenario = 'retry-recovers' | 'navigation-cancels-retry' | 'termination-cancels-retry';
 
 function installBootstrapProbe(options: {
   scenario: ProbeScenario;
@@ -89,7 +86,9 @@ function installBootstrapProbe(options: {
     const release = pendingWatchReleases.get(videoId);
     if (!release) return false;
     pendingWatchReleases.delete(videoId);
-    probe.pendingWatchBodies = probe.pendingWatchBodies.filter((pendingId) => pendingId !== videoId);
+    probe.pendingWatchBodies = probe.pendingWatchBodies.filter(
+      (pendingId) => pendingId !== videoId
+    );
     probe.lateWatchResponsesReleased.push(videoId);
     release();
     return true;
@@ -117,11 +116,11 @@ function installBootstrapProbe(options: {
       const attempt = (probe.watchRequests[videoId] ?? 0) + 1;
       probe.watchRequests[videoId] = attempt;
 
-      const shouldStall = videoId === initialVideoId && (
-        (scenario === 'retry-recovers' && attempt === 1) ||
-        (scenario === 'navigation-cancels-retry' && attempt <= 2) ||
-        (scenario === 'termination-cancels-retry' && attempt === 2)
-      );
+      const shouldStall =
+        videoId === initialVideoId &&
+        ((scenario === 'retry-recovers' && attempt === 1) ||
+          (scenario === 'navigation-cancels-retry' && attempt <= 2) ||
+          (scenario === 'termination-cancels-retry' && attempt === 2));
       if (shouldStall) {
         return new Response(
           new ReadableStream<Uint8Array>({

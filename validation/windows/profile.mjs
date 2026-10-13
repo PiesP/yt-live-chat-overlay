@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=windowsAcceptance';
@@ -16,11 +16,9 @@ const SUSTAINED_PHASE_ACTIONS = new Map([
   [
     'burst',
     Array.from({ length: 8 }, (_, index) =>
-      messageAction(
-        `windows-sustained-burst-${index + 1}`,
-        `Burst ${index + 1}`,
-        [{ text: `burst message ${index + 1}` }],
-      ),
+      messageAction(`windows-sustained-burst-${index + 1}`, `Burst ${index + 1}`, [
+        { text: `burst message ${index + 1}` },
+      ])
     ),
   ],
   [
@@ -31,10 +29,7 @@ const SUSTAINED_PHASE_ACTIONS = new Map([
     ],
   ],
   ['hidden', [messageAction('windows-sustained-hidden', 'Hidden', [{ text: 'hidden' }])]],
-  [
-    'visible',
-    [messageAction('windows-sustained-visible', 'Visible', [{ text: 'visible again' }])],
-  ],
+  ['visible', [messageAction('windows-sustained-visible', 'Visible', [{ text: 'visible again' }])]],
   [
     'second-video',
     [messageAction('windows-sustained-second-video', 'Second video', [{ text: 'new session' }])],
@@ -91,7 +86,9 @@ const CHAT_ACTIONS = [
 ];
 
 const EXPECTED_MESSAGE_IDS = CHAT_ACTIONS.map(({ addChatItemAction: { item } }) => {
-  const renderer = item.liveChatTextMessageRenderer ?? item.liveChatPaidMessageRenderer ??
+  const renderer =
+    item.liveChatTextMessageRenderer ??
+    item.liveChatPaidMessageRenderer ??
     item.liveChatMembershipItemRenderer;
   assert.equal(typeof renderer?.id, 'string', 'A declared fixture message has no ID');
   return renderer.id;
@@ -103,17 +100,19 @@ export function exactDeclaredMessageIdsReady(expectedIds) {
   const entries = document.querySelectorAll('.yt-live-chat-overlay-live-region > p');
   const actual = Array.from(entries, (element) => element.dataset.messageId);
   const observedAtMs = Math.round(performance.now());
-  const readiness = window.__ytAcceptanceReadiness ??= {
+  window.__ytAcceptanceReadiness ??= {
     startedAtMs: observedAtMs,
     firstSeenAtMs: {},
     exactReadyAtMs: null,
   };
+  const readiness = window.__ytAcceptanceReadiness;
   for (const id of actual) {
     if (expectedIds.includes(id) && readiness.firstSeenAtMs[id] === undefined) {
       readiness.firstSeenAtMs[id] = observedAtMs;
     }
   }
-  const ready = actual.length === expectedIds.length &&
+  const ready =
+    actual.length === expectedIds.length &&
     new Set(actual).size === expectedIds.length &&
     actual.every((id) => expectedIds.includes(id));
   if (ready) readiness.exactReadyAtMs = observedAtMs;
@@ -130,18 +129,21 @@ export function readFixtureAdmissionDiagnostic(expectedIds) {
     accessibility: {
       count: entries.length,
       unexpectedCount: entries.length - declared.length,
-      missingIds: expectedIds.filter((id) => !declared.some((element) =>
-        element.dataset.messageId === id)),
+      missingIds: expectedIds.filter(
+        (id) => !declared.some((element) => element.dataset.messageId === id)
+      ),
       declared: declared.slice(0, expectedIds.length).map((element) => ({
         id: element.dataset.messageId,
         firstSeenAtMs: readiness?.firstSeenAtMs?.[element.dataset.messageId] ?? null,
         snippet: (element.textContent ?? '').slice(0, 120),
       })),
     },
-    readiness: readiness ? {
-      startedAtMs: readiness.startedAtMs,
-      exactReadyAtMs: readiness.exactReadyAtMs,
-    } : null,
+    readiness: readiness
+      ? {
+          startedAtMs: readiness.startedAtMs,
+          exactReadyAtMs: readiness.exactReadyAtMs,
+        }
+      : null,
     hasCanvas: Boolean(document.querySelector('#yt-live-chat-overlay canvas')),
     paused: document.querySelector('video')?.paused ?? null,
     workers: (window.__ytAcceptanceWorkers ?? []).slice(-2).map((worker) => ({
@@ -151,57 +153,88 @@ export function readFixtureAdmissionDiagnostic(expectedIds) {
       acknowledgements: worker.acknowledgements,
       terminated: worker.terminated,
       error: typeof worker.error === 'string' ? worker.error.slice(0, 160) : null,
-      addedDeclaredIds: (worker.addedMessageIds ?? []).flat()
-        .filter((id) => expected.has(id)).slice(0, expectedIds.length),
+      addedDeclaredIds: (worker.addedMessageIds ?? [])
+        .flat()
+        .filter((id) => expected.has(id))
+        .slice(0, expectedIds.length),
       recentReceipts: (worker.recentReceipts ?? []).slice(-16),
       recentStats: (worker.recentStats ?? []).slice(-16),
     })),
     debugLines: Array.from(document.querySelectorAll('#yt-chat-overlay-debug > div'))
-      .slice(0, 3).map((element) => (element.textContent ?? '').slice(0, 120)),
+      .slice(0, 3)
+      .map((element) => (element.textContent ?? '').slice(0, 120)),
   };
 }
 
 export function readInstalledLifecycleDomDiagnostic() {
-  const lines = Array.from(document.querySelectorAll('#yt-chat-overlay-debug > div'),
-    (element) => element.textContent ?? '');
+  const lines = Array.from(
+    document.querySelectorAll('#yt-chat-overlay-debug > div'),
+    (element) => element.textContent ?? ''
+  );
   const received = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
   const dropped = /^Drop: (\d+) /u.exec(lines[1] ?? '');
   const logLevel = document.querySelector('select[name="logLevel"]')?.value;
   return {
     pageAppHandleVisible: Boolean(window.__ytChatOverlay),
     uiLogLevel: ['warn', 'info', 'debug'].includes(logLevel) ? logLevel : null,
-    debugCounts: received && dropped ? {
-      received: Number(received[1]), rendered: Number(received[2]), dropped: Number(dropped[1]),
-    } : null,
-    sustainedIds: Array.from(document.querySelectorAll(
-      '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
-    ), (element) => element.dataset.messageId).filter((id) =>
-      typeof id === 'string' && id.startsWith('windows-sustained-')).slice(0, 16),
+    debugCounts:
+      received && dropped
+        ? {
+            received: Number(received[1]),
+            rendered: Number(received[2]),
+            dropped: Number(dropped[1]),
+          }
+        : null,
+    sustainedIds: Array.from(
+      document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+      (element) => element.dataset.messageId
+    )
+      .filter((id) => typeof id === 'string' && id.startsWith('windows-sustained-'))
+      .slice(0, 16),
   };
 }
 
 export async function summarizeInterceptorConsoleMessage(message, phase, managerId) {
-  if (!['debug', 'log', 'info'].includes(message.type()) ||
-      !message.text().includes('[FetchInterceptor]')) return null;
+  if (
+    !['debug', 'log', 'info'].includes(message.type()) ||
+    !message.text().includes('[FetchInterceptor]')
+  )
+    return null;
   const args = message.args();
   if (args.length < 2 || args.length > 3) return null;
   const [moduleName, eventName] = await Promise.all(args.slice(0, 2).map((arg) => arg.jsonValue()));
-  if (moduleName !== '[FetchInterceptor]' || typeof eventName !== 'string' ||
-      !/^chat\.interceptor\.(?:installed|removed|messages-received|skip-duplicate|skip-in-flight-limit|parse-failed)$/u.test(eventName)) {
+  if (
+    moduleName !== '[FetchInterceptor]' ||
+    typeof eventName !== 'string' ||
+    !/^chat\.interceptor\.(?:installed|removed|messages-received|skip-duplicate|skip-in-flight-limit|parse-failed)$/u.test(
+      eventName
+    )
+  ) {
     return null;
   }
-  const detail = eventName === 'chat.interceptor.messages-received' && args[2]
-    ? await args[2].jsonValue() : null;
-  const count = detail && typeof detail === 'object' && Number.isSafeInteger(detail.count) &&
-    detail.count >= 0 && detail.count <= 1000 ? detail.count : null;
+  const detail =
+    eventName === 'chat.interceptor.messages-received' && args[2]
+      ? await args[2].jsonValue()
+      : null;
+  const count =
+    detail &&
+    typeof detail === 'object' &&
+    Number.isSafeInteger(detail.count) &&
+    detail.count >= 0 &&
+    detail.count <= 1000
+      ? detail.count
+      : null;
   const source = message.location().url;
   return {
     phase,
     event: eventName,
     count,
     consoleType: message.type(),
-    sourceKind: source.startsWith(`chrome-extension://${managerId}/`) ? 'manager-extension'
-      : source.startsWith('https://www.youtube.com/') ? 'youtube-page' : 'other',
+    sourceKind: source.startsWith(`chrome-extension://${managerId}/`)
+      ? 'manager-extension'
+      : source.startsWith('https://www.youtube.com/')
+        ? 'youtube-page'
+        : 'other',
   };
 }
 
@@ -219,35 +252,57 @@ async function readInstalledLifecycleWorlds(cdp, contexts) {
       fetchOwnProperty: Object.prototype.hasOwnProperty.call(window, 'fetch'),
     };
   })()`;
-  const active = Array.from(contexts.values()).filter((entry) =>
-    entry.auxData?.frameId === frameId).slice(0, 16);
-  return { status: 'captured', contexts: await Promise.all(active.map(async (entry) => {
-    let state = null;
-    try {
-      const result = await cdp.send('Runtime.evaluate', {
-        contextId: entry.id, expression, returnByValue: true,
-      });
-      if (!result.exceptionDetails) state = result.result?.value ?? null;
-    } catch { /* A context can disappear during navigation. */ }
-    return {
-      worldType: entry.auxData?.type ?? null,
-      isDefault: entry.auxData?.isDefault === true,
-      nameKind: entry.name === '' ? 'default'
-        : /tampermonkey|^tm_/iu.test(entry.name) ? 'manager'
-          : /playwright/iu.test(entry.name) ? 'playwright' : 'other',
-      originKind: entry.origin === 'https://www.youtube.com' ? 'youtube-page'
-        : entry.origin?.startsWith('chrome-extension:') ? 'extension' : 'other',
-      state,
-    };
-  })) };
+  const active = Array.from(contexts.values())
+    .filter((entry) => entry.auxData?.frameId === frameId)
+    .slice(0, 16);
+  return {
+    status: 'captured',
+    contexts: await Promise.all(
+      active.map(async (entry) => {
+        let state = null;
+        try {
+          const result = await cdp.send('Runtime.evaluate', {
+            contextId: entry.id,
+            expression,
+            returnByValue: true,
+          });
+          if (!result.exceptionDetails) state = result.result?.value ?? null;
+        } catch {
+          /* A context can disappear during navigation. */
+        }
+        return {
+          worldType: entry.auxData?.type ?? null,
+          isDefault: entry.auxData?.isDefault === true,
+          nameKind:
+            entry.name === ''
+              ? 'default'
+              : /tampermonkey|^tm_/iu.test(entry.name)
+                ? 'manager'
+                : /playwright/iu.test(entry.name)
+                  ? 'playwright'
+                  : 'other',
+          originKind:
+            entry.origin === 'https://www.youtube.com'
+              ? 'youtube-page'
+              : entry.origin?.startsWith('chrome-extension:')
+                ? 'extension'
+                : 'other',
+          state,
+        };
+      })
+    ),
+  };
 }
 
 export function installFixtureWorkerProbe(expectedIds) {
   const workers = [];
   const expected = new Set(expectedIds);
-  const declaredIds = (value) => Array.isArray(value) ? value
-    .filter((id) => typeof id === 'string' && expected.has(id))
-    .slice(0, expectedIds.length) : [];
+  const declaredIds = (value) =>
+    Array.isArray(value)
+      ? value
+          .filter((id) => typeof id === 'string' && expected.has(id))
+          .slice(0, expectedIds.length)
+      : [];
   const boundedNumber = (value) => Number.isSafeInteger(value) && value >= 0;
   const remember = (list, value) => {
     list.push(value);
@@ -277,9 +332,10 @@ export function installFixtureWorkerProbe(expectedIds) {
             record.readyAtMs = Math.round(performance.now());
           }
           if (data?.type === 'ack') record.acknowledgements++;
-          if (data?.type === 'batchReceipt' &&
-              [data.batchSequence, data.admittedMessages, data.pendingQueueDepth]
-                .every(boundedNumber)) {
+          if (
+            data?.type === 'batchReceipt' &&
+            [data.batchSequence, data.admittedMessages, data.pendingQueueDepth].every(boundedNumber)
+          ) {
             remember(record.recentReceipts, {
               observedAtMs: Math.round(performance.now()),
               batchSequence: data.batchSequence,
@@ -287,9 +343,16 @@ export function installFixtureWorkerProbe(expectedIds) {
               pendingQueueDepth: data.pendingQueueDepth,
             });
           }
-          if (data?.type === 'stats' &&
-              [data.activeMessages, data.pendingQueueDepth, data.totalRendered,
-                data.totalDrops, data.processedBatchSequence].every(boundedNumber)) {
+          if (
+            data?.type === 'stats' &&
+            [
+              data.activeMessages,
+              data.pendingQueueDepth,
+              data.totalRendered,
+              data.totalDrops,
+              data.processedBatchSequence,
+            ].every(boundedNumber)
+          ) {
             remember(record.recentStats, {
               observedAtMs: Math.round(performance.now()),
               activeMessages: data.activeMessages,
@@ -302,14 +365,14 @@ export function installFixtureWorkerProbe(expectedIds) {
             });
           }
         });
-        worker.addEventListener('error', (event) => { record.error = event.message; });
+        worker.addEventListener('error', (event) => {
+          record.error = event.message;
+        });
         const nativePostMessage = worker.postMessage.bind(worker);
         worker.postMessage = (message, transfer) => {
           if (message?.type === 'addMessages' && Array.isArray(message.messages)) {
             record.addedMessageIds.push(
-              message.messages
-                .map((entry) => entry?.id)
-                .filter((id) => typeof id === 'string'),
+              message.messages.map((entry) => entry?.id).filter((id) => typeof id === 'string')
             );
           }
           if (transfer === undefined) nativePostMessage(message);
@@ -364,7 +427,7 @@ function messageAction(id, author, runs) {
 function createMockWatchHtml(previewHtml) {
   const withVideo = previewHtml.replace(
     '<div class="player-inner">Video Player Placeholder</div>',
-    '<video aria-label="Acceptance fixture video" style="width:100%;height:100%"></video>',
+    '<video aria-label="Acceptance fixture video" style="width:100%;height:100%"></video>'
   );
   assert.notEqual(withVideo, previewHtml, 'Preview fixture no longer contains the expected player');
 
@@ -373,10 +436,12 @@ function createMockWatchHtml(previewHtml) {
     <yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer>
   </div>`;
   assert.match(withVideo, /<\/body>/u, 'Preview fixture does not contain a body element');
-  return withVideo.replace(
-    '</head>',
-    '<style>.player-wrapper{max-width:1150px}#movie_player{height:640px;aspect-ratio:auto}</style></head>',
-  ).replace('</body>', `${chat}\n</body>`);
+  return withVideo
+    .replace(
+      '</head>',
+      '<style>.player-wrapper{max-width:1150px}#movie_player{height:640px;aspect-ratio:auto}</style></head>'
+    )
+    .replace('</body>', `${chat}\n</body>`);
 }
 
 async function assertForcedColorsDisclosure(page, summary) {
@@ -421,10 +486,14 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
   assert.equal(await family.locator('legend').textContent(), 'Font family');
   assert.equal(await custom.getAttribute('aria-label'), 'Custom font stack…');
   assert.equal(await family.locator('label button, label input').count(), 0);
-  const previousWeight = await bold.getAttribute('aria-pressed') === 'true' ? bold : regular;
+  const previousWeight = (await bold.getAttribute('aria-pressed')) === 'true' ? bold : regular;
   const previousFamily = family.locator('button[aria-pressed="true"]');
-  const previousFamilyText = await previousFamily.count() ? await previousFamily.textContent() : null;
-  const previousFamilyValue = await family.locator('.yt-chat-overlay-settings-font-value').inputValue();
+  const previousFamilyText = (await previousFamily.count())
+    ? await previousFamily.textContent()
+    : null;
+  const previousFamilyValue = await family
+    .locator('.yt-chat-overlay-settings-font-value')
+    .inputValue();
   const previousCustom = await custom.inputValue();
   await regular.focus();
   await page.keyboard.press('Space');
@@ -439,7 +508,8 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
   await page.keyboard.type('Georgia, serif');
   await custom.blur();
   assert.equal(await monospace.getAttribute('aria-pressed'), 'false');
-  const previewFamily = await modal.locator('.yt-chat-overlay-settings-font-preview-text')
+  const previewFamily = await modal
+    .locator('.yt-chat-overlay-settings-font-preview-text')
     .evaluate((element) => getComputedStyle(element).fontFamily);
   assert.match(previewFamily, /Georgia.*serif/u);
   await previousWeight.click();
@@ -449,7 +519,10 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
     await custom.fill(previousCustom);
     await custom.blur();
   }
-  assert.equal(await family.locator('.yt-chat-overlay-settings-font-value').inputValue(), previousFamilyValue);
+  assert.equal(
+    await family.locator('.yt-chat-overlay-settings-font-value').inputValue(),
+    previousFamilyValue
+  );
 
   const previousViewport = page.viewportSize();
   const observations = [];
@@ -462,7 +535,12 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
       ...(setBrowserZoom ? [{ id: 'browser-zoom-200', width: 1280, zoom: 2, media: {} }] : []),
     ]) {
       await page.setViewportSize({ width: scenario.width, height: 720 });
-      await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'none', reducedMotion: 'no-preference', ...scenario.media });
+      await page.emulateMedia({
+        colorScheme: 'dark',
+        forcedColors: 'none',
+        reducedMotion: 'no-preference',
+        ...scenario.media,
+      });
       let zoom;
       let previousLanguage;
       let previousModalLanguage;
@@ -474,7 +552,11 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
           previousModalLanguage = await modal.getAttribute('lang');
           assert(previousModalLanguage, 'modal has no resolved language before switching');
           await modal.locator('select[name="language"]').selectOption(scenario.language);
-          await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, scenario.language);
+          await page.waitForFunction(
+            (language) =>
+              document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language,
+            scenario.language
+          );
           await modal.locator('#tab-comments').click();
           await disclosure.locator('summary').click();
         }
@@ -485,17 +567,39 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
           const box = element.getBoundingClientRect();
           const field = element.querySelector('.yt-chat-overlay-settings-font-custom-input');
           const control = field.getBoundingClientRect();
-          return { left: box.left, right: box.right, viewport: innerWidth, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, customLeft: control.left, customRight: control.right, focused: document.activeElement === field, direction: element.dir, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, forcedColors: matchMedia('(forced-colors: active)').matches };
+          return {
+            left: box.left,
+            right: box.right,
+            viewport: innerWidth,
+            scrollWidth: element.scrollWidth,
+            clientWidth: element.clientWidth,
+            customLeft: control.left,
+            customRight: control.right,
+            focused: document.activeElement === field,
+            direction: element.dir,
+            reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+            forcedColors: matchMedia('(forced-colors: active)').matches,
+          };
         });
-        assert(geometry.left >= -1 && geometry.right <= geometry.viewport + 1, `${scenario.id}: dialog exceeds viewport`);
-        assert(geometry.scrollWidth <= geometry.clientWidth + 1, `${scenario.id}: dialog horizontal overflow`);
-        assert(geometry.customLeft >= geometry.left - 1 && geometry.customRight <= geometry.right + 1, `${scenario.id}: custom font input clipped`);
+        assert(
+          geometry.left >= -1 && geometry.right <= geometry.viewport + 1,
+          `${scenario.id}: dialog exceeds viewport`
+        );
+        assert(
+          geometry.scrollWidth <= geometry.clientWidth + 1,
+          `${scenario.id}: dialog horizontal overflow`
+        );
+        assert(
+          geometry.customLeft >= geometry.left - 1 && geometry.customRight <= geometry.right + 1,
+          `${scenario.id}: custom font input clipped`
+        );
         assert(geometry.focused, `${scenario.id}: keyboard focus was lost`);
         if (scenario.language) assert.equal(geometry.direction, 'rtl');
         if (scenario.zoom) assert.equal(zoom.observed, 2);
         // Page capture avoids element clipping coordinates at real tab zoom.
         await (scenario.zoom ? page : modal).screenshot({
-          path: join(output, `yt-settings-${scenario.id}.png`), animations: 'disabled',
+          path: join(output, `yt-settings-${scenario.id}.png`),
+          animations: 'disabled',
         });
         observations.push({ id: scenario.id, geometry, browserZoom: zoom?.observed ?? null });
       } finally {
@@ -505,32 +609,65 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
           await modal.locator('select[name="language"]').selectOption(previousLanguage);
           // The selected value may be "auto"; modal.lang is the resolved
           // language. Wait for the debounced rebuild before testing focus.
-          await page.waitForFunction((language) => document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language, previousModalLanguage);
+          await page.waitForFunction(
+            (language) =>
+              document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language,
+            previousModalLanguage
+          );
           await modal.locator('#tab-comments').click();
-          if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
-          assert.equal(await disclosure.getAttribute('open'), '', 'restored language disclosure stayed closed');
+          if ((await disclosure.getAttribute('open')) === null)
+            await disclosure.locator('summary').click();
+          assert.equal(
+            await disclosure.getAttribute('open'),
+            '',
+            'restored language disclosure stayed closed'
+          );
         }
       }
     }
   } finally {
     if (previousViewport) await page.setViewportSize(previousViewport);
-    await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'none', reducedMotion: 'no-preference' });
+    await page.emulateMedia({
+      colorScheme: 'dark',
+      forcedColors: 'none',
+      reducedMotion: 'no-preference',
+    });
     await modal.locator('#tab-comments').click();
   }
   await modal.locator('#tab-advanced').click();
-  const motionOverride = modal.getByRole('checkbox', { name: 'Always animate scrolling comments', exact: true });
+  const motionOverride = modal.getByRole('checkbox', {
+    name: 'Always animate scrolling comments',
+    exact: true,
+  });
   const previousOverride = await motionOverride.isChecked();
   await motionOverride.focus();
   await page.keyboard.press('Space');
   assert.equal(await motionOverride.isChecked(), !previousOverride);
   await page.keyboard.press('Space');
   assert.equal(await motionOverride.isChecked(), previousOverride);
-  assert((await modal.locator('.yt-chat-overlay-settings-autosave-hint').textContent()).includes('saved when you close settings'));
+  assert(
+    (await modal.locator('.yt-chat-overlay-settings-autosave-hint').textContent()).includes(
+      'saved when you close settings'
+    )
+  );
   await modal.locator('#tab-comments').click();
-  return { fontGroups: true, customFontKeyboard: true, previewFamily, motionOverridePreserved: previousOverride, appearance: observations, browserZoom: setBrowserZoom ? 'verified-200-percent' : 'not-run-artifact-only' };
+  return {
+    fontGroups: true,
+    customFontKeyboard: true,
+    previewFamily,
+    motionOverridePreserved: previousOverride,
+    appearance: observations,
+    browserZoom: setBrowserZoom ? 'verified-200-percent' : 'not-run-artifact-only',
+  };
 }
 
-async function configureThroughSettingsUi(page, installed, output, inspectRenderer, setBrowserZoom) {
+async function configureThroughSettingsUi(
+  page,
+  installed,
+  output,
+  inspectRenderer,
+  setBrowserZoom
+) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
   await button.focus();
@@ -540,12 +677,14 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   await modal.waitFor({ state: 'visible', timeout: 5_000 });
   assert.equal(await modal.getAttribute('aria-modal'), 'true');
   await modal.evaluate(async (element) => {
-    await Promise.all(element.getAnimations().map((animation) => animation.finished.catch(() => {})));
+    await Promise.all(
+      element.getAnimations().map((animation) => animation.finished.catch(() => {}))
+    );
   });
   assert.equal(
     await page.evaluate(() => document.activeElement?.id),
     'tab-comments',
-    'The keyboard-opened dialog did not focus the active tab',
+    'The keyboard-opened dialog did not focus the active tab'
   );
   const defaultPreviewState = await modal.evaluate((element) => {
     const pane = element.querySelector('#pane-comments');
@@ -559,8 +698,12 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
       'input[name="opacity-slider"]',
       'input[name="opacity"]',
     ].map((selector) => pane?.querySelector(selector));
-    if (!(pane instanceof HTMLElement) || !(stage instanceof HTMLElement) ||
-        !(text instanceof HTMLElement) || requiredControls.some((control) => !control)) {
+    if (
+      !(pane instanceof HTMLElement) ||
+      !(stage instanceof HTMLElement) ||
+      !(text instanceof HTMLElement) ||
+      requiredControls.some((control) => !control)
+    ) {
       throw new Error('Primary settings preview DOM is incomplete');
     }
     const modalRect = element.getBoundingClientRect();
@@ -572,7 +715,8 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
     const paneStyle = getComputedStyle(pane);
     return {
       controlsVisible: requiredControls.every((control) =>
-        containsVertically(paneRect, control.getBoundingClientRect())),
+        containsVertically(paneRect, control.getBoundingClientRect())
+      ),
       maskImage: paneStyle.maskImage,
       modalHeight: modalRect.height,
       modalWidth: modalRect.width,
@@ -583,12 +727,19 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
       webkitMaskImage: paneStyle.getPropertyValue('-webkit-mask-image'),
     };
   });
-  await writeFile(join(output, 'yt-settings-default-geometry.json'), JSON.stringify(defaultPreviewState, null, 2));
+  await writeFile(
+    join(output, 'yt-settings-default-geometry.json'),
+    JSON.stringify(defaultPreviewState, null, 2)
+  );
   await modal.screenshot({ path: join(output, 'yt-settings-basic.png'), animations: 'disabled' });
-  assert(defaultPreviewState.modalWidth >= 399 && defaultPreviewState.modalWidth <= 401,
-    `Unexpected compact settings width: ${defaultPreviewState.modalWidth}`);
-  assert(defaultPreviewState.modalHeight >= 570 && defaultPreviewState.modalHeight <= 592,
-    `Unexpected compact settings height: ${defaultPreviewState.modalHeight}`);
+  assert(
+    defaultPreviewState.modalWidth >= 399 && defaultPreviewState.modalWidth <= 401,
+    `Unexpected compact settings width: ${defaultPreviewState.modalWidth}`
+  );
+  assert(
+    defaultPreviewState.modalHeight >= 570 && defaultPreviewState.modalHeight <= 592,
+    `Unexpected compact settings height: ${defaultPreviewState.modalHeight}`
+  );
   assert.equal(defaultPreviewState.maskImage, 'none');
   assert.equal(defaultPreviewState.webkitMaskImage, 'none');
   assert.equal(defaultPreviewState.opacity, '1');
@@ -602,7 +753,7 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   assert.equal(
     await modal.locator('details input[name="fontSize"]').count(),
     0,
-    'Font size must remain in the primary settings area',
+    'Font size must remain in the primary settings area'
   );
   const disclosureSummary = disclosure.locator('summary');
   for (const selector of [
@@ -617,13 +768,18 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
     await page.keyboard.press('Tab');
     assert(
       await page.evaluate((expected) => document.activeElement?.matches(expected), selector),
-      `Keyboard order did not reach ${selector}`,
+      `Keyboard order did not reach ${selector}`
     );
   }
   await page.keyboard.press('Enter');
   assert.equal(await disclosure.getAttribute('open'), '', 'Fine tuning did not open from keyboard');
   await assertForcedColorsDisclosure(page, disclosureSummary);
-  const interactionState = await verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoom);
+  const interactionState = await verifyFontGroupsAndPreferences(
+    page,
+    modal,
+    output,
+    setBrowserZoom
+  );
 
   await modal.locator('select[name="danmakuMode"]').selectOption('scroll');
   const fontSize = modal.locator('input[name="fontSize"]');
@@ -658,14 +814,19 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   await outlineOpacity.blur();
 
   await modal.locator('#tab-comments').click();
-  const previewState = await modal.locator('.yt-chat-overlay-settings-font-preview').evaluate(
-    (element) => {
+  const previewState = await modal
+    .locator('.yt-chat-overlay-settings-font-preview')
+    .evaluate((element) => {
       const stage = element.querySelector('.yt-chat-overlay-settings-font-preview-stage');
       const text = element.querySelector('.yt-chat-overlay-settings-font-preview-text');
       const top = element.querySelector('[data-preview-zone="top"]');
       const bottom = element.querySelector('[data-preview-zone="bottom"]');
-      if (!(stage instanceof HTMLElement) || !(text instanceof HTMLElement) ||
-          !(top instanceof HTMLElement) || !(bottom instanceof HTMLElement)) {
+      if (
+        !(stage instanceof HTMLElement) ||
+        !(text instanceof HTMLElement) ||
+        !(top instanceof HTMLElement) ||
+        !(bottom instanceof HTMLElement)
+      ) {
         throw new Error('Settings preview DOM is incomplete');
       }
       const stageHeight = stage.getBoundingClientRect().height;
@@ -681,17 +842,20 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
         textTop: text.getBoundingClientRect().top,
         topFraction: top.getBoundingClientRect().height / stageHeight,
       };
-    },
-  );
+    });
   assert(previewState.message.length > 0, 'The fixed preview message is missing');
   assert(previewState.metrics.includes('65%'), 'Preview does not report normalized opacity');
   assert(previewState.metrics.includes('3px / 60%'), 'Preview does not report outline state');
   assert.equal(previewState.opacity, '0.65');
   assert.equal(previewState.stroke, '2.55px rgba(0, 0, 0, 0.6)');
-  assert(previewState.textTop >= previewState.availableTop - 1,
-    'Preview text overlaps the top safe zone');
-  assert(previewState.textBottom <= previewState.availableBottom + 1,
-    'Preview text overlaps the bottom safe zone');
+  assert(
+    previewState.textTop >= previewState.availableTop - 1,
+    'Preview text overlaps the top safe zone'
+  );
+  assert(
+    previewState.textBottom <= previewState.availableBottom + 1,
+    'Preview text overlaps the bottom safe zone'
+  );
   assert(Math.abs(previewState.topFraction - 0.2) < 0.02, 'Top safe-zone mask is inaccurate');
   assert(Math.abs(previewState.bottomFraction - 0.1) < 0.02, 'Bottom safe-zone mask is inaccurate');
   await modal.locator('.yt-chat-overlay-settings-font-preview').scrollIntoViewIfNeeded();
@@ -711,8 +875,10 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   const localizedText = modal.locator('.yt-chat-overlay-settings-font-preview-text');
   await page.waitForFunction(() => {
     const text = document.querySelector('.yt-chat-overlay-settings-font-preview-text');
-    return text?.textContent === 'Mensaje de chat de ejemplo' &&
-      getComputedStyle(text).fontSize === '50px';
+    return (
+      text?.textContent === 'Mensaje de chat de ejemplo' &&
+      getComputedStyle(text).fontSize === '50px'
+    );
   });
   await localizedText.scrollIntoViewIfNeeded();
   const localizedPreviewState = await modal.locator('#pane-comments').evaluate((pane) => {
@@ -739,16 +905,23 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   assert.equal(localizedPreviewState.maskImage, 'none');
   assert.equal(localizedPreviewState.message, 'Mensaje de chat de ejemplo');
   assert(localizedPreviewState.paneCanScroll, 'Large localized settings cannot scroll');
-  assert(localizedPreviewState.paneScrollTop > 0, 'Localized preview was not reachable by scrolling');
-  assert(localizedPreviewState.sampleInsidePane, 'Localized preview text remains clipped after scrolling');
+  assert(
+    localizedPreviewState.paneScrollTop > 0,
+    'Localized preview was not reachable by scrolling'
+  );
+  assert(
+    localizedPreviewState.sampleInsidePane,
+    'Localized preview text remains clipped after scrolling'
+  );
   assert(localizedPreviewState.sampleInsideStage, 'Localized preview text overflows its stage');
 
   await localizedFontSize.fill('36');
   await localizedFontSize.blur();
   await modal.locator('#tab-translation').click();
   await modal.locator('select[name="language"]').selectOption('auto');
-  await page.waitForFunction(() =>
-    document.querySelector('select[name="language"]')?.value === 'auto');
+  await page.waitForFunction(
+    () => document.querySelector('select[name="language"]')?.value === 'auto'
+  );
 
   const capability = modal.locator('.yt-chat-overlay-settings-capability');
   assert.match(await capability.getAttribute('data-supported'), /^(?:true|false)$/u);
@@ -758,7 +931,7 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   assert.equal(
     await modal.locator('select[name="translationService"] option[value="off"]').count(),
     1,
-    'Translation off option is missing',
+    'Translation off option is missing'
   );
 
   await modal.locator('#tab-advanced').click();
@@ -802,7 +975,8 @@ async function verifyIsolatedPaidCardInk(page, output) {
   });
   await page.evaluate(async () => {
     const app = window.__ytChatOverlay;
-    if (!app?.restartRuntime || !app.applySettings) throw new Error('Runtime restart hook is unavailable');
+    if (!app?.restartRuntime || !app.applySettings)
+      throw new Error('Runtime restart hook is unavailable');
     app.applySettings({
       danmakuMode: 'top',
       showAuthor: { superChat: false },
@@ -813,53 +987,74 @@ async function verifyIsolatedPaidCardInk(page, output) {
   });
   const paused = page.locator('#yt-live-chat-overlay').getByText('Paused', { exact: true });
   if (await paused.isVisible()) await page.keyboard.press('Control+Space');
-  const previousDraws = await page.evaluate(() => window.__ytAcceptancePaidCardProbe?.cachedBitmapDraws ?? 0);
-  const index = CHAT_ACTIONS.findIndex((action) => action.addChatItemAction?.item?.liveChatPaidMessageRenderer);
+  const previousDraws = await page.evaluate(
+    () => window.__ytAcceptancePaidCardProbe?.cachedBitmapDraws ?? 0
+  );
+  const index = CHAT_ACTIONS.findIndex(
+    (action) => action.addChatItemAction?.item?.liveChatPaidMessageRenderer
+  );
   assert(index >= 0, 'Super Chat fixture is unavailable');
   await page.evaluate(async (messageIndex) => {
-    const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${messageIndex}&ink-probe=1`);
+    const response = await fetch(
+      `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${messageIndex}&ink-probe=1`
+    );
     if (!response.ok) throw new Error('Isolated Super Chat request failed');
     await response.json();
   }, index);
   await page.waitForFunction(() =>
-    document.querySelector('#yt-chat-overlay-debug')?.textContent?.includes('Rcvd: 1 | Rndr: 1'),
+    document.querySelector('#yt-chat-overlay-debug')?.textContent?.includes('Rcvd: 1 | Rndr: 1')
   );
-  const resultHandle = await page.waitForFunction((before) => {
-    const element = document.querySelector('#yt-live-chat-overlay canvas');
-    const probe = window.__ytAcceptancePaidCardProbe;
-    if (!(element instanceof HTMLCanvasElement) || !probe || probe.cachedBitmapDraws <= before) return null;
-    const context = element.getContext('2d');
-    if (!context) return null;
-    const candidates = probe.rects.filter((rect) => {
-      const x = Math.floor((rect.left + rect.right) / 2);
-      const y = Math.floor(rect.top) + 2;
-      if (x < 0 || x >= element.width || y < 0 || y >= element.height) return false;
-      const [red, green, blue, alpha] = context.getImageData(x, y, 1, 1).data;
-      return alpha >= 128 && blue > green + 10 && blue > red + 10;
-    });
-    if (candidates.length !== 1) return null;
-    const rect = candidates[0];
-    const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
-    const startY = Math.max(0, Math.floor(rect.top));
-    const endY = Math.min(element.height, Math.ceil(rect.bottom));
-    if (startX >= element.width || startY >= endY) return null;
-    const pixels = context.getImageData(startX, startY, element.width - startX, endY - startY).data;
-    let outsideAlphaPixels = 0;
-    for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 8) outsideAlphaPixels++;
-    return { cachedBitmapDraws: probe.cachedBitmapDraws - before, outsideAlphaPixels, rect };
-  }, previousDraws, { timeout: 10_000 });
+  const resultHandle = await page.waitForFunction(
+    (before) => {
+      const element = document.querySelector('#yt-live-chat-overlay canvas');
+      const probe = window.__ytAcceptancePaidCardProbe;
+      if (!(element instanceof HTMLCanvasElement) || !probe || probe.cachedBitmapDraws <= before)
+        return null;
+      const context = element.getContext('2d');
+      if (!context) return null;
+      const candidates = probe.rects.filter((rect) => {
+        const x = Math.floor((rect.left + rect.right) / 2);
+        const y = Math.floor(rect.top) + 2;
+        if (x < 0 || x >= element.width || y < 0 || y >= element.height) return false;
+        const [red, green, blue, alpha] = context.getImageData(x, y, 1, 1).data;
+        return alpha >= 128 && blue > green + 10 && blue > red + 10;
+      });
+      if (candidates.length !== 1) return null;
+      const rect = candidates[0];
+      const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
+      const startY = Math.max(0, Math.floor(rect.top));
+      const endY = Math.min(element.height, Math.ceil(rect.bottom));
+      if (startX >= element.width || startY >= endY) return null;
+      const pixels = context.getImageData(
+        startX,
+        startY,
+        element.width - startX,
+        endY - startY
+      ).data;
+      let outsideAlphaPixels = 0;
+      for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 8) outsideAlphaPixels++;
+      return { cachedBitmapDraws: probe.cachedBitmapDraws - before, outsideAlphaPixels, rect };
+    },
+    previousDraws,
+    { timeout: 10_000 }
+  );
   const result = await resultHandle.jsonValue();
   await resultHandle.dispose();
   assert.equal(result.outsideAlphaPixels, 0, 'Isolated outlined Super Chat ink escaped the card');
   const accessibleMessageId = `${CHAT_ACTIONS[index].addChatItemAction.item.liveChatPaidMessageRenderer.id}-isolated-ink`;
-  await page.waitForFunction((messageId) => {
-    const messages = document.querySelectorAll(
-      '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
-    );
-    return messages.length === 1 && messages[0].dataset.messageId === messageId;
-  }, accessibleMessageId, { timeout: 10_000 });
+  await page.waitForFunction(
+    (messageId) => {
+      const messages = document.querySelectorAll(
+        '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
+      );
+      return messages.length === 1 && messages[0].dataset.messageId === messageId;
+    },
+    accessibleMessageId,
+    { timeout: 10_000 }
+  );
   await page.locator('#yt-live-chat-overlay canvas').screenshot({
-    path: join(output, 'yt-paid-card-ink.png'), animations: 'disabled',
+    path: join(output, 'yt-paid-card-ink.png'),
+    animations: 'disabled',
   });
   await page.evaluate(async (settings) => {
     const app = window.__ytChatOverlay;
@@ -877,14 +1072,20 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
   ];
   const pausedIds = ['windows-sustained-paused-1', 'windows-sustained-paused-2'];
   const foregroundIds = [...initialIds, ...pausedIds, 'windows-sustained-visible'];
-  const readIds = () => page.locator(
-    '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p',
-  ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+  const readIds = () =>
+    page
+      .locator('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p')
+      .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
   const requestPhase = async (phase) => {
     if (diagnostic) diagnostic.activePhase = phase;
     const expectedCounts = {
-      'low-1': 1, 'low-2': 1, burst: 8, paused: 2,
-      hidden: 1, visible: 1, 'second-video': 1,
+      'low-1': 1,
+      'low-2': 1,
+      burst: 8,
+      paused: 2,
+      hidden: 1,
+      visible: 1,
+      'second-video': 1,
     };
     const expectedCount = expectedCounts[phase];
     assert(Number.isSafeInteger(expectedCount), `Unexpected sustained-viewing phase: ${phase}`);
@@ -895,8 +1096,11 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
       resolveReceived = resolve;
     });
     const onConsole = (message) => {
-      if (message.type() === 'debug' && message.text().includes('[FetchInterceptor]') &&
-          message.text().includes('chat.interceptor.messages-received')) {
+      if (
+        message.type() === 'debug' &&
+        message.text().includes('[FetchInterceptor]') &&
+        message.text().includes('chat.interceptor.messages-received')
+      ) {
         resolveReceived(message);
       }
     };
@@ -905,18 +1109,23 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     try {
       await page.evaluate(async (name) => {
         const response = await fetch(
-          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&sustained-phase=${name}`,
+          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&sustained-phase=${name}`
         );
         await response.json();
       }, phase);
       const message = await received;
       assert(message, `No product interceptor event for sustained-viewing phase ${phase}`);
       const observed = await summarizeInterceptorConsoleMessage(
-        message, phase, diagnostic?.managerId ?? '',
+        message,
+        phase,
+        diagnostic?.managerId ?? ''
       );
       assert.equal(observed?.event, 'chat.interceptor.messages-received');
-      assert.equal(observed.count, expectedCount,
-        `Unexpected intercepted message count for sustained-viewing phase ${phase}`);
+      assert.equal(
+        observed.count,
+        expectedCount,
+        `Unexpected intercepted message count for sustained-viewing phase ${phase}`
+      );
     } finally {
       clearTimeout(timeout);
       page.off('console', onConsole);
@@ -924,53 +1133,76 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     }
   };
   const waitForExactIds = async (expected) => {
-    await page.waitForFunction((ids) => {
-      const actual = Array.from(
-        document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
-        (element) => element.dataset.messageId,
-      );
-      return actual.length === ids.length && new Set(actual).size === ids.length &&
-        JSON.stringify(actual.toSorted()) === JSON.stringify(ids.toSorted());
-    }, expected, { timeout: 15_000 });
+    await page.waitForFunction(
+      (ids) => {
+        const actual = Array.from(
+          document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+          (element) => element.dataset.messageId
+        );
+        return (
+          actual.length === ids.length &&
+          new Set(actual).size === ids.length &&
+          JSON.stringify(actual.toSorted()) === JSON.stringify(ids.toSorted())
+        );
+      },
+      expected,
+      { timeout: 15_000 }
+    );
   };
   const waitForWorkerIngress = async (workerIndex, expected) => {
-    await page.waitForFunction(({ index, ids }) => {
-      const actual = window.__ytAcceptanceWorkers?.[index]?.addedMessageIds?.flat() ?? [];
-      return JSON.stringify(actual) === JSON.stringify(ids);
-    }, { index: workerIndex, ids: expected }, { timeout: 15_000 });
+    await page.waitForFunction(
+      ({ index, ids }) => {
+        const actual = window.__ytAcceptanceWorkers?.[index]?.addedMessageIds?.flat() ?? [];
+        return JSON.stringify(actual) === JSON.stringify(ids);
+      },
+      { index: workerIndex, ids: expected },
+      { timeout: 15_000 }
+    );
   };
   const readDebugCounts = async (received, dropped) => {
-    const handle = await page.waitForFunction((expected) => {
-      const lines = Array.from(
-        document.querySelectorAll('#yt-chat-overlay-debug > div'),
-        (element) => element.textContent ?? '',
-      );
-      const counters = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
-      const drops = /^Drop: (\d+) /u.exec(lines[1] ?? '');
-      if (!counters || !drops) return null;
-      const counts = {
-        received: Number(counters[1]),
-        rendered: Number(counters[2]),
-        dropped: Number(drops[1]),
-      };
-      return counts.received === expected.received && counts.dropped === expected.dropped
-        ? counts
-        : null;
-    }, { received, dropped }, { timeout: 15_000 });
+    const handle = await page.waitForFunction(
+      (expected) => {
+        const lines = Array.from(
+          document.querySelectorAll('#yt-chat-overlay-debug > div'),
+          (element) => element.textContent ?? ''
+        );
+        const counters = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
+        const drops = /^Drop: (\d+) /u.exec(lines[1] ?? '');
+        if (!counters || !drops) return null;
+        const counts = {
+          received: Number(counters[1]),
+          rendered: Number(counters[2]),
+          dropped: Number(drops[1]),
+        };
+        return counts.received === expected.received && counts.dropped === expected.dropped
+          ? counts
+          : null;
+      },
+      { received, dropped },
+      { timeout: 15_000 }
+    );
     const counts = await handle.jsonValue();
     await handle.dispose();
     return counts;
   };
 
   const baselineIds = await readIds();
-  assert.equal(new Set(baselineIds).size, baselineIds.length, 'Accessible baseline has duplicate IDs');
+  assert.equal(
+    new Set(baselineIds).size,
+    baselineIds.length,
+    'Accessible baseline has duplicate IDs'
+  );
   let initialWorkerIndex = null;
   if (expectedRenderer === 'worker') {
-    const readyWorker = await page.waitForFunction(() => {
-      const workers = window.__ytAcceptanceWorkers ?? [];
-      const index = workers.length - 1;
-      return workers[index]?.ready === true ? { index } : null;
-    }, undefined, { timeout: 15_000 });
+    const readyWorker = await page.waitForFunction(
+      () => {
+        const workers = window.__ytAcceptanceWorkers ?? [];
+        const index = workers.length - 1;
+        return workers[index]?.ready === true ? { index } : null;
+      },
+      undefined,
+      { timeout: 15_000 }
+    );
     initialWorkerIndex = (await readyWorker.jsonValue()).index;
     await readyWorker.dispose();
   }
@@ -1008,17 +1240,16 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
   }
   await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
-  await page.waitForFunction(
-    ({ received, dropped }) => {
-      const lines = Array.from(
-        document.querySelectorAll('#yt-chat-overlay-debug > div'),
-        (element) => element.textContent ?? '',
-      );
-      return lines[0]?.startsWith(`Rcvd: ${received + 2} |`) &&
-        lines[1]?.startsWith(`Drop: ${dropped + 2} `);
-    },
-    beforePause,
-  );
+  await page.waitForFunction(({ received, dropped }) => {
+    const lines = Array.from(
+      document.querySelectorAll('#yt-chat-overlay-debug > div'),
+      (element) => element.textContent ?? ''
+    );
+    return (
+      lines[0]?.startsWith(`Rcvd: ${received + 2} |`) &&
+      lines[1]?.startsWith(`Drop: ${dropped + 2} `)
+    );
+  }, beforePause);
 
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
@@ -1055,20 +1286,31 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     history.pushState({}, '', '/watch?v=windows-sustained-second');
     window.dispatchEvent(new Event('yt-navigate-finish'));
   });
-  await page.waitForFunction(() => {
-    const oldCanvas = window.__ytAcceptanceOldCanvas;
-    const currentCanvas = document.querySelector('#yt-live-chat-overlay canvas');
-    return oldCanvas && !oldCanvas.isConnected && currentCanvas && currentCanvas !== oldCanvas;
-  }, undefined, { timeout: 15_000 });
+  await page.waitForFunction(
+    () => {
+      const oldCanvas = window.__ytAcceptanceOldCanvas;
+      const currentCanvas = document.querySelector('#yt-live-chat-overlay canvas');
+      return oldCanvas && !oldCanvas.isConnected && currentCanvas && currentCanvas !== oldCanvas;
+    },
+    undefined,
+    { timeout: 15_000 }
+  );
 
   if (expectedRenderer === 'worker') {
-    await page.waitForFunction((previousCount) => {
-      const workers = window.__ytAcceptanceWorkers ?? [];
-      const oldWorker = workers[previousCount - 1];
-      const replacement = workers[previousCount];
-      return oldWorker?.acknowledgements >= 1 && oldWorker?.terminated === true &&
-        replacement?.ready === true;
-    }, oldWorkerCount, { timeout: 15_000 });
+    await page.waitForFunction(
+      (previousCount) => {
+        const workers = window.__ytAcceptanceWorkers ?? [];
+        const oldWorker = workers[previousCount - 1];
+        const replacement = workers[previousCount];
+        return (
+          oldWorker?.acknowledgements >= 1 &&
+          oldWorker?.terminated === true &&
+          replacement?.ready === true
+        );
+      },
+      oldWorkerCount,
+      { timeout: 15_000 }
+    );
   }
 
   await requestPhase('second-video');
@@ -1091,10 +1333,17 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
   };
 }
 
-export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer = 'main' }) {
+export async function run({
+  browser,
+  root,
+  output,
+  installedContext,
+  installedExtensionId,
+  expectedRenderer = 'main',
+}) {
   assert(
     browser && typeof browser.newContext === 'function',
-    'A launched Playwright browser is required',
+    'A launched Playwright browser is required'
   );
   assert.equal(typeof root, 'string', 'root must be the extracted bundle directory');
   assert.equal(typeof output, 'string', 'output must be an artifact directory');
@@ -1124,15 +1373,24 @@ export async function run({ browser, root, output, installedContext, installedEx
   let installedFixtureCursor = 0;
   let highActivityProbe = null;
   const highActivityRequests = new Map();
-  const lifecycleDiagnostic = installedContext ? {
-    activePhase: null, consoleEvents: [], debugMessagesObserved: 0,
-    contexts: new Map(), cdp: null, setupErrorType: null, managerId: installedExtensionId,
-  } : null;
-  const context = installedContext ?? await browser.newContext({
-    colorScheme: 'dark',
-    locale: 'en-US',
-    viewport: { width: 1280, height: 720 },
-  });
+  const lifecycleDiagnostic = installedContext
+    ? {
+        activePhase: null,
+        consoleEvents: [],
+        debugMessagesObserved: 0,
+        contexts: new Map(),
+        cdp: null,
+        setupErrorType: null,
+        managerId: installedExtensionId,
+      }
+    : null;
+  const context =
+    installedContext ??
+    (await browser.newContext({
+      colorScheme: 'dark',
+      locale: 'en-US',
+      viewport: { width: 1280, height: 720 },
+    }));
 
   let page;
   try {
@@ -1145,15 +1403,20 @@ export async function run({ browser, root, output, installedContext, installedEx
       if (lifecycleDiagnostic) {
         if (message.type() === 'debug') {
           lifecycleDiagnostic.debugMessagesObserved = Math.min(
-            32, lifecycleDiagnostic.debugMessagesObserved + 1,
+            32,
+            lifecycleDiagnostic.debugMessagesObserved + 1
           );
         }
         if (message.text().includes('[FetchInterceptor]')) {
           lifecycleDiagnostic.consoleEvents.push(
-            summarizeInterceptorConsoleMessage(message, lifecycleDiagnostic.activePhase,
-              installedExtensionId).catch(() => null),
+            summarizeInterceptorConsoleMessage(
+              message,
+              lifecycleDiagnostic.activePhase,
+              installedExtensionId
+            ).catch(() => null)
           );
-          if (lifecycleDiagnostic.consoleEvents.length > 32) lifecycleDiagnostic.consoleEvents.shift();
+          if (lifecycleDiagnostic.consoleEvents.length > 32)
+            lifecycleDiagnostic.consoleEvents.shift();
         }
       }
     });
@@ -1195,7 +1458,11 @@ export async function run({ browser, root, output, installedContext, installedEx
 
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
-      if (installedContext && url.protocol === 'chrome-extension:' && url.hostname === installedExtensionId) {
+      if (
+        installedContext &&
+        url.protocol === 'chrome-extension:' &&
+        url.hostname === installedExtensionId
+      ) {
         await route.continue();
         return;
       }
@@ -1205,7 +1472,7 @@ export async function run({ browser, root, output, installedContext, installedEx
       ) {
         chatApiRequests++;
         const sustainedActions = SUSTAINED_PHASE_ACTIONS.get(
-          url.searchParams.get('sustained-phase'),
+          url.searchParams.get('sustained-phase')
         );
         if (sustainedActions) {
           sustainedChatRequests++;
@@ -1220,7 +1487,9 @@ export async function run({ browser, root, output, installedContext, installedEx
         const action = CHAT_ACTIONS[messageIndex];
         if (url.searchParams.get('key') === 'windows-acceptance' && action) {
           explicitChatRequests++;
-          const deliveredAction = url.searchParams.has('ink-probe') ? structuredClone(action) : action;
+          const deliveredAction = url.searchParams.has('ink-probe')
+            ? structuredClone(action)
+            : action;
           if (url.searchParams.has('ink-probe')) {
             const paid = deliveredAction.addChatItemAction.item.liveChatPaidMessageRenderer;
             assert(paid, 'The isolated ink fixture must be a Super Chat');
@@ -1234,24 +1503,42 @@ export async function run({ browser, root, output, installedContext, installedEx
         } else {
           backgroundChatRequests++;
           backgroundRequestTimes.push(performance.now());
-          if (highActivityProbe && route.request().method() === 'POST' && highActivityProbe.samples.length < 9) {
+          if (
+            highActivityProbe &&
+            route.request().method() === 'POST' &&
+            highActivityProbe.samples.length < 9
+          ) {
             const index = highActivityProbe.samples.length;
             const sample = { startedAt: performance.now(), finishedAt: null, failed: null };
             highActivityProbe.samples.push(sample);
             highActivityRequests.set(route.request(), sample);
-            highActivityProbe.maxActive = Math.max(highActivityProbe.maxActive, highActivityRequests.size);
-            const actions = index < 7 ? Array.from({ length: 32 }, (_, message) => messageAction(
-              `windows-poll-floor-${index}-${message}`,
-              `Floor viewer ${index}-${message}`,
-              [{ text: `Sustained polling floor message ${index}-${message}` }],
-            )) : [];
-            await route.fulfill({ status: 200, contentType: 'application/json', json: chatResponse(actions, 1000) });
+            highActivityProbe.maxActive = Math.max(
+              highActivityProbe.maxActive,
+              highActivityRequests.size
+            );
+            const actions =
+              index < 7
+                ? Array.from({ length: 32 }, (_, message) =>
+                    messageAction(
+                      `windows-poll-floor-${index}-${message}`,
+                      `Floor viewer ${index}-${message}`,
+                      [{ text: `Sustained polling floor message ${index}-${message}` }]
+                    )
+                  )
+                : [];
+            await route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              json: chatResponse(actions, 1000),
+            });
             return;
           }
-          const actions = deliverInstalledFixture && !installedFixtureDelivered
-            ? [CHAT_ACTIONS[installedFixtureCursor++]]
-            : [];
-          if (actions.length) installedFixtureDelivered = installedFixtureCursor === CHAT_ACTIONS.length;
+          const actions =
+            deliverInstalledFixture && !installedFixtureDelivered
+              ? [CHAT_ACTIONS[installedFixtureCursor++]]
+              : [];
+          if (actions.length)
+            installedFixtureDelivered = installedFixtureCursor === CHAT_ACTIONS.length;
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -1270,7 +1557,9 @@ export async function run({ browser, root, output, installedContext, installedEx
           status: 200,
           contentType: installedEmoji ? 'image/png' : 'image/svg+xml',
           headers: { 'access-control-allow-origin': '*' },
-          body: installedEmoji ?? '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#ffd54f"/><path d="M9 19q7 8 14 0" fill="none" stroke="#382f18" stroke-width="2"/><circle cx="11" cy="12" r="2"/><circle cx="21" cy="12" r="2"/></svg>',
+          body:
+            installedEmoji ??
+            '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#ffd54f"/><path d="M9 19q7 8 14 0" fill="none" stroke="#382f18" stroke-width="2"/><circle cx="11" cy="12" r="2"/><circle cx="21" cy="12" r="2"/></svg>',
         });
         return;
       }
@@ -1283,7 +1572,9 @@ export async function run({ browser, root, output, installedContext, installedEx
       Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
         configurable: true,
         get: () => playbackState.currentTime,
-        set: (value) => { playbackState.currentTime = value; },
+        set: (value) => {
+          playbackState.currentTime = value;
+        },
       });
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
         configurable: true,
@@ -1313,11 +1604,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         };
         const originalRoundRect = CanvasRenderingContext2D.prototype.roundRect;
         CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radii) {
-          if (
-            width > 0 &&
-            typeof this.fillStyle !== 'string' &&
-            rects.length < 512
-          ) {
+          if (width > 0 && typeof this.fillStyle !== 'string' && rects.length < 512) {
             if (paintedCanvas !== this.canvas) {
               rects.length = 0;
               paintedCanvas = this.canvas;
@@ -1345,7 +1632,9 @@ export async function run({ browser, root, output, installedContext, installedEx
         };
         window.__ytAcceptancePaidCardProbe = {
           rects,
-          get cachedBitmapDraws() { return cachedBitmapDraws; },
+          get cachedBitmapDraws() {
+            return cachedBitmapDraws;
+          },
         };
       }
       window.ytcfg = {
@@ -1387,66 +1676,93 @@ export async function run({ browser, root, output, installedContext, installedEx
       state: 'attached',
       timeout: 15_000,
     });
-    if (!installedContext) await page.waitForFunction(() => {
-      const handle = window.__ytChatOverlay;
-      return Boolean(handle && typeof handle.getSettings === 'function');
-    });
+    if (!installedContext)
+      await page.waitForFunction(() => {
+        const handle = window.__ytChatOverlay;
+        return Boolean(handle && typeof handle.getSettings === 'function');
+      });
 
     const settingsUiState = await configureThroughSettingsUi(
       page,
       Boolean(installedContext),
       output,
       Boolean(expectedRenderer),
-      installedContext ? async (factor, restoreSettings) => {
-        const worker = installedContext.serviceWorkers().find((candidate) => candidate.url().startsWith(`chrome-extension://${installedExtensionId}/`));
-        assert(worker, 'Installed extension service worker is unavailable for scoped browser zoom');
-        return worker.evaluate(async ({ url, zoomFactor, restore }) => {
-          const tabs = await chrome.tabs.query({ url });
-          if (tabs.length !== 1 || !Number.isInteger(tabs[0].id)) throw new Error('Browser zoom requires one exact fixture tab');
-          const id = tabs[0].id;
-          const previous = await chrome.tabs.getZoom(id);
-          const settings = await chrome.tabs.getZoomSettings(id);
-          await chrome.tabs.setZoomSettings(id, { mode: 'automatic', scope: 'per-tab' });
-          await chrome.tabs.setZoom(id, zoomFactor);
-          if (restore) await chrome.tabs.setZoomSettings(id, { mode: restore.mode, scope: restore.scope });
-          return { previous, settings, observed: await chrome.tabs.getZoom(id) };
-        }, { url: page.url(), zoomFactor: factor, restore: restoreSettings });
-      } : undefined,
+      installedContext
+        ? async (factor, restoreSettings) => {
+            const worker = installedContext
+              .serviceWorkers()
+              .find((candidate) =>
+                candidate.url().startsWith(`chrome-extension://${installedExtensionId}/`)
+              );
+            assert(
+              worker,
+              'Installed extension service worker is unavailable for scoped browser zoom'
+            );
+            return worker.evaluate(
+              async ({ url, zoomFactor, restore }) => {
+                const tabs = await chrome.tabs.query({ url });
+                if (tabs.length !== 1 || !Number.isInteger(tabs[0].id))
+                  throw new Error('Browser zoom requires one exact fixture tab');
+                const id = tabs[0].id;
+                const previous = await chrome.tabs.getZoom(id);
+                const settings = await chrome.tabs.getZoomSettings(id);
+                await chrome.tabs.setZoomSettings(id, { mode: 'automatic', scope: 'per-tab' });
+                await chrome.tabs.setZoom(id, zoomFactor);
+                if (restore)
+                  await chrome.tabs.setZoomSettings(id, {
+                    mode: restore.mode,
+                    scope: restore.scope,
+                  });
+                return { previous, settings, observed: await chrome.tabs.getZoom(id) };
+              },
+              { url: page.url(), zoomFactor: factor, restore: restoreSettings }
+            );
+          }
+        : undefined
     );
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
     deliverInstalledFixture = Boolean(installedContext);
-    const apiStatuses = installedContext ? [] : await page.evaluate(async (count) => {
-      const statuses = [];
-      for (let index = 0; index < count; index++) {
-        const response = await fetch(
-          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${index}`,
-        );
-        await response.json();
-        statuses.push(response.status);
-        await new Promise((resolve) => setTimeout(resolve, 75));
-      }
-      return statuses;
-    }, EXPECTED_MESSAGE_COUNT);
-    if (!installedContext) assert.deepEqual(
-      apiStatuses,
-      Array.from({ length: EXPECTED_MESSAGE_COUNT }, () => 200),
-      'Deterministic live-chat API fixtures did not load',
-    );
+    const apiStatuses = installedContext
+      ? []
+      : await page.evaluate(async (count) => {
+          const statuses = [];
+          for (let index = 0; index < count; index++) {
+            const response = await fetch(
+              `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${index}`
+            );
+            await response.json();
+            statuses.push(response.status);
+            await new Promise((resolve) => setTimeout(resolve, 75));
+          }
+          return statuses;
+        }, EXPECTED_MESSAGE_COUNT);
+    if (!installedContext)
+      assert.deepEqual(
+        apiStatuses,
+        Array.from({ length: EXPECTED_MESSAGE_COUNT }, () => 200),
+        'Deterministic live-chat API fixtures did not load'
+      );
     assert.equal(explicitChatRequests, installedContext ? 0 : EXPECTED_MESSAGE_COUNT);
 
     try {
-      await page.waitForFunction(exactDeclaredMessageIdsReady, EXPECTED_MESSAGE_IDS,
-        { timeout: 15_000 });
+      await page.waitForFunction(exactDeclaredMessageIdsReady, EXPECTED_MESSAGE_IDS, {
+        timeout: 15_000,
+      });
     } catch (error) {
       const diagnostic = await page.evaluate(readFixtureAdmissionDiagnostic, EXPECTED_MESSAGE_IDS);
-      throw new Error(`Renderer readiness failed: ${JSON.stringify({ chatApiRequests, diagnostic })}`, {
-        cause: error,
-      });
+      throw new Error(
+        `Renderer readiness failed: ${JSON.stringify({ chatApiRequests, diagnostic })}`,
+        {
+          cause: error,
+        }
+      );
     }
-    const initialAdmission = await page.evaluate(readFixtureAdmissionDiagnostic,
-      EXPECTED_MESSAGE_IDS);
+    const initialAdmission = await page.evaluate(
+      readFixtureAdmissionDiagnostic,
+      EXPECTED_MESSAGE_IDS
+    );
 
     const accessibleMessages = await page
       .locator('.yt-live-chat-overlay-live-region > p')
@@ -1480,7 +1796,7 @@ export async function run({ browser, root, output, installedContext, installedEx
     const canvasBox = await canvas.boundingBox();
     assert(
       canvasBox && canvasBox.width > 0 && canvasBox.height > 0,
-      'Overlay canvas has no visible area',
+      'Overlay canvas has no visible area'
     );
 
     await page.waitForTimeout(250);
@@ -1528,11 +1844,14 @@ export async function run({ browser, root, output, installedContext, installedEx
     assert.equal(settings?.danmakuMode, 'scroll');
     assert.equal(settings?.depthLayersEnabled, false);
 
-    const paidCardInkContainment = expectedRenderer === 'main' && !installedContext
-      ? await verifyIsolatedPaidCardInk(page, output)
-      : null;
+    const paidCardInkContainment =
+      expectedRenderer === 'main' && !installedContext
+        ? await verifyIsolatedPaidCardInk(page, output)
+        : null;
     const sustainedViewing = await verifySustainedViewingLifecycle(
-      page, expectedRenderer, lifecycleDiagnostic,
+      page,
+      expectedRenderer,
+      lifecycleDiagnostic
     );
     assert.equal(sustainedChatRequests, 7, 'The sustained-viewing fixture was incomplete');
     let highActivityPolling = null;
@@ -1553,7 +1872,10 @@ export async function run({ browser, root, output, installedContext, installedEx
       await modal.waitFor({ state: 'hidden' });
       highActivityProbe = { samples: [], maxActive: 0 };
       const deadline = performance.now() + 20_000;
-      while (highActivityProbe.samples.filter((sample) => sample.finishedAt !== null).length < 9 && performance.now() < deadline) {
+      while (
+        highActivityProbe.samples.filter((sample) => sample.finishedAt !== null).length < 9 &&
+        performance.now() < deadline
+      ) {
         await page.waitForTimeout(100);
       }
       const probe = highActivityProbe;
@@ -1561,43 +1883,71 @@ export async function run({ browser, root, output, installedContext, installedEx
       assert.equal(probe.samples.length, 9, 'High-activity fixture did not complete nine polls');
       assert(probe.samples.every((sample) => sample.finishedAt !== null && sample.failed === null));
       assert.equal(probe.maxActive, 1, 'Live polls overlapped');
-      const waits = probe.samples.slice(1).map((sample, index) => sample.startedAt - probe.samples[index].finishedAt);
+      const waits = probe.samples
+        .slice(1)
+        .map((sample, index) => sample.startedAt - probe.samples[index].finishedAt);
       // Browser network-event timestamps can straddle response processing.
       // Exact floor boundaries are covered separately with fake-time loop tests.
       const eventToleranceMs = 25;
-      assert(waits[4] >= 500 - eventToleranceMs && waits[5] >= 500 - eventToleranceMs,
-        `Extreme density bypassed the polling floor: ${waits[4]}, ${waits[5]}`);
-      assert(waits[7] >= 1000 - eventToleranceMs, `Empty response did not restore ordinary polling: ${waits[7]}`);
+      assert(
+        waits[4] >= 500 - eventToleranceMs && waits[5] >= 500 - eventToleranceMs,
+        `Extreme density bypassed the polling floor: ${waits[4]}, ${waits[5]}`
+      );
+      assert(
+        waits[7] >= 1000 - eventToleranceMs,
+        `Empty response did not restore ordinary polling: ${waits[7]}`
+      );
       assert.equal(await page.locator('#yt-live-chat-overlay canvas').count(), 1);
-      const deliveredCount = await page.evaluate(() => new Set(window.__ytAcceptanceWorkers
-        .filter((worker) => !worker.terminated)
-        .flatMap((worker) => worker.addedMessageIds.flat())
-        .filter((id) => id.startsWith('windows-poll-floor-'))).size);
-      assert(deliveredCount >= 32, 'High-activity messages did not reach the production renderer worker');
-      highActivityPolling = { status: 'passed', minPollIntervalMs: 500, ordinaryIntervalMs: 1000,
-        eventToleranceMs, highResponses: 7, messagesPerResponse: 32, maxActive: probe.maxActive,
-        samples: probe.samples, waitsAfterResponseMs: waits, rendererWorkerDelivery: true,
-        rendererDeliveredMessages: deliveredCount };
+      const deliveredCount = await page.evaluate(
+        () =>
+          new Set(
+            window.__ytAcceptanceWorkers
+              .filter((worker) => !worker.terminated)
+              .flatMap((worker) => worker.addedMessageIds.flat())
+              .filter((id) => id.startsWith('windows-poll-floor-'))
+          ).size
+      );
+      assert(
+        deliveredCount >= 32,
+        'High-activity messages did not reach the production renderer worker'
+      );
+      highActivityPolling = {
+        status: 'passed',
+        minPollIntervalMs: 500,
+        ordinaryIntervalMs: 1000,
+        eventToleranceMs,
+        highResponses: 7,
+        messagesPerResponse: 32,
+        maxActive: probe.maxActive,
+        samples: probe.samples,
+        waitsAfterResponseMs: waits,
+        rendererWorkerDelivery: true,
+        rendererDeliveredMessages: deliveredCount,
+      };
     }
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
     const backgroundObservationMs = backgroundRequestTimes.length
       ? performance.now() - backgroundRequestTimes[0]
       : 0;
-    const minimumPollInterval = installedContext ? null : await page.evaluate(
-      () => window.__ytChatOverlay?.getSettings?.().minPollIntervalMs,
-    );
+    const minimumPollInterval = installedContext
+      ? null
+      : await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().minPollIntervalMs);
     if (!installedContext) {
-      assert(Number.isFinite(minimumPollInterval) && minimumPollInterval > 0,
-        'The runtime minimum polling interval is unavailable');
+      assert(
+        Number.isFinite(minimumPollInterval) && minimumPollInterval > 0,
+        'The runtime minimum polling interval is unavailable'
+      );
     }
     // Longer settings interactions permit more polls, but never a faster
     // average request rate than the configured minimum polling interval.
     const backgroundRequestBudget = installedContext
       ? 100
       : 1 + Math.floor(backgroundObservationMs / minimumPollInterval);
-    assert(backgroundChatRequests <= backgroundRequestBudget,
-      `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`);
+    assert(
+      backgroundChatRequests <= backgroundRequestBudget,
+      `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`
+    );
 
     const screenshots = (await readdir(output)).filter((file) => file.endsWith('.png')).sort();
     return {
@@ -1643,42 +1993,66 @@ export async function run({ browser, root, output, installedContext, installedEx
         initialAdmission,
         sustainedViewing,
         highActivityPolling,
-        backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(
-          (time, index) => time - backgroundRequestTimes[index],
-        ),
+        backgroundRequestIntervalsMs: backgroundRequestTimes
+          .slice(1)
+          .map((time, index) => time - backgroundRequestTimes[index]),
       },
     };
   } catch (error) {
     await page?.screenshot({ path: join(output, 'fixture-error.png') }).catch(() => {});
-    const installedLifecycle = lifecycleDiagnostic && page ? await (async () => {
-      let deadline;
-      try {
-        return await Promise.race([
-          (async () => {
-            const [dom, worlds, events] = await Promise.all([
-              page.evaluate(readInstalledLifecycleDomDiagnostic),
-              readInstalledLifecycleWorlds(lifecycleDiagnostic.cdp, lifecycleDiagnostic.contexts),
-              Promise.all(lifecycleDiagnostic.consoleEvents),
-            ]);
-            return {
-              activePhase: lifecycleDiagnostic.activePhase,
-              routedSustainedRequests: sustainedChatRequests,
-              debugMessagesObserved: lifecycleDiagnostic.debugMessagesObserved,
-              consoleEvents: events.filter(Boolean), worlds, dom,
-              cdpSetupErrorType: lifecycleDiagnostic.setupErrorType,
-            };
-          })().catch(() => null),
-          new Promise((resolve) => { deadline = setTimeout(() => resolve(null), 2_000); }),
-        ]);
-      } finally { clearTimeout(deadline); }
-    })() : null;
-    await writeFile(join(output, 'fixture-error.json'), JSON.stringify({
-      pageErrors: pageErrors.slice(-16), consoleErrors: consoleErrors.slice(-16),
-      chatApiRequests, installedFixtureDelivered,
-      installedLifecycle,
-      admission: page ? await page.evaluate(readFixtureAdmissionDiagnostic, EXPECTED_MESSAGE_IDS)
-        .catch(() => null) : null,
-    }, null, 2));
+    const installedLifecycle =
+      lifecycleDiagnostic && page
+        ? await (async () => {
+            let deadline;
+            try {
+              return await Promise.race([
+                (async () => {
+                  const [dom, worlds, events] = await Promise.all([
+                    page.evaluate(readInstalledLifecycleDomDiagnostic),
+                    readInstalledLifecycleWorlds(
+                      lifecycleDiagnostic.cdp,
+                      lifecycleDiagnostic.contexts
+                    ),
+                    Promise.all(lifecycleDiagnostic.consoleEvents),
+                  ]);
+                  return {
+                    activePhase: lifecycleDiagnostic.activePhase,
+                    routedSustainedRequests: sustainedChatRequests,
+                    debugMessagesObserved: lifecycleDiagnostic.debugMessagesObserved,
+                    consoleEvents: events.filter(Boolean),
+                    worlds,
+                    dom,
+                    cdpSetupErrorType: lifecycleDiagnostic.setupErrorType,
+                  };
+                })().catch(() => null),
+                new Promise((resolve) => {
+                  deadline = setTimeout(() => resolve(null), 2_000);
+                }),
+              ]);
+            } finally {
+              clearTimeout(deadline);
+            }
+          })()
+        : null;
+    await writeFile(
+      join(output, 'fixture-error.json'),
+      JSON.stringify(
+        {
+          pageErrors: pageErrors.slice(-16),
+          consoleErrors: consoleErrors.slice(-16),
+          chatApiRequests,
+          installedFixtureDelivered,
+          installedLifecycle,
+          admission: page
+            ? await page
+                .evaluate(readFixtureAdmissionDiagnostic, EXPECTED_MESSAGE_IDS)
+                .catch(() => null)
+            : null,
+        },
+        null,
+        2
+      )
+    );
     throw error;
   } finally {
     await lifecycleDiagnostic?.cdp?.detach().catch(() => {});

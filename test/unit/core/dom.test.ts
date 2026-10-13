@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  forEachSlot,
-  isAbortError,
-  findElementMatch,
-  isVisibleElement,
-} from '@util/dom';
+
+import { findElementMatch, forEachSlot, isAbortError, isVisibleElement } from '@util/dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── forEachSlot ────────────────────────────────────────────────────
 

@@ -1,57 +1,67 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
+import type { ChatMessage } from '@app-types';
+import { LruMap } from '@piesp/browser-core/util';
 import {
+  type CanvasRenderContext,
   cleanupAndBucketStage,
   compactRemovedMessages,
   drainStage,
   drawStage,
   mirrorVisibleMessages,
 } from '@renderer/canvas/render-pipeline';
-import type { CanvasRenderContext } from '@renderer/canvas/render-pipeline';
-import type { ChatMessage } from '@app-types';
-import { DEFAULT_SETTINGS } from '@settings/schema';
-import { LruMap } from '@piesp/browser-core/util';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { DEFAULT_SETTINGS } from '@settings/schema';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('scrolling motion on the main Canvas path', () => {
-  it.each([false, true])('uses fixed position only when effective reduced motion is %s', (reducedMotion) => {
-    const message = {
-      message: { id: 'motion', text: 'motion', kind: 'text', content: [{ type: 'text', content: 'motion' }] },
-      startTime: 0,
-      fadeStartTime: 0,
-      pausedDuration: 0,
-      duration: 2000,
-      invDuration: 1 / 2000,
-      startX: 640,
-      x: 640,
-      y: 0,
-      width: 100,
-      height: 20,
-      speedTier: 1,
-    };
-    const ctx = makeDrainCtx({
-      settings: DEFAULT_SETTINGS,
-      activeMessages: [message] as never[],
-      isReducedMotionActive: reducedMotion,
-      farOpacityBuckets: Array.from({ length: 32 }, () => []),
-      midOpacityBuckets: Array.from({ length: 32 }, () => []),
-      nearOpacityBuckets: Array.from({ length: 32 }, () => []),
-      cachedOpacityConfig: {
-        baseOpacity: 1,
-        fadeDurationMs: 0,
-        invFadeDuration: 0,
-        backlogOpacityMultiplier: 1,
-        depthLayersEnabled: false,
-        depthFarOpacityMul: 1,
-        ageFadeRate: 0,
-      },
-    });
-    cleanupAndBucketStage(ctx, 500, { width: 640, height: 360 }, 'scroll');
-    expect(message.x).toBe(reducedMotion ? 270 : 640 - 0.25 * (640 + 100 + DEFAULT_SETTINGS.exitPaddingPx));
-  });
+  it.each([false, true])(
+    'uses fixed position only when effective reduced motion is %s',
+    (reducedMotion) => {
+      const message = {
+        message: {
+          id: 'motion',
+          text: 'motion',
+          kind: 'text',
+          content: [{ type: 'text', content: 'motion' }],
+        },
+        startTime: 0,
+        fadeStartTime: 0,
+        pausedDuration: 0,
+        duration: 2000,
+        invDuration: 1 / 2000,
+        startX: 640,
+        x: 640,
+        y: 0,
+        width: 100,
+        height: 20,
+        speedTier: 1,
+      };
+      const ctx = makeDrainCtx({
+        settings: DEFAULT_SETTINGS,
+        activeMessages: [message] as never[],
+        isReducedMotionActive: reducedMotion,
+        farOpacityBuckets: Array.from({ length: 32 }, () => []),
+        midOpacityBuckets: Array.from({ length: 32 }, () => []),
+        nearOpacityBuckets: Array.from({ length: 32 }, () => []),
+        cachedOpacityConfig: {
+          baseOpacity: 1,
+          fadeDurationMs: 0,
+          invFadeDuration: 0,
+          backlogOpacityMultiplier: 1,
+          depthLayersEnabled: false,
+          depthFarOpacityMul: 1,
+          ageFadeRate: 0,
+        },
+      });
+      cleanupAndBucketStage(ctx, 500, { width: 640, height: 360 }, 'scroll');
+      expect(message.x).toBe(
+        reducedMotion ? 270 : 640 - 0.25 * (640 + 100 + DEFAULT_SETTINGS.exitPaddingPx)
+      );
+    }
+  );
 });
 
 const mocks = vi.hoisted(() => ({
@@ -248,7 +258,7 @@ describe('drawStage', () => {
       } as unknown as CanvasRenderContext['imageFetchManager'],
     });
     const renderCtx = { globalAlpha: 1 } as CanvasRenderingContext2D;
-    const buckets = Array.from({ length: 21 }, () => [] as typeof message[]);
+    const buckets = Array.from({ length: 21 }, () => [] as (typeof message)[]);
     buckets[20]!.push(message);
 
     drawStage(ctx, renderCtx, buckets as never);
@@ -324,11 +334,15 @@ describe('drawStage', () => {
     });
     const renderCtx = {
       globalAlpha: 1,
-      measureText: vi.fn(() => ({ actualBoundingBoxAscent: 0, actualBoundingBoxDescent: 16, width: 100 })),
+      measureText: vi.fn(() => ({
+        actualBoundingBoxAscent: 0,
+        actualBoundingBoxDescent: 16,
+        width: 100,
+      })),
       save: vi.fn(),
       restore: vi.fn(),
     } as unknown as CanvasRenderingContext2D;
-    const buckets = Array.from({ length: 21 }, () => [] as typeof message[]);
+    const buckets = Array.from({ length: 21 }, () => [] as (typeof message)[]);
     buckets[20]!.push(message);
 
     drawStage(ctx, renderCtx, buckets as never);
@@ -388,7 +402,7 @@ describe('drawStage', () => {
       save: vi.fn(),
       restore: vi.fn(),
     } as unknown as CanvasRenderingContext2D;
-    const buckets = Array.from({ length: 21 }, () => [] as typeof message[]);
+    const buckets = Array.from({ length: 21 }, () => [] as (typeof message)[]);
     buckets[20]!.push(message);
 
     drawStage(ctx, renderCtx, buckets as never);
@@ -411,7 +425,10 @@ function makeCompactCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderC
     activeMessagesByLane: new Map(),
     expiredMessagesScratch: [],
     pendingQueue: new HighFirstPriorityBucketQueue(),
-    observability: { updateActiveMessages: vi.fn(), updateQueueDepth: vi.fn() } as unknown as CanvasRenderContext['observability'],
+    observability: {
+      updateActiveMessages: vi.fn(),
+      updateQueueDepth: vi.fn(),
+    } as unknown as CanvasRenderContext['observability'],
     // Stubs
     settings: {} as CanvasRenderContext['settings'],
     textBitmapCache: {} as CanvasRenderContext['textBitmapCache'],
@@ -463,9 +480,7 @@ describe('compactRemovedMessages', () => {
   });
 
   it('allocates fresh array via slice when above compaction threshold', () => {
-    const msgs = Array.from({ length: 10 }, (_, i) =>
-      makeCanvasMsg({ laneIndex: i })
-    ) as never[];
+    const msgs = Array.from({ length: 10 }, (_, i) => makeCanvasMsg({ laneIndex: i })) as never[];
     const ctx = makeCompactCtx({
       activeMessages: [...msgs],
       expiredMessagesScratch: [],
@@ -548,10 +563,7 @@ describe('mirrorVisibleMessages', () => {
       id: string;
       text: string;
     }>;
-    expect(messages.map((message) => message.text)).toEqual([
-      'first message',
-      'second message',
-    ]);
+    expect(messages.map((message) => message.text)).toEqual(['first message', 'second message']);
   });
 
   it('skips when there are no active messages', () => {

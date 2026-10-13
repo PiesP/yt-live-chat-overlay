@@ -11,40 +11,24 @@
       "strict_min_version": "128.0"
     }
   },
-  "permissions": [
-    "storage",
-    "menus"
-  ],
-  "host_permissions": [
-    "https://www.youtube.com/*"
-  ],
+  "permissions": ["storage", "menus"],
+  "host_permissions": ["https://www.youtube.com/*"],
   "content_scripts": [
     {
-      "matches": [
-        "https://www.youtube.com/*"
-      ],
-      "js": [
-        "content-script.js"
-      ],
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content-script.js"],
       "run_at": "document_end",
       "world": "ISOLATED"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "workers/*.js",
-        "page-script.js"
-      ],
-      "matches": [
-        "https://www.youtube.com/*"
-      ]
+      "resources": ["workers/*.js", "page-script.js"],
+      "matches": ["https://www.youtube.com/*"]
     }
   ],
   "background": {
-    "scripts": [
-      "background.js"
-    ],
+    "scripts": ["background.js"],
     "type": "module"
   },
   "content_security_policy": {

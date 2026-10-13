@@ -182,8 +182,12 @@ describe('ImageFetchManager terminal lifecycle', () => {
     const paidUrl = 'https://yt3.ggpht.com/paid-toggle.png';
     const regular = { ...message(), content: [], author: 'regular', authorPhotoUrl: regularUrl };
     const paid: ChatMessage = {
-      ...message(), content: [], author: 'paid', authorPhotoUrl: paidUrl,
-      kind: 'superchat', superChat: { amount: '$5', tier: 'blue' },
+      ...message(),
+      content: [],
+      author: 'paid',
+      authorPhotoUrl: paidUrl,
+      kind: 'superchat',
+      superChat: { amount: '$5', tier: 'blue' },
     };
 
     manager.updateConfig(

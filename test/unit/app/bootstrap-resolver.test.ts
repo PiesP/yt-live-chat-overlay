@@ -7,8 +7,8 @@ vi.mock('@chat/youtube/api', () => ({
   bootstrapChatSession: vi.fn(),
 }));
 
+import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@app/bootstrap-resolver';
 import { bootstrapChatSession } from '@chat/youtube/api';
-import { resolveBootstrap, refreshBootstrap, logBootstrapFailure } from '@app/bootstrap-resolver';
 
 const mockBootstrap = vi.mocked(bootstrapChatSession);
 
@@ -22,7 +22,7 @@ const mockReadyData = {
     screenData: '',
     clickTrackingParams: '',
     apiKey: 'test-key',
-        clientContext: {},
+    clientContext: {},
     clientNameHeader: '',
     ytcfg: {},
   } as unknown as import('@chat/youtube/api').ChatBootstrapData,
@@ -41,7 +41,7 @@ describe('resolveBootstrap', () => {
 
     const result = await resolveBootstrap();
     expect(result.status).toBe('ready');
-    if (result.status === "ready") {
+    if (result.status === 'ready') {
       expect(result.data).toBeDefined();
     }
   });
@@ -86,11 +86,11 @@ describe('refreshBootstrap', () => {
   });
 
   it('returns data when bootstrap succeeds', async () => {
-  mockBootstrap.mockResolvedValueOnce(mockReadyData);
+    mockBootstrap.mockResolvedValueOnce(mockReadyData);
 
-  const result = await refreshBootstrap();
-  expect(result).not.toBeNull();
-  expect(result?.isReplay).toBe(false);
+    const result = await refreshBootstrap();
+    expect(result).not.toBeNull();
+    expect(result?.isReplay).toBe(false);
   });
 
   it('returns null when bootstrap is not ready', async () => {

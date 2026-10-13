@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { installDomChatWatcher } from '@chat/dom-watcher';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function createTextRenderer(author: string, text: string, id: string): HTMLElement {
   const renderer = document.createElement('yt-live-chat-text-message-renderer');
@@ -58,7 +59,7 @@ describe('installDomChatWatcher', () => {
     const batch = document.createElement('div');
     batch.append(
       createTextRenderer('alice', 'first message', 'message-1'),
-      createTextRenderer('bob', 'second message', 'message-2'),
+      createTextRenderer('bob', 'second message', 'message-2')
     );
     container.append(batch);
 
@@ -66,8 +67,14 @@ describe('installDomChatWatcher', () => {
 
     expect(onMessages).toHaveBeenCalledTimes(1);
     const messages = onMessages.mock.calls[0]?.[0];
-    expect(messages?.map((message: { id: string }) => message.id)).toEqual(['message-1', 'message-2']);
-    expect(messages?.map((message: { text: string }) => message.text)).toEqual(['first message', 'second message']);
+    expect(messages?.map((message: { id: string }) => message.id)).toEqual([
+      'message-1',
+      'message-2',
+    ]);
+    expect(messages?.map((message: { text: string }) => message.text)).toEqual([
+      'first message',
+      'second message',
+    ]);
 
     unsubscribe?.();
   });
@@ -95,9 +102,13 @@ describe('installDomChatWatcher', () => {
     const container = createChatContainer();
     const onMessages = vi.fn();
     const pendingCounts: number[] = [];
-    const unsubscribe = installDomChatWatcher(onMessages, () => 2, (count) => {
-      pendingCounts.push(count);
-    });
+    const unsubscribe = installDomChatWatcher(
+      onMessages,
+      () => 2,
+      (count) => {
+        pendingCounts.push(count);
+      }
+    );
 
     for (let index = 0; index < 10; index++) {
       container.append(createTextRenderer('author', `message-${index}`, `message-${index}`));
@@ -128,7 +139,10 @@ describe('installDomChatWatcher', () => {
     const messageElement = renderer.children.item(1);
     if (!messageElement) throw new Error('message fixture missing');
     for (let index = 0; index < 1000; index++) {
-      messageElement.append(document.createComment(`comment-${index}`), document.createTextNode('x'));
+      messageElement.append(
+        document.createComment(`comment-${index}`),
+        document.createTextNode('x')
+      );
     }
     const querySelector = vi.spyOn(renderer, 'querySelector');
     const fragment = document.createDocumentFragment();

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { AR } from '@i18n/ar';
+import { describe, expect, it } from 'vitest';
 
 describe('Arabic translations', () => {
   it('has proper Arabic labels for font-related keys', () => {
@@ -14,7 +14,9 @@ describe('Arabic translations', () => {
 
   it('spells cache-size labels without an extra letter', () => {
     const cacheLabels = Object.entries(AR)
-      .filter(([key]) => key.startsWith('advanced.') && (key.includes('Cache') || key.includes('cache')))
+      .filter(
+        ([key]) => key.startsWith('advanced.') && (key.includes('Cache') || key.includes('cache'))
+      )
       .map(([, value]) => value);
 
     expect(cacheLabels.length).toBeGreaterThanOrEqual(3);

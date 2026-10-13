@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 PiesP
 
-import { describe, expect, it } from 'vitest';
 import { extractBestThumbnail } from '@chat/emoji-parser';
+import { describe, expect, it } from 'vitest';
 
 const YT_THUMB = 'https://yt3.ggpht.com/emoji/abc123';
 const YT_THUMB2 = 'https://yt3.ggpht.com/emoji/def456';
@@ -43,18 +43,14 @@ describe('emoji-parser', () => {
 
     it('extracts from sources array as fallback', () => {
       const result = extractBestThumbnail({
-        sources: [
-          { url: YT_THUMB + '=w48-h48', width: 48, height: 48 },
-        ],
+        sources: [{ url: YT_THUMB + '=w48-h48', width: 48, height: 48 }],
       });
       expect(result).not.toBeNull();
     });
 
     it('skips items with invalid URLs', () => {
       const result = extractBestThumbnail({
-        thumbnails: [
-          { url: 'invalid-scheme', width: 48 },
-        ],
+        thumbnails: [{ url: 'invalid-scheme', width: 48 }],
       });
       expect(result).toBeNull();
     });

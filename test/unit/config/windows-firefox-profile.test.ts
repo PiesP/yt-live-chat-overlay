@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Script } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
-import * as firefoxInstallModule from '../../../validation/windows/firefox-install.mjs';
-// @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
 import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.mjs';
+// @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
+import * as firefoxInstallModule from '../../../validation/windows/firefox-install.mjs';
 
 const {
   categorizeErrors,
@@ -36,10 +36,9 @@ async function createBundle(): Promise<{ output: string; root: string }> {
   return { output, root };
 }
 
-function createSession(options: {
-  failStartup?: boolean;
-  liveState?: Record<string, unknown>;
-} = {}) {
+function createSession(
+  options: { failStartup?: boolean; liveState?: Record<string, unknown> } = {}
+) {
   const calls: string[] = [];
   const pageLogs: Array<{ level: string; text: string; type: string }> = [];
   const pageErrors: Array<{ level: string; text: string; type: string }> = [];
@@ -82,18 +81,20 @@ function createSession(options: {
         case 4:
           return 1;
         case 7:
-          return options.liveState ?? {
-            renderer: 'worker',
-            videoPaused: false,
-            videoReadyState: 4,
-            canvasCount: 1,
-            overlayCount: 1,
-            pageScriptCount: 1,
-            renderedMessageCount: 1,
-            settingsButtonCount: 1,
-            workerBridgeReady: true,
-            workerReady: true,
-          };
+          return (
+            options.liveState ?? {
+              renderer: 'worker',
+              videoPaused: false,
+              videoReadyState: 4,
+              canvasCount: 1,
+              overlayCount: 1,
+              pageScriptCount: 1,
+              renderedMessageCount: 1,
+              settingsButtonCount: 1,
+              workerBridgeReady: true,
+              workerReady: true,
+            }
+          );
         default:
           return true;
       }
@@ -162,11 +163,13 @@ describe('Windows Firefox installation profile', () => {
       '--remote-allow-system-access',
       'about:blank',
     ]);
-    expect(buildFirefoxLaunchArguments({
-      headless: true,
-      platform: 'win32',
-      profileDir: 'C:\\task\\.firefox-install-profile-b',
-    })).toEqual([
+    expect(
+      buildFirefoxLaunchArguments({
+        headless: true,
+        platform: 'win32',
+        profileDir: 'C:\\task\\.firefox-install-profile-b',
+      })
+    ).toEqual([
       '--headless',
       '--wait-for-browser',
       '--new-instance',
@@ -178,11 +181,13 @@ describe('Windows Firefox installation profile', () => {
       '--remote-allow-system-access',
       'about:blank',
     ]);
-    expect(buildFirefoxLaunchArguments({
-      headless: true,
-      platform: 'linux',
-      profileDir: '/tmp/.firefox-install-profile-c',
-    })).toEqual([
+    expect(
+      buildFirefoxLaunchArguments({
+        headless: true,
+        platform: 'linux',
+        profileDir: '/tmp/.firefox-install-profile-c',
+      })
+    ).toEqual([
       '--headless',
       '--new-instance',
       '--no-remote',
@@ -225,12 +230,14 @@ describe('Windows Firefox installation profile', () => {
     expect(() => normalizeLiveUrls(['https://www.youtube.com/watch?v=x#fragment'])).toThrow(
       /fragment/u
     );
-    expect(() => normalizeLiveUrls([
-      'https://www.youtube.com/watch?v=1',
-      'https://www.youtube.com/watch?v=2',
-      'https://www.youtube.com/watch?v=3',
-      'https://www.youtube.com/watch?v=4',
-    ])).toThrow(/at most 3/u);
+    expect(() =>
+      normalizeLiveUrls([
+        'https://www.youtube.com/watch?v=1',
+        'https://www.youtube.com/watch?v=2',
+        'https://www.youtube.com/watch?v=3',
+        'https://www.youtube.com/watch?v=4',
+      ])
+    ).toThrow(/at most 3/u);
     expect(
       categorizeErrors([
         { level: 'error', text: 'Content Security Policy blocked data', type: 'console' },
@@ -266,15 +273,23 @@ describe('Windows Firefox installation profile', () => {
     );
     expect(result.status).toBe('passed');
     expect(session.command).toHaveBeenCalledWith('input.performActions', {
-      context: 'owned-context', actions: [{
-        type: 'pointer', id: 'acceptance-player', parameters: { pointerType: 'mouse' },
-        actions: [
-          { type: 'pointerMove', origin: 'viewport', x: 300, y: 200 },
-          { type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 },
-        ],
-      }],
+      context: 'owned-context',
+      actions: [
+        {
+          type: 'pointer',
+          id: 'acceptance-player',
+          parameters: { pointerType: 'mouse' },
+          actions: [
+            { type: 'pointerMove', origin: 'viewport', x: 300, y: 200 },
+            { type: 'pointerDown', button: 0 },
+            { type: 'pointerUp', button: 0 },
+          ],
+        },
+      ],
     });
-    expect(session.command).toHaveBeenCalledWith('input.releaseActions', { context: 'owned-context' });
+    expect(session.command).toHaveBeenCalledWith('input.releaseActions', {
+      context: 'owned-context',
+    });
     expect(result.observations.live).toEqual([
       {
         renderer: 'worker',
@@ -284,7 +299,12 @@ describe('Windows Firefox installation profile', () => {
         videoPaused: false,
         videoReadyState: 4,
         screenshot: 'firefox-live-01.png',
-        player: { paused: false, readyState: 4, inputMethod: 'native-pointer', playbackStarted: true },
+        player: {
+          paused: false,
+          readyState: 4,
+          inputMethod: 'native-pointer',
+          playbackStarted: true,
+        },
         canvasCount: 1,
         errorCategories: {},
         errorCount: 0,
@@ -330,48 +350,51 @@ describe('Windows Firefox installation profile', () => {
     expect(calls.slice(-3)).toEqual(['stop-mock', 'uninstall', 'close']);
   });
 
-  it.each([false, true])('fails missing render readiness or paused playback (paused=%s)', async (paused) => {
-    const { output, root } = await createBundle();
-    const { calls, session } = createSession({
-      liveState: {
-        canvasCount: paused ? 1 : 0,
-        overlayCount: paused ? 1 : 0,
-        pageScriptCount: paused ? 1 : 0,
-        renderedMessageCount: paused ? 1 : 0,
-        settingsButtonCount: paused ? 1 : 0,
-        workerBridgeReady: paused,
-        workerReady: paused,
-        renderer: 'worker',
-        videoPaused: paused,
-        videoReadyState: 4,
-      },
-    });
-
-    await expect(
-      runFirefoxInstallation(
-        {
-          executablePath: '/test/firefox.exe',
-          liveUrls: ['https://www.youtube.com/watch?v=public'],
-          output,
-          root,
+  it.each([false, true])(
+    'fails missing render readiness or paused playback (paused=%s)',
+    async (paused) => {
+      const { output, root } = await createBundle();
+      const { calls, session } = createSession({
+        liveState: {
+          canvasCount: paused ? 1 : 0,
+          overlayCount: paused ? 1 : 0,
+          pageScriptCount: paused ? 1 : 0,
+          renderedMessageCount: paused ? 1 : 0,
+          settingsButtonCount: paused ? 1 : 0,
+          workerBridgeReady: paused,
+          workerReady: paused,
+          renderer: 'worker',
+          videoPaused: paused,
+          videoReadyState: 4,
         },
-        { launch: async () => session }
-      )
-    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+      });
 
-    const result = JSON.parse(
-      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
-    );
-    expect(result.status).toBe('failed');
-    expect(result.observations.live).toEqual([
-      expect.objectContaining({
-        loaded: true,
-        renderedMessageCount: paused ? 1 : 0,
-        status: 'unverified',
-      }),
-    ]);
-    expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
-  });
+      await expect(
+        runFirefoxInstallation(
+          {
+            executablePath: '/test/firefox.exe',
+            liveUrls: ['https://www.youtube.com/watch?v=public'],
+            output,
+            root,
+          },
+          { launch: async () => session }
+        )
+      ).rejects.toThrow('public YouTube page did not prove installed rendering');
+
+      const result = JSON.parse(
+        await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+      );
+      expect(result.status).toBe('failed');
+      expect(result.observations.live).toEqual([
+        expect.objectContaining({
+          loaded: true,
+          renderedMessageCount: paused ? 1 : 0,
+          status: 'unverified',
+        }),
+      ]);
+      expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
+    }
+  );
 
   it('attempts process and owned-profile cleanup even when socket close fails', async () => {
     const calls: string[] = [];
@@ -382,11 +405,20 @@ describe('Windows Firefox installation profile', () => {
           detachSocket: () => calls.push('detach'),
           profileDir: '/task/.firefox-install-profile-test',
           root: '/task',
-          socket: { close: () => { calls.push('socket-close'); throw new Error('socket failed'); } },
+          socket: {
+            close: () => {
+              calls.push('socket-close');
+              throw new Error('socket failed');
+            },
+          },
         },
         {
-          removeProfile: async () => { calls.push('remove-profile'); },
-          terminateProcessTree: async () => { calls.push('terminate-tree'); },
+          removeProfile: async () => {
+            calls.push('remove-profile');
+          },
+          terminateProcessTree: async () => {
+            calls.push('terminate-tree');
+          },
         }
       )
     ).rejects.toThrow(AggregateError);
@@ -403,7 +435,9 @@ describe('Windows Firefox installation profile', () => {
         },
         {
           removeProfile,
-          terminateProcessTree: async () => { throw new Error('tree remains'); },
+          terminateProcessTree: async () => {
+            throw new Error('tree remains');
+          },
         }
       )
     ).rejects.toThrow('Firefox resource cleanup failed');

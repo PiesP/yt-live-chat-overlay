@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import {
-  MAX_WATCH_HTML_BYTES,
-  WATCH_HTML_TIMEOUT_MS,
-  getVideoIdFromUrl,
+  bootstrapChatSession,
   buildWatchUrl,
   fetchWatchHtml,
-  bootstrapChatSession,
   findLiveChatRenderer,
+  getVideoIdFromUrl,
+  MAX_WATCH_HTML_BYTES,
+  WATCH_HTML_TIMEOUT_MS,
 } from '@chat/youtube/api';
 import { ResponseTooLargeError } from '@chat/youtube/response-text';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -21,15 +22,13 @@ afterEach(() => {
 describe('getVideoIdFromUrl', () => {
   describe('/watch URLs', () => {
     it('extracts videoId from standard /watch?v= URL', () => {
-      expect(getVideoIdFromUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(
-        'dQw4w9WgXcQ'
-      );
+      expect(getVideoIdFromUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
     });
 
     it('extracts videoId from /watch with extra params', () => {
-      expect(
-        getVideoIdFromUrl('https://www.youtube.com/watch?v=abc123&t=30&list=PLxyz')
-      ).toBe('abc123');
+      expect(getVideoIdFromUrl('https://www.youtube.com/watch?v=abc123&t=30&list=PLxyz')).toBe(
+        'abc123'
+      );
     });
 
     it('extracts videoId when v is the only param', () => {
@@ -63,9 +62,7 @@ describe('getVideoIdFromUrl', () => {
     });
 
     it('extracts videoId from /live/ with query params', () => {
-      expect(getVideoIdFromUrl('https://www.youtube.com/live/abc123?feature=share')).toBe(
-        'abc123'
-      );
+      expect(getVideoIdFromUrl('https://www.youtube.com/live/abc123?feature=share')).toBe('abc123');
     });
 
     it('returns null for bare /live/ with no videoId', () => {
@@ -132,9 +129,7 @@ describe('getVideoIdFromUrl', () => {
 
 describe('buildWatchUrl', () => {
   it('constructs a standard watch URL', () => {
-    expect(buildWatchUrl('dQw4w9WgXcQ')).toBe(
-      'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-    );
+    expect(buildWatchUrl('dQw4w9WgXcQ')).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   });
 
   it('encodes special characters in videoId', () => {
@@ -156,10 +151,11 @@ describe('fetchWatchHtml', () => {
     const body = new ReadableStream<Uint8Array>({ cancel });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(body, {
-          headers: { 'content-length': String(MAX_WATCH_HTML_BYTES + 1) },
-        })
+      vi.fn(
+        async () =>
+          new Response(body, {
+            headers: { 'content-length': String(MAX_WATCH_HTML_BYTES + 1) },
+          })
       )
     );
 
@@ -191,18 +187,17 @@ describe('fetchWatchHtml', () => {
       },
     });
     const abortBody = vi.fn((reason: unknown) => bodyController?.error(reason));
-    const fetchMock = vi.fn(
-      (_input: RequestInfo | URL, init?: RequestInit) =>
-        Promise.resolve().then(() => {
-          const requestSignal = init?.signal;
-          if (!requestSignal) {
-            throw new Error('Watch HTML request omitted its signal');
-          }
-          requestSignal.addEventListener('abort', () => abortBody(requestSignal.reason), {
-            once: true,
-          });
-          return new Response(body);
-        })
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      Promise.resolve().then(() => {
+        const requestSignal = init?.signal;
+        if (!requestSignal) {
+          throw new Error('Watch HTML request omitted its signal');
+        }
+        requestSignal.addEventListener('abort', () => abortBody(requestSignal.reason), {
+          once: true,
+        });
+        return new Response(body);
+      })
     );
     vi.stubGlobal('fetch', fetchMock);
 

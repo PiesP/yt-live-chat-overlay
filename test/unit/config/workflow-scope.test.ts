@@ -7,9 +7,7 @@ const root = resolve(import.meta.dirname, '../../..');
 const classifier = resolve(root, 'scripts/ci/classify-workflow-changes.ts');
 
 function jobSection(workflow: string, job: string): string {
-  const section = workflow.match(
-    new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
-  )?.[0];
+  const section = workflow.match(new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`))?.[0];
   if (!section) throw new Error(`Workflow job not found: ${job}`);
   return section;
 }
@@ -53,10 +51,14 @@ type Scope =
   | 'deep_fast';
 
 function classify(paths: string[]): Record<Scope, boolean> {
-  const result = spawnSync(process.execPath, ['--experimental-strip-types', classifier, '--paths', ...paths], {
-    cwd: root,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', classifier, '--paths', ...paths],
+    {
+      cwd: root,
+      encoding: 'utf8',
+    }
+  );
 
   expect(result.status, result.stderr).toBe(0);
   return Object.fromEntries(
@@ -204,9 +206,7 @@ describe('workflow change classification', () => {
 
   it('fails closed for unknown paths, manual runs, and unavailable revisions', () => {
     expect(Object.values(classify(['new-config.unknown']))).not.toContain(false);
-    expect(
-      Object.values(classifyEvent({ EVENT_NAME: 'workflow_dispatch' }))
-    ).not.toContain(false);
+    expect(Object.values(classifyEvent({ EVENT_NAME: 'workflow_dispatch' }))).not.toContain(false);
     expect(
       Object.values(
         classifyEvent({
@@ -313,13 +313,13 @@ describe('workflow scope integration', () => {
     for (const workflow of [ci, security]) {
       const changes = jobSection(workflow, 'changes');
       expect(changes).toContain('pull_request | merge_group');
-      expect(changes).toContain(
-        'git show "$BASE_SHA:scripts/ci/classify-workflow-changes.ts"'
-      );
+      expect(changes).toContain('git show "$BASE_SHA:scripts/ci/classify-workflow-changes.ts"');
       expect(changes).toContain('node --experimental-strip-types "$classifier"');
       expect(changes).toContain("install-dependencies: 'false'");
       expect(changes).toContain('RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}');
-      expect(changes).toContain('for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast');
+      expect(changes).toContain(
+        'for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast'
+      );
     }
   });
 

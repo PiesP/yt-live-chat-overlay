@@ -15,16 +15,16 @@ import {
 } from '@chat/render-resource-limits';
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
-import type {
-  WorkerActiveMotion,
-  WorkerBatchReceipt,
-  WorkerClearStateAck,
-  WorkerErrorMessage,
-  WorkerMessageSnapshot,
-  WorkerMotionSnapshot,
-  WorkerStatsMessage,
+import {
+  WORKER_DROP_REASONS,
+  type WorkerActiveMotion,
+  type WorkerBatchReceipt,
+  type WorkerClearStateAck,
+  type WorkerErrorMessage,
+  type WorkerMessageSnapshot,
+  type WorkerMotionSnapshot,
+  type WorkerStatsMessage,
 } from './types';
-import { WORKER_DROP_REASONS } from './types';
 
 export const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
 const MAX_STATS_MESSAGE_IDS =

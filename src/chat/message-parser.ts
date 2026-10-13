@@ -34,8 +34,7 @@ import {
   type RenderResourceField,
   type RenderResourceViolation,
 } from '@chat/render-resource-limits';
-import type { JsonObject } from '@chat/youtube/request';
-import { asRecord, getNumber, getString, isRecord } from '@chat/youtube/request';
+import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@chat/youtube/request';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('ChatMessageParser');

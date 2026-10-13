@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, expect, it } from 'vitest';
 import { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { getRegularRowHeight, getRowSlotCount } from '@renderer/layout/row-geometry';
+import { describe, expect, it } from 'vitest';
 
-const baseOptions = { safeTop: 0, safeBottom: 0, fontSize: 32, fontWeight: 'bold' as const, fontFamily: 'sans-serif', laneSpacing: 6, outlineWidthPx: 2, headwayGapRatio: 0.08, exitPaddingPx: 100, scrollDurationMaxMs: 30000 };
+const baseOptions = {
+  safeTop: 0,
+  safeBottom: 0,
+  fontSize: 32,
+  fontWeight: 'bold' as const,
+  fontFamily: 'sans-serif',
+  laneSpacing: 6,
+  outlineWidthPx: 2,
+  headwayGapRatio: 0.08,
+  exitPaddingPx: 100,
+  scrollDurationMaxMs: 30000,
+};
 
 describe('production density grid', () => {
   it('refines the grid without claiming extra ordinary-row capacity or wasting pitch', () => {
@@ -33,7 +44,8 @@ describe('production density grid', () => {
     for (const factor of [1, 0.75, 0.5]) {
       const allocator = new LaneAllocator({ ...baseOptions, laneDensityFactor: factor });
       allocator.reset({ width: 1920, height: 1080 }, 0);
-      const reserved = getRowSlotCount(tallHeight, allocator.getLaneHeight(), 6) * allocator.getLaneHeight();
+      const reserved =
+        getRowSlotCount(tallHeight, allocator.getLaneHeight(), 6) * allocator.getLaneHeight();
       expect(reserved).toBeGreaterThanOrEqual(tallHeight + 6);
       expect(reserved).toBeLessThanOrEqual(previous);
       previous = reserved;
@@ -41,10 +53,21 @@ describe('production density grid', () => {
   });
 
   it('bounds grid work to four subdivisions at large viewports and the minimum font', () => {
-    const normal = new LaneAllocator({ ...baseOptions, fontSize: 14, laneSpacing: 0, laneDensityFactor: 1 });
-    const dense = new LaneAllocator({ ...baseOptions, fontSize: 14, laneSpacing: 0, laneDensityFactor: 0.5 });
+    const normal = new LaneAllocator({
+      ...baseOptions,
+      fontSize: 14,
+      laneSpacing: 0,
+      laneDensityFactor: 1,
+    });
+    const dense = new LaneAllocator({
+      ...baseOptions,
+      fontSize: 14,
+      laneSpacing: 0,
+      laneDensityFactor: 0.5,
+    });
     const dimensions = { width: 7680, height: 4320 };
-    normal.reset(dimensions, 0); dense.reset(dimensions, 0);
+    normal.reset(dimensions, 0);
+    dense.reset(dimensions, 0);
     expect(dense.getLaneCount()).toBeLessThanOrEqual(4 * normal.getLaneCount() + 3);
     expect(dense.snapshot().heap).toHaveLength(dense.getLaneCount());
   });

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { Page } from '@playwright/test';
 
 export const PLAYBACK_WORKER_URL =
   'https://www.youtube.com/__yt-chat-overlay-e2e__/renderer-worker.js';
@@ -68,7 +68,7 @@ export function installPlaybackWorkerObserver(workerUrl: string): void {
   const InstrumentedWorker = function (
     this: Worker,
     scriptURL: string | URL,
-    options?: WorkerOptions,
+    options?: WorkerOptions
   ): Worker {
     const worker = new NativeWorker(scriptURL, options);
     telemetry.constructed++;
@@ -83,12 +83,10 @@ export function installPlaybackWorkerObserver(workerUrl: string): void {
         telemetry.acknowledgements++;
       } else if (record.type === 'stats') {
         telemetry.stats.push({
-          activeMessages:
-            typeof record.activeMessages === 'number' ? record.activeMessages : -1,
+          activeMessages: typeof record.activeMessages === 'number' ? record.activeMessages : -1,
           pendingQueueDepth:
             typeof record.pendingQueueDepth === 'number' ? record.pendingQueueDepth : -1,
-          totalRendered:
-            typeof record.totalRendered === 'number' ? record.totalRendered : -1,
+          totalRendered: typeof record.totalRendered === 'number' ? record.totalRendered : -1,
           totalDrops: typeof record.totalDrops === 'number' ? record.totalDrops : -1,
           activeMessageIds: Array.isArray(record.activeMessageIds)
             ? record.activeMessageIds.filter((id): id is string => typeof id === 'string')
@@ -120,9 +118,9 @@ export function installPlaybackWorkerObserver(workerUrl: string): void {
               .map((entry) =>
                 entry !== null && typeof entry === 'object' && 'id' in entry
                   ? (entry as Record<string, unknown>).id
-                  : undefined,
+                  : undefined
               )
-              .filter((id): id is string => typeof id === 'string'),
+              .filter((id): id is string => typeof id === 'string')
           );
         }
       }

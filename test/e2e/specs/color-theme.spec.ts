@@ -11,13 +11,13 @@
  * Colors are stored as hex strings like '#FFFFFF' in the settings.
  */
 
-import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { expect, test } from '@playwright/test';
 import {
-  setupOverlayPage,
-  getSettings,
   applySettings,
+  getSettings,
   readStoredSettings,
+  setupOverlayPage,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 
@@ -25,7 +25,7 @@ test.describe('Color Theme Switching', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`,
+        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`
       );
     }
   });

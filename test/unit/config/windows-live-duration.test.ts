@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as durationModule from '../../../validation/windows/live-duration.mjs';
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as installProfileModule from '../../../validation/windows/install-profile.mjs';
+// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
+import * as durationModule from '../../../validation/windows/live-duration.mjs';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as naturalChromeModule from '../../../validation/windows/natural-chrome.mjs';
 
@@ -29,10 +29,12 @@ const healthySample = {
 describe('public duration observation contract', () => {
   it('accepts only the reviewed twenty-minute option', () => {
     expect(installProfileModule.validateLiveObservation(null)).toBeNull();
-    expect(installProfileModule.validateLiveObservation({
-      mode: 'duration',
-      duration_seconds: 1200,
-    })).toEqual({ mode: 'duration', duration_seconds: 1200 });
+    expect(
+      installProfileModule.validateLiveObservation({
+        mode: 'duration',
+        duration_seconds: 1200,
+      })
+    ).toEqual({ mode: 'duration', duration_seconds: 1200 });
 
     expect(installProfileModule.validateLiveObservation()).toBeNull();
 
@@ -48,12 +50,12 @@ describe('public duration observation contract', () => {
   });
 
   it('preserves the controller-admitted public YouTube URL policy', () => {
-    expect(durationModule.validateDurationLiveUrl(
-      'https://www.youtube.com/watch?v=public&list=playlist'
-    )).toBe('https://www.youtube.com/watch?v=public&list=playlist');
-    expect(durationModule.validateDurationLiveUrl(
-      'https://www.youtube.com/live/public-id?feature=share'
-    )).toBe('https://www.youtube.com/live/public-id?feature=share');
+    expect(
+      durationModule.validateDurationLiveUrl('https://www.youtube.com/watch?v=public&list=playlist')
+    ).toBe('https://www.youtube.com/watch?v=public&list=playlist');
+    expect(
+      durationModule.validateDurationLiveUrl('https://www.youtube.com/live/public-id?feature=share')
+    ).toBe('https://www.youtube.com/live/public-id?feature=share');
     for (const invalid of [
       'https://youtube.com/watch?v=public',
       'https://www.youtube.com/embed/public',
@@ -66,9 +68,17 @@ describe('public duration observation contract', () => {
   it('does not accept duration evidence without a native hidden transition', () => {
     const reasons = durationModule.durationEvidenceReasons({
       visibilityProof: ['visible', 'visible'],
-      samples: [healthySample, { ...healthySample, phase: 'resumed', video: {
-        ...healthySample.video, currentTime: 20,
-      } }],
+      samples: [
+        healthySample,
+        {
+          ...healthySample,
+          phase: 'resumed',
+          video: {
+            ...healthySample.video,
+            currentTime: 20,
+          },
+        },
+      ],
       rendererValidation: { status: 'observed' },
       playerControl: { status: 'observed' },
       resumeAccessibleRender: { status: 'observed' },
@@ -90,10 +100,9 @@ describe('public duration observation contract', () => {
     );
 
     expect(health.status).toBe('unverified');
-    expect(health.reasons).toEqual(expect.arrayContaining([
-      'sample-health-incomplete',
-      'media-time-not-progressing',
-    ]));
+    expect(health.reasons).toEqual(
+      expect.arrayContaining(['sample-health-incomplete', 'media-time-not-progressing'])
+    );
   });
 
   it('records visible YouTube player error UI even when MediaError is null', () => {
@@ -101,13 +110,16 @@ describe('public duration observation contract', () => {
       ...healthySample,
       playerErrorUi: { visible: true, marker: 'youtube-player-error-ui-visible' },
     };
-    const health = durationModule.summarizePhaseHealth([
-      errorUiSample,
-      {
-        ...errorUiSample,
-        video: { ...errorUiSample.video, currentTime: 40 },
-      },
-    ], 'active');
+    const health = durationModule.summarizePhaseHealth(
+      [
+        errorUiSample,
+        {
+          ...errorUiSample,
+          video: { ...errorUiSample.video, currentTime: 40 },
+        },
+      ],
+      'active'
+    );
 
     expect(health).toMatchObject({
       status: 'unverified',
@@ -129,10 +141,13 @@ describe('public duration observation contract', () => {
     { name: 'no positions', times: [], range: null },
     { name: 'non-finite positions', times: [10, Number.NaN, Infinity], range: null },
   ])('reports only a media position range for $name', ({ times, range }) => {
-    const health = durationModule.summarizePhaseHealth(times.map((currentTime) => ({
-      ...healthySample,
-      video: { ...healthySample.video, currentTime },
-    })), 'active');
+    const health = durationModule.summarizePhaseHealth(
+      times.map((currentTime) => ({
+        ...healthySample,
+        video: { ...healthySample.video, currentTime },
+      })),
+      'active'
+    );
 
     expect(health.mediaTimeRangeSeconds).toBe(range);
     expect(health).not.toHaveProperty('mediaProgressSeconds');
@@ -160,44 +175,58 @@ describe('public duration observation contract', () => {
   });
 
   it('waits for both overlay surfaces after healthy media becomes ready', () => {
-    expect(durationModule.isInitialObservationReady({
-      ...healthySample,
-      canvasAttached: false,
-      installedBridgeReady: false,
-    })).toBe(false);
-    expect(durationModule.isInitialObservationReady({
-      ...healthySample,
-      installedBridgeReady: false,
-    })).toBe(false);
-    expect(durationModule.isInitialObservationReady({
-      ...healthySample,
-      canvasAttached: false,
-    })).toBe(false);
+    expect(
+      durationModule.isInitialObservationReady({
+        ...healthySample,
+        canvasAttached: false,
+        installedBridgeReady: false,
+      })
+    ).toBe(false);
+    expect(
+      durationModule.isInitialObservationReady({
+        ...healthySample,
+        installedBridgeReady: false,
+      })
+    ).toBe(false);
+    expect(
+      durationModule.isInitialObservationReady({
+        ...healthySample,
+        canvasAttached: false,
+      })
+    ).toBe(false);
     expect(durationModule.isInitialObservationReady(healthySample)).toBe(true);
-    expect(durationModule.isInitialObservationReady({
-      ...healthySample,
-      playerErrorUi: { visible: true, marker: 'youtube-player-error-ui-visible' },
-    })).toBe(false);
+    expect(
+      durationModule.isInitialObservationReady({
+        ...healthySample,
+        playerErrorUi: { visible: true, marker: 'youtube-player-error-ui-visible' },
+      })
+    ).toBe(false);
   });
 
   it('requires a fresh accessible fingerprint after resume when chat exists', () => {
-    expect(durationModule.classifyResumeFingerprint(
-      { count: 2, fingerprint: 'before' },
-      { count: 2, fingerprint: 'after' },
-      123
-    )).toMatchObject({ status: 'observed', fingerprintChanged: true });
+    expect(
+      durationModule.classifyResumeFingerprint(
+        { count: 2, fingerprint: 'before' },
+        { count: 2, fingerprint: 'after' },
+        123
+      )
+    ).toMatchObject({ status: 'observed', fingerprintChanged: true });
 
-    expect(durationModule.classifyResumeFingerprint(
-      { count: 2, fingerprint: 'same' },
-      { count: 2, fingerprint: 'same' },
-      123
-    )).toMatchObject({ status: 'unverified', reason: 'accessible-render-did-not-change' });
+    expect(
+      durationModule.classifyResumeFingerprint(
+        { count: 2, fingerprint: 'same' },
+        { count: 2, fingerprint: 'same' },
+        123
+      )
+    ).toMatchObject({ status: 'unverified', reason: 'accessible-render-did-not-change' });
 
-    expect(durationModule.classifyResumeFingerprint(
-      { count: 0, fingerprint: 'empty' },
-      { count: 0, fingerprint: 'empty' },
-      123
-    )).toMatchObject({ status: 'not-run', reason: 'no-accessible-chat-observed' });
+    expect(
+      durationModule.classifyResumeFingerprint(
+        { count: 0, fingerprint: 'empty' },
+        { count: 0, fingerprint: 'empty' },
+        123
+      )
+    ).toMatchObject({ status: 'not-run', reason: 'no-accessible-chat-observed' });
   });
 
   it('does not await a never-settling media play promise', async () => {
@@ -232,10 +261,12 @@ describe('public duration observation contract', () => {
     };
     const page = { locator: () => ({ first: () => locator }) };
 
-    await expect(durationModule.exercisePlayerPausePlay(page, {
-      delay: vi.fn().mockResolvedValue(undefined),
-      timeoutMs: 50,
-    })).resolves.toMatchObject({ status: 'observed', muted: true });
+    await expect(
+      durationModule.exercisePlayerPausePlay(page, {
+        delay: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 50,
+      })
+    ).resolves.toMatchObject({ status: 'observed', muted: true });
     expect(pause).toHaveBeenCalledOnce();
     expect(play).toHaveBeenCalledOnce();
   });
@@ -251,22 +282,23 @@ describe('natural Chrome ownership boundaries', () => {
       signalCode: null,
       kill: vi.fn(() => true),
     };
-    const waitForChildExit = vi.fn()
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    const waitForChildExit = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     try {
-      const result = await naturalChromeModule.cleanupFailedNaturalChrome({
-        child,
-        childState: { spawnError: null },
-        browserProcessIdentity: null,
-        profile,
-        root,
-      }, {
-        stopChild: (ownedChild: unknown, state: unknown, cdp: unknown) =>
-          naturalChromeModule.stopUnidentifiedChild(ownedChild, state, cdp, {
-            waitForChildExit,
-          }),
-      });
+      const result = await naturalChromeModule.cleanupFailedNaturalChrome(
+        {
+          child,
+          childState: { spawnError: null },
+          browserProcessIdentity: null,
+          profile,
+          root,
+        },
+        {
+          stopChild: (ownedChild: unknown, state: unknown, cdp: unknown) =>
+            naturalChromeModule.stopUnidentifiedChild(ownedChild, state, cdp, {
+              waitForChildExit,
+            }),
+        }
+      );
 
       expect(child.kill).toHaveBeenCalledOnce();
       expect(result.cleanup).toMatchObject({
@@ -293,21 +325,24 @@ describe('natural Chrome ownership boundaries', () => {
       executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
       profile: 'c:\\owned-profile',
     };
-    const result = await naturalChromeModule.cleanupFailedNaturalChrome({
-      child: { pid: 42 },
-      childState: { spawnError: null },
-      browserProcessIdentity: identity,
-      profile: 'C:\\owned-profile',
-      root: 'C:\\',
-    }, {
-      terminateProcessTree: vi.fn(async (value: unknown) => {
-        expect(value).toBe(identity);
-        ordering.push('terminate-tree');
-      }),
-      removeProfile: vi.fn(async () => {
-        ordering.push('remove-profile');
-      }),
-    });
+    const result = await naturalChromeModule.cleanupFailedNaturalChrome(
+      {
+        child: { pid: 42 },
+        childState: { spawnError: null },
+        browserProcessIdentity: identity,
+        profile: 'C:\\owned-profile',
+        root: 'C:\\',
+      },
+      {
+        terminateProcessTree: vi.fn(async (value: unknown) => {
+          expect(value).toBe(identity);
+          ordering.push('terminate-tree');
+        }),
+        removeProfile: vi.fn(async () => {
+          ordering.push('remove-profile');
+        }),
+      }
+    );
 
     expect(ordering).toEqual(['terminate-tree', 'remove-profile']);
     expect(result).toEqual({
@@ -326,21 +361,24 @@ describe('natural Chrome ownership boundaries', () => {
   it('removes the profile when asynchronous spawn failure proves no PID existed', async () => {
     const ordering: string[] = [];
     const spawnError = new Error('spawn failed');
-    const result = await naturalChromeModule.cleanupFailedNaturalChrome({
-      child: { pid: undefined },
-      childState: { spawnError },
-      browserProcessIdentity: null,
-      profile: 'C:\\owned-profile',
-      root: 'C:\\',
-    }, {
-      stopChild: vi.fn(async () => {
-        ordering.push('confirm-no-process');
-        return { exited: true, errors: [] };
-      }),
-      removeProfile: vi.fn(async () => {
-        ordering.push('remove-profile');
-      }),
-    });
+    const result = await naturalChromeModule.cleanupFailedNaturalChrome(
+      {
+        child: { pid: undefined },
+        childState: { spawnError },
+        browserProcessIdentity: null,
+        profile: 'C:\\owned-profile',
+        root: 'C:\\',
+      },
+      {
+        stopChild: vi.fn(async () => {
+          ordering.push('confirm-no-process');
+          return { exited: true, errors: [] };
+        }),
+        removeProfile: vi.fn(async () => {
+          ordering.push('remove-profile');
+        }),
+      }
+    );
 
     expect(ordering).toEqual(['confirm-no-process', 'remove-profile']);
     expect(result.cleanup).toMatchObject({

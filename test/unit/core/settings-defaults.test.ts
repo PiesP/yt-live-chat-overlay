@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   migrateSettings,
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@settings/defaults';
+import { describe, expect, it } from 'vitest';
 
 // ── migrateSettings ─────────────────────────────────────────────
 

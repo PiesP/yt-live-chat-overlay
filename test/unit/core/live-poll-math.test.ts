@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
 import {
   calculateAdaptiveDelay,
   computeBurstAdjustedMs,
@@ -9,10 +8,11 @@ import {
   computeErrorBackoffMs,
   DENSITY_HIGH_THRESHOLD,
   DENSITY_WINDOW_SIZE,
+  type DensityConfig,
   EXTREME_DENSITY_THRESHOLD,
   recordDensitySample,
-  type DensityConfig,
 } from '@chat/live-poll-math';
+import { describe, expect, it } from 'vitest';
 
 const TEST_LIMITS: DensityConfig = {
   minPollIntervalMs: 200,
@@ -53,14 +53,19 @@ describe('recordDensitySample', () => {
   it('caps filled at window size', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
     // Simulate already full state
-    let result = recordDensitySample(ring, 2, DENSITY_WINDOW_SIZE, 1);
+    const result = recordDensitySample(ring, 2, DENSITY_WINDOW_SIZE, 1);
     expect(result.filled).toBe(DENSITY_WINDOW_SIZE);
   });
 
   it('does not mutate filled beyond window size', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
     for (let i = 0; i < 100; i++) {
-      const r = recordDensitySample(ring, i % DENSITY_WINDOW_SIZE, Math.min(i, DENSITY_WINDOW_SIZE), 1);
+      const r = recordDensitySample(
+        ring,
+        i % DENSITY_WINDOW_SIZE,
+        Math.min(i, DENSITY_WINDOW_SIZE),
+        1
+      );
       expect(r.filled).toBeLessThanOrEqual(DENSITY_WINDOW_SIZE);
     }
   });
@@ -116,7 +121,9 @@ describe('computeBurstAdjustedMs', () => {
   });
 
   it('returns the configured minimum for extreme density', () => {
-    expect(computeBurstAdjustedMs(2000, EXTREME_DENSITY_THRESHOLD, TEST_LIMITS)).toBe(TEST_LIMITS.minPollIntervalMs);
+    expect(computeBurstAdjustedMs(2000, EXTREME_DENSITY_THRESHOLD, TEST_LIMITS)).toBe(
+      TEST_LIMITS.minPollIntervalMs
+    );
     expect(computeBurstAdjustedMs(2000, 100, TEST_LIMITS)).toBe(TEST_LIMITS.minPollIntervalMs);
   });
 
@@ -218,7 +225,8 @@ describe('computeDensityAdjustedMs', () => {
 describe('calculateAdaptiveDelay', () => {
   it('uses timeoutMs as fallback when > 0', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 5; ring[1] = 5;
+    ring[0] = 5;
+    ring[1] = 5;
     // no errors, no EMA, normal density → timeoutMs(3000) used as fallback
     const result = calculateAdaptiveDelay(3000, 2000, 0, undefined, ring, 2, TEST_LIMITS);
     // fallback = timeoutMs=3000 (timeoutMs > 0 takes priority over livePollFallbackMs)
@@ -227,14 +235,16 @@ describe('calculateAdaptiveDelay', () => {
 
   it('uses livePollFallbackMs when timeoutMs is 0', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 5; ring[1] = 5;
+    ring[0] = 5;
+    ring[1] = 5;
     const result = calculateAdaptiveDelay(0, 2000, 0, undefined, ring, 2, TEST_LIMITS);
     expect(result).toBe(2000); // fallback = livePollFallbackMs=2000, density adjusted
   });
 
   it('error backoff takes priority over burst and density', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 40; ring[1] = 40; // extreme density → would return the minimum
+    ring[0] = 40;
+    ring[1] = 40; // extreme density → would return the minimum
     // But error backoff should take priority
     const result = calculateAdaptiveDelay(2000, 2000, 3, undefined, ring, 2, TEST_LIMITS);
     // delayed = 2000 * 2^3 = 16000 → clamped to 5000
@@ -243,15 +253,25 @@ describe('calculateAdaptiveDelay', () => {
 
   it('burst reactivity takes priority over density adaptation', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 5; ring[1] = 5; // normal density → 2000
+    ring[0] = 5;
+    ring[1] = 5; // normal density → 2000
     // EMA rate at high → burst takes priority
-    const result = calculateAdaptiveDelay(2000, 2000, 0, DENSITY_HIGH_THRESHOLD, ring, 2, TEST_LIMITS);
+    const result = calculateAdaptiveDelay(
+      2000,
+      2000,
+      0,
+      DENSITY_HIGH_THRESHOLD,
+      ring,
+      2,
+      TEST_LIMITS
+    );
     expect(result).toBe(600); // burst adjusted (not density adjusted)
   });
 
   it('falls through to density adaptation when no errors or burst', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 2; ring[1] = 3;
+    ring[0] = 2;
+    ring[1] = 3;
     const result = calculateAdaptiveDelay(2000, 2000, 0, undefined, ring, 2, TEST_LIMITS);
     // avg = 2.5: normal density → base unchanged
     expect(result).toBe(2000);
@@ -259,14 +279,24 @@ describe('calculateAdaptiveDelay', () => {
 
   it('returns the configured minimum when extreme burst is active', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 5; ring[1] = 5;
-    const result = calculateAdaptiveDelay(2000, 2000, 0, EXTREME_DENSITY_THRESHOLD, ring, 2, TEST_LIMITS);
+    ring[0] = 5;
+    ring[1] = 5;
+    const result = calculateAdaptiveDelay(
+      2000,
+      2000,
+      0,
+      EXTREME_DENSITY_THRESHOLD,
+      ring,
+      2,
+      TEST_LIMITS
+    );
     expect(result).toBe(TEST_LIMITS.minPollIntervalMs);
   });
 
   it('handles negative timeoutMs (uses livePollFallbackMs)', () => {
     const ring = new Uint16Array(DENSITY_WINDOW_SIZE);
-    ring[0] = 5; ring[1] = 5;
+    ring[0] = 5;
+    ring[1] = 5;
     const result = calculateAdaptiveDelay(-1, 2000, 0, undefined, ring, 2, TEST_LIMITS);
     expect(result).toBe(2000);
   });

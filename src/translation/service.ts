@@ -27,8 +27,12 @@ const TRANSLATION_CANCELLED = Symbol('translation-cancelled');
 // Types are defined in @platform/translation-adapter and re-exported for
 // use within this module.
 
-import type { TranslatorDownloadEvent, TranslatorInstance } from '@platform/translation-adapter';
-import { getTranslator, isTranslationSupported } from '@platform/translation-adapter';
+import {
+  getTranslator,
+  isTranslationSupported,
+  type TranslatorDownloadEvent,
+  type TranslatorInstance,
+} from '@platform/translation-adapter';
 
 type TranslateQueueEntry = {
   text: string;

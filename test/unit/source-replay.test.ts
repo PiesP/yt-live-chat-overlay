@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { ReplayChatSource } from '@chat/source-replay';
+
 import type { ChatMessage } from '@app-types';
-import type { InnertubeContinuationData } from '@chat/youtube/continuation';
+import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
+import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function makeReplayMessage(id: string, offsetMs: number): ChatMessage {
   return {
@@ -123,9 +124,7 @@ describe('ReplayChatSource', () => {
     source.setPauseReason('video', true);
     expect(source.drainPendingMessages()).toEqual([]);
     source.setPauseReason('video', false);
-    expect(source.drainPendingMessages().map((message) => message.id)).toEqual([
-      'just-future',
-    ]);
+    expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['just-future']);
     source.setPauseReason('visibility', false);
     playback.mockReturnValue({ offsetMs: 11_500, paused: false });
     expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['prefetched']);
@@ -464,8 +463,9 @@ describe('ReplayChatSource', () => {
       offsetMs: 1000,
       paused: false,
     });
-    const requestPayload = vi.spyOn(internals, 'requestPayload').mockImplementation(
-      (_fetchFn, _continuation, ...fetchArgs) => {
+    const requestPayload = vi
+      .spyOn(internals, 'requestPayload')
+      .mockImplementation((_fetchFn, _continuation, ...fetchArgs) => {
         const signal = fetchArgs.at(-1) as AbortSignal;
         requestSignals.push(signal);
         return new Promise<LiveChatPayload>((resolve, reject) => {
@@ -486,8 +486,7 @@ describe('ReplayChatSource', () => {
             };
           }
         });
-      }
-    );
+      });
 
     internals.startCooperativeLoop();
     await vi.advanceTimersByTimeAsync(0);
@@ -646,9 +645,7 @@ describe('ReplayChatSource', () => {
           },
         },
       ],
-      continuations: [
-        { liveChatReplayContinuationData: { continuation: 'stale-next' } },
-      ],
+      continuations: [{ liveChatReplayContinuationData: { continuation: 'stale-next' } }],
     });
     await Promise.resolve();
     await Promise.resolve();
@@ -697,15 +694,11 @@ describe('ReplayChatSource', () => {
       .spyOn(internals, 'requestReplayPayload')
       .mockResolvedValueOnce({
         actions: [],
-        continuations: [
-          { liveChatReplayContinuationData: { continuation: 'after-empty-page' } },
-        ],
+        continuations: [{ liveChatReplayContinuationData: { continuation: 'after-empty-page' } }],
       })
       .mockResolvedValueOnce({
         actions: [makeReplayAction('five-minute-message', 300_000)],
-        continuations: [
-          { liveChatReplayContinuationData: { continuation: 'after-five-minutes' } },
-        ],
+        continuations: [{ liveChatReplayContinuationData: { continuation: 'after-five-minutes' } }],
       });
 
     await expect(internals.fetchNextReplayFallbackBatch(0)).resolves.toBe(true);
@@ -772,9 +765,7 @@ describe('ReplayChatSource', () => {
           },
         },
       ],
-      continuations: [
-        { liveChatReplayContinuationData: { continuation: 'stale-next' } },
-      ],
+      continuations: [{ liveChatReplayContinuationData: { continuation: 'stale-next' } }],
     });
 
     await expect(staleInitialization).resolves.toBe(false);
@@ -803,9 +794,7 @@ describe('ReplayChatSource', () => {
           },
         },
       ],
-      continuations: [
-        { liveChatReplayContinuationData: { continuation: 'current-next' } },
-      ],
+      continuations: [{ liveChatReplayContinuationData: { continuation: 'current-next' } }],
     });
 
     await expect(currentInitialization).resolves.toBe(true);
@@ -890,9 +879,9 @@ describe('ReplayChatSource', () => {
       .spyOn(internals, 'installSeekListeners')
       .mockImplementation(() => {});
 
-    await expect(
-      internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })
-    ).resolves.toBe(true);
+    await expect(internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })).resolves.toBe(
+      true
+    );
     expect(startLoop).toHaveBeenCalledOnce();
     expect(installSeekListeners).toHaveBeenCalledOnce();
   });
@@ -903,29 +892,24 @@ describe('ReplayChatSource', () => {
 
     const internals = source as unknown as {
       replayNextAllowedFetchAt: number;
-      pollPlayerSeekReplay: (playback: {
-        offsetMs: number;
-        paused: boolean;
-      }) => Promise<boolean>;
+      pollPlayerSeekReplay: (playback: { offsetMs: number; paused: boolean }) => Promise<boolean>;
       shouldFetchReplayAtOffset: (offsetMs: number) => boolean;
       fetchReplayPlayerSeek: (offsetMs: number) => Promise<boolean>;
     };
     internals.replayNextAllowedFetchAt = Date.now() + 5000;
-    const shouldFetch = vi
-      .spyOn(internals, 'shouldFetchReplayAtOffset')
-      .mockReturnValue(true);
+    const shouldFetch = vi.spyOn(internals, 'shouldFetchReplayAtOffset').mockReturnValue(true);
     const fetchReplay = vi.spyOn(internals, 'fetchReplayPlayerSeek').mockResolvedValue(true);
 
-    await expect(
-      internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })
-    ).resolves.toBe(false);
+    await expect(internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })).resolves.toBe(
+      false
+    );
     expect(shouldFetch).not.toHaveBeenCalled();
     expect(fetchReplay).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(5000);
-    await expect(
-      internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })
-    ).resolves.toBe(true);
+    await expect(internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })).resolves.toBe(
+      true
+    );
     expect(fetchReplay).toHaveBeenCalledOnce();
   });
 

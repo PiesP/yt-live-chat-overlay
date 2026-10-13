@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TranslatorInstance } from '@platform/translation-adapter';
 import { TranslationService } from '@translation/service';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -133,7 +133,10 @@ describe('TranslationService translator lifecycle', () => {
   it('resolves non-empty translations immediately after disable and destroy', async () => {
     const firstTranslator = makeTranslator('first');
     const secondTranslator = makeTranslator('second');
-    const create = vi.fn().mockResolvedValueOnce(firstTranslator).mockResolvedValueOnce(secondTranslator);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(firstTranslator)
+      .mockResolvedValueOnce(secondTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -158,10 +161,13 @@ describe('TranslationService translator lifecycle', () => {
     const newTranslator = makeTranslator('new');
     const newCreation = deferred<TranslatorInstance>();
     const newCreationStarted = deferred<void>();
-    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockImplementationOnce(() => {
-      newCreationStarted.resolve(undefined);
-      return newCreation.promise;
-    });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockImplementationOnce(() => {
+        newCreationStarted.resolve(undefined);
+        return newCreation.promise;
+      });
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -191,10 +197,13 @@ describe('TranslationService translator lifecycle', () => {
     const newTranslator = makeTranslator('new');
     const newCreation = deferred<TranslatorInstance>();
     const newCreationStarted = deferred<void>();
-    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockImplementationOnce(() => {
-      newCreationStarted.resolve(undefined);
-      return newCreation.promise;
-    });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockImplementationOnce(() => {
+        newCreationStarted.resolve(undefined);
+        return newCreation.promise;
+      });
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -221,10 +230,13 @@ describe('TranslationService translator lifecycle', () => {
     const oldTranslator = makeTranslator('old');
     const newCreation = deferred<TranslatorInstance>();
     const newCreationStarted = deferred<void>();
-    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockImplementationOnce(() => {
-      newCreationStarted.resolve(undefined);
-      return newCreation.promise;
-    });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockImplementationOnce(() => {
+        newCreationStarted.resolve(undefined);
+        return newCreation.promise;
+      });
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -253,10 +265,13 @@ describe('TranslationService translator lifecycle', () => {
     const staleCreation = deferred<TranslatorInstance>();
     const latestTranslator = makeTranslator('latest');
     const staleCreateStarted = deferred<void>();
-    const create = vi.fn().mockImplementationOnce(() => {
-      staleCreateStarted.resolve(undefined);
-      return staleCreation.promise;
-    }).mockResolvedValueOnce(latestTranslator);
+    const create = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        staleCreateStarted.resolve(undefined);
+        return staleCreation.promise;
+      })
+      .mockResolvedValueOnce(latestTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -287,10 +302,13 @@ describe('TranslationService translator lifecycle', () => {
     const staleCreation = deferred<TranslatorInstance>();
     const latestTranslator = makeTranslator('latest');
     const staleCreateStarted = deferred<void>();
-    const create = vi.fn().mockImplementationOnce(() => {
-      staleCreateStarted.resolve(undefined);
-      return staleCreation.promise;
-    }).mockResolvedValueOnce(latestTranslator);
+    const create = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        staleCreateStarted.resolve(undefined);
+        return staleCreation.promise;
+      })
+      .mockResolvedValueOnce(latestTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -330,7 +348,10 @@ describe('TranslationService translator lifecycle', () => {
       newTranslationStarted.resolve(undefined);
       return Promise.resolve(`new:${text}`);
     });
-    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockResolvedValueOnce(newTranslator);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockResolvedValueOnce(newTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -354,7 +375,10 @@ describe('TranslationService translator lifecycle', () => {
     const staleTranslation = deferred<string>();
     oldTranslator.translate.mockImplementationOnce(() => staleTranslation.promise);
     const newTranslator = makeTranslator('new');
-    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockResolvedValueOnce(newTranslator);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockResolvedValueOnce(newTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -441,7 +465,10 @@ describe('TranslationService translator lifecycle', () => {
       secondTranslateStarted.resolve(undefined);
       return secondTranslation.promise;
     });
-    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockResolvedValueOnce(newTranslator);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockResolvedValueOnce(newTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 
@@ -518,7 +545,11 @@ describe('TranslationService translator lifecycle', () => {
   });
 
   it('settles translations after the recovery cycle cap is reached', async () => {
-    const translators = [makeTranslator('first'), makeTranslator('second'), makeTranslator('third')];
+    const translators = [
+      makeTranslator('first'),
+      makeTranslator('second'),
+      makeTranslator('third'),
+    ];
     for (const translator of translators) {
       translator.translate.mockRejectedValue(new Error('translator failed'));
     }
@@ -618,12 +649,12 @@ describe('TranslationService translator lifecycle', () => {
         secondCreateStarted.resolve(undefined);
         return secondCreation.promise;
       });
-    const availability = vi.fn().mockImplementation(
-      async ({ sourceLanguage }: { sourceLanguage: string }) => {
+    const availability = vi
+      .fn()
+      .mockImplementation(async ({ sourceLanguage }: { sourceLanguage: string }) => {
         if (sourceLanguage === 'zh-CN') secondDetectionStarted.resolve(undefined);
         return 'available';
-      }
-    );
+      });
     stubTranslator(create, availability);
 
     const service = new TranslationService();
@@ -650,7 +681,10 @@ describe('TranslationService translator lifecycle', () => {
   it('passes a detected Traditional Chinese script tag to the Translator API', async () => {
     const initialTranslator = makeTranslator('initial');
     const detectedTranslator = makeTranslator('detected');
-    const create = vi.fn().mockResolvedValueOnce(initialTranslator).mockResolvedValueOnce(detectedTranslator);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(initialTranslator)
+      .mockResolvedValueOnce(detectedTranslator);
     const availability = vi.fn().mockResolvedValue('available');
     stubTranslator(create, availability);
 

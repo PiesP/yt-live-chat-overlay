@@ -8,13 +8,23 @@ import { join } from 'node:path';
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows193Placement';
 const MIXED_IDS = ['WINDOWS204_MIX_REGULAR', 'WINDOWS204_MIX_PAID'];
 const TOKENS = [
-  'WINDOWS193_SHORT', 'WINDOWS193_LONG', 'WINDOWS193_REVERSE',
-  'WINDOWS193_REPLAY_DUE', 'WINDOWS193_REPLAY_NEXT', 'WINDOWS193_REPLAY_FUTURE',
-  'WINDOWS193_REDUCED', 'WINDOWS193_OVERRIDE', 'WINDOWS193_TRANSITION',
-  'WINDOWS193_EXPANDED', 'WINDOWS193_OVERRIDE_OFF', 'WINDOWS193_SYSTEM_OFF',
+  'WINDOWS193_SHORT',
+  'WINDOWS193_LONG',
+  'WINDOWS193_REVERSE',
+  'WINDOWS193_REPLAY_DUE',
+  'WINDOWS193_REPLAY_NEXT',
+  'WINDOWS193_REPLAY_FUTURE',
+  'WINDOWS193_REDUCED',
+  'WINDOWS193_OVERRIDE',
+  'WINDOWS193_TRANSITION',
+  'WINDOWS193_EXPANDED',
+  'WINDOWS193_OVERRIDE_OFF',
+  'WINDOWS193_SYSTEM_OFF',
   'WINDOWS193_PAID',
-  'WINDOWS196_GAP0_A', 'WINDOWS196_GAP0_B',
-  'WINDOWS196_GAP8_A', 'WINDOWS196_GAP8_B',
+  'WINDOWS196_GAP0_A',
+  'WINDOWS196_GAP0_B',
+  'WINDOWS196_GAP8_A',
+  'WINDOWS196_GAP8_B',
   'WINDOWS195_BACKLOG_LONG',
   ...Array.from({ length: 10 }, (_, index) => `WINDOWS196_GAP0_${String(index).padStart(2, '0')}`),
   ...Array.from({ length: 10 }, (_, index) => `WINDOWS196_GAP8_${String(index).padStart(2, '0')}`),
@@ -40,15 +50,22 @@ export const PLACEMENT_SCENARIOS = Object.freeze([
   { name: 'worker-congestion', forceFallback: false, mode: 'scroll', transition: 'congestion' },
   { name: 'worker-translation', forceFallback: false, mode: 'scroll', transition: 'translation' },
   { name: 'worker-replay', forceFallback: false, mode: 'replay' },
-  { name: 'worker-spacing-speed', forceFallback: false, mode: 'scroll', transition: 'spacing-speed' },
+  {
+    name: 'worker-spacing-speed',
+    forceFallback: false,
+    mode: 'scroll',
+    transition: 'spacing-speed',
+  },
   { name: 'main-spacing-speed', forceFallback: true, mode: 'scroll', transition: 'spacing-speed' },
   { name: 'worker-mixed-gap', forceFallback: false, mode: 'top', transition: 'mixed-gap' },
   { name: 'main-mixed-gap', forceFallback: true, mode: 'top', transition: 'mixed-gap' },
 ]);
 
 export function spacingFixtureIds() {
-  return { gap0: [...TOKENS.slice(13, 15), ...TOKENS.slice(18, 28)],
-    gap8: [...TOKENS.slice(15, 17), ...TOKENS.slice(28, 38)] };
+  return {
+    gap0: [...TOKENS.slice(13, 15), ...TOKENS.slice(18, 28)],
+    gap8: [...TOKENS.slice(15, 17), ...TOKENS.slice(28, 38)],
+  };
 }
 
 function installProbeRuntime(options) {
@@ -59,52 +76,93 @@ function installProbeRuntime(options) {
   const bitmapInk = new WeakMap();
   const frameContexts = new WeakMap();
   const state = {
-    frames: [], bounds: [], ink: [], firstEntry: {}, ingress: {}, stats: [], workers: [],
-    sourcePrefixed: false, sourceHooked: false, overflow: 0, ready: false, canvas: null,
-    frameCount: 0, reportCount: 0, videoEntry: {}, renderFrameId: 0, latestRenderFrame: null,
+    frames: [],
+    bounds: [],
+    ink: [],
+    firstEntry: {},
+    ingress: {},
+    stats: [],
+    workers: [],
+    sourcePrefixed: false,
+    sourceHooked: false,
+    overflow: 0,
+    ready: false,
+    canvas: null,
+    frameCount: 0,
+    reportCount: 0,
+    videoEntry: {},
+    renderFrameId: 0,
+    latestRenderFrame: null,
   };
   scope.__ytPlacementProbe = state;
   const epochNow = () => performance.timeOrigin + performance.now();
   const tokenIn = (text) => options.tokens.find((token) => String(text).includes(token));
-  const overlayContext = (ctx) => options.worker
-    ? ctx.canvas === state.canvas
-    : Boolean(ctx.canvas?.closest?.('#yt-live-chat-overlay'));
+  const overlayContext = (ctx) =>
+    options.worker
+      ? ctx.canvas === state.canvas
+      : Boolean(ctx.canvas?.closest?.('#yt-live-chat-overlay'));
   const japaneseRun = (text, ctx, x, y) => {
     const match = /[\u3040-\u30ff\u3400-\u9fff]+/u.exec(String(text));
     if (!match) return null;
     const startX = x + ctx.measureText(String(text).slice(0, match.index)).width;
     const metrics = ctx.measureText(match[0]);
-    return { text: match[0], left: startX - (metrics.actualBoundingBoxLeft ?? 0),
+    return {
+      text: match[0],
+      left: startX - (metrics.actualBoundingBoxLeft ?? 0),
       top: y - metrics.actualBoundingBoxAscent,
-      width: (metrics.actualBoundingBoxLeft ?? 0) +
-        (metrics.actualBoundingBoxRight ?? metrics.width),
-      height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent };
+      width:
+        (metrics.actualBoundingBoxLeft ?? 0) + (metrics.actualBoundingBoxRight ?? metrics.width),
+      height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+    };
   };
   const transformedRect = (ctx, x, y, width, height) => {
     if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
     const transform = ctx.getTransform();
-    const points = [[x, y], [x + width, y], [x, y + height], [x + width, y + height]]
-      .map(([px, py]) => ({
-        x: transform.a * px + transform.c * py + transform.e,
-        y: transform.b * px + transform.d * py + transform.f,
-      }));
-    return { left: Math.min(...points.map((point) => point.x)),
+    const points = [
+      [x, y],
+      [x + width, y],
+      [x, y + height],
+      [x + width, y + height],
+    ].map(([px, py]) => ({
+      x: transform.a * px + transform.c * py + transform.e,
+      y: transform.b * px + transform.d * py + transform.f,
+    }));
+    return {
+      left: Math.min(...points.map((point) => point.x)),
       top: Math.min(...points.map((point) => point.y)),
       right: Math.max(...points.map((point) => point.x)),
-      bottom: Math.max(...points.map((point) => point.y)) };
+      bottom: Math.max(...points.map((point) => point.y)),
+    };
   };
-  const logicalRect = (rect, frame) => rect && frame?.backingRatioX > 0 &&
-    frame?.backingRatioY > 0 ? { left: rect.left / frame.backingRatioX,
-      top: rect.top / frame.backingRatioY, right: rect.right / frame.backingRatioX,
-      bottom: rect.bottom / frame.backingRatioY } : null;
+  const logicalRect = (rect, frame) =>
+    rect && frame?.backingRatioX > 0 && frame?.backingRatioY > 0
+      ? {
+          left: rect.left / frame.backingRatioX,
+          top: rect.top / frame.backingRatioY,
+          right: rect.right / frame.backingRatioX,
+          bottom: rect.bottom / frame.backingRatioY,
+        }
+      : null;
   state.beginRenderFrame = ({ ctx, logicalWidth, logicalHeight, config }) => {
     const backingWidth = ctx?.canvas?.width ?? null;
     const backingHeight = ctx?.canvas?.height ?? null;
-    const frame = { frameId: ++state.renderFrameId, startedAtEpochMs: epochNow(),
-      finishedAtEpochMs: null, complete: false, cleared: false, truncated: false,
-      logicalWidth, logicalHeight, backingWidth, backingHeight,
-      backingRatioX: backingWidth / logicalWidth, backingRatioY: backingHeight / logicalHeight,
-      config, active: [], draws: [] };
+    const frame = {
+      frameId: ++state.renderFrameId,
+      startedAtEpochMs: epochNow(),
+      finishedAtEpochMs: null,
+      complete: false,
+      cleared: false,
+      truncated: false,
+      logicalWidth,
+      logicalHeight,
+      backingWidth,
+      backingHeight,
+      backingRatioX: backingWidth / logicalWidth,
+      backingRatioY: backingHeight / logicalHeight,
+      config,
+      active: [],
+      draws: [],
+    };
     if (ctx) frameContexts.set(frame, ctx);
     state.currentRenderFrame = frame;
     return frame;
@@ -116,12 +174,19 @@ function installProbeRuntime(options) {
     frame.backingHeight = ctx?.canvas?.height ?? null;
     frame.backingRatioX = frame.backingWidth / frame.logicalWidth;
     frame.backingRatioY = frame.backingHeight / frame.logicalHeight;
-    frame.complete = !frame.failed && frame.cleared && Number.isFinite(frame.backingRatioX) &&
-      frame.backingRatioX > 0 && Number.isFinite(frame.backingRatioY) && frame.backingRatioY > 0 &&
+    frame.complete =
+      !frame.failed &&
+      frame.cleared &&
+      Number.isFinite(frame.backingRatioX) &&
+      frame.backingRatioX > 0 &&
+      Number.isFinite(frame.backingRatioY) &&
+      frame.backingRatioY > 0 &&
       frame.config?.logicalWidth === frame.logicalWidth &&
       frame.config?.logicalHeight === frame.logicalHeight &&
-      frame.draws.every((draw) => draw.backingRatioX === frame.backingRatioX &&
-        draw.backingRatioY === frame.backingRatioY);
+      frame.draws.every(
+        (draw) =>
+          draw.backingRatioX === frame.backingRatioX && draw.backingRatioY === frame.backingRatioY
+      );
     if (active.length > MAX_SAMPLES) frame.truncated = true;
     frame.active = active.slice(0, MAX_SAMPLES);
     state.latestRenderFrame = frame;
@@ -138,12 +203,23 @@ function installProbeRuntime(options) {
       const backingRatioY = ctx.canvas.height / frame.logicalHeight;
       const ratios = { backingRatioX, backingRatioY };
       const japanese = ink?.japanese ?? null;
-      frame.draws.push({ id, frameId: frame.frameId, kind, alpha: ctx.globalAlpha,
-        ...ratios, rect: logicalRect(rect, ratios), japanese: japanese ? {
-          text: japanese.text,
-          rect: logicalRect(transformedRect(ctx, japanese.left, japanese.top,
-            japanese.width, japanese.height), ratios),
-        } : null });
+      frame.draws.push({
+        id,
+        frameId: frame.frameId,
+        kind,
+        alpha: ctx.globalAlpha,
+        ...ratios,
+        rect: logicalRect(rect, ratios),
+        japanese: japanese
+          ? {
+              text: japanese.text,
+              rect: logicalRect(
+                transformedRect(ctx, japanese.left, japanese.top, japanese.width, japanese.height),
+                ratios
+              ),
+            }
+          : null,
+      });
     } else if (frame) frame.truncated = true;
     if (ctx.globalAlpha <= 0) return;
     if (state.bounds.length < MAX_SAMPLES) state.bounds.push(bound);
@@ -155,7 +231,12 @@ function installProbeRuntime(options) {
     // Bounds and viewport use backing-store pixels after applying the transform.
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
-    if (bound.right > 0 && bound.left < canvasWidth && bound.bottom > 0 && bound.top < canvasHeight) {
+    if (
+      bound.right > 0 &&
+      bound.left < canvasWidth &&
+      bound.bottom > 0 &&
+      bound.top < canvasHeight
+    ) {
       state.firstEntry[id] ??= bound.atEpochMs;
     }
   };
@@ -171,29 +252,47 @@ function installProbeRuntime(options) {
       if (id && !overlayContext(this)) {
         bitmapIds.set(this.canvas, id);
         const metrics = this.measureText(text);
-        bitmapInk.set(this.canvas, { ...bitmapInk.get(this.canvas), fill: { font: this.font,
-          left: x - (metrics.actualBoundingBoxLeft ?? 0),
-          top: y - metrics.actualBoundingBoxAscent,
-          width: (metrics.actualBoundingBoxLeft ?? 0) +
-            (metrics.actualBoundingBoxRight ?? metrics.width),
-          height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
-          japanese: (() => {
-            const run = japaneseRun(text, this, x, y);
-            if (!run) return null;
-            const rect = transformedRect(this, run.left, run.top, run.width, run.height);
-            return rect ? { text: run.text, left: rect.left, top: rect.top,
-              width: rect.right - rect.left, height: rect.bottom - rect.top } : null;
-          })() } });
+        bitmapInk.set(this.canvas, {
+          ...bitmapInk.get(this.canvas),
+          fill: {
+            font: this.font,
+            left: x - (metrics.actualBoundingBoxLeft ?? 0),
+            top: y - metrics.actualBoundingBoxAscent,
+            width:
+              (metrics.actualBoundingBoxLeft ?? 0) +
+              (metrics.actualBoundingBoxRight ?? metrics.width),
+            height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+            japanese: (() => {
+              const run = japaneseRun(text, this, x, y);
+              if (!run) return null;
+              const rect = transformedRect(this, run.left, run.top, run.width, run.height);
+              return rect
+                ? {
+                    text: run.text,
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.right - rect.left,
+                    height: rect.bottom - rect.top,
+                  }
+                : null;
+            })(),
+          },
+        });
       }
       if (id && overlayContext(this)) {
         const metrics = this.measureText(text);
         const left = metrics.actualBoundingBoxLeft ?? 0;
         const right = metrics.actualBoundingBoxRight ?? metrics.width;
-        recordRect(this, id, x - left,
-          y - metrics.actualBoundingBoxAscent, left + right,
-          metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent, 'fill',
-          { font: this.font, lineWidth: this.lineWidth,
-            japanese: japaneseRun(text, this, x, y) });
+        recordRect(
+          this,
+          id,
+          x - left,
+          y - metrics.actualBoundingBoxAscent,
+          left + right,
+          metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+          'fill',
+          { font: this.font, lineWidth: this.lineWidth, japanese: japaneseRun(text, this, x, y) }
+        );
       }
       return result;
     };
@@ -204,32 +303,51 @@ function installProbeRuntime(options) {
       if (id && !overlayContext(this)) {
         const metrics = this.measureText(text);
         const padding = this.lineWidth / 2;
-        bitmapInk.set(this.canvas, { ...bitmapInk.get(this.canvas), stroke: { font: this.font,
-          lineWidth: this.lineWidth,
-          left: x - (metrics.actualBoundingBoxLeft ?? 0) - padding,
-          top: y - metrics.actualBoundingBoxAscent - padding,
-          width: (metrics.actualBoundingBoxLeft ?? 0) +
-            (metrics.actualBoundingBoxRight ?? metrics.width) + padding * 2,
-          height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
-          japanese: (() => {
-            const run = japaneseRun(text, this, x, y);
-            if (!run) return null;
-            const rect = transformedRect(this, run.left, run.top, run.width, run.height);
-            return rect ? { text: run.text, left: rect.left, top: rect.top,
-              width: rect.right - rect.left, height: rect.bottom - rect.top } : null;
-          })() } });
+        bitmapInk.set(this.canvas, {
+          ...bitmapInk.get(this.canvas),
+          stroke: {
+            font: this.font,
+            lineWidth: this.lineWidth,
+            left: x - (metrics.actualBoundingBoxLeft ?? 0) - padding,
+            top: y - metrics.actualBoundingBoxAscent - padding,
+            width:
+              (metrics.actualBoundingBoxLeft ?? 0) +
+              (metrics.actualBoundingBoxRight ?? metrics.width) +
+              padding * 2,
+            height:
+              metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
+            japanese: (() => {
+              const run = japaneseRun(text, this, x, y);
+              if (!run) return null;
+              const rect = transformedRect(this, run.left, run.top, run.width, run.height);
+              return rect
+                ? {
+                    text: run.text,
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.right - rect.left,
+                    height: rect.bottom - rect.top,
+                  }
+                : null;
+            })(),
+          },
+        });
       }
       if (id && overlayContext(this)) {
         const metrics = this.measureText(text);
         const left = metrics.actualBoundingBoxLeft ?? 0;
         const right = metrics.actualBoundingBoxRight ?? metrics.width;
         const padding = this.lineWidth / 2;
-        recordRect(this, id, x - left - padding,
+        recordRect(
+          this,
+          id,
+          x - left - padding,
           y - metrics.actualBoundingBoxAscent - padding,
           left + right + padding * 2,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
-          'stroke', { font: this.font, lineWidth: this.lineWidth,
-            japanese: japaneseRun(text, this, x, y) });
+          'stroke',
+          { font: this.font, lineWidth: this.lineWidth, japanese: japaneseRun(text, this, x, y) }
+        );
       }
       return result;
     };
@@ -238,27 +356,32 @@ function installProbeRuntime(options) {
       const id = bitmapIds.get(image);
       const result = nativeDrawImage.call(this, image, ...args);
       if (id && overlayContext(this)) {
-        const destination = args.length === 2
-          ? [args[0], args[1], image.width, image.height]
-          : args.length === 4 ? args : args.slice(4, 8);
+        const destination =
+          args.length === 2
+            ? [args[0], args[1], image.width, image.height]
+            : args.length === 4
+              ? args
+              : args.slice(4, 8);
         if (destination.length === 4) {
           const sourceInk = bitmapInk.get(image) ?? null;
           const run = sourceInk?.fill?.japanese ?? sourceInk?.stroke?.japanese ?? null;
-          const [sourceX, sourceY, sourceWidth, sourceHeight] = args.length === 8
-            ? args.slice(0, 4) : [0, 0, image.width, image.height];
+          const [sourceX, sourceY, sourceWidth, sourceHeight] =
+            args.length === 8 ? args.slice(0, 4) : [0, 0, image.width, image.height];
           const [destX, destY, destWidth, destHeight] = destination;
           const runLeft = run ? Math.max(run.left, sourceX) : 0;
           const runTop = run ? Math.max(run.top, sourceY) : 0;
           const runRight = run ? Math.min(run.left + run.width, sourceX + sourceWidth) : 0;
           const runBottom = run ? Math.min(run.top + run.height, sourceY + sourceHeight) : 0;
-          const japanese = run && sourceWidth > 0 && sourceHeight > 0 &&
-            runRight > runLeft && runBottom > runTop ? {
-            text: run.text,
-            left: destX + (runLeft - sourceX) * destWidth / sourceWidth,
-            top: destY + (runTop - sourceY) * destHeight / sourceHeight,
-            width: (runRight - runLeft) * destWidth / sourceWidth,
-            height: (runBottom - runTop) * destHeight / sourceHeight,
-          } : null;
+          const japanese =
+            run && sourceWidth > 0 && sourceHeight > 0 && runRight > runLeft && runBottom > runTop
+              ? {
+                  text: run.text,
+                  left: destX + ((runLeft - sourceX) * destWidth) / sourceWidth,
+                  top: destY + ((runTop - sourceY) * destHeight) / sourceHeight,
+                  width: ((runRight - runLeft) * destWidth) / sourceWidth,
+                  height: ((runBottom - runTop) * destHeight) / sourceHeight,
+                }
+              : null;
           recordRect(this, id, ...destination, 'bitmap', { sourceInk, japanese });
         }
       }
@@ -268,10 +391,15 @@ function installProbeRuntime(options) {
     prototype.clearRect = function (...args) {
       const result = nativeClearRect.call(this, ...args);
       const renderFrame = state.currentRenderFrame;
-      if (overlayContext(this) && renderFrame && args.length >= 4 &&
-        args[0] <= 0 && args[1] <= 0 &&
+      if (
+        overlayContext(this) &&
+        renderFrame &&
+        args.length >= 4 &&
+        args[0] <= 0 &&
+        args[1] <= 0 &&
         args[0] + args[2] >= renderFrame.logicalWidth &&
-        args[1] + args[3] >= renderFrame.logicalHeight) {
+        args[1] + args[3] >= renderFrame.logicalHeight
+      ) {
         renderFrame.cleared = true;
         renderFrame.draws.length = 0;
       }
@@ -282,28 +410,41 @@ function installProbeRuntime(options) {
     };
   }
   const nativeRaf = scope.requestAnimationFrame.bind(scope);
-  scope.requestAnimationFrame = (callback) => nativeRaf((timestamp) => {
-    const frame = { startedAt: performance.now(), preClearMs: null };
-    state.currentFrame = frame;
-    try { callback(timestamp); }
-    finally {
-      if (frame.preClearMs !== null) {
-        state.frameCount++;
-        if (state.frames.length < MAX_SAMPLES) {
-          state.frames.push({ atEpochMs: epochNow(), workMs: performance.now() - frame.startedAt,
-            preClearMs: frame.preClearMs });
-        } else state.overflow++;
-        if (options.worker && state.frameCount % 30 === 0 && state.reportCount++ < 20) {
-          scope.postMessage({ type: 'ytPlacementProbe', sample: {
-            frames: state.frames, bounds: state.bounds, ink: state.ink, firstEntry: state.firstEntry,
-            ingress: state.ingress, exact: state.exact, latestRenderFrame: state.latestRenderFrame,
-            overflow: state.overflow,
-          } });
+  scope.requestAnimationFrame = (callback) =>
+    nativeRaf((timestamp) => {
+      const frame = { startedAt: performance.now(), preClearMs: null };
+      state.currentFrame = frame;
+      try {
+        callback(timestamp);
+      } finally {
+        if (frame.preClearMs !== null) {
+          state.frameCount++;
+          if (state.frames.length < MAX_SAMPLES) {
+            state.frames.push({
+              atEpochMs: epochNow(),
+              workMs: performance.now() - frame.startedAt,
+              preClearMs: frame.preClearMs,
+            });
+          } else state.overflow++;
+          if (options.worker && state.frameCount % 30 === 0 && state.reportCount++ < 20) {
+            scope.postMessage({
+              type: 'ytPlacementProbe',
+              sample: {
+                frames: state.frames,
+                bounds: state.bounds,
+                ink: state.ink,
+                firstEntry: state.firstEntry,
+                ingress: state.ingress,
+                exact: state.exact,
+                latestRenderFrame: state.latestRenderFrame,
+                overflow: state.overflow,
+              },
+            });
+          }
         }
+        if (state.currentFrame === frame) state.currentFrame = null;
       }
-      if (state.currentFrame === frame) state.currentFrame = null;
-    }
-  });
+    });
   if (options.worker) {
     scope.addEventListener('message', (event) => {
       // Dedicated Worker messages come only from their owner and have an empty origin.
@@ -325,43 +466,68 @@ function installProbeRuntime(options) {
         state.ink.length = 0;
       }
       if (event.data?.type === 'ytPlacementFlush') {
-        scope.postMessage({ type: 'ytPlacementProbe', requestId: event.data.requestId, sample: {
-          frames: state.frames, bounds: state.bounds, ink: state.ink, firstEntry: state.firstEntry,
-          ingress: state.ingress, exact: state.exact, latestRenderFrame: state.latestRenderFrame,
-          overflow: state.overflow,
-        } });
+        scope.postMessage({
+          type: 'ytPlacementProbe',
+          requestId: event.data.requestId,
+          sample: {
+            frames: state.frames,
+            bounds: state.bounds,
+            ink: state.ink,
+            firstEntry: state.firstEntry,
+            ingress: state.ingress,
+            exact: state.exact,
+            latestRenderFrame: state.latestRenderFrame,
+            overflow: state.overflow,
+          },
+        });
       }
     });
     return;
   }
-  const replayOffsets = { WINDOWS193_REPLAY_DUE: 10000,
-    WINDOWS193_REPLAY_NEXT: 10001, WINDOWS193_REPLAY_FUTURE: 11500 };
+  const replayOffsets = {
+    WINDOWS193_REPLAY_DUE: 10000,
+    WINDOWS193_REPLAY_NEXT: 10001,
+    WINDOWS193_REPLAY_FUTURE: 11500,
+  };
   new MutationObserver(() => {
     for (const element of document.querySelectorAll('.yt-live-chat-overlay-live-region > p')) {
       const id = element.dataset.messageId;
       if (ids.has(id) && !state.videoEntry[id] && replayOffsets[id] !== undefined) {
         const videoTimeMs = document.querySelector('video')?.currentTime * 1000;
-        state.videoEntry[id] = { atEpochMs: epochNow(), videoTimeMs,
-          offsetMs: replayOffsets[id], videoTimeErrorMs: videoTimeMs - replayOffsets[id] };
+        state.videoEntry[id] = {
+          atEpochMs: epochNow(),
+          videoTimeMs,
+          offsetMs: replayOffsets[id],
+          videoTimeErrorMs: videoTimeMs - replayOffsets[id],
+        };
       }
     }
   }).observe(document, { childList: true, subtree: true });
   if (options.forceFallback) {
     Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
       configurable: true,
-      value: () => { throw new Error('Acceptance fixture selected the Canvas fallback'); },
+      value: () => {
+        throw new Error('Acceptance fixture selected the Canvas fallback');
+      },
     });
   } else {
     const NativeBlob = scope.Blob;
     scope.Blob = new Proxy(NativeBlob, {
       construct(target, args) {
         const [parts, optionsArg] = args;
-        if (optionsArg?.type === 'text/javascript' && parts?.length === 1 &&
-          typeof parts[0] === 'string' && parts[0].includes('OffscreenCanvas')) {
+        if (
+          optionsArg?.type === 'text/javascript' &&
+          parts?.length === 1 &&
+          typeof parts[0] === 'string' &&
+          parts[0].includes('OffscreenCanvas')
+        ) {
           state.sourcePrefixed = true;
           const suffix = workerProbeSuffix(parts[0], options.attachProbeSource);
           state.sourceHooked = Boolean(suffix);
-          return Reflect.construct(target, [[options.workerPrelude, parts[0], suffix ?? ''], optionsArg]);
+          return Reflect.construct(target, [
+            [options.workerPrelude, parts[0], suffix ?? ''],
+            optionsArg,
+          ]);
         }
         return Reflect.construct(target, args);
       },
@@ -377,8 +543,13 @@ function installProbeRuntime(options) {
         if (event.data?.type === 'ready') record.ready = true;
         if (event.data?.type === 'stats' && record.stats.length < 60) {
           const { activeMessages, pendingQueueDepth, totalRendered, totalDrops } = event.data;
-          record.stats.push({ atEpochMs: epochNow(), activeMessages, pendingQueueDepth,
-            totalRendered, totalDrops });
+          record.stats.push({
+            atEpochMs: epochNow(),
+            activeMessages,
+            pendingQueueDepth,
+            totalRendered,
+            totalDrops,
+          });
         }
         if (event.data?.type === 'ytPlacementProbe') {
           record.sample = event.data.sample;
@@ -401,11 +572,16 @@ function installProbeRuntime(options) {
 }
 
 export function summarizeSamples(values) {
-  const samples = values.filter((value) => Number.isFinite(value) && value >= 0)
+  const samples = values
+    .filter((value) => Number.isFinite(value) && value >= 0)
     .toSorted((left, right) => left - right);
   if (samples.length === 0) return { count: 0, p50: null, p95: null, max: null };
-  return { count: samples.length, p50: samples[Math.ceil(samples.length * 0.5) - 1],
-    p95: samples[Math.ceil(samples.length * 0.95) - 1], max: samples.at(-1) };
+  return {
+    count: samples.length,
+    p50: samples[Math.ceil(samples.length * 0.5) - 1],
+    p95: samples[Math.ceil(samples.length * 0.95) - 1],
+    max: samples.at(-1),
+  };
 }
 
 export function summarizeExactWorkerProbe(selected, renderer) {
@@ -416,20 +592,33 @@ export function summarizeExactWorkerProbe(selected, renderer) {
   return {
     exactWorkerFrameMs: summarizeSamples(exact.frames.map((frame) => frame.workMs)),
     exactWorkerDrainMs: summarizeSamples(exact.drains.map((drain) => drain.workMs)),
-    exactWorker: { ...exact, dispositions: exact.dispositions.slice(0, MAX_SAMPLES),
-      active: exact.active.slice(0, MAX_SAMPLES) },
+    exactWorker: {
+      ...exact,
+      dispositions: exact.dispositions.slice(0, MAX_SAMPLES),
+      active: exact.active.slice(0, MAX_SAMPLES),
+    },
   };
 }
 
 export function findOverlappingActivePair(messages, width, height) {
-  const visible = messages.filter((item) => item.x < width && item.x + item.width > 0 &&
-    item.y < height && item.y + item.height > 0 && item.visibleNow !== false);
+  const visible = messages.filter(
+    (item) =>
+      item.x < width &&
+      item.x + item.width > 0 &&
+      item.y < height &&
+      item.y + item.height > 0 &&
+      item.visibleNow !== false
+  );
   for (let left = 0; left < visible.length; left++) {
     for (let right = left + 1; right < visible.length; right++) {
       const a = visible[left];
       const b = visible[right];
-      if (a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 &&
-          a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1) {
+      if (
+        a.x < b.x + b.width - 1 &&
+        b.x < a.x + a.width - 1 &&
+        a.y < b.y + b.height - 1 &&
+        b.y < a.y + a.height - 1
+      ) {
         return [a.id, b.id];
       }
     }
@@ -439,56 +628,97 @@ export function findOverlappingActivePair(messages, width, height) {
 
 /** Smallest sampled allocation-origin distance; adjacent lane occupancy is not established. */
 export function measureAllocationRowPitch(messages, prefix = 'WINDOWS196_GAP0_') {
-  const ys = messages.filter((entry) => entry.id?.startsWith(prefix) &&
-    Number.isFinite(entry.y) && Number.isFinite(entry.height))
-    .map((entry) => entry.y).toSorted((a, b) => a - b);
-  const pitches = ys.slice(1).map((y, index) => y - ys[index]).filter((pitch) => pitch > 0);
+  const ys = messages
+    .filter(
+      (entry) =>
+        entry.id?.startsWith(prefix) && Number.isFinite(entry.y) && Number.isFinite(entry.height)
+    )
+    .map((entry) => entry.y)
+    .toSorted((a, b) => a - b);
+  const pitches = ys
+    .slice(1)
+    .map((y, index) => y - ys[index])
+    .filter((pitch) => pitch > 0);
   return pitches.length ? Math.min(...pitches) : null;
 }
 
 /** Sampled row origins in one completed frame, not proven adjacency or a historical ink join. */
 export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
-  const result = { pitchPx: null, status: 'unknown', reason: null,
-    frameId: frame?.frameId ?? null, includedIds: [], excluded: [], unknownIds: [],
-    japaneseVisibleIds: [], japaneseVisibleRowOriginsPx: [] };
+  const result = {
+    pitchPx: null,
+    status: 'unknown',
+    reason: null,
+    frameId: frame?.frameId ?? null,
+    includedIds: [],
+    excluded: [],
+    unknownIds: [],
+    japaneseVisibleIds: [],
+    japaneseVisibleRowOriginsPx: [],
+  };
   const unknown = (reason, id) => {
     result.reason = reason;
     if (id) result.unknownIds.push(id);
     return result;
   };
-  if (!frame || !Number.isSafeInteger(frame.frameId) || frame.frameId <= 0 ||
-    frame.complete !== true || frame.truncated !== false ||
+  if (
+    !frame ||
+    !Number.isSafeInteger(frame.frameId) ||
+    frame.frameId <= 0 ||
+    frame.complete !== true ||
+    frame.truncated !== false ||
     !Number.isFinite(frame.startedAtEpochMs) ||
     !Number.isFinite(frame.finishedAtEpochMs) ||
     frame.finishedAtEpochMs < frame.startedAtEpochMs ||
-    !Number.isFinite(frame.logicalWidth) || frame.logicalWidth <= 0 ||
-    !Number.isFinite(frame.logicalHeight) || frame.logicalHeight <= 0 ||
-    !Number.isFinite(frame.backingRatioX) || frame.backingRatioX <= 0 ||
-    !Number.isFinite(frame.backingRatioY) || frame.backingRatioY <= 0 ||
+    !Number.isFinite(frame.logicalWidth) ||
+    frame.logicalWidth <= 0 ||
+    !Number.isFinite(frame.logicalHeight) ||
+    frame.logicalHeight <= 0 ||
+    !Number.isFinite(frame.backingRatioX) ||
+    frame.backingRatioX <= 0 ||
+    !Number.isFinite(frame.backingRatioY) ||
+    frame.backingRatioY <= 0 ||
     !['main', 'worker'].includes(frame.config?.renderer) ||
     !Number.isFinite(frame.config?.fontSize) ||
     !Number.isFinite(frame.config?.laneSpacing) ||
-    !Array.isArray(frame.active) || !Array.isArray(frame.draws)) {
+    !Array.isArray(frame.active) ||
+    !Array.isArray(frame.draws)
+  ) {
     return unknown('incomplete_or_unsupported_frame');
   }
-  const intersects = (rect) => rect && [rect.left, rect.top, rect.right, rect.bottom]
-    .every(Number.isFinite) && rect.right > rect.left && rect.bottom > rect.top &&
-    rect.left < frame.logicalWidth && rect.right > 0 &&
-    rect.top < frame.logicalHeight && rect.bottom > 0;
-  const tracked = frame.active.filter((row) => typeof row?.id === 'string' &&
-    row.id.startsWith(prefix));
+  const intersects = (rect) =>
+    rect &&
+    [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
+    rect.right > rect.left &&
+    rect.bottom > rect.top &&
+    rect.left < frame.logicalWidth &&
+    rect.right > 0 &&
+    rect.top < frame.logicalHeight &&
+    rect.bottom > 0;
+  const tracked = frame.active.filter(
+    (row) => typeof row?.id === 'string' && row.id.startsWith(prefix)
+  );
   const ids = new Set();
-  const unmatchedDraw = frame.draws.find((draw) => typeof draw?.id === 'string' &&
-    draw.id.startsWith(prefix) && !tracked.some((row) => row.id === draw.id));
+  const unmatchedDraw = frame.draws.find(
+    (draw) =>
+      typeof draw?.id === 'string' &&
+      draw.id.startsWith(prefix) &&
+      !tracked.some((row) => row.id === draw.id)
+  );
   if (unmatchedDraw) return unknown('draw_without_active_row', unmatchedDraw.id);
   const visible = [];
   const japaneseRows = new Set();
   for (const row of tracked) {
     if (ids.has(row.id)) return unknown('duplicate_active_id', row.id);
     ids.add(row.id);
-    if (![row.x, row.y, row.width, row.height, row.startAtEpochMs,
-      row.endAtEpochMs].every(Number.isFinite) || row.width <= 0 || row.height <= 0 ||
-      row.endAtEpochMs <= row.startAtEpochMs) return unknown('invalid_active_geometry_or_time', row.id);
+    if (
+      ![row.x, row.y, row.width, row.height, row.startAtEpochMs, row.endAtEpochMs].every(
+        Number.isFinite
+      ) ||
+      row.width <= 0 ||
+      row.height <= 0 ||
+      row.endAtEpochMs <= row.startAtEpochMs
+    )
+      return unknown('invalid_active_geometry_or_time', row.id);
     if (frame.finishedAtEpochMs < row.startAtEpochMs) {
       result.excluded.push({ id: row.id, reason: 'future' });
       continue;
@@ -497,10 +727,14 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
       result.excluded.push({ id: row.id, reason: 'expired' });
       continue;
     }
-    if (frame.startedAtEpochMs < row.startAtEpochMs ||
-      frame.finishedAtEpochMs >= row.endAtEpochMs) return unknown('eligibility_changed_during_frame', row.id);
-    const rowRect = { left: row.x, top: row.y,
-      right: row.x + row.width, bottom: row.y + row.height };
+    if (frame.startedAtEpochMs < row.startAtEpochMs || frame.finishedAtEpochMs >= row.endAtEpochMs)
+      return unknown('eligibility_changed_during_frame', row.id);
+    const rowRect = {
+      left: row.x,
+      top: row.y,
+      right: row.x + row.width,
+      bottom: row.y + row.height,
+    };
     if (!intersects(rowRect)) {
       result.excluded.push({ id: row.id, reason: 'offscreen_row' });
       continue;
@@ -513,18 +747,32 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
       result.excluded.push({ id: row.id, reason: 'no_current_frame_draw' });
       continue;
     }
-    if (draws.some((draw) => !Number.isFinite(draw.alpha) || draw.alpha < 0 ||
-      draw.alpha > 1 || !draw.rect ||
-      ![draw.rect.left, draw.rect.top, draw.rect.right, draw.rect.bottom]
-        .every(Number.isFinite))) return unknown('invalid_draw_geometry_or_alpha', row.id);
+    if (
+      draws.some(
+        (draw) =>
+          !Number.isFinite(draw.alpha) ||
+          draw.alpha < 0 ||
+          draw.alpha > 1 ||
+          !draw.rect ||
+          ![draw.rect.left, draw.rect.top, draw.rect.right, draw.rect.bottom].every(Number.isFinite)
+      )
+    )
+      return unknown('invalid_draw_geometry_or_alpha', row.id);
     if (draws.every((draw) => draw.alpha <= 0)) {
       result.excluded.push({ id: row.id, reason: 'zero_alpha' });
       continue;
     }
     const painted = draws.filter((draw) => draw.alpha > 0 && intersects(draw.rect));
-    if (painted.some((draw) => draw.rect.left >= rowRect.right ||
-      draw.rect.right <= rowRect.left || draw.rect.top >= rowRect.bottom ||
-      draw.rect.bottom <= rowRect.top)) return unknown('draw_row_mismatch', row.id);
+    if (
+      painted.some(
+        (draw) =>
+          draw.rect.left >= rowRect.right ||
+          draw.rect.right <= rowRect.left ||
+          draw.rect.top >= rowRect.bottom ||
+          draw.rect.bottom <= rowRect.top
+      )
+    )
+      return unknown('draw_row_mismatch', row.id);
     if (painted.length === 0) {
       result.excluded.push({ id: row.id, reason: 'offscreen_draw' });
       continue;
@@ -538,7 +786,10 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
   }
   result.japaneseVisibleRowOriginsPx = [...japaneseRows].toSorted((a, b) => a - b);
   const ys = [...new Set(visible.map((row) => row.y))].toSorted((a, b) => a - b);
-  const pitches = ys.slice(1).map((y, index) => y - ys[index]).filter((pitch) => pitch > 0);
+  const pitches = ys
+    .slice(1)
+    .map((y, index) => y - ys[index])
+    .filter((pitch) => pitch > 0);
   if (pitches.length === 0) {
     result.status = 'insufficient';
     result.reason = 'fewer_than_two_distinct_visible_rows';
@@ -551,34 +802,61 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
 
 /** Content-rectangle clearance of both fixture rows painted in one completed frame. */
 export function measureMixedHeightClearance(frame) {
-  const result = { status: 'unknown', reason: null, frameId: frame?.frameId ?? null,
+  const result = {
+    status: 'unknown',
+    reason: null,
+    frameId: frame?.frameId ?? null,
     observedLaneDensityFactor: frame?.config?.laneDensityFactor ?? null,
-    paintedIds: [], heightsPx: [], pairs: [], minimumGapPx: null };
-  const unknown = (reason) => { result.reason = reason; return result; };
-  if (!frame || !Number.isSafeInteger(frame.frameId) || frame.frameId <= 0 ||
-    frame.complete !== true || frame.truncated !== false ||
+    paintedIds: [],
+    heightsPx: [],
+    pairs: [],
+    minimumGapPx: null,
+  };
+  const unknown = (reason) => {
+    result.reason = reason;
+    return result;
+  };
+  if (
+    !frame ||
+    !Number.isSafeInteger(frame.frameId) ||
+    frame.frameId <= 0 ||
+    frame.complete !== true ||
+    frame.truncated !== false ||
     !Number.isFinite(frame.startedAtEpochMs) ||
     !Number.isFinite(frame.finishedAtEpochMs) ||
     frame.finishedAtEpochMs < frame.startedAtEpochMs ||
-    !Number.isFinite(frame.logicalWidth) || frame.logicalWidth <= 0 ||
-    !Number.isFinite(frame.logicalHeight) || frame.logicalHeight <= 0 ||
-    !Number.isFinite(frame.backingRatioX) || frame.backingRatioX <= 0 ||
-    !Number.isFinite(frame.backingRatioY) || frame.backingRatioY <= 0 ||
+    !Number.isFinite(frame.logicalWidth) ||
+    frame.logicalWidth <= 0 ||
+    !Number.isFinite(frame.logicalHeight) ||
+    frame.logicalHeight <= 0 ||
+    !Number.isFinite(frame.backingRatioX) ||
+    frame.backingRatioX <= 0 ||
+    !Number.isFinite(frame.backingRatioY) ||
+    frame.backingRatioY <= 0 ||
     !['main', 'worker'].includes(frame.config?.renderer) ||
-    frame.config?.mode !== 'top' || frame.config?.laneSpacing !== 8 ||
+    frame.config?.mode !== 'top' ||
+    frame.config?.laneSpacing !== 8 ||
     !Number.isFinite(frame.config?.laneDensityFactor) ||
-    !Number.isFinite(frame.config.safeTop) || !Number.isFinite(frame.config.safeBottom) ||
-    frame.config.safeTop < 0 || frame.config.safeBottom < 0 ||
+    !Number.isFinite(frame.config.safeTop) ||
+    !Number.isFinite(frame.config.safeBottom) ||
+    frame.config.safeTop < 0 ||
+    frame.config.safeBottom < 0 ||
     frame.config.safeTop + frame.config.safeBottom >= 1 ||
-    !Array.isArray(frame.active) || !Array.isArray(frame.draws)) {
+    !Array.isArray(frame.active) ||
+    !Array.isArray(frame.draws)
+  ) {
     return unknown('incomplete_or_unsupported_frame');
   }
   if (frame.config.laneDensityFactor !== 0.5) return unknown('wrong_lane_density');
-  const intersects = (rect) => rect &&
+  const intersects = (rect) =>
+    rect &&
     [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
-    rect.right > rect.left && rect.bottom > rect.top &&
-    rect.left < frame.logicalWidth && rect.right > 0 &&
-    rect.top < frame.logicalHeight && rect.bottom > 0;
+    rect.right > rect.left &&
+    rect.bottom > rect.top &&
+    rect.left < frame.logicalWidth &&
+    rect.right > 0 &&
+    rect.top < frame.logicalHeight &&
+    rect.bottom > 0;
   const rows = [];
   for (const id of MIXED_IDS) {
     const matches = frame.active.filter((row) => row?.id === id);
@@ -588,19 +866,26 @@ export function measureMixedHeightClearance(frame) {
       return result;
     }
     const row = matches[0];
-    if (![row.x, row.y, row.width, row.height, row.startAtEpochMs,
-      row.endAtEpochMs].every(Number.isFinite) || row.width <= 0 || row.height <= 0 ||
-      row.endAtEpochMs <= row.startAtEpochMs) return unknown('invalid_active_geometry_or_time');
-    if (frame.finishedAtEpochMs < row.startAtEpochMs ||
-      frame.startedAtEpochMs >= row.endAtEpochMs) {
+    if (
+      ![row.x, row.y, row.width, row.height, row.startAtEpochMs, row.endAtEpochMs].every(
+        Number.isFinite
+      ) ||
+      row.width <= 0 ||
+      row.height <= 0 ||
+      row.endAtEpochMs <= row.startAtEpochMs
+    )
+      return unknown('invalid_active_geometry_or_time');
+    if (
+      frame.finishedAtEpochMs < row.startAtEpochMs ||
+      frame.startedAtEpochMs >= row.endAtEpochMs
+    ) {
       result.status = 'insufficient';
       result.reason = `not_time_eligible_${id}`;
       return result;
     }
-    if (frame.startedAtEpochMs < row.startAtEpochMs ||
-      frame.finishedAtEpochMs >= row.endAtEpochMs) return unknown('eligibility_changed_during_frame');
-    const rect = { left: row.x, top: row.y, right: row.x + row.width,
-      bottom: row.y + row.height };
+    if (frame.startedAtEpochMs < row.startAtEpochMs || frame.finishedAtEpochMs >= row.endAtEpochMs)
+      return unknown('eligibility_changed_during_frame');
+    const rect = { left: row.x, top: row.y, right: row.x + row.width, bottom: row.y + row.height };
     if (!intersects(rect)) {
       result.status = 'insufficient';
       result.reason = `offscreen_${id}`;
@@ -614,13 +899,29 @@ export function measureMixedHeightClearance(frame) {
       return result;
     }
     const draws = frame.draws.filter((draw) => draw?.id === id);
-    if (draws.some((draw) => draw.frameId !== frame.frameId ||
-      !Number.isFinite(draw.alpha) || draw.alpha < 0 || draw.alpha > 1 ||
-      !draw.rect || ![draw.rect.left, draw.rect.top, draw.rect.right, draw.rect.bottom]
-        .every(Number.isFinite))) return unknown('invalid_or_mismatched_draw');
-    if (!draws.some((draw) => draw.alpha > 0 && intersects(draw.rect) &&
-      draw.rect.left < rect.right && draw.rect.right > rect.left &&
-      draw.rect.top < rect.bottom && draw.rect.bottom > rect.top)) {
+    if (
+      draws.some(
+        (draw) =>
+          draw.frameId !== frame.frameId ||
+          !Number.isFinite(draw.alpha) ||
+          draw.alpha < 0 ||
+          draw.alpha > 1 ||
+          !draw.rect ||
+          ![draw.rect.left, draw.rect.top, draw.rect.right, draw.rect.bottom].every(Number.isFinite)
+      )
+    )
+      return unknown('invalid_or_mismatched_draw');
+    if (
+      !draws.some(
+        (draw) =>
+          draw.alpha > 0 &&
+          intersects(draw.rect) &&
+          draw.rect.left < rect.right &&
+          draw.rect.right > rect.left &&
+          draw.rect.top < rect.bottom &&
+          draw.rect.bottom > rect.top
+      )
+    ) {
       result.status = 'insufficient';
       result.reason = `no_current_frame_positive_alpha_draw_${id}`;
       return result;
@@ -640,8 +941,7 @@ export function measureMixedHeightClearance(frame) {
     result.reason = 'horizontal_lane_sharing';
     return result;
   }
-  const gapPx = a.rect.top <= b.rect.top
-    ? b.rect.top - a.rect.bottom : a.rect.top - b.rect.bottom;
+  const gapPx = a.rect.top <= b.rect.top ? b.rect.top - a.rect.bottom : a.rect.top - b.rect.bottom;
   result.pairs.push({ ids: [a.id, b.id], gapPx });
   result.minimumGapPx = gapPx;
   result.status = gapPx + 1e-6 >= frame.config.laneSpacing ? 'measured' : 'violation';
@@ -652,15 +952,26 @@ export function measureMixedHeightClearance(frame) {
 /** Accept one phase's available observations, without inferring adjacency across cohorts. */
 export function assertSpacingPhase(snapshot, prefix, laneSpacing, renderer) {
   const visibleRowPitch = measureVisibleRowPitch(snapshot?.renderFrame, prefix);
-  assert(visibleRowPitch.status === 'measured' &&
-    visibleRowPitch.japaneseVisibleRowOriginsPx.length >= 2,
-  `No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`);
-  assert.equal(snapshot.renderFrame.config.renderer, renderer,
-    'Spacing frame came from the wrong renderer');
-  assert.equal(snapshot.renderFrame.config.laneSpacing, laneSpacing,
-    'Spacing frame did not use the phase Lane Gap');
-  assert.equal(snapshot.exact?.config?.laneSpacing, laneSpacing,
-    'Spacing snapshot did not use the phase Lane Gap');
+  assert(
+    visibleRowPitch.status === 'measured' &&
+      visibleRowPitch.japaneseVisibleRowOriginsPx.length >= 2,
+    `No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`
+  );
+  assert.equal(
+    snapshot.renderFrame.config.renderer,
+    renderer,
+    'Spacing frame came from the wrong renderer'
+  );
+  assert.equal(
+    snapshot.renderFrame.config.laneSpacing,
+    laneSpacing,
+    'Spacing frame did not use the phase Lane Gap'
+  );
+  assert.equal(
+    snapshot.exact?.config?.laneSpacing,
+    laneSpacing,
+    'Spacing snapshot did not use the phase Lane Gap'
+  );
   const allocationPitchPx = measureAllocationRowPitch(snapshot.exact.activeNow, prefix);
   assert(allocationPitchPx !== null, 'Spacing fixture did not allocate distinct regular rows');
   // Spread placement and surviving reservations can change the sampled lane separation.
@@ -669,52 +980,85 @@ export function assertSpacingPhase(snapshot, prefix, laneSpacing, renderer) {
 }
 
 export function assertBacklogMotion(disposition, renderer, comparisonOnly = false) {
-  assert(disposition?.kind === 'activated' && disposition.isBacklog === true,
-    'Long parser-ingress message was not activated as Backlog');
+  assert(
+    disposition?.kind === 'activated' && disposition.isBacklog === true,
+    'Long parser-ingress message was not activated as Backlog'
+  );
   assert(disposition.width > 1870, 'Backlog text did not produce unclamped travel geometry');
   assert(renderer === 'worker' || renderer === 'main', 'Unknown renderer for Backlog motion');
   const burstMultiplier = disposition.burstSpeedMultiplier;
-  assert((renderer === 'main' && burstMultiplier === null) ||
-    (Number.isFinite(burstMultiplier) && burstMultiplier > 1),
-  'Worker did not receive a finite burst multiplier above one');
-  assert(disposition.durationMs > 5000 && disposition.durationMs < 30000,
-    'Backlog duration was clamped, so this cannot verify speed policy');
-  assert(Number.isFinite(disposition.travelDistancePx) &&
-    Number.isFinite(disposition.actualVelocityPxPerMs), 'Committed motion fields are unavailable');
-  const expectedVelocity = 250 * 2 / 1000;
+  assert(
+    (renderer === 'main' && burstMultiplier === null) ||
+      (Number.isFinite(burstMultiplier) && burstMultiplier > 1),
+    'Worker did not receive a finite burst multiplier above one'
+  );
+  assert(
+    disposition.durationMs > 5000 && disposition.durationMs < 30000,
+    'Backlog duration was clamped, so this cannot verify speed policy'
+  );
+  assert(
+    Number.isFinite(disposition.travelDistancePx) &&
+      Number.isFinite(disposition.actualVelocityPxPerMs),
+    'Committed motion fields are unavailable'
+  );
+  const expectedVelocity = (250 * 2) / 1000;
   if (!comparisonOnly) {
-    assert(Math.abs(disposition.actualVelocityPxPerMs - expectedVelocity) < 0.002,
-      'Backlog motion acquired an extra burst multiplier');
-    assert(Math.abs(disposition.durationMs - disposition.travelDistancePx / expectedVelocity) < 25,
-      'Backlog duration does not match the selected nominal speed');
+    assert(
+      Math.abs(disposition.actualVelocityPxPerMs - expectedVelocity) < 0.002,
+      'Backlog motion acquired an extra burst multiplier'
+    );
+    assert(
+      Math.abs(disposition.durationMs - disposition.travelDistancePx / expectedVelocity) < 25,
+      'Backlog duration does not match the selected nominal speed'
+    );
   }
 }
 
 export function assertBacklogReflow(before, after, id) {
-  assert(after?.config?.logicalWidth > before?.config?.logicalWidth &&
-    after.config.logicalHeight > before.config.logicalHeight,
-  'Fixture video geometry did not grow during resize');
+  assert(
+    after?.config?.logicalWidth > before?.config?.logicalWidth &&
+      after.config.logicalHeight > before.config.logicalHeight,
+    'Fixture video geometry did not grow during resize'
+  );
   assert.equal(before.config.fontSize, 32);
   assert.equal(after.config.fontSize, 32, 'Reflow changed the configured 32px font');
-  assert(after.activeNow.some((entry) => entry.id === id),
-    'Backlog message disappeared during resize and spacing reflow');
+  assert(
+    after.activeNow.some((entry) => entry.id === id),
+    'Backlog message disappeared during resize and spacing reflow'
+  );
 }
 
 export function workerProbePrelude(tokens = TOKENS) {
   return `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: true, tokens })});\n`;
 }
 
-export function canvasProbePrelude({ tokens = TOKENS, forceFallback = false,
-  workerPrelude = workerProbePrelude(tokens) } = {}) {
-  return `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
-    `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: false, tokens,
-      forceFallback, workerPrelude, attachProbeSource: attachWorkerRendererProbe.toString() })});`;
+export function canvasProbePrelude({
+  tokens = TOKENS,
+  forceFallback = false,
+  workerPrelude = workerProbePrelude(tokens),
+} = {}) {
+  return (
+    `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
+    `;(${installProbeRuntime.toString()})(${JSON.stringify({
+      worker: false,
+      tokens,
+      forceFallback,
+      workerPrelude,
+      attachProbeSource: attachWorkerRendererProbe.toString(),
+    })});`
+  );
 }
 
 // The emitted Worker is a classic Blob script. The suffix runs in its lexical
 // scope, after the original onmessage assignment. Fail closed on bundle drift.
-export function workerProbeSuffix(source, attachProbeSource = attachWorkerRendererProbe.toString()) {
-  const handler = /self\.onmessage=([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.handleMessage\(\1\)\};?\s*$/.exec(source);
+export function workerProbeSuffix(
+  source,
+  attachProbeSource = attachWorkerRendererProbe.toString()
+) {
+  const handler =
+    /self\.onmessage=([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.handleMessage\(\1\)\};?\s*$/.exec(
+      source
+    );
   if (!handler) return null;
   return `\n;(${attachProbeSource})(${handler[2]});\n`;
 }
@@ -722,8 +1066,18 @@ export function workerProbeSuffix(source, attachProbeSource = attachWorkerRender
 function attachWorkerRendererProbe(renderer) {
   const state = globalThis.__ytPlacementProbe;
   if (!state || !renderer || typeof renderer.drainQueue !== 'function') return;
-  const exact = { frames: [], drains: [], dispositions: [], active: [], activeNow: [], config: null,
-    collisionRejects: 0, placementMisses: 0, drops: {}, overflow: 0 };
+  const exact = {
+    frames: [],
+    drains: [],
+    dispositions: [],
+    active: [],
+    activeNow: [],
+    config: null,
+    collisionRejects: 0,
+    placementMisses: 0,
+    drops: {},
+    overflow: 0,
+  };
   state.exact = exact;
   const queuedAt = new Map();
   const epochNow = () => performance.timeOrigin + performance.now();
@@ -739,12 +1093,17 @@ function attachWorkerRendererProbe(renderer) {
     inEnqueue = true;
     try {
       const admitted = nativeEnqueue.call(this, message);
-      if (admitted && isFixture(message.id) &&
-          this.pendingQueue.some((entry) => entry.id === message.id)) {
+      if (
+        admitted &&
+        isFixture(message.id) &&
+        this.pendingQueue.some((entry) => entry.id === message.id)
+      ) {
         queuedAt.set(message.id, epochNow());
       }
       return admitted;
-    } finally { inEnqueue = false; }
+    } finally {
+      inEnqueue = false;
+    }
   };
   const nativeActivate = renderer.activateMessage;
   renderer.activateMessage = function (message, ...args) {
@@ -752,29 +1111,56 @@ function attachWorkerRendererProbe(renderer) {
     if (isFixture(message.id)) {
       const active = this.activeMessages.find((entry) => entry.id === message.id);
       const geometricEntryAtEpochMs = active?.motion
-          ? performance.timeOrigin + active.motion.viewportEntryTime
-          : (() => {
-            if (!active || !this.config || !Number.isFinite(this.logicalWidth) ||
-              ![active.startX, active.startTime, active.pausedDuration, active.duration, active.width,
-                this.config.exitPaddingPx].every(Number.isFinite)) return null;
+        ? performance.timeOrigin + active.motion.viewportEntryTime
+        : (() => {
+            if (
+              !active ||
+              !this.config ||
+              !Number.isFinite(this.logicalWidth) ||
+              ![
+                active.startX,
+                active.startTime,
+                active.pausedDuration,
+                active.duration,
+                active.width,
+                this.config.exitPaddingPx,
+              ].every(Number.isFinite)
+            )
+              return null;
             const reverse = this.config?.danmakuMode === 'reverse';
-            const fixed = this.config?.danmakuMode === 'top' || this.config?.danmakuMode === 'bottom' ||
+            const fixed =
+              this.config?.danmakuMode === 'top' ||
+              this.config?.danmakuMode === 'bottom' ||
               (this.config?.reducedMotion && !this.config?.ignoreReducedMotion);
-            const endX = reverse ? this.logicalWidth + this.config.exitPaddingPx
+            const endX = reverse
+              ? this.logicalWidth + this.config.exitPaddingPx
               : -active.width - this.config.exitPaddingPx;
             const velocity = Math.abs(endX - active.startX) / active.duration;
-            const distance = fixed ? 0 : reverse ? Math.max(0, -active.startX - active.width)
-              : Math.max(0, active.startX - this.logicalWidth);
-            return performance.timeOrigin + active.startTime + active.pausedDuration +
-              (distance === 0 ? 0 : distance / velocity);
+            const distance = fixed
+              ? 0
+              : reverse
+                ? Math.max(0, -active.startX - active.width)
+                : Math.max(0, active.startX - this.logicalWidth);
+            return (
+              performance.timeOrigin +
+              active.startTime +
+              active.pausedDuration +
+              (distance === 0 ? 0 : distance / velocity)
+            );
           })();
       const placementWaitMs = args[1]?.waitMs ?? 0;
-      bounded(exact.dispositions, { id: message.id, kind: 'activated',
+      bounded(exact.dispositions, {
+        id: message.id,
+        kind: 'activated',
         queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
-        atEpochMs: epochNow(), laneIndex: active?.laneIndex ?? null,
-        startX: active?.startX ?? null, durationMs: active?.duration ?? null,
-        width: active?.width ?? null, height: active?.height ?? null,
-        y: active?.y ?? null, laneHeight: this.laneHeight,
+        atEpochMs: epochNow(),
+        laneIndex: active?.laneIndex ?? null,
+        startX: active?.startX ?? null,
+        durationMs: active?.duration ?? null,
+        width: active?.width ?? null,
+        height: active?.height ?? null,
+        y: active?.y ?? null,
+        laneHeight: this.laneHeight,
         laneSpacing: this.config?.laneSpacing ?? null,
         fontSize: this.config?.fontSize ?? null,
         slotCount: active?.laneSlotCount ?? args[1]?.slotCount ?? null,
@@ -782,28 +1168,48 @@ function attachWorkerRendererProbe(renderer) {
         burstSpeedMultiplier: message.burstSpeedMultiplier ?? null,
         actualVelocityPxPerMs: active?.motion?.actualVelocityPxPerMs ?? null,
         travelDistancePx: active?.motion?.travelDistancePx ?? null,
-        visibleExitAtEpochMs: active?.motion ? performance.timeOrigin + active.motion.visibleExitTime : null,
+        visibleExitAtEpochMs: active?.motion
+          ? performance.timeOrigin + active.motion.visibleExitTime
+          : null,
         pendingDepth: this.pendingQueue.length,
-        staggerDelayMs: active?.motion?.staggerDelayMs ??
+        staggerDelayMs:
+          active?.motion?.staggerDelayMs ??
           Math.max(0, active.startTime - args[0] - placementWaitMs),
         isScrolling: active?.motion?.isScrolling ?? null,
-        geometricEntryAtEpochMs, placementWaitMs,
-        optionalEntryDelayMs: geometricEntryAtEpochMs === null ? null
-          : geometricEntryAtEpochMs - performance.timeOrigin - args[0] - placementWaitMs,
-        geometricEntryProvenance: active?.motion ? 'committed motion plan' : 'committed baseline path' });
+        geometricEntryAtEpochMs,
+        placementWaitMs,
+        optionalEntryDelayMs:
+          geometricEntryAtEpochMs === null
+            ? null
+            : geometricEntryAtEpochMs - performance.timeOrigin - args[0] - placementWaitMs,
+        geometricEntryProvenance: active?.motion
+          ? 'committed motion plan'
+          : 'committed baseline path',
+      });
       queuedAt.delete(message.id);
     }
     return result;
   };
   const nativeDrop = renderer.recordDrop;
   renderer.recordDrop = function (message, ...args) {
-    const reason = typeof args[0] === 'string' ? args[0] : inEnqueue ? 'queue-capacity'
-      : inDrain && message.height > this.numLanes * this.laneHeight ? 'oversize' : 'other';
+    const reason =
+      typeof args[0] === 'string'
+        ? args[0]
+        : inEnqueue
+          ? 'queue-capacity'
+          : inDrain && message.height > this.numLanes * this.laneHeight
+            ? 'oversize'
+            : 'other';
     if (message.trackDrops !== false) exact.drops[reason] = (exact.drops[reason] ?? 0) + 1;
     if (isFixture(message.id)) {
-      bounded(exact.dispositions, { id: message.id, kind: 'dropped', reason, tracked: message.trackDrops !== false,
+      bounded(exact.dispositions, {
+        id: message.id,
+        kind: 'dropped',
+        reason,
+        tracked: message.trackDrops !== false,
         queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
-        atEpochMs: epochNow() });
+        atEpochMs: epochNow(),
+      });
       queuedAt.delete(message.id);
     }
     return nativeDrop.call(this, message, ...args);
@@ -828,64 +1234,98 @@ function attachWorkerRendererProbe(renderer) {
     const placementBefore = exact.placementMisses;
     const startedAt = performance.now();
     inDrain = true;
-    try { return nativeDrain.apply(this, args); }
-    finally {
+    try {
+      return nativeDrain.apply(this, args);
+    } finally {
       inDrain = false;
-      bounded(exact.drains, { atEpochMs: epochNow(), workMs: performance.now() - startedAt,
-        pendingBefore: before, pendingAfter: this.pendingQueue.length,
-        activeBefore, activeAfter: this.activeMessages.length,
+      bounded(exact.drains, {
+        atEpochMs: epochNow(),
+        workMs: performance.now() - startedAt,
+        pendingBefore: before,
+        pendingAfter: this.pendingQueue.length,
+        activeBefore,
+        activeAfter: this.activeMessages.length,
         collisionRejects: exact.collisionRejects - collisionsBefore,
-        placementMisses: exact.placementMisses - placementBefore });
+        placementMisses: exact.placementMisses - placementBefore,
+      });
     }
   };
   const nativeFrame = renderer.renderFrame;
   renderer.renderFrame = function (...args) {
     const startedAt = performance.now();
-    const frame = state.beginRenderFrame({ ctx: this.ctx, logicalWidth: this.logicalWidth,
-      logicalHeight: this.logicalHeight, config: { renderer: 'worker',
-        fontSize: this.config?.fontSize ?? null, laneSpacing: this.config?.laneSpacing ?? null } });
+    const frame = state.beginRenderFrame({
+      ctx: this.ctx,
+      logicalWidth: this.logicalWidth,
+      logicalHeight: this.logicalHeight,
+      config: {
+        renderer: 'worker',
+        fontSize: this.config?.fontSize ?? null,
+        laneSpacing: this.config?.laneSpacing ?? null,
+      },
+    });
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
       successful = true;
       return result;
-    }
-    finally {
+    } finally {
       bounded(exact.frames, { atEpochMs: epochNow(), workMs: performance.now() - startedAt });
-      exact.config = { mode: this.config?.danmakuMode ?? null,
+      exact.config = {
+        mode: this.config?.danmakuMode ?? null,
         reducedMotion: this.config?.reducedMotion ?? null,
         ignoreReducedMotion: this.config?.ignoreReducedMotion ?? null,
         translationGeneration: this.config?.translationGeneration ?? null,
-        fontSize: this.config?.fontSize ?? null, laneSpacing: this.config?.laneSpacing ?? null,
+        fontSize: this.config?.fontSize ?? null,
+        laneSpacing: this.config?.laneSpacing ?? null,
         laneDensityFactor: this.laneDensityFactor,
         speedPxPerSec: this.config?.speedPxPerSec ?? null,
         backlogSpeedMultiplier: this.config?.backlogSpeedMultiplier ?? null,
         outline: this.config?.outline ?? null,
         backgroundColors: this.config?.backgroundColors ?? null,
-        safeTop: this.config?.safeTop ?? null, safeBottom: this.config?.safeBottom ?? null,
+        safeTop: this.config?.safeTop ?? null,
+        safeBottom: this.config?.safeBottom ?? null,
         maxConcurrentMessages: this.config?.maxConcurrentMessages ?? null,
         queueMaxSize: this.config?.queueMaxSize ?? null,
-        logicalWidth: this.logicalWidth, logicalHeight: this.logicalHeight,
-        laneHeight: this.laneHeight, laneCount: this.numLanes };
+        logicalWidth: this.logicalWidth,
+        logicalHeight: this.logicalHeight,
+        laneHeight: this.laneHeight,
+        laneCount: this.numLanes,
+      };
       const active = this.activeMessages.filter((message) => isFixture(message.id));
-      exact.activeNow = active
-        .slice(0, 100).map((message) => ({ id: message.id, atEpochMs: epochNow(),
-          x: message.x, y: message.y, width: message.width, height: message.height,
-          slotCount: message.laneSlotCount, durationMs: message.duration,
-          actualVelocityPxPerMs: message.motion?.actualVelocityPxPerMs ?? null,
-          laneIndex: message.laneIndex, isScrolling: message.motion?.isScrolling ?? null,
-          startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
-          endAtEpochMs: performance.timeOrigin + message.startTime +
-            message.pausedDuration + message.duration,
-          visibleNow: performance.now() >= message.startTime + message.pausedDuration &&
-            performance.now() < message.startTime + message.pausedDuration + message.duration }));
+      exact.activeNow = active.slice(0, 100).map((message) => ({
+        id: message.id,
+        atEpochMs: epochNow(),
+        x: message.x,
+        y: message.y,
+        width: message.width,
+        height: message.height,
+        slotCount: message.laneSlotCount,
+        durationMs: message.duration,
+        actualVelocityPxPerMs: message.motion?.actualVelocityPxPerMs ?? null,
+        laneIndex: message.laneIndex,
+        isScrolling: message.motion?.isScrolling ?? null,
+        startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
+        endAtEpochMs:
+          performance.timeOrigin + message.startTime + message.pausedDuration + message.duration,
+        visibleNow:
+          performance.now() >= message.startTime + message.pausedDuration &&
+          performance.now() < message.startTime + message.pausedDuration + message.duration,
+      }));
       frame.failed = !successful;
       frame.config = { ...frame.config, ...exact.config };
-      state.endRenderFrame(frame, active.map((message) => ({ id: message.id,
-        x: message.x, y: message.y, width: message.width, height: message.height,
-        startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
-        endAtEpochMs: performance.timeOrigin + message.startTime +
-          message.pausedDuration + message.duration })));
+      state.endRenderFrame(
+        frame,
+        active.map((message) => ({
+          id: message.id,
+          x: message.x,
+          y: message.y,
+          width: message.width,
+          height: message.height,
+          startAtEpochMs: performance.timeOrigin + message.startTime + message.pausedDuration,
+          endAtEpochMs:
+            performance.timeOrigin + message.startTime + message.pausedDuration + message.duration,
+        }))
+      );
       if (exact.frames.length % 10 === 0) {
         for (const message of exact.activeNow) bounded(exact.active, message);
       }
@@ -896,24 +1336,42 @@ function attachWorkerRendererProbe(renderer) {
 // The installed extension page script is executed intact inside its normal
 // closure. This additive probe is inserted immediately before its app entry.
 // A changed bundle shape is an acceptance failure, never a silent fallback.
-export function instrumentCanvasPageScript(source, probeSource = attachCanvasRendererProbe.toString()) {
+export function instrumentCanvasPageScript(
+  source,
+  probeSource = attachCanvasRendererProbe.toString()
+) {
   const marker = '\n\tmain();\n';
-  if (!source.includes('var CanvasRenderer = class CanvasRenderer extends RendererBase {') ||
-      !source.includes('function getRegularCardInsets(') ||
-      source.split(marker).length !== 2) return null;
-  return source.replace(marker, `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);${marker}`);
+  if (
+    !source.includes('var CanvasRenderer = class CanvasRenderer extends RendererBase {') ||
+    !source.includes('function getRegularCardInsets(') ||
+    source.split(marker).length !== 2
+  )
+    return null;
+  return source.replace(
+    marker,
+    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);${marker}`
+  );
 }
 
 function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
   const state = globalThis.__ytPlacementProbe;
-  if (!state || typeof Renderer?.prototype?.placeQueuedMessage !== 'function' ||
-      typeof getRegularCardInsets !== 'function') return;
+  if (
+    !state ||
+    typeof Renderer?.prototype?.placeQueuedMessage !== 'function' ||
+    typeof getRegularCardInsets !== 'function'
+  )
+    return;
   state.canvasSourceHooked = true;
   state.readRegularInsets = (fontSize, outlineWidthPx, backgroundVisible) =>
     getRegularCardInsets(fontSize, outlineWidthPx, false, backgroundVisible);
-  const exact = { dispositions: [], activeNow: [], config: null, peaks: { pending: 0, active: 0 },
+  const exact = {
+    dispositions: [],
+    activeNow: [],
+    config: null,
+    peaks: { pending: 0, active: 0 },
     drops: {},
-    overflow: 0 };
+    overflow: 0,
+  };
   state.exact = exact;
   const queuedAt = new Map();
   const bounded = (value) => {
@@ -924,7 +1382,10 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
   const nativeEnqueue = Renderer.prototype.enqueueMessage;
   Renderer.prototype.enqueueMessage = function (message, ...args) {
     const result = nativeEnqueue.call(this, message, ...args);
-    if (isFixture(message.id) && this.pendingQueue.toArray().some((entry) => entry.id === message.id)) {
+    if (
+      isFixture(message.id) &&
+      this.pendingQueue.toArray().some((entry) => entry.id === message.id)
+    ) {
       queuedAt.set(message.id, performance.timeOrigin + performance.now());
     }
     exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
@@ -936,20 +1397,30 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
     if (isFixture(message.id) && result?.placed) {
       const active = this.activeMessages.find((entry) => entry.message?.id === message.id);
       const motion = active?.motion;
-      bounded({ id: message.id, kind: 'activated', atEpochMs: performance.timeOrigin + performance.now(),
-        isBacklog: message.isBacklog === true, laneIndex: active?.laneIndex ?? null,
+      bounded({
+        id: message.id,
+        kind: 'activated',
+        atEpochMs: performance.timeOrigin + performance.now(),
+        isBacklog: message.isBacklog === true,
+        laneIndex: active?.laneIndex ?? null,
         burstSpeedMultiplier: null,
-        laneSpacing: this.settings.laneSpacing, fontSize: this.settings.fontSize,
-        width: active?.width ?? null, height: active?.height ?? null, y: active?.y ?? null,
-        laneHeight: this.laneAllocator.getLaneHeight(), slotCount: active?.slotCount ?? null,
+        laneSpacing: this.settings.laneSpacing,
+        fontSize: this.settings.fontSize,
+        width: active?.width ?? null,
+        height: active?.height ?? null,
+        y: active?.y ?? null,
+        laneHeight: this.laneAllocator.getLaneHeight(),
+        slotCount: active?.slotCount ?? null,
         durationMs: motion?.durationMs ?? null,
         actualVelocityPxPerMs: motion?.actualVelocityPxPerMs ?? null,
         travelDistancePx: motion?.travelDistancePx ?? null,
         queueResidenceMs: queuedAt.has(message.id)
-          ? performance.timeOrigin + performance.now() - queuedAt.get(message.id) : null,
+          ? performance.timeOrigin + performance.now() - queuedAt.get(message.id)
+          : null,
         geometricEntryAtEpochMs: motion ? performance.timeOrigin + motion.viewportEntryTime : null,
         visibleExitAtEpochMs: motion ? performance.timeOrigin + motion.visibleExitTime : null,
-        pendingDepth: this.pendingQueue.size });
+        pendingDepth: this.pendingQueue.size,
+      });
       queuedAt.delete(message.id);
     }
     return result;
@@ -959,7 +1430,10 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
   Renderer.prototype.renderFrame = function (...args) {
     if (this.observability && !observed.has(this.observability)) {
       observed.add(this.observability);
-      for (const [method, countIndex] of [['onMessageDropped', 1], ['onMessagesDropped', 0]]) {
+      for (const [method, countIndex] of [
+        ['onMessageDropped', 1],
+        ['onMessagesDropped', 0],
+      ]) {
         const native = this.observability[method];
         if (typeof native !== 'function') continue;
         this.observability[method] = (...dropArgs) => {
@@ -971,53 +1445,87 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
       }
     }
     const dimsBefore = this.overlay.getDimensions();
-    const frame = state.beginRenderFrame({ ctx: this.ctx,
-      logicalWidth: dimsBefore?.width ?? null, logicalHeight: dimsBefore?.height ?? null,
-      config: { renderer: 'main', fontSize: this.settings.fontSize,
-        laneSpacing: this.settings.laneSpacing } });
+    const frame = state.beginRenderFrame({
+      ctx: this.ctx,
+      logicalWidth: dimsBefore?.width ?? null,
+      logicalHeight: dimsBefore?.height ?? null,
+      config: {
+        renderer: 'main',
+        fontSize: this.settings.fontSize,
+        laneSpacing: this.settings.laneSpacing,
+      },
+    });
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
       successful = true;
       return result;
-    }
-    finally {
+    } finally {
       exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
       exact.peaks.active = Math.max(exact.peaks.active, this.activeMessages.length);
       const dims = this.overlay.getDimensions();
-      exact.config = { mode: this.settings.danmakuMode,
-        fontSize: this.settings.fontSize, laneSpacing: this.settings.laneSpacing,
+      exact.config = {
+        mode: this.settings.danmakuMode,
+        fontSize: this.settings.fontSize,
+        laneSpacing: this.settings.laneSpacing,
         laneDensityFactor: this.currentLaneDensityFactor,
-        safeTop: this.settings.safeTop, safeBottom: this.settings.safeBottom,
+        safeTop: this.settings.safeTop,
+        safeBottom: this.settings.safeBottom,
         speedPxPerSec: this.settings.speedPxPerSec,
         backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
-        outline: this.settings.outline, backgroundColors: this.settings.backgroundColors,
-        logicalWidth: dims?.width ?? null, logicalHeight: dims?.height ?? null,
-        laneHeight: this.laneAllocator.getLaneHeight(), laneCount: this.laneAllocator.getLaneCount() };
+        outline: this.settings.outline,
+        backgroundColors: this.settings.backgroundColors,
+        logicalWidth: dims?.width ?? null,
+        logicalHeight: dims?.height ?? null,
+        laneHeight: this.laneAllocator.getLaneHeight(),
+        laneCount: this.laneAllocator.getLaneCount(),
+      };
       const active = this.activeMessages.filter((entry) => isFixture(entry.message?.id));
-      exact.activeNow = active
-        .slice(0, 100).map((entry) => ({ id: entry.message.id, x: entry.x, y: entry.y,
-          width: entry.width, height: entry.height, laneIndex: entry.laneIndex,
-          slotCount: entry.slotCount, durationMs: entry.motion?.durationMs ?? null,
-          actualVelocityPxPerMs: entry.motion?.actualVelocityPxPerMs ?? null,
-          startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
-          endAtEpochMs: performance.timeOrigin + entry.startTime +
-            entry.pausedDuration + entry.duration }));
+      exact.activeNow = active.slice(0, 100).map((entry) => ({
+        id: entry.message.id,
+        x: entry.x,
+        y: entry.y,
+        width: entry.width,
+        height: entry.height,
+        laneIndex: entry.laneIndex,
+        slotCount: entry.slotCount,
+        durationMs: entry.motion?.durationMs ?? null,
+        actualVelocityPxPerMs: entry.motion?.actualVelocityPxPerMs ?? null,
+        startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
+        endAtEpochMs:
+          performance.timeOrigin + entry.startTime + entry.pausedDuration + entry.duration,
+      }));
       frame.failed = !successful;
       frame.config = { ...frame.config, ...exact.config };
-      state.endRenderFrame(frame, active.map((entry) => ({ id: entry.message.id,
-        x: entry.x, y: entry.y, width: entry.width, height: entry.height,
-        startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
-        endAtEpochMs: performance.timeOrigin + entry.startTime +
-          entry.pausedDuration + entry.duration })));
+      state.endRenderFrame(
+        frame,
+        active.map((entry) => ({
+          id: entry.message.id,
+          x: entry.x,
+          y: entry.y,
+          width: entry.width,
+          height: entry.height,
+          startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
+          endAtEpochMs:
+            performance.timeOrigin + entry.startTime + entry.pausedDuration + entry.duration,
+        }))
+      );
     }
   };
 }
 
 function messageAction(id, text) {
-  return { addChatItemAction: { item: { liveChatTextMessageRenderer: {
-    id, authorName: { simpleText: `Fixture viewer ${id}` }, message: { runs: [{ text: text.includes(id) ? text : `${id} ${text}` }] },
-  } } } };
+  return {
+    addChatItemAction: {
+      item: {
+        liveChatTextMessageRenderer: {
+          id,
+          authorName: { simpleText: `Fixture viewer ${id}` },
+          message: { runs: [{ text: text.includes(id) ? text : `${id} ${text}` }] },
+        },
+      },
+    },
+  };
 }
 
 export function mixedPressureBatches(phase) {
@@ -1025,26 +1533,50 @@ export function mixedPressureBatches(phase) {
     key: `${phase}-${chunk}`,
     actions: Array.from({ length: MIXED_PRESSURE_CHUNK_SIZE }, (_, offset) => {
       const index = chunk * MIXED_PRESSURE_CHUNK_SIZE + offset;
-      return messageAction(`WINDOWS204_PRESSURE_${phase}_${String(index).padStart(2, '0')}`,
-        'Bounded placement pressure');
+      return messageAction(
+        `WINDOWS204_PRESSURE_${phase}_${String(index).padStart(2, '0')}`,
+        'Bounded placement pressure'
+      );
     }),
   }));
 }
 
 function chatResponse(actions) {
-  return { continuationContents: { liveChatContinuation: { actions, continuations: [
-    { timedContinuationData: { continuation: 'windows193-next', timeoutMs: 30_000 } },
-  ] } } };
+  return {
+    continuationContents: {
+      liveChatContinuation: {
+        actions,
+        continuations: [
+          { timedContinuationData: { continuation: 'windows193-next', timeoutMs: 30_000 } },
+        ],
+      },
+    },
+  };
 }
 
 function replayResponse(actions, continuation = 'windows193-seek') {
-  return { continuationContents: { liveChatContinuation: { actions,
-    continuations: [{ playerSeekContinuationData: { continuation } }],
-  } } };
+  return {
+    continuationContents: {
+      liveChatContinuation: {
+        actions,
+        continuations: [{ playerSeekContinuationData: { continuation } }],
+      },
+    },
+  };
 }
 
-async function runScenario({ context, root, output, extensionId, name, forceFallback, mode,
-  transition, comparisonOnly = false, spacingOnly = false }) {
+async function runScenario({
+  context,
+  root,
+  output,
+  extensionId,
+  name,
+  forceFallback,
+  mode,
+  transition,
+  comparisonOnly = false,
+  spacingOnly = false,
+}) {
   const page = await context.newPage();
   const requested = [];
   let originalSettings;
@@ -1054,42 +1586,105 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
   const replay = mode === 'replay';
   const spacingSpeed = transition === 'spacing-speed';
   const mixedGap = transition === 'mixed-gap';
-  const hasMixedConfig = (config) => config?.mode === 'top' && config?.fontSize === 34 &&
-    config?.laneSpacing === 8 && config?.safeTop === 0.1 && config?.safeBottom === 0.15;
+  const hasMixedConfig = (config) =>
+    config?.mode === 'top' &&
+    config?.fontSize === 34 &&
+    config?.laneSpacing === 8 &&
+    config?.safeTop === 0.1 &&
+    config?.safeBottom === 0.15;
   const replayObservations = {};
-  const ids = replay ? TOKENS.slice(3, 6) : mixedGap ? [MIXED_IDS[0]]
-    : spacingSpeed ? spacingFixtureIds().gap0
-    : mode === 'reverse' ? [TOKENS[2]] : TOKENS.slice(0, 2);
+  const ids = replay
+    ? TOKENS.slice(3, 6)
+    : mixedGap
+      ? [MIXED_IDS[0]]
+      : spacingSpeed
+        ? spacingFixtureIds().gap0
+        : mode === 'reverse'
+          ? [TOKENS[2]]
+          : TOKENS.slice(0, 2);
   const paidId = mixedGap ? MIXED_IDS[1] : 'WINDOWS193_PAID';
   const drawnIds = replay ? ids : spacingSpeed ? ids.slice(0, 2) : [...ids, paidId];
-  const actions = ids.map((id) => messageAction(id, spacingSpeed
-    ? `東京の夜空にコメントが流れます ${id}` : id === TOKENS[1] ? `${id}_${'W'.repeat(100)}` : id));
-  if (!replay && !spacingSpeed) actions.push({ addChatItemAction: { item: { liveChatPaidMessageRenderer: {
-    id: paidId, authorName: { simpleText: 'Fixture donor' },
-    purchaseAmountText: { simpleText: '$5.00' },
-    message: { simpleText: paidId },
-  } } } });
-  const replayActions = replay ? [10_000, 10_001, 11_500].map((offsetMs, index) => ({
-    replayChatItemAction: { videoOffsetTimeMsec: offsetMs, actions: [actions[index]] },
-  })) : [];
+  const actions = ids.map((id) =>
+    messageAction(
+      id,
+      spacingSpeed
+        ? `東京の夜空にコメントが流れます ${id}`
+        : id === TOKENS[1]
+          ? `${id}_${'W'.repeat(100)}`
+          : id
+    )
+  );
+  if (!replay && !spacingSpeed)
+    actions.push({
+      addChatItemAction: {
+        item: {
+          liveChatPaidMessageRenderer: {
+            id: paidId,
+            authorName: { simpleText: 'Fixture donor' },
+            purchaseAmountText: { simpleText: '$5.00' },
+            message: { simpleText: paidId },
+          },
+        },
+      },
+    });
+  const replayActions = replay
+    ? [10_000, 10_001, 11_500].map((offsetMs, index) => ({
+        replayChatItemAction: { videoOffsetTimeMsec: offsetMs, actions: [actions[index]] },
+      }))
+    : [];
   const batches = new Map([
     ['1', actions],
-    ['2', spacingSpeed ? spacingFixtureIds().gap8.map((id) => messageAction(id,
-      `東京の夜空にコメントが流れます ${id}`)) : transition === 'congestion'
-      ? Array.from({ length: 50 }, (_, index) => messageAction(
-        `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`, 'Bounded congestion fixture'))
-      : [messageAction(transition === 'reduced' ? TOKENS[6] : TOKENS[8],
-        'Bounded transition fixture')]],
-    ['3', spacingSpeed ? Array.from({ length: 51 }, (_, index) => {
-      const id = index === 14 ? TOKENS[17] : `WINDOWS195_LOAD_${String(index).padStart(2, '0')}`;
-      return messageAction(id, index === 14
-        ? `${id} ${'東京の夜空をゆっくり流れるコメント'.repeat(5)}`
-        : `${id} バックログ`);
-    }) : [messageAction(transition === 'reduced' ? TOKENS[7] : TOKENS[9],
-      'Bounded second transition fixture')]],
-    ['4', spacingSpeed ? Array.from({ length: 4 }, (_, index) => messageAction(
-      `WINDOWS195_BURST_${String(index).padStart(2, '0')}`, 'Bounded live burst'))
-      : [messageAction(TOKENS[10], 'Reduced-motion override disabled')]],
+    [
+      '2',
+      spacingSpeed
+        ? spacingFixtureIds().gap8.map((id) =>
+            messageAction(id, `東京の夜空にコメントが流れます ${id}`)
+          )
+        : transition === 'congestion'
+          ? Array.from({ length: 50 }, (_, index) =>
+              messageAction(
+                `WINDOWS193_LOAD_${String(index).padStart(2, '0')}`,
+                'Bounded congestion fixture'
+              )
+            )
+          : [
+              messageAction(
+                transition === 'reduced' ? TOKENS[6] : TOKENS[8],
+                'Bounded transition fixture'
+              ),
+            ],
+    ],
+    [
+      '3',
+      spacingSpeed
+        ? Array.from({ length: 51 }, (_, index) => {
+            const id =
+              index === 14 ? TOKENS[17] : `WINDOWS195_LOAD_${String(index).padStart(2, '0')}`;
+            return messageAction(
+              id,
+              index === 14
+                ? `${id} ${'東京の夜空をゆっくり流れるコメント'.repeat(5)}`
+                : `${id} バックログ`
+            );
+          })
+        : [
+            messageAction(
+              transition === 'reduced' ? TOKENS[7] : TOKENS[9],
+              'Bounded second transition fixture'
+            ),
+          ],
+    ],
+    [
+      '4',
+      spacingSpeed
+        ? Array.from({ length: 4 }, (_, index) =>
+            messageAction(
+              `WINDOWS195_BURST_${String(index).padStart(2, '0')}`,
+              'Bounded live burst'
+            )
+          )
+        : [messageAction(TOKENS[10], 'Reduced-motion override disabled')],
+    ],
     ['5', [messageAction(TOKENS[11], 'System reduced motion disabled')]],
   ]);
   if (mixedGap) {
@@ -1099,18 +1694,30 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     }
   }
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
-  let html = preview.replace(
-    '<div class="player-inner">Video Player Placeholder</div>',
-    '<video aria-label="Placement fixture video" style="width:100%;height:100%"></video>',
-  ).replace('</body>', '<div id="chat"><yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer></div></body>');
+  let html = preview
+    .replace(
+      '<div class="player-inner">Video Player Placeholder</div>',
+      '<video aria-label="Placement fixture video" style="width:100%;height:100%"></video>'
+    )
+    .replace(
+      '</body>',
+      '<div id="chat"><yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer></div></body>'
+    );
   assert.notEqual(html, preview, 'Placement fixture video was not installed');
-  if (mixedGap) html = html.replace('</style>',
-    '#movie_player:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; }\n</style>')
-    .replace('</body>', '<button id="placement-fullscreen">Full screen</button></body>');
+  if (mixedGap)
+    html = html
+      .replace(
+        '</style>',
+        '#movie_player:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; }\n</style>'
+      )
+      .replace('</body>', '<button id="placement-fullscreen">Full screen</button></body>');
   const workerPrelude = workerProbePrelude();
-  const canvasScript = spacingSpeed || mixedGap
-    ? instrumentCanvasPageScript(await readFile(join(root, 'dist-extension/page-script.js'), 'utf8'))
-    : null;
+  const canvasScript =
+    spacingSpeed || mixedGap
+      ? instrumentCanvasPageScript(
+          await readFile(join(root, 'dist-extension/page-script.js'), 'utf8')
+        )
+      : null;
   if (spacingSpeed || mixedGap) assert(canvasScript, 'Packaged Canvas page script shape changed');
   const screenshot = `placement-${name}.png`;
   let screenshotCaptured = false;
@@ -1121,9 +1728,14 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         if (key === '1') {
           window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
         }
-        const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=${key}`, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
-        });
+        const response = await fetch(
+          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows193=${key}`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          }
+        );
         if (!response.ok) throw new Error('Placement fixture request failed');
         await response.json();
       }
@@ -1140,17 +1752,31 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       const probe = window.__ytPlacementProbe;
       const id = (probe.flushSequence ?? 0) + 1;
       probe.flushSequence = id;
-      for (const record of probe.workers) record.worker.postMessage({ type: 'ytPlacementFlush', requestId: id });
+      for (const record of probe.workers)
+        record.worker.postMessage({ type: 'ytPlacementFlush', requestId: id });
       return id;
     });
-    await page.waitForFunction((id) => window.__ytPlacementProbe.workers
-      .some((record) => record.ready && record.flushId === id), requestId, { timeout: 5000 });
-    return page.evaluate(() => window.__ytPlacementProbe.workers
-      .find((record) => record.ready)?.sample?.exact ?? null);
+    await page.waitForFunction(
+      (id) =>
+        window.__ytPlacementProbe.workers.some((record) => record.ready && record.flushId === id),
+      requestId,
+      { timeout: 5000 }
+    );
+    return page.evaluate(
+      () => window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample?.exact ?? null
+    );
   };
-  const waitForWorkerEntry = (id) => page.waitForFunction((messageId) =>
-    Number.isFinite(window.__ytPlacementProbe.workers.find((record) => record.ready)
-      ?.sample?.firstEntry?.[messageId]), id, { timeout: 10_000 });
+  const waitForWorkerEntry = (id) =>
+    page.waitForFunction(
+      (messageId) =>
+        Number.isFinite(
+          window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample?.firstEntry?.[
+            messageId
+          ]
+        ),
+      id,
+      { timeout: 10_000 }
+    );
   const captureProbe = async () => {
     if (page.isClosed()) return null;
     await page.evaluate(() => {
@@ -1165,62 +1791,101 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       const video = document.querySelector('video')?.getBoundingClientRect();
       const overlay = document.querySelector('#yt-live-chat-overlay canvas');
       const settings = window.__ytChatOverlay?.getSettings?.();
-      const insets = settings && probe.readRegularInsets?.(settings.fontSize,
-        settings.outline.enabled ? settings.outline.widthPx : 0, false);
-      return { sourcePrefixed: probe.sourcePrefixed, sourceHooked: probe.sourceHooked,
+      const insets =
+        settings &&
+        probe.readRegularInsets?.(
+          settings.fontSize,
+          settings.outline.enabled ? settings.outline.widthPx : 0,
+          false
+        );
+      return {
+        sourcePrefixed: probe.sourcePrefixed,
+        sourceHooked: probe.sourceHooked,
         canvasSourceHooked: probe.canvasSourceHooked,
         regularInsets: insets ?? null,
         viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
         video: video ? { x: video.x, y: video.y, width: video.width, height: video.height } : null,
         canvas: overlay ? { width: overlay.width, height: overlay.height } : null,
-        requestAtEpochMs: probe.requestAtEpochMs, videoEntry: probe.videoEntry,
-        frames: probe.frames, bounds: probe.bounds, ink: probe.ink, exact: probe.exact,
+        requestAtEpochMs: probe.requestAtEpochMs,
+        videoEntry: probe.videoEntry,
+        frames: probe.frames,
+        bounds: probe.bounds,
+        ink: probe.ink,
+        exact: probe.exact,
         latestRenderFrame: probe.latestRenderFrame,
         firstEntry: probe.firstEntry,
-        ingress: probe.ingress, overflow: probe.overflow,
-        workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })) };
+        ingress: probe.ingress,
+        overflow: probe.overflow,
+        workers: probe.workers.map(({ ready, stats, sample }) => ({ ready, stats, sample })),
+      };
     });
   };
   const mixedSnapshot = async () => {
     if (!forceFallback) await workerSnapshot();
     const raw = await captureProbe();
     const selected = forceFallback ? raw : raw?.workers.find((record) => record.ready)?.sample;
-    assert(raw?.canvasSourceHooked && selected?.exact,
-      'Packaged mixed-height renderer probe did not attach');
+    assert(
+      raw?.canvasSourceHooked && selected?.exact,
+      'Packaged mixed-height renderer probe did not attach'
+    );
     return selected;
   };
   const probeResult = (raw) => {
-    const selected = raw && (forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample);
-    const ingress = forceFallback ? Object.fromEntries(drawnIds.map((id) => [id, raw?.requestAtEpochMs]))
-      : raw?.ingress ?? {};
-    return { renderer: forceFallback ? 'main' : 'worker', name, mode,
-      phases: phaseObservations, ids: requested,
+    const selected =
+      raw && (forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample);
+    const ingress = forceFallback
+      ? Object.fromEntries(drawnIds.map((id) => [id, raw?.requestAtEpochMs]))
+      : (raw?.ingress ?? {});
+    return {
+      renderer: forceFallback ? 'main' : 'worker',
+      name,
+      mode,
+      phases: phaseObservations,
+      ids: requested,
       replayRequests: replay ? replayRequests : null,
       replayBoundaries: replay ? replayObservations : null,
       deliveredBatches: [...deliveredBatches],
-      sourcePrefixed: raw?.sourcePrefixed ?? false, sourceHooked: raw?.sourceHooked ?? false,
-      canvasSourceHooked: raw?.canvasSourceHooked ?? false, comparisonOnly,
+      sourcePrefixed: raw?.sourcePrefixed ?? false,
+      sourceHooked: raw?.sourceHooked ?? false,
+      canvasSourceHooked: raw?.canvasSourceHooked ?? false,
+      comparisonOnly,
       regularInsets: raw?.regularInsets ?? null,
-      viewport: raw?.viewport ?? null, video: raw?.video ?? null, canvas: raw?.canvas ?? null,
+      viewport: raw?.viewport ?? null,
+      video: raw?.video ?? null,
+      canvas: raw?.canvas ?? null,
       workerReady: raw?.workers.some((worker) => worker.ready) ?? false,
-      firstEntryLatencyMs: Object.fromEntries(drawnIds.map((id) => [id,
-        selected?.firstEntry?.[id] !== undefined && ingress[id] !== undefined
-          ? selected.firstEntry[id] - ingress[id] : null])),
+      firstEntryLatencyMs: Object.fromEntries(
+        drawnIds.map((id) => [
+          id,
+          selected?.firstEntry?.[id] !== undefined && ingress[id] !== undefined
+            ? selected.firstEntry[id] - ingress[id]
+            : null,
+        ])
+      ),
       firstEntryAtEpochMs: selected?.firstEntry ?? {},
-      firstEntryScope: 'first sampled nonzero-alpha text draw touching the viewport; includes fade and frame quantization',
+      firstEntryScope:
+        'first sampled nonzero-alpha text draw touching the viewport; includes fade and frame quantization',
       geometryUnits: 'backing-store pixels',
       replayVideoTime: raw?.videoEntry ?? {},
-      geometricEntryLatencyMs: Object.fromEntries((selected?.exact?.dispositions ?? [])
-        .filter((entry) => entry.kind === 'activated' && Number.isFinite(entry.geometricEntryAtEpochMs))
-        .map((entry) => [entry.id, ingress[entry.id] === undefined ? null
-          : entry.geometricEntryAtEpochMs - ingress[entry.id]])),
+      geometricEntryLatencyMs: Object.fromEntries(
+        (selected?.exact?.dispositions ?? [])
+          .filter(
+            (entry) => entry.kind === 'activated' && Number.isFinite(entry.geometricEntryAtEpochMs)
+          )
+          .map((entry) => [
+            entry.id,
+            ingress[entry.id] === undefined
+              ? null
+              : entry.geometricEntryAtEpochMs - ingress[entry.id],
+          ])
+      ),
       frameWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.workMs) ?? []),
       preClearWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.preClearMs) ?? []),
       ...summarizeExactWorkerProbe(selected, forceFallback ? 'main' : 'worker'),
       bounds: selected?.bounds?.slice(0, MAX_SAMPLES) ?? [],
       ink: selected?.ink?.slice(0, MAX_SAMPLES) ?? [],
       latestRenderFrame: selected?.latestRenderFrame ?? null,
-      exactCanvas: forceFallback ? selected?.exact ?? null : null,
+      exactCanvas: forceFallback ? (selected?.exact ?? null) : null,
       queueStats: raw?.workers.flatMap((worker) => worker.stats) ?? [],
       sampleOverflow: selected?.overflow ?? null,
       screenshot: screenshotCaptured ? screenshot : null,
@@ -1231,92 +1896,178 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
-      if (canvasScript && url.protocol === 'chrome-extension:' &&
-          url.hostname === extensionId && url.pathname === '/page-script.js') {
+      if (
+        canvasScript &&
+        url.protocol === 'chrome-extension:' &&
+        url.hostname === extensionId &&
+        url.pathname === '/page-script.js'
+      ) {
         return route.fulfill({ status: 200, contentType: 'text/javascript', body: canvasScript });
       }
-      if (url.protocol === 'chrome-extension:' && url.hostname === extensionId) return route.continue();
-      if (replay && url.hostname === 'www.youtube.com' &&
-        url.pathname === '/youtubei/v1/live_chat/get_live_chat_replay') {
+      if (url.protocol === 'chrome-extension:' && url.hostname === extensionId)
+        return route.continue();
+      if (
+        replay &&
+        url.hostname === 'www.youtube.com' &&
+        url.pathname === '/youtubei/v1/live_chat/get_live_chat_replay'
+      ) {
         replayRequests++;
-        return route.fulfill({ status: 200, contentType: 'application/json',
-          json: replayResponse(replayRequests === 2 ? replayActions : []) });
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          json: replayResponse(replayRequests === 2 ? replayActions : []),
+        });
       }
-      if (url.hostname === 'www.youtube.com' && url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')) {
+      if (
+        url.hostname === 'www.youtube.com' &&
+        url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')
+      ) {
         const batch = url.searchParams.get('windows193');
         const deliver = batch && batches.has(batch) && !deliveredBatches.has(batch);
         if (deliver) deliveredBatches.add(batch);
-        return route.fulfill({ status: 200, contentType: 'application/json',
-          json: chatResponse(deliver ? batches.get(batch) : []) });
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          json: chatResponse(deliver ? batches.get(batch) : []),
+        });
       }
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
         return route.fulfill({ status: 200, contentType: 'text/html', body: html });
       }
-      return route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by placement fixture' });
+      return route.fulfill({
+        status: 403,
+        contentType: 'text/plain',
+        body: 'Blocked by placement fixture',
+      });
     });
     await page.addInitScript({ content: canvasProbePrelude({ forceFallback, workerPrelude }) });
     await page.addInitScript((isReplay) => {
       const playback = { time: 10, paused: false };
       Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
-        configurable: true, get: () => playback.time, set: (value) => { playback.time = value; },
+        configurable: true,
+        get: () => playback.time,
+        set: (value) => {
+          playback.time = value;
+        },
       });
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
-        configurable: true, get: () => playback.paused,
+        configurable: true,
+        get: () => playback.paused,
       });
-      window.__ytPlacementSetVideoTime = (seconds) => { playback.time = seconds; };
+      window.__ytPlacementSetVideoTime = (seconds) => {
+        playback.time = seconds;
+      };
       window.__ytPlacementSetPaused = (paused) => {
         playback.paused = paused;
         document.querySelector('video')?.dispatchEvent(new Event(paused ? 'pause' : 'play'));
       };
-      window.ytcfg = { data_: { INNERTUBE_API_KEY: 'windows-acceptance-key',
-        INNERTUBE_CONTEXT_CLIENT_NAME: '1', INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
-        INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } } } };
-      window.ytInitialData = { currentVideoEndpoint: { watchEndpoint: { videoId: 'windows193Placement' } },
-        contents: { twoColumnWatchNextResults: { conversationBar: { liveChatRenderer: {
-          isReplay, continuations: [isReplay
-            ? { playerSeekContinuationData: { continuation: 'windows193-initial' } }
-            : { timedContinuationData: { continuation: 'windows193-live', timeoutMs: 30_000 } }],
-        } } } } };
+      window.ytcfg = {
+        data_: {
+          INNERTUBE_API_KEY: 'windows-acceptance-key',
+          INNERTUBE_CONTEXT_CLIENT_NAME: '1',
+          INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
+          INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } },
+        },
+      };
+      window.ytInitialData = {
+        currentVideoEndpoint: { watchEndpoint: { videoId: 'windows193Placement' } },
+        contents: {
+          twoColumnWatchNextResults: {
+            conversationBar: {
+              liveChatRenderer: {
+                isReplay,
+                continuations: [
+                  isReplay
+                    ? { playerSeekContinuationData: { continuation: 'windows193-initial' } }
+                    : {
+                        timedContinuationData: {
+                          continuation: 'windows193-live',
+                          timeoutMs: 30_000,
+                        },
+                      },
+                ],
+              },
+            },
+          },
+        },
+      };
     }, replay);
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached', timeout: 15_000 });
-    await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings), undefined,
-      { timeout: 15_000 });
-    originalSettings = await page.evaluate(({ danmakuMode, spacingSpeed, mixedGap,
-      mixedBurstSettings }) => {
-      const settings = window.__ytChatOverlay.getSettings();
-      const overrides = { danmakuMode,
-        outline: { ...settings.outline, enabled: spacingSpeed, widthPx: 2, opacity: 0.7 },
-        showDebugOverlay: true,
-        fontSize: mixedGap ? 34 : 32, laneSpacing: mixedGap ? 8 : 0,
-        safeTop: mixedGap ? 0.1 : 0, safeBottom: mixedGap ? 0.15 : 0,
-        maxConcurrentMessages: 300, queueMaxSize: 200,
-        ignoreReducedMotion: false, translationEnabled: false };
-      if (spacingSpeed) Object.assign(overrides, {
-        backgroundColors: { ...settings.backgroundColors, normal: '#00000000' },
-        showAuthor: { ...settings.showAuthor, normal: false },
-        depthLayersEnabled: false, speedPxPerSec: 250, backlogSpeedMultiplier: 2,
-        backlogMaxRate: 50,
-        scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
-        staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
-      });
-      if (mixedGap) Object.assign(overrides, {
-        topBottomDurationMs: 30000, ...mixedBurstSettings,
-        staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
-      });
-      const previous = structuredClone(Object.fromEntries([
-        ...Object.keys(overrides), ...(spacingSpeed
-          ? ['burstElevatedThreshold', 'burstHighThreshold', 'burstExtremeThreshold',
-            'speedBoostThreshold'] : []),
-      ].map((key) => [key, settings[key]])));
-      window.__ytChatOverlay.applySettings(overrides);
-      return previous;
-    }, { danmakuMode: replay ? 'scroll' : mode, spacingSpeed, mixedGap,
-      mixedBurstSettings: MIXED_BURST_SETTINGS });
-    await page.waitForFunction((worker) => {
-      const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
-      return status.includes('Render:') && status.includes('Render: n/a') === worker;
-    }, !forceFallback, { timeout: 15_000 });
+    await page
+      .locator('#yt-live-chat-overlay canvas')
+      .waitFor({ state: 'attached', timeout: 15_000 });
+    await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings), undefined, {
+      timeout: 15_000,
+    });
+    originalSettings = await page.evaluate(
+      ({ danmakuMode, spacingSpeed, mixedGap, mixedBurstSettings }) => {
+        const settings = window.__ytChatOverlay.getSettings();
+        const overrides = {
+          danmakuMode,
+          outline: { ...settings.outline, enabled: spacingSpeed, widthPx: 2, opacity: 0.7 },
+          showDebugOverlay: true,
+          fontSize: mixedGap ? 34 : 32,
+          laneSpacing: mixedGap ? 8 : 0,
+          safeTop: mixedGap ? 0.1 : 0,
+          safeBottom: mixedGap ? 0.15 : 0,
+          maxConcurrentMessages: 300,
+          queueMaxSize: 200,
+          ignoreReducedMotion: false,
+          translationEnabled: false,
+        };
+        if (spacingSpeed)
+          Object.assign(overrides, {
+            backgroundColors: { ...settings.backgroundColors, normal: '#00000000' },
+            showAuthor: { ...settings.showAuthor, normal: false },
+            depthLayersEnabled: false,
+            speedPxPerSec: 250,
+            backlogSpeedMultiplier: 2,
+            backlogMaxRate: 50,
+            scrollDurationMinMs: 5000,
+            scrollDurationMaxMs: 30000,
+            staggerMaxDelayMs: 0,
+            staggerMediumDelayMs: 0,
+          });
+        if (mixedGap)
+          Object.assign(overrides, {
+            topBottomDurationMs: 30000,
+            ...mixedBurstSettings,
+            staggerMaxDelayMs: 0,
+            staggerMediumDelayMs: 0,
+          });
+        const previous = structuredClone(
+          Object.fromEntries(
+            [
+              ...Object.keys(overrides),
+              ...(spacingSpeed
+                ? [
+                    'burstElevatedThreshold',
+                    'burstHighThreshold',
+                    'burstExtremeThreshold',
+                    'speedBoostThreshold',
+                  ]
+                : []),
+            ].map((key) => [key, settings[key]])
+          )
+        );
+        window.__ytChatOverlay.applySettings(overrides);
+        return previous;
+      },
+      {
+        danmakuMode: replay ? 'scroll' : mode,
+        spacingSpeed,
+        mixedGap,
+        mixedBurstSettings: MIXED_BURST_SETTINGS,
+      }
+    );
+    await page.waitForFunction(
+      (worker) => {
+        const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
+        return status.includes('Render:') && status.includes('Render: n/a') === worker;
+      },
+      !forceFallback,
+      { timeout: 15_000 }
+    );
     await page.waitForTimeout(300);
     if (mixedGap) {
       let configured;
@@ -1325,67 +2076,109 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         if (hasMixedConfig(configured.exact.config)) break;
         await page.waitForTimeout(200);
       }
-      assert(hasMixedConfig(configured?.exact.config),
-      `Mixed-height settings did not reach the renderer before ingress: ${JSON.stringify({
-        config: configured?.exact.config, frameConfig: configured?.latestRenderFrame?.config,
-        complete: configured?.latestRenderFrame?.complete,
-      })}`);
-      phaseObservations.push({ phase: 'configured-safe-zone', config: configured.exact.config,
-        frameId: configured.latestRenderFrame?.frameId ?? null });
+      assert(
+        hasMixedConfig(configured?.exact.config),
+        `Mixed-height settings did not reach the renderer before ingress: ${JSON.stringify({
+          config: configured?.exact.config,
+          frameConfig: configured?.latestRenderFrame?.config,
+          complete: configured?.latestRenderFrame?.complete,
+        })}`
+      );
+      phaseObservations.push({
+        phase: 'configured-safe-zone',
+        config: configured.exact.config,
+        frameId: configured.latestRenderFrame?.frameId ?? null,
+      });
     }
     if (replay) {
-      await page.waitForFunction(() => document.querySelector(
-        '.yt-live-chat-overlay-live-region > p[data-message-id="WINDOWS193_REPLAY_DUE"]',
-      ), undefined, { timeout: 15_000 });
+      await page.waitForFunction(
+        () =>
+          document.querySelector(
+            '.yt-live-chat-overlay-live-region > p[data-message-id="WINDOWS193_REPLAY_DUE"]'
+          ),
+        undefined,
+        { timeout: 15_000 }
+      );
       assert(replayRequests >= 2, 'Replay player-seek fixture was not requested');
-      const futureAtDue = await page.locator(
-        '.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]',
-      ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+      const futureAtDue = await page
+        .locator('.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]')
+        .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
       replayObservations.at10000 = futureAtDue;
-      assert.deepEqual(futureAtDue, [TOKENS[3]], 'A prefetched replay message appeared before video time');
+      assert.deepEqual(
+        futureAtDue,
+        [TOKENS[3]],
+        'A prefetched replay message appeared before video time'
+      );
       await page.evaluate(() => window.__ytPlacementSetVideoTime(10.001));
-      await page.waitForFunction(() => document.querySelector(
-        '.yt-live-chat-overlay-live-region > p[data-message-id="WINDOWS193_REPLAY_NEXT"]',
-      ), undefined, { timeout: 10_000 });
-      replayObservations.at10001 = await page.locator(
-        '.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]',
-      ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
-      assert.deepEqual(replayObservations.at10001.toSorted(), [TOKENS[3], TOKENS[4]].toSorted(),
-        'A replay message appeared before 11500ms');
+      await page.waitForFunction(
+        () =>
+          document.querySelector(
+            '.yt-live-chat-overlay-live-region > p[data-message-id="WINDOWS193_REPLAY_NEXT"]'
+          ),
+        undefined,
+        { timeout: 10_000 }
+      );
+      replayObservations.at10001 = await page
+        .locator('.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]')
+        .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+      assert.deepEqual(
+        replayObservations.at10001.toSorted(),
+        [TOKENS[3], TOKENS[4]].toSorted(),
+        'A replay message appeared before 11500ms'
+      );
       await page.evaluate(() => window.__ytPlacementSetVideoTime(11.5));
     } else {
       await sendBatch('1');
     }
     requested.push(...ids, ...(replay || spacingSpeed ? [] : [paidId]));
-    await page.waitForFunction(({ expected, boundedStream }) => {
-      const accessibleIds = new Set([...document.querySelectorAll(
-        '.yt-live-chat-overlay-live-region > p')].map((element) => element.dataset.messageId));
-      // Each renderer mirrors at most ten active messages per update. The
-      // twelve-message stream is retained in the routed parser batch; selected
-      // messages are independently verified by canvas paint below.
-      return boundedStream
-        ? expected.filter((id) => accessibleIds.has(id)).length >= 2
-        : expected.every((id) => accessibleIds.has(id));
-    }, { expected: requested, boundedStream: spacingSpeed }, { timeout: 15_000 });
-    if (replay) replayObservations.at11500 = await page.locator(
-      '.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]',
-    ).evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
-    await page.waitForFunction(({ expected, worker }) => {
-      const probe = window.__ytPlacementProbe;
-      const firstEntry = worker ? probe.workers.find((record) => record.ready)?.sample?.firstEntry
-        : probe.firstEntry;
-      return expected.every((id) => Number.isFinite(firstEntry?.[id]));
-    }, { expected: drawnIds, worker: !forceFallback }, { timeout: 10_000 });
+    await page.waitForFunction(
+      ({ expected, boundedStream }) => {
+        const accessibleIds = new Set(
+          [...document.querySelectorAll('.yt-live-chat-overlay-live-region > p')].map(
+            (element) => element.dataset.messageId
+          )
+        );
+        // Each renderer mirrors at most ten active messages per update. The
+        // twelve-message stream is retained in the routed parser batch; selected
+        // messages are independently verified by canvas paint below.
+        return boundedStream
+          ? expected.filter((id) => accessibleIds.has(id)).length >= 2
+          : expected.every((id) => accessibleIds.has(id));
+      },
+      { expected: requested, boundedStream: spacingSpeed },
+      { timeout: 15_000 }
+    );
+    if (replay)
+      replayObservations.at11500 = await page
+        .locator('.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]')
+        .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+    await page.waitForFunction(
+      ({ expected, worker }) => {
+        const probe = window.__ytPlacementProbe;
+        const firstEntry = worker
+          ? probe.workers.find((record) => record.ready)?.sample?.firstEntry
+          : probe.firstEntry;
+        return expected.every((id) => Number.isFinite(firstEntry?.[id]));
+      },
+      { expected: drawnIds, worker: !forceFallback },
+      { timeout: 10_000 }
+    );
 
     if (mixedGap) {
       const initial = await mixedSnapshot();
-      assert(hasMixedConfig(initial.exact.config) &&
-        hasMixedConfig(initial.latestRenderFrame?.config),
-      'Mixed-height focus rows did not use the configured font and safe zone');
-      assert(MIXED_IDS.every((id) => initial.exact.activeNow.some((entry) => entry.id === id)),
-        'Mixed-height fixture rows were not both active before reflow');
-      phaseObservations.push({ phase: 'initial', config: initial.exact.config,
-        active: initial.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)) });
+      assert(
+        hasMixedConfig(initial.exact.config) && hasMixedConfig(initial.latestRenderFrame?.config),
+        'Mixed-height focus rows did not use the configured font and safe zone'
+      );
+      assert(
+        MIXED_IDS.every((id) => initial.exact.activeNow.some((entry) => entry.id === id)),
+        'Mixed-height fixture rows were not both active before reflow'
+      );
+      phaseObservations.push({
+        phase: 'initial',
+        config: initial.exact.config,
+        active: initial.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)),
+      });
       const waitForClearance = async (phase, priorFrameId, acceptsConfig) => {
         let clearance;
         for (let attempt = 0; attempt < 40; attempt++) {
@@ -1396,56 +2189,84 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
             continue;
           }
           clearance = measureMixedHeightClearance(frame);
-          if (!hasMixedConfig(selected.exact.config) || !hasMixedConfig(frame.config) ||
-            !acceptsConfig(selected.exact.config) || !acceptsConfig(frame.config)) {
+          if (
+            !hasMixedConfig(selected.exact.config) ||
+            !hasMixedConfig(frame.config) ||
+            !acceptsConfig(selected.exact.config) ||
+            !acceptsConfig(frame.config)
+          ) {
             await page.waitForTimeout(200);
             continue;
           }
           if (clearance.status === 'violation') {
             assert.fail(`${phase} content clearance violated: ${JSON.stringify(clearance)}`);
           }
-          if (clearance.status === 'measured' &&
-            selected.exact.config?.laneDensityFactor === 0.5) {
+          if (clearance.status === 'measured' && selected.exact.config?.laneDensityFactor === 0.5) {
             assert.equal(selected.exact.config.laneSpacing, 8);
             assert.equal(selected.exact.config.mode, 'top');
-            phaseObservations.push({ phase, clearance,
+            phaseObservations.push({
+              phase,
+              clearance,
               renderFrame: selected.latestRenderFrame,
               config: selected.exact.config,
               active: selected.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)),
               dispositions: selected.exact.dispositions.filter((entry) =>
-                MIXED_IDS.includes(entry.id)) });
+                MIXED_IDS.includes(entry.id)
+              ),
+            });
             return selected;
           }
           await page.waitForTimeout(200);
         }
-        assert.fail(`${phase} lacked two painted mixed-height rows at density 0.5: ${JSON.stringify(clearance)}`);
+        assert.fail(
+          `${phase} lacked two painted mixed-height rows at density 0.5: ${JSON.stringify(clearance)}`
+        );
       };
       await sendPressure('2');
-      const dense = await waitForClearance('density-reflow', initial.latestRenderFrame?.frameId ?? 0,
-        (config) => config?.laneHeight < initial.exact.config.laneHeight);
-      assert(dense.exact.config.laneHeight < initial.exact.config.laneHeight,
-        'Parser-driven burst did not shrink the lane grid');
+      const dense = await waitForClearance(
+        'density-reflow',
+        initial.latestRenderFrame?.frameId ?? 0,
+        (config) => config?.laneHeight < initial.exact.config.laneHeight
+      );
+      assert(
+        dense.exact.config.laneHeight < initial.exact.config.laneHeight,
+        'Parser-driven burst did not shrink the lane grid'
+      );
       await page.locator('.player-wrapper').evaluate((element) => {
         element.style.maxWidth = '1000px';
       });
       await page.setViewportSize({ width: 1100, height: 700 });
       await sendPressure('4');
-      const resized = await waitForClearance('resize-reflow', dense.latestRenderFrame.frameId,
-        (config) => config?.logicalWidth > dense.exact.config.logicalWidth);
-      assert(resized.exact.config.logicalWidth > dense.exact.config.logicalWidth,
-        'Fixture video did not grow on resize');
+      const resized = await waitForClearance(
+        'resize-reflow',
+        dense.latestRenderFrame.frameId,
+        (config) => config?.logicalWidth > dense.exact.config.logicalWidth
+      );
+      assert(
+        resized.exact.config.logicalWidth > dense.exact.config.logicalWidth,
+        'Fixture video did not grow on resize'
+      );
       await page.locator('#placement-fullscreen').evaluate((element) => {
         element.addEventListener('click', () =>
-          document.querySelector('#movie_player')?.requestFullscreen());
+          document.querySelector('#movie_player')?.requestFullscreen()
+        );
       });
       await page.locator('#placement-fullscreen').click();
-      await page.waitForFunction(() => document.fullscreenElement?.id === 'movie_player',
-        undefined, { timeout: 5000 });
+      await page.waitForFunction(
+        () => document.fullscreenElement?.id === 'movie_player',
+        undefined,
+        { timeout: 5000 }
+      );
       await sendPressure('5');
-      const fullscreen = await waitForClearance('fullscreen-reflow', resized.latestRenderFrame.frameId,
-        (config) => config?.logicalHeight > resized.exact.config.logicalHeight);
-      assert(fullscreen.exact.config.logicalHeight > resized.exact.config.logicalHeight,
-        'Actual fullscreen did not expand the overlay');
+      const fullscreen = await waitForClearance(
+        'fullscreen-reflow',
+        resized.latestRenderFrame.frameId,
+        (config) => config?.logicalHeight > resized.exact.config.logicalHeight
+      );
+      assert(
+        fullscreen.exact.config.logicalHeight > resized.exact.config.logicalHeight,
+        'Actual fullscreen did not expand the overlay'
+      );
     }
 
     if (spacingSpeed) {
@@ -1453,13 +2274,24 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         if (!forceFallback) await workerSnapshot();
         const raw = await captureProbe();
         const selected = forceFallback ? raw : raw?.workers.find((record) => record.ready)?.sample;
-        assert(raw?.canvasSourceHooked && selected?.exact, 'Packaged renderer probe did not attach');
-        assert.equal(selected.exact.config?.backgroundColors?.normal, '#00000000',
-          'Japanese fixture did not keep a transparent normal background');
-        return { exact: selected.exact, ink: selected.ink ?? [],
+        assert(
+          raw?.canvasSourceHooked && selected?.exact,
+          'Packaged renderer probe did not attach'
+        );
+        assert.equal(
+          selected.exact.config?.backgroundColors?.normal,
+          '#00000000',
+          'Japanese fixture did not keep a transparent normal background'
+        );
+        return {
+          exact: selected.exact,
+          ink: selected.ink ?? [],
           renderFrame: selected.latestRenderFrame ?? null,
           regularInsets: raw.regularInsets,
-          stats: forceFallback ? selected.exact.peaks : raw.workers.flatMap((record) => record.stats) };
+          stats: forceFallback
+            ? selected.exact.peaks
+            : raw.workers.flatMap((record) => record.stats),
+        };
       };
       const visibleGap = async (prefix, laneSpacing) => {
         let snapshot;
@@ -1467,268 +2299,486 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
         for (let attempt = 0; attempt < 40; attempt++) {
           snapshot = await issueSnapshot();
           visibleRowPitch = measureVisibleRowPitch(snapshot.renderFrame, prefix);
-          if (visibleRowPitch.status === 'measured' &&
-            visibleRowPitch.japaneseVisibleRowOriginsPx.length >= 2) {
-            return { snapshot, ...assertSpacingPhase(snapshot, prefix, laneSpacing,
-              forceFallback ? 'main' : 'worker') };
+          if (
+            visibleRowPitch.status === 'measured' &&
+            visibleRowPitch.japaneseVisibleRowOriginsPx.length >= 2
+          ) {
+            return {
+              snapshot,
+              ...assertSpacingPhase(
+                snapshot,
+                prefix,
+                laneSpacing,
+                forceFallback ? 'main' : 'worker'
+              ),
+            };
           }
           await page.waitForTimeout(250);
         }
-        assert.fail(`No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`);
+        assert.fail(
+          `No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`
+        );
       };
-      const { snapshot: gap0, visibleRowPitch: gap0Visible, allocationPitchPx: gap0Pitch } =
-        await visibleGap('WINDOWS196_GAP0_', 0);
-      await page.screenshot({ path: join(output, `placement-${name}-gap0.png`), animations: 'disabled' });
-      phaseObservations.push({ phase: 'gap0', allocationPitchPx: gap0Pitch,
-        visibleRowPitch: gap0Visible, renderFrame: gap0.renderFrame,
-        active: gap0.exact.activeNow, config: gap0.exact.config,
-        dispositions: gap0.exact.dispositions, ink: gap0.ink,
-        regularInsets: gap0.regularInsets, queue: gap0.stats });
+      const {
+        snapshot: gap0,
+        visibleRowPitch: gap0Visible,
+        allocationPitchPx: gap0Pitch,
+      } = await visibleGap('WINDOWS196_GAP0_', 0);
+      await page.screenshot({
+        path: join(output, `placement-${name}-gap0.png`),
+        animations: 'disabled',
+      });
+      phaseObservations.push({
+        phase: 'gap0',
+        allocationPitchPx: gap0Pitch,
+        visibleRowPitch: gap0Visible,
+        renderFrame: gap0.renderFrame,
+        active: gap0.exact.activeNow,
+        config: gap0.exact.config,
+        dispositions: gap0.exact.dispositions,
+        ink: gap0.ink,
+        regularInsets: gap0.regularInsets,
+        queue: gap0.stats,
+      });
       await page.evaluate(() => {
         const probe = window.__ytPlacementProbe;
         probe.bounds.length = 0;
         probe.ink.length = 0;
-        for (const record of probe.workers) record.worker.postMessage({ type: 'ytPlacementResetIssueInk' });
+        for (const record of probe.workers)
+          record.worker.postMessage({ type: 'ytPlacementResetIssueInk' });
       });
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 8 }));
       await page.waitForTimeout(350);
       await sendBatch('2');
-      const { snapshot: gap8, visibleRowPitch: gap8Visible, allocationPitchPx: gap8Pitch } =
-        await visibleGap('WINDOWS196_GAP8_', 8);
-      await page.screenshot({ path: join(output, `placement-${name}-gap8.png`), animations: 'disabled' });
+      const {
+        snapshot: gap8,
+        visibleRowPitch: gap8Visible,
+        allocationPitchPx: gap8Pitch,
+      } = await visibleGap('WINDOWS196_GAP8_', 8);
+      await page.screenshot({
+        path: join(output, `placement-${name}-gap8.png`),
+        animations: 'disabled',
+      });
       if (!comparisonOnly) {
-        const regular = gap0.exact.dispositions.filter((entry) =>
-          entry.kind === 'activated' && entry.id.startsWith('WINDOWS196_GAP0_'));
-        assert(regular.length >= 2 && regular.every((entry) => entry.slotCount === 1),
-          'Compact transparent regular comments reserved extra baseline rows');
+        const regular = gap0.exact.dispositions.filter(
+          (entry) => entry.kind === 'activated' && entry.id.startsWith('WINDOWS196_GAP0_')
+        );
+        assert(
+          regular.length >= 2 && regular.every((entry) => entry.slotCount === 1),
+          'Compact transparent regular comments reserved extra baseline rows'
+        );
       }
-      phaseObservations.push({ phase: 'gap8', allocationPitchPx: gap8Pitch,
-        visibleRowPitch: gap8Visible, renderFrame: gap8.renderFrame,
-        active: gap8.exact.activeNow, config: gap8.exact.config,
-        dispositions: gap8.exact.dispositions, ink: gap8.ink,
-        regularInsets: gap8.regularInsets, queue: gap8.stats });
+      phaseObservations.push({
+        phase: 'gap8',
+        allocationPitchPx: gap8Pitch,
+        visibleRowPitch: gap8Visible,
+        renderFrame: gap8.renderFrame,
+        active: gap8.exact.activeNow,
+        config: gap8.exact.config,
+        dispositions: gap8.exact.dispositions,
+        ink: gap8.ink,
+        regularInsets: gap8.regularInsets,
+        queue: gap8.stats,
+      });
       if (spacingOnly) {
         await page.screenshot({ path: join(output, screenshot), animations: 'disabled' });
         screenshotCaptured = true;
         const raw = await captureProbe();
-        assert(raw?.canvasSourceHooked && (forceFallback ||
-          (raw.sourcePrefixed && raw.sourceHooked && raw.workers.some((worker) => worker.ready))),
-        'Packaged renderer source probe was not attached');
+        assert(
+          raw?.canvasSourceHooked &&
+            (forceFallback ||
+              (raw.sourcePrefixed &&
+                raw.sourceHooked &&
+                raw.workers.some((worker) => worker.ready))),
+          'Packaged renderer source probe was not attached'
+        );
         return { status: 'passed', ...probeResult(raw) };
       }
 
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({
-        burstElevatedThreshold: 2, burstHighThreshold: 5,
-        burstExtremeThreshold: 10, speedBoostThreshold: 2,
-      }));
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({
+          burstElevatedThreshold: 2,
+          burstHighThreshold: 5,
+          burstExtremeThreshold: 10,
+          speedBoostThreshold: 2,
+        })
+      );
       await sendBatch('3'); // >50 parsed chat actions take the production Backlog path.
       await sendBatch('4'); // Ordinary live ingress raises the real burst detector.
       let backlog;
       for (let attempt = 0; attempt < 30; attempt++) {
         backlog = await issueSnapshot();
-        if (backlog.exact.dispositions.some((entry) =>
-          entry.id === TOKENS[17] && entry.kind === 'activated')) break;
+        if (
+          backlog.exact.dispositions.some(
+            (entry) => entry.id === TOKENS[17] && entry.kind === 'activated'
+          )
+        )
+          break;
         await page.waitForTimeout(900);
       }
-      assert(backlog.exact.dispositions.some((entry) =>
-        entry.id === TOKENS[17] && entry.kind === 'activated'),
-      'Long parser-ingress Backlog message did not activate within 30 seconds');
-      const long = backlog.exact.dispositions.find((entry) => entry.id === TOKENS[17]
-        && entry.kind === 'activated');
+      assert(
+        backlog.exact.dispositions.some(
+          (entry) => entry.id === TOKENS[17] && entry.kind === 'activated'
+        ),
+        'Long parser-ingress Backlog message did not activate within 30 seconds'
+      );
+      const long = backlog.exact.dispositions.find(
+        (entry) => entry.id === TOKENS[17] && entry.kind === 'activated'
+      );
       assertBacklogMotion(long, forceFallback ? 'main' : 'worker', comparisonOnly);
-      phaseObservations.push({ phase: 'backlog-burst', motion: long,
-        config: backlog.exact.config, queue: backlog.stats,
-        dispositions: backlog.exact.dispositions.filter((entry) => entry.id.startsWith('WINDOWS195_')) });
+      phaseObservations.push({
+        phase: 'backlog-burst',
+        motion: long,
+        config: backlog.exact.config,
+        queue: backlog.stats,
+        dispositions: backlog.exact.dispositions.filter((entry) =>
+          entry.id.startsWith('WINDOWS195_')
+        ),
+      });
       await page.evaluate(() => window.__ytPlacementSetPaused(true));
       const pauseStart = await issueSnapshot();
       await page.waitForTimeout(450);
       const paused = await issueSnapshot();
       const atPauseStart = pauseStart.exact.activeNow.find((entry) => entry.id === TOKENS[17]);
       const atPauseEnd = paused.exact.activeNow.find((entry) => entry.id === TOKENS[17]);
-      assert(atPauseStart && atPauseEnd && Math.abs(atPauseStart.x - atPauseEnd.x) < 2,
-        'Backlog progress advanced during video pause');
+      assert(
+        atPauseStart && atPauseEnd && Math.abs(atPauseStart.x - atPauseEnd.x) < 2,
+        'Backlog progress advanced during video pause'
+      );
       await page.evaluate(() => window.__ytPlacementSetPaused(false));
       await page.waitForTimeout(350);
       const resumed = await issueSnapshot();
-      assert(resumed.exact.activeNow.some((entry) => entry.id === TOKENS[17]),
-        'Backlog message was lost on video resume');
-      phaseObservations.push({ phase: 'pause-resume',
-        pauseStart: atPauseStart, paused: atPauseEnd,
-        resumed: resumed.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
+      assert(
+        resumed.exact.activeNow.some((entry) => entry.id === TOKENS[17]),
+        'Backlog message was lost on video resume'
+      );
+      phaseObservations.push({
+        phase: 'pause-resume',
+        pauseStart: atPauseStart,
+        paused: atPauseEnd,
+        resumed: resumed.exact.activeNow.filter((entry) => entry.id === TOKENS[17]),
+      });
       await page.locator('.player-wrapper').evaluate((element) => {
         element.style.maxWidth = '1000px';
       });
       await page.setViewportSize({ width: 1100, height: 700 });
-      await page.waitForFunction(({ width, height }) => {
-        const video = document.querySelector('video')?.getBoundingClientRect();
-        return video && video.width > width && video.height > height;
-      }, { width: resumed.exact.config.logicalWidth,
-        height: resumed.exact.config.logicalHeight }, { timeout: 5000 });
+      await page.waitForFunction(
+        ({ width, height }) => {
+          const video = document.querySelector('video')?.getBoundingClientRect();
+          return video && video.width > width && video.height > height;
+        },
+        { width: resumed.exact.config.logicalWidth, height: resumed.exact.config.logicalHeight },
+        { timeout: 5000 }
+      );
       const grown = await issueSnapshot();
       assertBacklogReflow(resumed.exact, grown.exact, TOKENS[17]);
-      phaseObservations.push({ phase: 'resize-expanded', config: grown.exact.config,
-        active: grown.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
+      phaseObservations.push({
+        phase: 'resize-expanded',
+        config: grown.exact.config,
+        active: grown.exact.activeNow.filter((entry) => entry.id === TOKENS[17]),
+      });
       if (!forceFallback) {
         await page.evaluate(() => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
-          record.worker.dispatchEvent(new ErrorEvent('error', { message: 'Acceptance recovery trigger' }));
+          record.worker.dispatchEvent(
+            new ErrorEvent('error', { message: 'Acceptance recovery trigger' })
+          );
         });
-        await page.waitForFunction(() => {
-          const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
-          return status.includes('Render:') && !status.includes('Render: n/a');
-        }, undefined, { timeout: 15_000 });
+        await page.waitForFunction(
+          () => {
+            const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
+            return status.includes('Render:') && !status.includes('Render: n/a');
+          },
+          undefined,
+          { timeout: 15_000 }
+        );
         const recovered = await captureProbe();
-        assert(recovered?.canvasSourceHooked && recovered.exact?.config,
-          'Worker failure did not recover into the instrumented Canvas');
-        assert(recovered.exact.activeNow.some((entry) => entry.id === TOKENS[17]),
-          'Backlog message was lost during Worker-to-Canvas recovery');
-        phaseObservations.push({ phase: 'worker-recovery', config: recovered.exact.config,
-          active: recovered.exact.activeNow.filter((entry) => entry.id === TOKENS[17]) });
+        assert(
+          recovered?.canvasSourceHooked && recovered.exact?.config,
+          'Worker failure did not recover into the instrumented Canvas'
+        );
+        assert(
+          recovered.exact.activeNow.some((entry) => entry.id === TOKENS[17]),
+          'Backlog message was lost during Worker-to-Canvas recovery'
+        );
+        phaseObservations.push({
+          phase: 'worker-recovery',
+          config: recovered.exact.config,
+          active: recovered.exact.activeNow.filter((entry) => entry.id === TOKENS[17]),
+        });
       }
       await page.locator('#yt-chat-overlay-settings-button').click({ force: true });
       const modal = page.locator('#yt-chat-overlay-settings-backdrop');
       await modal.waitFor({ state: 'visible' });
       const disclosure = modal.locator('.yt-chat-overlay-settings-disclosure').first();
-      if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
+      if ((await disclosure.getAttribute('open')) === null)
+        await disclosure.locator('summary').click();
       const slider = modal.locator('input[name="laneSpacing-slider"]');
       await slider.focus();
       await slider.press('Home');
-      const previewState = () => page.locator('.yt-chat-overlay-settings-font-preview-text')
-        .evaluate((element) => ({ rows: element.dataset.previewRows ?? null,
+      const previewState = () =>
+        page.locator('.yt-chat-overlay-settings-font-preview-text').evaluate((element) => ({
+          rows: element.dataset.previewRows ?? null,
           rowHeight: Number(element.dataset.previewRowHeight),
-          rowPitch: Number(element.dataset.previewRowPitch) }));
+          rowPitch: Number(element.dataset.previewRowPitch),
+        }));
       const previewZero = await previewState();
       for (let step = 0; step < 8; step++) await slider.press('ArrowRight');
       assert.equal(await modal.locator('input[name="laneSpacing"]').inputValue(), '8');
-      if (!comparisonOnly) await page.waitForFunction((before) => {
-        const element = document.querySelector('.yt-chat-overlay-settings-font-preview-text');
-        return element?.dataset.previewRows === '2' &&
-          Number(element.dataset.previewRowPitch) > before;
-      }, previewZero.rowPitch, { timeout: 5000 });
+      if (!comparisonOnly)
+        await page.waitForFunction(
+          (before) => {
+            const element = document.querySelector('.yt-chat-overlay-settings-font-preview-text');
+            return (
+              element?.dataset.previewRows === '2' &&
+              Number(element.dataset.previewRowPitch) > before
+            );
+          },
+          previewZero.rowPitch,
+          { timeout: 5000 }
+        );
       const previewEight = await previewState();
       if (!comparisonOnly) {
-        assert.equal(previewZero.rows, '2', 'Settings preview did not draw two representative rows');
+        assert.equal(
+          previewZero.rows,
+          '2',
+          'Settings preview did not draw two representative rows'
+        );
         assert.equal(previewEight.rows, '2');
-        assert(previewEight.rowPitch > previewZero.rowPitch,
-          'Settings preview did not respond to Lane Gap');
+        assert(
+          previewEight.rowPitch > previewZero.rowPitch,
+          'Settings preview did not respond to Lane Gap'
+        );
       }
       await modal.locator('button[data-action="close"]').last().click();
       await modal.waitFor({ state: 'hidden' });
       await page.locator('#yt-chat-overlay-settings-button').click({ force: true });
       await modal.waitFor({ state: 'visible' });
-      if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
-      assert.equal(await modal.locator('input[name="laneSpacing"]').inputValue(), '8',
-        'Saved Lane Gap was not restored on settings reopen');
+      if ((await disclosure.getAttribute('open')) === null)
+        await disclosure.locator('summary').click();
+      assert.equal(
+        await modal.locator('input[name="laneSpacing"]').inputValue(),
+        '8',
+        'Saved Lane Gap was not restored on settings reopen'
+      );
       await page.keyboard.press('Escape');
       await modal.waitFor({ state: 'hidden' });
-      const storageWorker = context.serviceWorkers().find((worker) =>
-        worker.url().startsWith(`chrome-extension://${extensionId}/`));
-      assert(storageWorker, 'Installed extension background worker is unavailable for storage readback');
+      const storageWorker = context
+        .serviceWorkers()
+        .find((worker) => worker.url().startsWith(`chrome-extension://${extensionId}/`));
+      assert(
+        storageWorker,
+        'Installed extension background worker is unavailable for storage readback'
+      );
       let storedLaneSpacing = null;
       for (let attempt = 0; attempt < 10; attempt++) {
-        const saved = await storageWorker.evaluate(async () =>
-          (await chrome.storage.local.get('yt-live-chat-overlay-settings'))['yt-live-chat-overlay-settings']);
+        const saved = await storageWorker.evaluate(
+          async () =>
+            (await chrome.storage.local.get('yt-live-chat-overlay-settings'))[
+              'yt-live-chat-overlay-settings'
+            ]
+        );
         storedLaneSpacing = saved ? JSON.parse(saved).laneSpacing : null;
         if (storedLaneSpacing === 8) break;
         await page.waitForTimeout(100);
       }
       assert.equal(storedLaneSpacing, 8, 'Lane Gap was not persisted in extension storage');
-      phaseObservations.push({ phase: 'settings-ui', previewZero, previewEight,
-        reopenedLaneSpacing: 8, storedLaneSpacing: 8, closeActions: ['Done', 'Escape'] });
+      phaseObservations.push({
+        phase: 'settings-ui',
+        previewZero,
+        previewEight,
+        reopenedLaneSpacing: 8,
+        storedLaneSpacing: 8,
+        closeActions: ['Done', 'Escape'],
+      });
     }
 
     if (transition === 'reduced') {
       const baseline = await workerSnapshot();
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.waitForFunction(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
-        ?.sample?.exact?.config?.reducedMotion === true, undefined, { timeout: 10_000 });
+      await page.waitForFunction(
+        () =>
+          window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample?.exact?.config
+            ?.reducedMotion === true,
+        undefined,
+        { timeout: 10_000 }
+      );
       await sendBatch('2');
-      await page.waitForFunction((id) => document.querySelector(
-        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[6]);
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector(`.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`),
+        TOKENS[6]
+      );
       await waitForWorkerEntry(TOKENS[6]);
       const reduced = await workerSnapshot();
       assert.equal(reduced.config.reducedMotion, true);
-      assert(reduced.dispositions.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === false),
-        'Reduced-motion message was not activated in fixed mode');
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ ignoreReducedMotion: true }));
+      assert(
+        reduced.dispositions.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === false),
+        'Reduced-motion message was not activated in fixed mode'
+      );
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({ ignoreReducedMotion: true })
+      );
       const override = await workerSnapshot();
       assert.equal(override.config.ignoreReducedMotion, true);
-      assert(override.activeNow.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === true),
-        'Reduced-motion override did not restore scrolling');
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ ignoreReducedMotion: false }));
+      assert(
+        override.activeNow.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === true),
+        'Reduced-motion override did not restore scrolling'
+      );
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({ ignoreReducedMotion: false })
+      );
       const restored = await workerSnapshot();
       assert.equal(restored.config.ignoreReducedMotion, false);
-      assert(restored.activeNow.some((entry) => entry.id === TOKENS[6] &&
-        entry.isScrolling === false), 'Disabling override did not restore reduced motion');
+      assert(
+        restored.activeNow.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === false),
+        'Disabling override did not restore reduced motion'
+      );
       await page.emulateMedia({ reducedMotion: 'no-preference' });
-      await page.waitForFunction(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
-        ?.sample?.exact?.config?.reducedMotion === false, undefined, { timeout: 10_000 });
+      await page.waitForFunction(
+        () =>
+          window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample?.exact?.config
+            ?.reducedMotion === false,
+        undefined,
+        { timeout: 10_000 }
+      );
       const systemOff = await workerSnapshot();
       assert.equal(systemOff.config.reducedMotion, false);
-      assert(systemOff.activeNow.some((entry) => entry.id === TOKENS[6] &&
-        entry.isScrolling === true), 'System reduced-motion off did not restore scrolling');
+      assert(
+        systemOff.activeNow.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === true),
+        'System reduced-motion off did not restore scrolling'
+      );
       for (const state of [reduced, override, restored, systemOff]) {
-        assert.equal(findOverlappingActivePair(state.activeNow,
-          state.config.logicalWidth, state.config.logicalHeight), null,
-        'Visible messages overlapped during a live reduced-motion transition');
+        assert.equal(
+          findOverlappingActivePair(
+            state.activeNow,
+            state.config.logicalWidth,
+            state.config.logicalHeight
+          ),
+          null,
+          'Visible messages overlapped during a live reduced-motion transition'
+        );
       }
-      phaseObservations.push({ phase: 'initial', config: baseline.config },
-        { phase: 'reduced', config: reduced.config }, { phase: 'override', config: override.config },
+      phaseObservations.push(
+        { phase: 'initial', config: baseline.config },
+        { phase: 'reduced', config: reduced.config },
+        { phase: 'override', config: override.config },
         { phase: 'override-off', config: restored.config },
-        { phase: 'system-off', config: systemOff.config });
+        { phase: 'system-off', config: systemOff.config }
+      );
     }
     if (transition === 'safe-density') {
       const baseline = await workerSnapshot();
       await page.setViewportSize({ width: 800, height: 600 });
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0.15,
-        safeBottom: 0.25, fontSize: 40, laneSpacing: 10, maxConcurrentMessages: 30 }));
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({
+          safeTop: 0.15,
+          safeBottom: 0.25,
+          fontSize: 40,
+          laneSpacing: 10,
+          maxConcurrentMessages: 30,
+        })
+      );
       await sendBatch('2');
-      await page.waitForFunction((id) => document.querySelector(
-        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[8]);
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector(`.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`),
+        TOKENS[8]
+      );
       await waitForWorkerEntry(TOKENS[8]);
       const compact = await workerSnapshot();
-      assert(compact.config.logicalWidth < baseline.config.logicalWidth,
-        'Active Worker viewport did not shrink');
+      assert(
+        compact.config.logicalWidth < baseline.config.logicalWidth,
+        'Active Worker viewport did not shrink'
+      );
       assert.equal(compact.config.safeTop, 0.15);
       assert.equal(compact.config.safeBottom, 0.25);
       assert.equal(compact.config.maxConcurrentMessages, 30);
       const active = compact.activeNow.filter((entry) => entry.id === TOKENS[8]);
       assert(active.length > 0, 'Safe-zone transition produced no active geometry');
-      assert(active.some((entry) => entry.y >= compact.config.logicalHeight * 0.15 &&
-        entry.y + entry.height <= compact.config.logicalHeight * 0.75),
-      'Transition message escaped the shrunken safe zone');
-      assert.equal(findOverlappingActivePair(compact.activeNow,
-        compact.config.logicalWidth, compact.config.logicalHeight), null,
-      'Messages overlapped after safe-zone and density shrink');
+      assert(
+        active.some(
+          (entry) =>
+            entry.y >= compact.config.logicalHeight * 0.15 &&
+            entry.y + entry.height <= compact.config.logicalHeight * 0.75
+        ),
+        'Transition message escaped the shrunken safe zone'
+      );
+      assert.equal(
+        findOverlappingActivePair(
+          compact.activeNow,
+          compact.config.logicalWidth,
+          compact.config.logicalHeight
+        ),
+        null,
+        'Messages overlapped after safe-zone and density shrink'
+      );
       await page.setViewportSize({ width: 1280, height: 720 });
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ safeTop: 0,
-        safeBottom: 0, fontSize: 32, laneSpacing: 0, maxConcurrentMessages: 300 }));
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({
+          safeTop: 0,
+          safeBottom: 0,
+          fontSize: 32,
+          laneSpacing: 0,
+          maxConcurrentMessages: 300,
+        })
+      );
       await sendBatch('3');
-      await page.waitForFunction((id) => document.querySelector(
-        `.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`), TOKENS[9]);
+      await page.waitForFunction(
+        (id) =>
+          document.querySelector(`.yt-live-chat-overlay-live-region > p[data-message-id="${id}"]`),
+        TOKENS[9]
+      );
       await waitForWorkerEntry(TOKENS[9]);
       const expanded = await workerSnapshot();
-      assert(expanded.config.logicalWidth > compact.config.logicalWidth,
-        'Active Worker viewport did not expand');
+      assert(
+        expanded.config.logicalWidth > compact.config.logicalWidth,
+        'Active Worker viewport did not expand'
+      );
       assert.equal(expanded.config.safeTop, 0);
       assert.equal(expanded.config.safeBottom, 0);
-      assert(expanded.activeNow.some((entry) => entry.id === TOKENS[9]),
-        'Expanded safe zone produced no active geometry');
-      assert.equal(findOverlappingActivePair(expanded.activeNow,
-        expanded.config.logicalWidth, expanded.config.logicalHeight), null,
-      'Messages overlapped after safe-zone expansion');
-      phaseObservations.push({ phase: 'initial', config: baseline.config },
+      assert(
+        expanded.activeNow.some((entry) => entry.id === TOKENS[9]),
+        'Expanded safe zone produced no active geometry'
+      );
+      assert.equal(
+        findOverlappingActivePair(
+          expanded.activeNow,
+          expanded.config.logicalWidth,
+          expanded.config.logicalHeight
+        ),
+        null,
+        'Messages overlapped after safe-zone expansion'
+      );
+      phaseObservations.push(
+        { phase: 'initial', config: baseline.config },
         { phase: 'compact', config: compact.config, active: active.at(-1) },
-        { phase: 'expanded', config: expanded.config,
-          active: expanded.activeNow.filter((entry) => entry.id === TOKENS[9]).at(-1) });
+        {
+          phase: 'expanded',
+          config: expanded.config,
+          active: expanded.activeNow.filter((entry) => entry.id === TOKENS[9]).at(-1),
+        }
+      );
     }
     if (transition === 'congestion') {
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ maxConcurrentMessages: 30,
-        queueMaxSize: 50, fontSize: 16, laneSpacing: 0, safeTop: 0, safeBottom: 0,
-        staggerMaxDelayMs: 200, staggerMediumDelayMs: 80 }));
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({
+          maxConcurrentMessages: 30,
+          queueMaxSize: 50,
+          fontSize: 16,
+          laneSpacing: 0,
+          safeTop: 0,
+          safeBottom: 0,
+          staggerMaxDelayMs: 200,
+          staggerMediumDelayMs: 80,
+        })
+      );
       await workerSnapshot();
-      await page.evaluate(() => window.__ytPlacementProbe.workers.find((record) => record.ready)
-        .worker.postMessage({ type: 'ytPlacementResetSamples' }));
+      await page.evaluate(() =>
+        window.__ytPlacementProbe.workers
+          .find((record) => record.ready)
+          .worker.postMessage({ type: 'ytPlacementResetSamples' })
+      );
       await sendBatch('2');
       await page.waitForTimeout(500);
       const congested = await workerSnapshot();
@@ -1736,15 +2786,26 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       assert.equal(congested.config.maxConcurrentMessages, 30);
       assert.equal(congested.config.queueMaxSize, 50);
       assert(peakPending >= 50, `No-stagger pressure was not reached: pending ${peakPending}`);
-      assert(congested.dispositions.some((entry) => entry.kind === 'activated' &&
-        entry.pendingDepth >= 50 && entry.staggerDelayMs === 0 &&
-        Math.abs(entry.optionalEntryDelayMs) < 1),
-      'Queue pressure did not remove both temporal and geometric entry delay');
+      assert(
+        congested.dispositions.some(
+          (entry) =>
+            entry.kind === 'activated' &&
+            entry.pendingDepth >= 50 &&
+            entry.staggerDelayMs === 0 &&
+            Math.abs(entry.optionalEntryDelayMs) < 1
+        ),
+        'Queue pressure did not remove both temporal and geometric entry delay'
+      );
       assert(congested.drains.every((drain) => drain.activeAfter <= 30));
-      phaseObservations.push({ phase: 'congested', config: congested.config, peakPending,
-        zeroStaggerActivations: congested.dispositions.filter((entry) =>
-          entry.kind === 'activated' && entry.pendingDepth >= 50 &&
-          entry.staggerDelayMs === 0).length });
+      phaseObservations.push({
+        phase: 'congested',
+        config: congested.config,
+        peakPending,
+        zeroStaggerActivations: congested.dispositions.filter(
+          (entry) =>
+            entry.kind === 'activated' && entry.pendingDepth >= 50 && entry.staggerDelayMs === 0
+        ).length,
+      });
     }
     if (transition === 'translation') {
       const before = await workerSnapshot();
@@ -1753,40 +2814,91 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
       await page.evaluate(() => window.__ytChatOverlay.applySettings({ translationEnabled: true }));
       const enabled = await workerSnapshot();
       assert(Number.isInteger(enabled.config.translationGeneration));
-      await page.evaluate(({ id, width, height, generation }) => {
-        const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
-        record.worker.postMessage({ type: 'updateTranslation', id,
-          translatedText: 'Fixture translation only', width, height,
-          translationHeight: 32, translationGeneration: generation });
-      }, { id: TOKENS[0], width: active.width + 80, height: active.height + 32,
-        generation: enabled.config.translationGeneration });
-      await page.waitForFunction(({ id, width }) => window.__ytPlacementProbe.workers
-        .find((record) => record.ready)?.sample?.exact?.activeNow
-        ?.some((entry) => entry.id === id && entry.width >= width),
-      { id: TOKENS[0], width: active.width + 80 }, { timeout: 10_000 });
+      await page.evaluate(
+        ({ id, width, height, generation }) => {
+          const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+          record.worker.postMessage({
+            type: 'updateTranslation',
+            id,
+            translatedText: 'Fixture translation only',
+            width,
+            height,
+            translationHeight: 32,
+            translationGeneration: generation,
+          });
+        },
+        {
+          id: TOKENS[0],
+          width: active.width + 80,
+          height: active.height + 32,
+          generation: enabled.config.translationGeneration,
+        }
+      );
+      await page.waitForFunction(
+        ({ id, width }) =>
+          window.__ytPlacementProbe.workers
+            .find((record) => record.ready)
+            ?.sample?.exact?.activeNow?.some((entry) => entry.id === id && entry.width >= width),
+        { id: TOKENS[0], width: active.width + 80 },
+        { timeout: 10_000 }
+      );
       const translated = await workerSnapshot();
       const translatedActive = translated.activeNow.find((entry) => entry.id === TOKENS[0]);
-      assert(translatedActive && translatedActive.width >= active.width + 80 &&
-        translatedActive.height >= active.height + 32,
-      'Injected production translation protocol did not reflow active geometry');
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ translationEnabled: false }));
+      assert(
+        translatedActive &&
+          translatedActive.width >= active.width + 80 &&
+          translatedActive.height >= active.height + 32,
+        'Injected production translation protocol did not reflow active geometry'
+      );
+      await page.evaluate(() =>
+        window.__ytChatOverlay.applySettings({ translationEnabled: false })
+      );
       const disabled = await workerSnapshot();
-      await page.evaluate(({ id, width, height, generation }) => {
-        const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
-        record.worker.postMessage({ type: 'updateTranslation', id, translatedText: null,
-          width, height, translationHeight: 0, translationGeneration: generation });
-      }, { id: TOKENS[0], width: active.width, height: active.height,
-        generation: disabled.config.translationGeneration });
-      await page.waitForFunction(({ id, width, height }) => window.__ytPlacementProbe.workers
-        .find((record) => record.ready)?.sample?.exact?.activeNow
-        ?.some((entry) => entry.id === id && entry.width === width && entry.height === height),
-      { id: TOKENS[0], width: active.width, height: active.height }, { timeout: 10_000 });
+      await page.evaluate(
+        ({ id, width, height, generation }) => {
+          const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+          record.worker.postMessage({
+            type: 'updateTranslation',
+            id,
+            translatedText: null,
+            width,
+            height,
+            translationHeight: 0,
+            translationGeneration: generation,
+          });
+        },
+        {
+          id: TOKENS[0],
+          width: active.width,
+          height: active.height,
+          generation: disabled.config.translationGeneration,
+        }
+      );
+      await page.waitForFunction(
+        ({ id, width, height }) =>
+          window.__ytPlacementProbe.workers
+            .find((record) => record.ready)
+            ?.sample?.exact?.activeNow?.some(
+              (entry) => entry.id === id && entry.width === width && entry.height === height
+            ),
+        { id: TOKENS[0], width: active.width, height: active.height },
+        { timeout: 10_000 }
+      );
       const reverted = await workerSnapshot();
-      phaseObservations.push({ phase: 'before', active },
-        { phase: 'translated', config: translated.config, active: translatedActive,
-          provenance: 'test-injected production Worker protocol' },
-        { phase: 'translation-off', config: reverted.config,
-          active: reverted.activeNow.find((entry) => entry.id === TOKENS[0]) });
+      phaseObservations.push(
+        { phase: 'before', active },
+        {
+          phase: 'translated',
+          config: translated.config,
+          active: translatedActive,
+          provenance: 'test-injected production Worker protocol',
+        },
+        {
+          phase: 'translation-off',
+          config: reverted.config,
+          active: reverted.activeNow.find((entry) => entry.id === TOKENS[0]),
+        }
+      );
     }
     await page.screenshot({ path: join(output, screenshot), animations: 'disabled' });
     screenshotCaptured = true;
@@ -1794,36 +2906,60 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
     const selected = forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample;
     assert(forceFallback || raw.sourcePrefixed, 'Packaged Worker source was not instrumented');
     assert(forceFallback || raw.sourceHooked, 'Packaged Worker renderer shape changed');
-    assert(forceFallback || raw.workers.some((worker) => worker.ready), 'Real Worker did not become ready');
+    assert(
+      forceFallback || raw.workers.some((worker) => worker.ready),
+      'Real Worker did not become ready'
+    );
     assert(selected && selected.frames.length > 0, 'No overlay frames were observed');
-    assert(forceFallback || selected.exact?.drains?.length > 0, 'No exact Worker drains were observed');
+    assert(
+      forceFallback || selected.exact?.drains?.length > 0,
+      'No exact Worker drains were observed'
+    );
     if (mode === 'top' || mode === 'bottom') {
       assert.equal(selected.exact.config.mode, mode);
-      assert(selected.exact.activeNow.some((entry) => ids.includes(entry.id)),
-        `No ${mode} message remained active for placement geometry`);
-      assert.equal(findOverlappingActivePair(selected.exact.activeNow,
-        selected.exact.config.logicalWidth, selected.exact.config.logicalHeight), null,
-      `${mode} active messages overlapped`);
+      assert(
+        selected.exact.activeNow.some((entry) => ids.includes(entry.id)),
+        `No ${mode} message remained active for placement geometry`
+      );
+      assert.equal(
+        findOverlappingActivePair(
+          selected.exact.activeNow,
+          selected.exact.config.logicalWidth,
+          selected.exact.config.logicalHeight
+        ),
+        null,
+        `${mode} active messages overlapped`
+      );
     }
     return { status: 'passed', ...probeResult(raw) };
   } catch (error) {
     if (!screenshotCaptured && !page.isClosed()) {
-      screenshotCaptured = await page.screenshot({ path: join(output, screenshot),
-        animations: 'disabled', timeout: 3000 }).then(() => true, () => false);
+      screenshotCaptured = await page
+        .screenshot({ path: join(output, screenshot), animations: 'disabled', timeout: 3000 })
+        .then(
+          () => true,
+          () => false
+        );
     }
     const raw = await captureProbe().catch(() => null);
-    return { status: 'failed', ...probeResult(raw),
+    return {
+      status: 'failed',
+      ...probeResult(raw),
       errorType: error instanceof Error ? error.name : typeof error,
-      errorMessage: error instanceof Error ? error.message.slice(0, 400) : String(error).slice(0, 400),
-      assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null };
+      errorMessage:
+        error instanceof Error ? error.message.slice(0, 400) : String(error).slice(0, 400),
+      assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null,
+    };
   } finally {
     if (mixedGap && !page.isClosed()) {
-      await page.evaluate(() => document.fullscreenElement && document.exitFullscreen())
+      await page
+        .evaluate(() => document.fullscreenElement && document.exitFullscreen())
         .catch(() => {});
     }
     if (originalSettings && !page.isClosed()) {
-      await page.evaluate((settings) => window.__ytChatOverlay?.applySettings(settings),
-        originalSettings).catch(() => {});
+      await page
+        .evaluate((settings) => window.__ytChatOverlay?.applySettings(settings), originalSettings)
+        .catch(() => {});
       await page.waitForTimeout(350).catch(() => {});
     }
     await page.close();
@@ -1831,34 +2967,72 @@ async function runScenario({ context, root, output, extensionId, name, forceFall
 }
 
 /** Installed Edge: run the same application/parser paths with Worker and forced Canvas fallback. */
-export async function runPlacementTimingFixture({ context, root, output, extensionId,
-  comparisonOnly = false, selectedScenarios, spacingOnly = false }) {
+export async function runPlacementTimingFixture({
+  context,
+  root,
+  output,
+  extensionId,
+  comparisonOnly = false,
+  selectedScenarios,
+  spacingOnly = false,
+}) {
   assert.equal(typeof comparisonOnly, 'boolean');
   assert.equal(typeof spacingOnly, 'boolean');
-  assert(selectedScenarios === undefined || (Array.isArray(selectedScenarios) &&
-    selectedScenarios.length > 0 && new Set(selectedScenarios).size === selectedScenarios.length &&
-    selectedScenarios.every((name) => PLACEMENT_SCENARIOS.some((scenario) => scenario.name === name))),
-  'Selected placement scenario names must be unique known names');
-  assert(!spacingOnly || selectedScenarios?.every((name) =>
-    ['worker-spacing-speed', 'main-spacing-speed'].includes(name)),
-  'Spacing-only execution requires explicit spacing scenario names');
-  const selected = selectedScenarios === undefined ? PLACEMENT_SCENARIOS
-    : PLACEMENT_SCENARIOS.filter((scenario) => selectedScenarios.includes(scenario.name));
+  assert(
+    selectedScenarios === undefined ||
+      (Array.isArray(selectedScenarios) &&
+        selectedScenarios.length > 0 &&
+        new Set(selectedScenarios).size === selectedScenarios.length &&
+        selectedScenarios.every((name) =>
+          PLACEMENT_SCENARIOS.some((scenario) => scenario.name === name)
+        )),
+    'Selected placement scenario names must be unique known names'
+  );
+  assert(
+    !spacingOnly ||
+      selectedScenarios?.every((name) =>
+        ['worker-spacing-speed', 'main-spacing-speed'].includes(name)
+      ),
+    'Spacing-only execution requires explicit spacing scenario names'
+  );
+  const selected =
+    selectedScenarios === undefined
+      ? PLACEMENT_SCENARIOS
+      : PLACEMENT_SCENARIOS.filter((scenario) => selectedScenarios.includes(scenario.name));
   const scenarios = [];
   for (const scenario of selected) {
     try {
-      scenarios.push(await runScenario({ context, root, output, extensionId,
-        comparisonOnly, spacingOnly, ...scenario }));
+      scenarios.push(
+        await runScenario({
+          context,
+          root,
+          output,
+          extensionId,
+          comparisonOnly,
+          spacingOnly,
+          ...scenario,
+        })
+      );
     } catch (error) {
-      scenarios.push({ status: 'failed', renderer: scenario.forceFallback ? 'main' : 'worker',
-        name: scenario.name, mode: scenario.mode,
+      scenarios.push({
+        status: 'failed',
+        renderer: scenario.forceFallback ? 'main' : 'worker',
+        name: scenario.name,
+        mode: scenario.mode,
         errorType: error instanceof Error ? error.name : typeof error,
-        errorMessage: error instanceof Error ? error.message.slice(0, 400) : String(error).slice(0, 400),
-        assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null });
+        errorMessage:
+          error instanceof Error ? error.message.slice(0, 400) : String(error).slice(0, 400),
+        assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null,
+      });
     }
   }
-  return { status: scenarios.every((scenario) => scenario.status === 'passed') ? 'passed' : 'failed',
-    scenarios, comparisonOnly, selectedScenarios: selected.map((scenario) => scenario.name),
-    spacingOnly, geometryScope: 'historical ink rectangles and complete-frame visible row pitch',
-    preClearScope: 'frame work before first overlay clear, including drain and cleanup' };
+  return {
+    status: scenarios.every((scenario) => scenario.status === 'passed') ? 'passed' : 'failed',
+    scenarios,
+    comparisonOnly,
+    selectedScenarios: selected.map((scenario) => scenario.name),
+    spacingOnly,
+    geometryScope: 'historical ink rectangles and complete-frame visible row pitch',
+    preClearScope: 'frame work before first overlay clear, including drain and cleanup',
+  };
 }

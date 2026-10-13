@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
 import { computeScrollDuration } from '@util/design-tokens';
+import { describe, expect, it } from 'vitest';
 
 // ── computeScrollDuration ────────────────────────────────────────
 

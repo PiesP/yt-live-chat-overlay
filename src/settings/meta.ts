@@ -19,12 +19,11 @@ import type { AuthorType, OverlaySettings } from '@app-types';
  * Deriving this from OverlaySettings alone is not feasible because TypeScript
  * types carry no runtime metadata about display semantics. A Proxy or decorator
  * approach would add runtime complexity for negligible ergonomic gain. The
- * `satisfies Record<RootScalarSettingKey, SettingMeta>` constraint at the bottom
- * guarantees exhaustiveness at compile time — adding a new setting without an
- * entry here is a type error.
+ * mapped constraint below checks both complete coverage and each field's
+ * scalar type against OverlaySettings.
  */
-type SettingMeta = {
-  type: 'boolean' | 'number' | 'string';
+export type SettingMeta<T extends boolean | number | string> = {
+  type: T extends boolean ? 'boolean' : T extends number ? 'number' : 'string';
   visual: boolean;
   /** Display scale factor for UI (e.g. 100 for percentages, 1 for raw values). Only meaningful for 'number'. */
   displayScale?: number;
@@ -40,6 +39,10 @@ type RootScalarSettingKey = Exclude<
 >;
 
 export type { RootScalarSettingKey };
+
+export type RootSettingMeta = {
+  [K in RootScalarSettingKey]: SettingMeta<OverlaySettings[K]>;
+};
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -152,7 +155,7 @@ const ROOT_SETTING_META = {
   backlogToggleCooldownMs: { type: 'number', visual: false },
   replayPrefetchPages: { type: 'number', visual: false },
   replayBatchLimit: { type: 'number', visual: false },
-} as const satisfies Record<RootScalarSettingKey, SettingMeta>;
+} as const satisfies RootSettingMeta;
 
 /**
  * Visual root keys derived from ROOT_SETTING_META — single source of truth.
@@ -169,7 +172,7 @@ export function getRootDisplayMeta(key: RootScalarSettingKey): {
   scale: number;
   precision: number;
 } {
-  const meta: SettingMeta = ROOT_SETTING_META[key];
+  const meta: SettingMeta<boolean | number | string> = ROOT_SETTING_META[key];
   return {
     scale: meta.displayScale ?? 1,
     precision: meta.displayPrecision ?? 0,

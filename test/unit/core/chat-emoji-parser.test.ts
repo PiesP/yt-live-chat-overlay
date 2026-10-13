@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
 import {
-  extractBestThumbnail,
   createImageAsset,
+  extractBestThumbnail,
   getEmojiVisibleFallbackText,
   parseEmoji,
 } from '@chat/emoji-parser';
+import { describe, expect, it } from 'vitest';
 
 // ── extractBestThumbnail ─────────────────────────────────────────────
 

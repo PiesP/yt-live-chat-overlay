@@ -12,13 +12,14 @@ const providerPin = '9a9471ad301e439bcd1ebc52334cf6b4399510e7';
 const runtimePin = '279124fa998847bd0184d2de12bdaadcd6d2f969';
 const active = "${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}";
 const inactive = "${{ needs.changes.result == 'success' && needs.changes.outputs.osv != 'true' }}";
-const upload = "${{ !cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') }}";
+const upload =
+  "${{ !cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') }}";
 
 function job(name: string): string {
   const start = workflow.search(new RegExp(`^  ${name}:$`, 'm'));
   if (start < 0) throw new Error(`Missing OSV job: ${name}`);
   const remaining = workflow.slice(start + name.length + 4);
-  const end = remaining.search(/^  [a-z][a-z-]*:/m);
+  const end = remaining.search(/^ {2}[a-z][a-z-]*:/m);
   return workflow.slice(start, end < 0 ? undefined : start + name.length + 4 + end);
 }
 
@@ -58,19 +59,27 @@ describe('shared overlay OSV workflow composition', () => {
       expect(step(body, '❌ Require reviewed scanner image')).toContain(
         "if: ${{ needs['pin-metadata'].result != 'success' }}"
       );
-      expect(body).toContain("OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}");
-      const names = [...body.matchAll(/^      - name: (.+)$/gm)].map((match) => match[1]);
-      for (const name of names.slice(1, -2)) expect(step(body, name ?? '')).toContain(`if: ${active}`);
+      expect(body).toContain(
+        "OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}"
+      );
+      const names = [...body.matchAll(/^ {6}- name: (.+)$/gm)].map((match) => match[1]);
+      for (const name of names.slice(1, -2))
+        expect(step(body, name ?? '')).toContain(`if: ${active}`);
     }
   });
 
   it('pins PR runtime and helper to the base before scanning, then restores the target', () => {
     inOrder(pr, [
-      '📥 Checkout PR result and history', '⏪ Checkout the trusted PR base',
-      '📦 Setup trusted OSV runtime', '🔒 Prepare pinned OSV helper',
-      '📁 Prepare private OSV result directory', '🛡️ Scan dependencies before the PR',
-      '⏩ Checkout the PR result', '🛡️ Scan dependencies after the PR',
-      '📋 Report newly introduced vulnerabilities', '📊 Upload OSV SARIF to GitHub Security',
+      '📥 Checkout PR result and history',
+      '⏪ Checkout the trusted PR base',
+      '📦 Setup trusted OSV runtime',
+      '🔒 Prepare pinned OSV helper',
+      '📁 Prepare private OSV result directory',
+      '🛡️ Scan dependencies before the PR',
+      '⏩ Checkout the PR result',
+      '🛡️ Scan dependencies after the PR',
+      '📋 Report newly introduced vulnerabilities',
+      '📊 Upload OSV SARIF to GitHub Security',
     ]);
     const checkout = step(pr, '📥 Checkout PR result and history');
     expect(checkout).toContain('ref: ${{ github.sha }}');
@@ -81,16 +90,24 @@ describe('shared overlay OSV workflow composition', () => {
     expect(base).toContain('BASE_SHA: ${{ github.event.pull_request.base.sha }}');
     expect(base).toContain('git switch --force --detach "$BASE_SHA"');
     expect(base).toContain('git submodule update --init --recursive');
-    expect(step(pr, '⏩ Checkout the PR result')).toContain('git switch --force --detach "$GITHUB_SHA"');
-    expect(step(pr, '⏩ Checkout the PR result')).toContain('git submodule update --init --recursive');
+    expect(step(pr, '⏩ Checkout the PR result')).toContain(
+      'git switch --force --detach "$GITHUB_SHA"'
+    );
+    expect(step(pr, '⏩ Checkout the PR result')).toContain(
+      'git submodule update --init --recursive'
+    );
   });
 
   it('selects the merge-group base manifest before setup and restores the exact target', () => {
     inOrder(full, [
-      '📥 Checkout target and history', '🔒 Select trusted OSV runtime manifest',
-      '📦 Setup trusted OSV runtime', '🔒 Prepare pinned OSV helper',
-      '📁 Prepare private OSV result directory', '⏩ Restore target for the full scan',
-      '🛡️ Run OSV scan', '📋 Convert OSV results to SARIF and enforce the vulnerability gate',
+      '📥 Checkout target and history',
+      '🔒 Select trusted OSV runtime manifest',
+      '📦 Setup trusted OSV runtime',
+      '🔒 Prepare pinned OSV helper',
+      '📁 Prepare private OSV result directory',
+      '⏩ Restore target for the full scan',
+      '🛡️ Run OSV scan',
+      '📋 Convert OSV results to SARIF and enforce the vulnerability gate',
       '📊 Upload OSV SARIF to GitHub Security',
     ]);
     expect(step(full, '📥 Checkout target and history')).toContain('ref: ${{ github.sha }}');
@@ -101,8 +118,12 @@ describe('shared overlay OSV workflow composition', () => {
     expect(policy).toContain('[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]');
     expect(policy).toContain('git switch --force --detach "$POLICY_SHA"');
     expect(policy).toContain('[[ "$POLICY_SHA" == "$GITHUB_SHA" ]]');
-    expect(step(full, '⏩ Restore target for the full scan')).toContain('git switch --force --detach "$GITHUB_SHA"');
-    expect(step(full, '⏩ Restore target for the full scan')).toContain('git submodule update --init --recursive');
+    expect(step(full, '⏩ Restore target for the full scan')).toContain(
+      'git switch --force --detach "$GITHUB_SHA"'
+    );
+    expect(step(full, '⏩ Restore target for the full scan')).toContain(
+      'git submodule update --init --recursive'
+    );
   });
 
   it('uses a private provider-owned helper with the overlay profile in every mode', () => {

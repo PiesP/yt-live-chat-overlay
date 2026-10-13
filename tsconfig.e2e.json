@@ -12,14 +12,6 @@
     "noUnusedParameters": true,
     "types": ["node"]
   },
-  "include": [
-    "src/**/*.d.ts",
-    "test/e2e/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "dist-extension",
-    "dist-extension-firefox"
-  ]
+  "include": ["src/**/*.d.ts", "test/e2e/**/*.ts"],
+  "exclude": ["node_modules", "dist", "dist-extension", "dist-extension-firefox"]
 }

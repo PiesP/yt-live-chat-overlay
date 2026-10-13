@@ -1,43 +1,115 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SettingsUiForm, BACKDROP_ID } from '@settings/ui/form';
-import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
+
 import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage, t } from '@i18n/index';
+import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
+import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   return {
-    enabled: true, danmakuMode: 'scroll' as const, speedPxPerSec: 250,
-    fontSize: 32, opacity: 1, superChatOpacity: 0.95, safeTop: 0, safeBottom: 0,
-    maxConcurrentMessages: 300, allowShortTextMessages: false, minTextLength: 1,
+    enabled: true,
+    danmakuMode: 'scroll' as const,
+    speedPxPerSec: 250,
+    fontSize: 32,
+    opacity: 1,
+    superChatOpacity: 0.95,
+    safeTop: 0,
+    safeBottom: 0,
+    maxConcurrentMessages: 300,
+    allowShortTextMessages: false,
+    minTextLength: 1,
     logLevel: 'warn' as const,
-    showAuthor: { normal: false, member: true, moderator: true, owner: true, verified: true, superChat: true },
-    colors: { normal: '#FFFFFF', member: '#0F9D58', moderator: '#5E84F1', owner: '#FFD600', verified: '#AAAAAA' },
-    backgroundColors: { normal: '#00000000', member: '#00000000', moderator: '#1B3A6F59', owner: '#6B4F0059', verified: '#00000000' },
+    showAuthor: {
+      normal: false,
+      member: true,
+      moderator: true,
+      owner: true,
+      verified: true,
+      superChat: true,
+    },
+    colors: {
+      normal: '#FFFFFF',
+      member: '#0F9D58',
+      moderator: '#5E84F1',
+      owner: '#FFD600',
+      verified: '#AAAAAA',
+    },
+    backgroundColors: {
+      normal: '#00000000',
+      member: '#00000000',
+      moderator: '#1B3A6F59',
+      owner: '#6B4F0059',
+      verified: '#00000000',
+    },
     outline: { enabled: true, widthPx: 2, opacity: 0.7 },
-    laneSpacing: 1, showDebugOverlay: false, ignoreReducedMotion: false,
-    authorRateLimit: 'normal' as const, backlogMaxRate: 10, backlogSpeedMultiplier: 1,
-    backlogMode: 'playback' as const, backlogRecentMinutes: 5, backlogOpacityMultiplier: 0.5,
-    depthLayersEnabled: false, depthNearSpeedMul: 1.2, depthFarSpeedMul: 0.8, depthFarOpacityMul: 0.6,
-    modOwnerDurationMultiplier: 1.5, showSuperChatAmount: true,
-    fontWeight: 'bold' as const, fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
-    preserveUserColor: true, superChatMaxBodyLines: 3, membershipMaxBodyLines: 2,
-    fadeDurationMs: 300, minPollIntervalMs: 1000, maxPollIntervalMs: 10000,
-    language: 'en' as const, translationEnabled: false, translationService: 'auto' as const,
-    translationSource: 'auto' as const, translationTarget: 'en' as const,
-    translationMode: 'dual' as const, exitPaddingPx: 50,
-    scrollDurationMinMs: 3000, scrollDurationMaxMs: 15000, topBottomDurationMs: 5000,
-    queueMaxSize: 500, backgroundQueueMax: 200, maxMessageAgeMs: 30000, headwayGapRatio: 0.3,
-    emojiCacheMb: 20, photoCacheMb: 10, stickerCacheMb: 5, textCacheMb: 5,
-    translationBatchSize: 5, emojiFetchLimit: 20, failedEmojiRetryMins: 5,
-    burstSampleWindow: 60, burstElevatedThreshold: 5, burstHighThreshold: 15, burstExtremeThreshold: 30,
-    backlogInjectionMax: 50, backlogDensityRampMs: 5000, livePollFallbackMs: 2000, livePollFailureLimit: 5,
-    speedBoostThreshold: 2, backlogPauseThreshold: 0.3, backlogResumeThreshold: 0.1,
-    activityTimeoutMs: 60000, staggerMaxDelayMs: 100, staggerMediumDelayMs: 50,
-    emojiFetchTimeoutMs: 5000, backlogDensityRampMaxMs: 10000, backlogInjectionRateMin: 1,
-    speedBoostMax: 1, speedBoostDenom: 2, backlogToggleCooldownMs: 2000,
-    replayPrefetchPages: 50, replayBatchLimit: 50,
+    laneSpacing: 1,
+    showDebugOverlay: false,
+    ignoreReducedMotion: false,
+    authorRateLimit: 'normal' as const,
+    backlogMaxRate: 10,
+    backlogSpeedMultiplier: 1,
+    backlogMode: 'playback' as const,
+    backlogRecentMinutes: 5,
+    backlogOpacityMultiplier: 0.5,
+    depthLayersEnabled: false,
+    depthNearSpeedMul: 1.2,
+    depthFarSpeedMul: 0.8,
+    depthFarOpacityMul: 0.6,
+    modOwnerDurationMultiplier: 1.5,
+    showSuperChatAmount: true,
+    fontWeight: 'bold' as const,
+    fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
+    preserveUserColor: true,
+    superChatMaxBodyLines: 3,
+    membershipMaxBodyLines: 2,
+    fadeDurationMs: 300,
+    minPollIntervalMs: 1000,
+    maxPollIntervalMs: 10000,
+    language: 'en' as const,
+    translationEnabled: false,
+    translationService: 'auto' as const,
+    translationSource: 'auto' as const,
+    translationTarget: 'en' as const,
+    translationMode: 'dual' as const,
+    exitPaddingPx: 50,
+    scrollDurationMinMs: 3000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    maxMessageAgeMs: 30000,
+    headwayGapRatio: 0.3,
+    emojiCacheMb: 20,
+    photoCacheMb: 10,
+    stickerCacheMb: 5,
+    textCacheMb: 5,
+    translationBatchSize: 5,
+    emojiFetchLimit: 20,
+    failedEmojiRetryMins: 5,
+    burstSampleWindow: 60,
+    burstElevatedThreshold: 5,
+    burstHighThreshold: 15,
+    burstExtremeThreshold: 30,
+    backlogInjectionMax: 50,
+    backlogDensityRampMs: 5000,
+    livePollFallbackMs: 2000,
+    livePollFailureLimit: 5,
+    speedBoostThreshold: 2,
+    backlogPauseThreshold: 0.3,
+    backlogResumeThreshold: 0.1,
+    activityTimeoutMs: 60000,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    emojiFetchTimeoutMs: 5000,
+    backlogDensityRampMaxMs: 10000,
+    backlogInjectionRateMin: 1,
+    speedBoostMax: 1,
+    speedBoostDenom: 2,
+    backlogToggleCooldownMs: 2000,
+    replayPrefetchPages: 50,
+    replayBatchLimit: 50,
     ...overrides,
   } as OverlaySettings;
 }
@@ -160,8 +232,9 @@ describe('SettingsUiForm', () => {
   it('createModalContent produces header with title', () => {
     const form = new SettingsUiForm(getSettings, onPreview);
     const nodes = form.createModalContent();
-    const headerEl = nodes.find((n: Node) =>
-      n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-header')
+    const headerEl = nodes.find(
+      (n: Node) =>
+        n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-header')
     );
     expect(headerEl).toBeInstanceOf(HTMLElement);
     form.destroy();
@@ -170,8 +243,8 @@ describe('SettingsUiForm', () => {
   it('createModalContent produces tabs', () => {
     const form = new SettingsUiForm(getSettings, onPreview);
     const nodes = form.createModalContent();
-    const tabsEl = nodes.find((n: Node) =>
-      n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-tabs')
+    const tabsEl = nodes.find(
+      (n: Node) => n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-tabs')
     );
     expect(tabsEl).toBeInstanceOf(HTMLElement);
     form.destroy();
@@ -180,8 +253,9 @@ describe('SettingsUiForm', () => {
   it('createModalContent produces action buttons', () => {
     const form = new SettingsUiForm(getSettings, onPreview);
     const nodes = form.createModalContent();
-    const actionsEl = nodes.find((n: Node) =>
-      n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-actions-wrapper')
+    const actionsEl = nodes.find(
+      (n: Node) =>
+        n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-actions-wrapper')
     );
     expect(actionsEl).toBeInstanceOf(HTMLElement);
     form.destroy();
@@ -196,9 +270,7 @@ describe('SettingsUiForm', () => {
     form.populateForm(getSettings());
 
     const pane = modal.querySelector<HTMLElement>('#pane-comments');
-    const details = pane?.querySelector<HTMLDetailsElement>(
-      '.yt-chat-overlay-settings-disclosure'
-    );
+    const details = pane?.querySelector<HTMLDetailsElement>('.yt-chat-overlay-settings-disclosure');
     expect(details).not.toBeNull();
     expect(details?.open).toBe(false);
     expect(details?.querySelector('summary')?.textContent).toBe('Fine tuning');
@@ -234,12 +306,8 @@ describe('SettingsUiForm', () => {
     form.setModal(modal);
     form.populateForm(settings);
 
-    const preview = modal.querySelector<HTMLElement>(
-      '.yt-chat-overlay-settings-font-preview'
-    );
-    const text = preview?.querySelector<HTMLElement>(
-      '.yt-chat-overlay-settings-font-preview-text'
-    );
+    const preview = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview');
+    const text = preview?.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-text');
     expect(preview?.getAttribute('aria-label')).toBe('Comment preview');
     expect(text?.style.fontSize).toBe('40px');
     expect(text?.style.color).toBe('rgb(16, 16, 16)');
@@ -312,9 +380,7 @@ describe('SettingsUiForm', () => {
       const stage = modal.querySelector<HTMLElement>(
         '.yt-chat-overlay-settings-font-preview-stage'
       )!;
-      const text = modal.querySelector<HTMLElement>(
-        '.yt-chat-overlay-settings-font-preview-text'
-      )!;
+      const text = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-text')!;
       stage.style.minBlockSize = '144px';
       let stageWidth = 0;
       stage.getBoundingClientRect = () => ({
@@ -345,7 +411,9 @@ describe('SettingsUiForm', () => {
       const canvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
       expect(canvasHeight).toBeGreaterThan(oldCanvasHeight);
       expect(Number.parseFloat(stage.style.blockSize)).toBeGreaterThan(oldStageHeight);
-      expect(Number.parseFloat(stage.style.blockSize) * 0.25).toBeGreaterThanOrEqual(canvasHeight + 1);
+      expect(Number.parseFloat(stage.style.blockSize) * 0.25).toBeGreaterThanOrEqual(
+        canvasHeight + 1
+      );
       expect(animationFrames.size).toBe(1);
       Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 260 });
       form.populateForm(settings);
@@ -443,9 +511,7 @@ describe('SettingsUiForm', () => {
   });
 
   it('styles the disclosure, unmasked preview, metrics, and capability states inside the modal', () => {
-    expect(SETTINGS_UI_STYLES).toMatch(
-      /\.yt-chat-overlay-settings-disclosure\s*\{[^}]*border:/s
-    );
+    expect(SETTINGS_UI_STYLES).toMatch(/\.yt-chat-overlay-settings-disclosure\s*\{[^}]*border:/s);
     expect(SETTINGS_UI_STYLES).toMatch(
       /\.yt-chat-overlay-settings-disclosure\s*>\s*summary:focus-visible\s*\{[^}]*outline:/s
     );
@@ -578,18 +644,32 @@ describe('SettingsUiForm', () => {
         expect(button.textContent?.trim()).toBeTruthy();
         expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
       }
-      const chip = familyGroup?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip');
+      const chip = familyGroup?.querySelector<HTMLButtonElement>(
+        '.yt-chat-overlay-settings-font-chip'
+      );
       expect(chip?.textContent).toBe(t('danmaku.fontSystemDefault'));
       expect(chip?.hasAttribute('aria-pressed')).toBe(true);
-      expect(familyGroup?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip[data-value="monospace"]')?.textContent).toBe(t('danmaku.fontMonospace'));
-      const namedFont = Array.from(familyGroup?.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip') ?? [])
-        .find((button) => button.dataset.value === '"Noto Sans KR", sans-serif');
+      expect(
+        familyGroup?.querySelector<HTMLButtonElement>(
+          '.yt-chat-overlay-settings-font-chip[data-value="monospace"]'
+        )?.textContent
+      ).toBe(t('danmaku.fontMonospace'));
+      const namedFont = Array.from(
+        familyGroup?.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip') ??
+          []
+      ).find((button) => button.dataset.value === '"Noto Sans KR", sans-serif');
       expect(namedFont?.textContent).toBe('Noto Sans KR');
-      const custom = familyGroup?.querySelector<HTMLInputElement>('.yt-chat-overlay-settings-font-custom-input');
+      const custom = familyGroup?.querySelector<HTMLInputElement>(
+        '.yt-chat-overlay-settings-font-custom-input'
+      );
       expect(custom?.getAttribute('aria-label')).toBe(t('danmaku.fontCustom'));
-      expect(custom?.getAttribute('aria-label')).not.toBe(familyGroup?.querySelector('legend')?.textContent);
+      expect(custom?.getAttribute('aria-label')).not.toBe(
+        familyGroup?.querySelector('legend')?.textContent
+      );
 
-      weightGroup?.querySelector('legend')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      weightGroup
+        ?.querySelector('legend')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       expect(bold?.getAttribute('aria-pressed')).toBe('true');
       expect(onPreview).not.toHaveBeenCalled();
       form.destroy();
@@ -607,29 +687,42 @@ describe('SettingsUiForm', () => {
 
     for (const ignoreReducedMotion of [false, true]) {
       form.populateForm(makeDefaults({ ignoreReducedMotion }));
-      expect(modal.querySelector<HTMLInputElement>('input[name="ignoreReducedMotion"]')?.checked)
-        .toBe(ignoreReducedMotion);
+      expect(
+        modal.querySelector<HTMLInputElement>('input[name="ignoreReducedMotion"]')?.checked
+      ).toBe(ignoreReducedMotion);
       expect(form.collectSettings().ignoreReducedMotion).toBe(ignoreReducedMotion);
     }
 
-    const regular = modal.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-weight-toggle-btn[data-value="normal"]');
+    const regular = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn[data-value="normal"]'
+    );
     regular?.click();
     expect(form.collectSettings().fontWeight).toBe('normal');
     expect(regular?.getAttribute('aria-pressed')).toBe('true');
 
-    const chip = modal.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip[data-value="monospace"]');
+    const chip = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-font-chip[data-value="monospace"]'
+    );
     chip?.click();
     expect(form.collectSettings().fontFamily).toBe('monospace');
     expect(chip?.getAttribute('aria-pressed')).toBe('true');
 
-    const custom = modal.querySelector<HTMLInputElement>('.yt-chat-overlay-settings-font-custom-input');
+    const custom = modal.querySelector<HTMLInputElement>(
+      '.yt-chat-overlay-settings-font-custom-input'
+    );
     custom!.value = 'Georgia, serif';
     custom!.dispatchEvent(new Event('input', { bubbles: true }));
     expect(form.collectSettings().fontFamily).toBe('Georgia, serif');
     expect(chip?.getAttribute('aria-pressed')).toBe('false');
     expect(onPreview).toHaveBeenCalled();
 
-    form.populateForm(makeDefaults({ fontFamily: 'Georgia, serif', fontWeight: 'normal', ignoreReducedMotion: true }));
+    form.populateForm(
+      makeDefaults({
+        fontFamily: 'Georgia, serif',
+        fontWeight: 'normal',
+        ignoreReducedMotion: true,
+      })
+    );
     expect(custom?.value).toBe('Georgia, serif');
     expect(regular?.getAttribute('aria-pressed')).toBe('true');
     expect(form.collectSettings().ignoreReducedMotion).toBe(true);

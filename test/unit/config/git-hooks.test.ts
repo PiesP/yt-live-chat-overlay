@@ -99,7 +99,9 @@ describe('protected Git hook path', () => {
 
       expect(run(work, 'push', 'origin', 'master').status).not.toBe(0);
       expect(run(work, 'push', 'origin', ':master').status).not.toBe(0);
-      expect(git(directory, '--git-dir', remote, 'rev-parse', 'refs/heads/master')).toBe(remoteBase);
+      expect(git(directory, '--git-dir', remote, 'rev-parse', 'refs/heads/master')).toBe(
+        remoteBase
+      );
       expect(run(work, 'push', 'origin', 'topic:main').status).not.toBe(0);
       expect(run(work, 'push', 'origin', 'topic').status).toBe(0);
       expect(git(directory, '--git-dir', remote, 'rev-parse', 'refs/heads/topic')).toBe(

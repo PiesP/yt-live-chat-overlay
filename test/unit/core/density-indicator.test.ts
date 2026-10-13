@@ -2,7 +2,7 @@
  * Tests for DensityIndicator — density level computation and DOM operations.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 // ── Pure function extracted for testing ─────────────────────────────────
 
@@ -10,7 +10,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
  * Pure function that maps activeCount / maxConcurrent ratio to a density level.
  * Extracted from DensityIndicator.update() logic.
  */
-function computeDensityLevel(activeCount: number, maxConcurrent: number): 'normal' | 'elevated' | 'high' | 'extreme' {
+function computeDensityLevel(
+  activeCount: number,
+  maxConcurrent: number
+): 'normal' | 'elevated' | 'high' | 'extreme' {
   const ratio = activeCount / Math.max(1, maxConcurrent);
   if (ratio > 0.85) return 'extreme';
   if (ratio > 0.65) return 'high';
@@ -41,7 +44,7 @@ describe('computeDensityLevel (density indicator logic)', () => {
 
   it('handles maxConcurrent = 0 without division by zero', () => {
     expect(computeDensityLevel(1, 0)).toBe('extreme'); // 1 / max(1, 0) = 1 > 0.85
-    expect(computeDensityLevel(0, 0)).toBe('normal');  // 0 / 1 = 0
+    expect(computeDensityLevel(0, 0)).toBe('normal'); // 0 / 1 = 0
   });
 
   it('handles maxConcurrent = 1 edge case', () => {

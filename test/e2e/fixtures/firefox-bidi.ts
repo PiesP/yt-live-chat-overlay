@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { firefox } from '@playwright/test';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { firefox } from '@playwright/test';
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 15_000;

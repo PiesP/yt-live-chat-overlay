@@ -38,9 +38,14 @@ describe('extension worker source loader', () => {
 
   it('times out stalled preparation so application fallback can initialize', async () => {
     vi.useFakeTimers();
-    const fetchImpl = vi.fn<typeof fetch>((_url, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
-    }));
+    const fetchImpl = vi.fn<typeof fetch>(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+            once: true,
+          });
+        })
+    );
     const request = loadPackagedWorkerSource('chrome-extension://trusted/workers/renderer.js', {
       fetchImpl,
     });

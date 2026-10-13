@@ -8,24 +8,23 @@
  * settings object and the active storage backend.
  */
 
-import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { expect, test } from '@playwright/test';
 import {
-  setupOverlayPage,
-  OVERLAY_ID,
+  applySettings,
   BUTTON_ID,
   getSettings,
-  applySettings,
+  OVERLAY_ID,
   readStoredSettings,
+  setupOverlayPage,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
-
 
 test.describe('Overlay Visibility Toggle', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`,
+        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`
       );
     }
   });
