@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWorkerUrl } from '@platform/worker-factory';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(() => {
   delete window.__ytExtensionBridge;

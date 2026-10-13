@@ -12,14 +12,12 @@
 import type { ChatMessage } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@chat/message-parser';
 import { ReplayBuffer } from '@chat/replay-buffer';
-import type { ChatHealthSnapshot, PlaybackSnapshot } from '@chat/source-base';
-import { ChatSource } from '@chat/source-base';
-import type { LiveChatPayload } from '@chat/youtube/api';
-import { fetchReplayChat } from '@chat/youtube/api';
-import type { InnertubeContinuationData } from '@chat/youtube/continuation';
+import { type ChatHealthSnapshot, ChatSource, type PlaybackSnapshot } from '@chat/source-base';
+import { fetchReplayChat, type LiveChatPayload } from '@chat/youtube/api';
 import {
   extractPlayerSeekContinuation,
   extractReplayContinuation,
+  type InnertubeContinuationData,
 } from '@chat/youtube/continuation';
 import {
   clearSafeTimeout,

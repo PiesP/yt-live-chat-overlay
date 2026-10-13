@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Mock browser APIs ───────────────────────────────────────────────
 
-vi.stubGlobal('Worker', class {
-  postMessage = vi.fn();
-  terminate = vi.fn();
-  addEventListener = vi.fn();
-  removeEventListener = vi.fn();
-});
+vi.stubGlobal(
+  'Worker',
+  class {
+    postMessage = vi.fn();
+    terminate = vi.fn();
+    addEventListener = vi.fn();
+    removeEventListener = vi.fn();
+  }
+);
 
 vi.stubGlobal('OffscreenCanvas', class {});
 
@@ -161,7 +164,9 @@ describe('RenderWorkerManager', () => {
       };
       deps.estimateDimensions.mockReturnValue({ width: 100, height: 20 });
 
-      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(true);
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(
+        true
+      );
       const worker = (manager as unknown as { worker: { postMessage: ReturnType<typeof vi.fn> } })
         .worker;
       const first = {
@@ -202,15 +207,13 @@ describe('RenderWorkerManager', () => {
         height: 180,
         dpr: window.devicePixelRatio || 1,
       });
-      expect(worker.postMessage).toHaveBeenCalledWith(
-        {
-          type: 'updateMessageGeometries',
-          geometries: [
-            { id: 'first', width: 260, height: 80, translationHeight: 16 },
-            { id: 'second', width: 220, height: 60 },
-          ],
-        }
-      );
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'updateMessageGeometries',
+        geometries: [
+          { id: 'first', width: 260, height: 80, translationHeight: 16 },
+          { id: 'second', width: 220, height: 60 },
+        ],
+      });
       expect(worker.postMessage).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: 'addMessages' })
       );
@@ -228,13 +231,17 @@ describe('RenderWorkerManager', () => {
         onDimensionsChanged,
       };
 
-      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(true);
-      const worker = (manager as unknown as {
-        worker: {
-          onmessage?: (event: MessageEvent) => void;
-          postMessage: ReturnType<typeof vi.fn>;
-        };
-      }).worker;
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js').started).toBe(
+        true
+      );
+      const worker = (
+        manager as unknown as {
+          worker: {
+            onmessage?: (event: MessageEvent) => void;
+            postMessage: ReturnType<typeof vi.fn>;
+          };
+        }
+      ).worker;
       const original = {
         id: 'deferred-replacement',
         timestamp: Date.now(),
@@ -425,7 +432,6 @@ describe('RenderWorkerManager', () => {
       expect(postMessage).not.toHaveBeenCalled();
       expect((manager as any).sentMessages.has('fresh-replacement')).toBe(false);
     });
-
   });
 
   describe('queueDepth', () => {

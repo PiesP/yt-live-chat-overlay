@@ -87,7 +87,6 @@ import {
   hasRegularBackground,
 } from '@renderer/layout/card-layout';
 import { EntryPacingState } from '@renderer/layout/entry-pacing';
-import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   buildLaneHeap,
   commitPlacementShared,
@@ -95,6 +94,7 @@ import {
   computeOccupancyMs as computeOccupancyMsShared,
   findPlacementShared,
   type LaneAllocationState,
+  type LaneSelectionStrategy,
   resetBatchShared,
   shiftLaneTimersShared,
 } from '@renderer/layout/lane-shared';

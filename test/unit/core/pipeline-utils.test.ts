@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
 import {
   addMessageToLaneIndex,
+  COMPACTION_THRESHOLD_RATIO,
   createFastRandom,
   fastRandom,
-  COMPACTION_THRESHOLD_RATIO,
   removeMessageFromLaneIndex,
 } from '@renderer/canvas/pipeline-utils';
+import { describe, expect, it } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // createFastRandom
@@ -127,11 +127,7 @@ describe('lane index maintenance', () => {
     const retained: LaneMessage = { laneIndex: 1, laneArrayIndices: [0] };
 
     expect(() =>
-      removeMessageFromLaneIndex(
-        new Map(),
-        { laneIndex: 1, laneArrayIndices: [0] },
-        1
-      )
+      removeMessageFromLaneIndex(new Map(), { laneIndex: 1, laneArrayIndices: [0] }, 1)
     ).not.toThrow();
 
     for (const index of [-1, 1]) {

@@ -1,20 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import type { ContentSegment, OverlaySettings } from '@app-types';
 import {
+  classifyAuthorBadge,
   countCodePoints,
   extractActionItem,
-  extractSupportedRenderer,
   extractAuthorType,
-  classifyAuthorBadge,
+  extractChatEvents,
+  extractSupportedRenderer,
   getVisibleContentLength,
   isSubstantialMessage,
-  extractChatEvents,
+  type ParsedMessageBody,
 } from '@chat/message-parser';
-import type { ParsedMessageBody } from '@chat/message-parser';
-import type { ContentSegment, OverlaySettings } from '@app-types';
 import {
   MAX_RENDER_CONTENT_SEGMENTS,
   MAX_RENDER_FIELD_CODE_POINTS,
 } from '@chat/render-resource-limits';
+import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -201,7 +201,7 @@ describe('extractAuthorType', () => {
             icon: { iconType: 'OWNER' },
           },
         },
-      ]),
+      ])
     ).toBe('owner');
   });
 
@@ -213,7 +213,7 @@ describe('extractAuthorType', () => {
             icon: { iconType: 'MODERATOR' },
           },
         },
-      ]),
+      ])
     ).toBe('moderator');
   });
 
@@ -225,7 +225,7 @@ describe('extractAuthorType', () => {
             icon: { iconType: 'SPONSOR' },
           },
         },
-      ]),
+      ])
     ).toBe('member');
   });
 
@@ -237,7 +237,7 @@ describe('extractAuthorType', () => {
             style: 'VERIFIED',
           },
         },
-      ]),
+      ])
     ).toBe('verified');
   });
 
@@ -254,7 +254,7 @@ describe('extractAuthorType', () => {
             icon: { iconType: 'OWNER' },
           },
         },
-      ]),
+      ])
     ).toBe('owner');
   });
 
@@ -271,7 +271,7 @@ describe('extractAuthorType', () => {
             icon: { iconType: 'MODERATOR' },
           },
         },
-      ]),
+      ])
     ).toBe('moderator');
   });
 });
@@ -287,7 +287,7 @@ describe('classifyAuthorBadge', () => {
         liveChatAuthorBadgeRenderer: {
           icon: { iconType: 'OWNER' },
         },
-      }),
+      })
     ).toBe('owner');
   });
 
@@ -297,7 +297,7 @@ describe('classifyAuthorBadge', () => {
         metadataBadgeRenderer: {
           icon: { iconType: 'MODERATOR' },
         },
-      }),
+      })
     ).toBe('moderator');
   });
 
@@ -307,7 +307,7 @@ describe('classifyAuthorBadge', () => {
         liveChatAuthorBadgeRenderer: {
           icon: { iconType: 'SPONSOR' },
         },
-      }),
+      })
     ).toBe('member');
   });
 
@@ -317,7 +317,7 @@ describe('classifyAuthorBadge', () => {
         liveChatAuthorBadgeRenderer: {
           style: 'MEMBERS_ONLY',
         },
-      }),
+      })
     ).toBe('member');
   });
 
@@ -327,7 +327,7 @@ describe('classifyAuthorBadge', () => {
         liveChatAuthorBadgeRenderer: {
           customThumbnail: { thumbnails: [] },
         },
-      }),
+      })
     ).toBe('member');
   });
 
@@ -337,7 +337,7 @@ describe('classifyAuthorBadge', () => {
         liveChatAuthorBadgeRenderer: {
           style: 'VERIFIED',
         },
-      }),
+      })
     ).toBe('verified');
   });
 
@@ -345,7 +345,7 @@ describe('classifyAuthorBadge', () => {
     expect(
       classifyAuthorBadge({
         unknownRenderer: {},
-      }),
+      })
     ).toBe('normal');
   });
 
@@ -377,10 +377,7 @@ describe('getVisibleContentLength', () => {
   });
 
   it('counts mixed text + emoji segments', () => {
-    const segments: ContentSegment[] = [
-      { type: 'text', content: 'hi' },
-      makeEmojiSegment(),
-    ];
+    const segments: ContentSegment[] = [{ type: 'text', content: 'hi' }, makeEmojiSegment()];
     expect(getVisibleContentLength(segments)).toBe(3); // 2 + 1
   });
 
@@ -560,16 +557,19 @@ describe('extractChatEvents message-boundary normalization', () => {
       },
       kind: 'membership',
     },
-  ])('preserves the full normalized $label body for paid-card wrapping', ({ rendererKey, renderer, kind }) => {
-    const message = parseRenderer(rendererKey, renderer);
-    const expected = kind === 'superchat' ? 'p'.repeat(400) : 'm'.repeat(400);
+  ])(
+    'preserves the full normalized $label body for paid-card wrapping',
+    ({ rendererKey, renderer, kind }) => {
+      const message = parseRenderer(rendererKey, renderer);
+      const expected = kind === 'superchat' ? 'p'.repeat(400) : 'm'.repeat(400);
 
-    expect(message).toMatchObject({
-      text: expected,
-      content: [{ type: 'text', content: expected }],
-      kind,
-    });
-  });
+      expect(message).toMatchObject({
+        text: expected,
+        content: [{ type: 'text', content: expected }],
+        kind,
+      });
+    }
+  );
 
   it('accepts the exact astral input boundary and rejects one code point above it', () => {
     let exactStats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
@@ -630,15 +630,13 @@ describe('extractChatEvents message-boundary normalization', () => {
     });
 
     expect(
-      extractChatEvents(
-        [makeAction(MAX_RENDER_CONTENT_SEGMENTS)],
-        () => mkSettings({ allowShortTextMessages: true })
+      extractChatEvents([makeAction(MAX_RENDER_CONTENT_SEGMENTS)], () =>
+        mkSettings({ allowShortTextMessages: true })
       )
     ).toHaveLength(1);
     expect(
-      extractChatEvents(
-        [makeAction(MAX_RENDER_CONTENT_SEGMENTS + 1)],
-        () => mkSettings({ allowShortTextMessages: true })
+      extractChatEvents([makeAction(MAX_RENDER_CONTENT_SEGMENTS + 1)], () =>
+        mkSettings({ allowShortTextMessages: true })
       )
     ).toEqual([]);
   });
@@ -711,9 +709,13 @@ describe('extractChatEvents hostile batch bounds', () => {
   it('counts invalid and nested actions against the traversal budget', () => {
     let invalidStats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
     expect(
-      extractChatEvents(Array.from({ length: 1000 }), () => settings(5), (value) => {
-        invalidStats = value;
-      })
+      extractChatEvents(
+        Array.from({ length: 1000 }),
+        () => settings(5),
+        (value) => {
+          invalidStats = value;
+        }
+      )
     ).toEqual([]);
     expect(invalidStats).toMatchObject({ traversedActions: 20, budgetExhausted: true });
 
@@ -724,9 +726,13 @@ describe('extractChatEvents hostile batch bounds', () => {
         actions: Array.from({ length: 1000 }, (_, index) => textAction(`nested-${index}`)),
       },
     };
-    const events = extractChatEvents([nested], () => settings(5), (value) => {
-      nestedStats = value;
-    });
+    const events = extractChatEvents(
+      [nested],
+      () => settings(5),
+      (value) => {
+        nestedStats = value;
+      }
+    );
     expect(events).toHaveLength(5);
     expect(nestedStats).toMatchObject({ traversedActions: 20, budgetExhausted: true });
   });

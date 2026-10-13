@@ -5,8 +5,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.mjs';
-import { countUnexpectedLiveErrors, isYouTubeHostError, redactDiagnosticText, validateLiveRenderer } from './live-rendering.mjs';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
+import {
+  countUnexpectedLiveErrors,
+  isYouTubeHostError,
+  redactDiagnosticText,
+  validateLiveRenderer,
+} from './live-rendering.mjs';
 import { runPlacementTimingFixture } from './placement-timing.mjs';
 import { run as runFixture } from './profile.mjs';
 
@@ -34,11 +39,7 @@ export function readOwnedBrowserProcessId(response) {
   const browsers = Array.isArray(response?.processInfo)
     ? response.processInfo.filter(({ type }) => type === 'browser')
     : [];
-  if (
-    browsers.length !== 1 ||
-    !Number.isSafeInteger(browsers[0]?.id) ||
-    browsers[0].id <= 0
-  ) {
+  if (browsers.length !== 1 || !Number.isSafeInteger(browsers[0]?.id) || browsers[0].id <= 0) {
     throw new Error('Browser CDP did not expose one task-owned browser process');
   }
   return browsers[0].id;
@@ -70,10 +71,13 @@ async function waitForProcessExit(
 export async function removeOwnedChromeProfile(root, profile) {
   assertOwnedProfile(root, profile);
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  const removed = await stat(profile).then(() => false, (error) => {
-    if (error.code === 'ENOENT') return true;
-    throw error;
-  });
+  const removed = await stat(profile).then(
+    () => false,
+    (error) => {
+      if (error.code === 'ENOENT') return true;
+      throw error;
+    }
+  );
   if (!removed) throw new Error('Task-owned Chrome profile remained after bounded cleanup');
 }
 
@@ -93,31 +97,53 @@ export async function enableDeveloperMode(context, browserName) {
 export function isOwnedManagerOptionsUrl(value, managerId) {
   try {
     const url = new URL(value);
-    return url.protocol === 'chrome-extension:' && url.hostname === managerId &&
-      url.pathname === '/options.html' && !url.search;
-  } catch { return false; }
+    return (
+      url.protocol === 'chrome-extension:' &&
+      url.hostname === managerId &&
+      url.pathname === '/options.html' &&
+      !url.search
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function requireManagerUiLabels(labels) {
-  assert(labels && typeof labels === 'object' && !Array.isArray(labels),
-    'Manager returned invalid UI labels');
-  assert.deepEqual(Object.keys(labels).sort(), ['install', 'installedUserscripts', 'utilities'],
-    'Manager UI label keys differ');
+  assert(
+    labels && typeof labels === 'object' && !Array.isArray(labels),
+    'Manager returned invalid UI labels'
+  );
+  assert.deepEqual(
+    Object.keys(labels).sort(),
+    ['install', 'installedUserscripts', 'utilities'],
+    'Manager UI label keys differ'
+  );
   for (const value of Object.values(labels)) {
-    assert(typeof value === 'string' && value.length > 0 && value.length <= 80 &&
-      value.trim() === value && !/[\r\n\u0000-\u001f]/u.test(value),
-    'Manager returned an invalid UI label');
+    assert(
+      typeof value === 'string' &&
+        value.length > 0 &&
+        value.length <= 80 &&
+        value.trim() === value &&
+        !/[\r\n\u0000-\u001f]/u.test(value),
+      'Manager returned an invalid UI label'
+    );
   }
   return labels;
 }
 
 export async function readManagerUiLabels(page, managerId) {
-  assert(isOwnedManagerOptionsUrl(page.url(), managerId),
-    'Manager labels require its owned options page');
+  assert(
+    isOwnedManagerOptionsUrl(page.url(), managerId),
+    'Manager labels require its owned options page'
+  );
   const labels = await page.evaluate((expectedId) => {
     const url = new URL(location.href);
-    if (url.protocol !== 'chrome-extension:' || url.hostname !== expectedId ||
-      url.pathname !== '/options.html' || url.search) {
+    if (
+      url.protocol !== 'chrome-extension:' ||
+      url.hostname !== expectedId ||
+      url.pathname !== '/options.html' ||
+      url.search
+    ) {
       throw new Error('Manager options page navigated away');
     }
     return {
@@ -126,8 +152,10 @@ export async function readManagerUiLabels(page, managerId) {
       installedUserscripts: chrome.i18n.getMessage('Installed_userscripts'),
     };
   }, managerId);
-  assert(isOwnedManagerOptionsUrl(page.url(), managerId),
-    'Manager options page navigated away after label lookup');
+  assert(
+    isOwnedManagerOptionsUrl(page.url(), managerId),
+    'Manager options page navigated away after label lookup'
+  );
   return requireManagerUiLabels(labels);
 }
 
@@ -140,7 +168,10 @@ async function installUserscript(context, id, root, output) {
     const toggle = page.locator('#allow-user-scripts cr-toggle');
     await toggle.waitFor({ state: 'visible' });
     if (!(await toggle.evaluate((element) => element.checked))) await toggle.click();
-    assert(await toggle.evaluate((element) => element.checked), 'User scripts permission is disabled');
+    assert(
+      await toggle.evaluate((element) => element.checked),
+      'User scripts permission is disabled'
+    );
     const keep = page.getByRole('button', { name: 'Keep', exact: true });
     if (await keep.isVisible()) await keep.click();
     const restarted = context.waitForEvent('serviceworker', {
@@ -153,7 +184,9 @@ async function installUserscript(context, id, root, output) {
     const labels = await readManagerUiLabels(page, id);
     await page.getByText(labels.utilities, { exact: true }).click();
     const confirmationPromise = context.waitForEvent('page');
-    await page.locator('input[type=file]').setInputFiles(join(root, 'dist/yt-live-chat-overlay.user.js'));
+    await page
+      .locator('input[type=file]')
+      .setInputFiles(join(root, 'dist/yt-live-chat-overlay.user.js'));
     const confirmation = await confirmationPromise;
     await confirmation.waitForURL(`chrome-extension://${id}/ask.html*`);
     const closed = confirmation.waitForEvent('close');
@@ -182,36 +215,43 @@ export function selectPublicSeekTarget({ currentTime, start, end }) {
 }
 
 export async function readPublicPageState(page) {
-  return page.evaluate(() => {
-    const initialData = window.ytInitialData;
-    let renderer = initialData?.contents?.twoColumnWatchNextResults
-      ?.conversationBar?.liveChatRenderer;
-    if (!renderer && initialData && typeof initialData === 'object') {
-      const pending = [initialData];
-      const seen = new Set();
-      for (let visited = 0; pending.length && visited < 1000; visited++) {
-        const value = pending.pop();
-        if (!value || typeof value !== 'object' || seen.has(value)) continue;
-        seen.add(value);
-        if (value.liveChatRenderer?.continuations) {
-          renderer = value.liveChatRenderer;
-          break;
-        }
-        for (const child of Object.values(value)) {
-          if (child && typeof child === 'object') pending.push(child);
+  return page
+    .evaluate(() => {
+      const initialData = window.ytInitialData;
+      let renderer =
+        initialData?.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
+      if (!renderer && initialData && typeof initialData === 'object') {
+        const pending = [initialData];
+        const seen = new Set();
+        for (let visited = 0; pending.length && visited < 1000; visited++) {
+          const value = pending.pop();
+          if (!value || typeof value !== 'object' || seen.has(value)) continue;
+          seen.add(value);
+          if (value.liveChatRenderer?.continuations) {
+            renderer = value.liveChatRenderer;
+            break;
+          }
+          for (const child of Object.values(value)) {
+            if (child && typeof child === 'object') pending.push(child);
+          }
         }
       }
-    }
-    const hostname = new URL(location.href).hostname;
-    return {
-      chatMode: renderer ? renderer.isReplay === true ? 'replay' : 'live' : 'unknown',
-      chatRendererFound: Boolean(renderer),
-      playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
-      loginRedirect: hostname === 'accounts.google.com',
-      consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com',
-    };
-  }).catch(() => ({ chatMode: 'unknown', chatRendererFound: false,
-    playabilityStatus: null, loginRedirect: false, consentRedirect: false }));
+      const hostname = new URL(location.href).hostname;
+      return {
+        chatMode: renderer ? (renderer.isReplay === true ? 'replay' : 'live') : 'unknown',
+        chatRendererFound: Boolean(renderer),
+        playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
+        loginRedirect: hostname === 'accounts.google.com',
+        consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com',
+      };
+    })
+    .catch(() => ({
+      chatMode: 'unknown',
+      chatRendererFound: false,
+      playabilityStatus: null,
+      loginRedirect: false,
+      consentRedirect: false,
+    }));
 }
 
 /** Observe a real watch page without supplying application code or site responses. */
@@ -226,11 +266,20 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
   page.on('console', (message) => {
     const text = message.text();
     if (message.type() === 'error') {
-      if (consoleErrors.length < 32) consoleErrors.push({ type: 'error', text: text.slice(0, 1000), url: message.location().url });
+      if (consoleErrors.length < 32)
+        consoleErrors.push({
+          type: 'error',
+          text: text.slice(0, 1000),
+          url: message.location().url,
+        });
       else consoleErrorOverflow++;
     }
     if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
-      workerDiagnostics.push({ type: message.type(), text: redactDiagnosticText(text), url: redactDiagnosticText(message.location().url) });
+      workerDiagnostics.push({
+        type: message.type(),
+        text: redactDiagnosticText(text),
+        url: redactDiagnosticText(message.location().url),
+      });
     }
   });
   const observation = { url, status: 'not-run', mocked: false };
@@ -239,8 +288,14 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
   const screenshot = `live-${index}.png`;
   const deadline = setTimeout(() => {
     deadlineReached = true;
-    deadlineCleanup = page.screenshot({ path: join(output, screenshot), timeout: 3000 })
-      .then(() => { observation.screenshot = screenshot; }, () => {})
+    deadlineCleanup = page
+      .screenshot({ path: join(output, screenshot), timeout: 3000 })
+      .then(
+        () => {
+          observation.screenshot = screenshot;
+        },
+        () => {}
+      )
       .finally(() => page.close().catch(() => {}));
   }, 120_000);
   try {
@@ -252,11 +307,18 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
     if (await rejectConsent.isVisible().catch(() => false)) await rejectConsent.click();
     observation.phase = 'player';
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
-    observation.video = await page.locator('video').first().evaluate((video) => {
-      video.muted = true;
-      void video.play().catch(() => {});
-      return { paused: video.paused, readyState: video.readyState, errorCode: video.error?.code ?? null };
-    });
+    observation.video = await page
+      .locator('video')
+      .first()
+      .evaluate((video) => {
+        video.muted = true;
+        void video.play().catch(() => {});
+        return {
+          paused: video.paused,
+          readyState: video.readyState,
+          errorCode: video.error?.code ?? null,
+        };
+      });
     observation.phase = 'settings';
     const settingsButton = page.locator('#yt-chat-overlay-settings-button');
     await settingsButton.waitFor({ state: 'visible', timeout: 20_000 });
@@ -268,89 +330,155 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
     observation.fontSize = Number(await fontSize.inputValue());
     await page.keyboard.press('Escape');
     observation.phase = 'chat';
-    await page.waitForFunction(() =>
-      document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
-      undefined, { timeout: 30_000 });
-    observation.renderedMessages = await page.locator('.yt-live-chat-overlay-live-region > p').count();
-    observation.canvasAttached = await page.locator('#yt-live-chat-overlay canvas').count() === 1;
+    await page.waitForFunction(
+      () => document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
+      undefined,
+      { timeout: 30_000 }
+    );
+    observation.renderedMessages = await page
+      .locator('.yt-live-chat-overlay-live-region > p')
+      .count();
+    observation.canvasAttached = (await page.locator('#yt-live-chat-overlay canvas').count()) === 1;
     const renderer = await page.locator('#yt-chat-overlay-debug').innerText();
     observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
-    observation.installedBridgeReady = await page.evaluate(() => Boolean(
-      window.__ytExtensionBridge?.workerSupported === true &&
-      window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-      window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
-    ));
-    Object.assign(observation, validateLiveRenderer(observation.renderer, installation,
-      workerDiagnostics, observation.installedBridgeReady));
+    observation.installedBridgeReady = await page.evaluate(() =>
+      Boolean(
+        window.__ytExtensionBridge?.workerSupported === true &&
+          window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
+          window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
+      )
+    );
+    Object.assign(
+      observation,
+      validateLiveRenderer(
+        observation.renderer,
+        installation,
+        workerDiagnostics,
+        observation.installedBridgeReady
+      )
+    );
     const pageState = await readPublicPageState(page);
     observation.chatMode = pageState.chatMode;
     observation.provider = pageState;
-    observation.workflow = { startup: { status: 'passed', chatMode: observation.chatMode,
-      renderedMessages: observation.renderedMessages } };
+    observation.workflow = {
+      startup: {
+        status: 'passed',
+        chatMode: observation.chatMode,
+        renderedMessages: observation.renderedMessages,
+      },
+    };
     observation.phase = 'pause';
-    observation.workflow.pause = await page.locator('video').first().evaluate((video) => {
-      video.pause();
-      return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
-    });
+    observation.workflow.pause = await page
+      .locator('video')
+      .first()
+      .evaluate((video) => {
+        video.pause();
+        return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
+      });
     observation.phase = 'resume';
-    observation.workflow.resume = await page.locator('video').first().evaluate(async (video) => {
-      try { await video.play(); } catch { return { status: 'unverified', reason: 'play-rejected' }; }
-      return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
-    });
+    observation.workflow.resume = await page
+      .locator('video')
+      .first()
+      .evaluate(async (video) => {
+        try {
+          await video.play();
+        } catch {
+          return { status: 'unverified', reason: 'play-rejected' };
+        }
+        return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
+      });
     observation.phase = 'seek';
-    const seekRange = await page.locator('video').first().evaluate((video) => {
-      if (!video.seekable.length) return null;
-      const last = video.seekable.length - 1;
-      return { currentTime: video.currentTime, start: video.seekable.start(last),
-        end: video.seekable.end(last) };
-    });
+    const seekRange = await page
+      .locator('video')
+      .first()
+      .evaluate((video) => {
+        if (!video.seekable.length) return null;
+        const last = video.seekable.length - 1;
+        return {
+          currentTime: video.currentTime,
+          start: video.seekable.start(last),
+          end: video.seekable.end(last),
+        };
+      });
     const target = seekRange && selectPublicSeekTarget(seekRange);
     if (target === null) {
-      observation.workflow.seek = { status: 'unverified', reason: 'seek-range-unavailable',
-        range: seekRange };
+      observation.workflow.seek = {
+        status: 'unverified',
+        reason: 'seek-range-unavailable',
+        range: seekRange,
+      };
     } else {
-      observation.workflow.seek = await page.locator('video').first().evaluate(async (video, seekTo) => {
-        const completed = new Promise((resolve) => {
-          const timeout = setTimeout(() => resolve(false), 8000);
-          video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(true); }, { once: true });
-        });
-        video.currentTime = seekTo;
-        const seeked = await completed;
-        return { status: seeked && Math.abs(video.currentTime - seekTo) < 2 ? 'passed' : 'unverified',
-          reason: seeked ? null : 'seeked-event-timeout', target: seekTo,
-          currentTime: video.currentTime };
-      }, target);
+      observation.workflow.seek = await page
+        .locator('video')
+        .first()
+        .evaluate(async (video, seekTo) => {
+          const completed = new Promise((resolve) => {
+            const timeout = setTimeout(() => resolve(false), 8000);
+            video.addEventListener(
+              'seeked',
+              () => {
+                clearTimeout(timeout);
+                resolve(true);
+              },
+              { once: true }
+            );
+          });
+          video.currentTime = seekTo;
+          const seeked = await completed;
+          return {
+            status: seeked && Math.abs(video.currentTime - seekTo) < 2 ? 'passed' : 'unverified',
+            reason: seeked ? null : 'seeked-event-timeout',
+            target: seekTo,
+            currentTime: video.currentTime,
+          };
+        }, target);
     }
     observation.phase = 'navigation-transition';
     const diagnosticStart = workerDiagnostics.length;
     await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
-    await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached', timeout: 20_000 });
-    await page.waitForFunction(() =>
-      document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
-    undefined, { timeout: 30_000 });
+    await page
+      .locator('#yt-live-chat-overlay canvas')
+      .waitFor({ state: 'attached', timeout: 20_000 });
+    await page.waitForFunction(
+      () => document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
+      undefined,
+      { timeout: 30_000 }
+    );
     const nextPageState = await readPublicPageState(page);
     const nextRendererText = await page.locator('#yt-chat-overlay-debug').innerText();
     const nextRenderer = nextRendererText.includes('Render: n/a') ? 'worker' : 'main';
-    const nextBridgeReady = await page.evaluate(() => Boolean(
-      window.__ytExtensionBridge?.workerSupported === true &&
-      window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-      window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
-    ));
-    const nextRendererPolicy = validateLiveRenderer(nextRenderer, installation,
-      workerDiagnostics.slice(diagnosticStart), nextBridgeReady);
-    observation.workflow.navigation = { status: nextPageState.chatMode === 'unknown' ? 'unverified' : 'passed',
+    const nextBridgeReady = await page.evaluate(() =>
+      Boolean(
+        window.__ytExtensionBridge?.workerSupported === true &&
+          window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
+          window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
+      )
+    );
+    const nextRendererPolicy = validateLiveRenderer(
+      nextRenderer,
+      installation,
+      workerDiagnostics.slice(diagnosticStart),
+      nextBridgeReady
+    );
+    observation.workflow.navigation = {
+      status: nextPageState.chatMode === 'unknown' ? 'unverified' : 'passed',
       reason: nextPageState.chatMode === 'unknown' ? 'chat-mode-unknown' : null,
-      kind: nextUrl === url ? 'reload' : 'cross-watch', chatMode: nextPageState.chatMode,
-      canvasAttached: true, renderer: nextRenderer,
-      installedBridgeReady: nextBridgeReady, ...nextRendererPolicy,
-      renderedMessages: await page.locator('.yt-live-chat-overlay-live-region > p').count() };
+      kind: nextUrl === url ? 'reload' : 'cross-watch',
+      chatMode: nextPageState.chatMode,
+      canvasAttached: true,
+      renderer: nextRenderer,
+      installedBridgeReady: nextBridgeReady,
+      ...nextRendererPolicy,
+      renderedMessages: await page.locator('.yt-live-chat-overlay-live-region > p').count(),
+    };
     if (pageState.chatMode === 'unknown') {
       observation.workflow.startup.status = 'unverified';
       observation.workflow.startup.reason = 'chat-mode-unknown';
     }
-    const failedStage = Object.entries(observation.workflow)
-      .find(([, stage]) => stage.status !== 'passed');
+    const failedStage = Object.entries(observation.workflow).find(
+      ([, stage]) => stage.status !== 'passed'
+    );
     if (failedStage) {
       observation.status = 'unverified';
       observation.reason = `${failedStage[0]}-${failedStage[1].reason ?? 'state-not-observed'}`;
@@ -362,33 +490,47 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
   } catch (error) {
     observation.status = 'unverified';
     observation.provider = await readPublicPageState(page);
-    observation.reason = deadlineReached ? 'live-url-deadline'
-      : observation.provider.loginRedirect ? 'provider-login-redirect'
-        : observation.provider.consentRedirect ? 'provider-consent-redirect'
-          : observation.provider.playabilityStatus && observation.provider.playabilityStatus !== 'OK'
+    observation.reason = deadlineReached
+      ? 'live-url-deadline'
+      : observation.provider.loginRedirect
+        ? 'provider-login-redirect'
+        : observation.provider.consentRedirect
+          ? 'provider-consent-redirect'
+          : observation.provider.playabilityStatus &&
+              observation.provider.playabilityStatus !== 'OK'
             ? 'provider-playability-unavailable'
             : !observation.provider.chatRendererFound && observation.phase === 'chat'
               ? 'provider-chat-renderer-unavailable'
-              : error.name === 'TimeoutError' ? `${observation.phase}-timeout`
+              : error.name === 'TimeoutError'
+                ? `${observation.phase}-timeout`
                 : `${observation.phase}-error`;
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
     observation.workerDiagnostics = workerDiagnostics;
     if (!page.isClosed()) {
-      await page.screenshot({ path: join(output, screenshot) }).then(() => {
-        observation.screenshot = screenshot;
-      }, () => {});
+      await page.screenshot({ path: join(output, screenshot) }).then(
+        () => {
+          observation.screenshot = screenshot;
+        },
+        () => {}
+      );
     }
     await page.close();
     observation.pageErrorTypes = [...new Set(pageErrors)];
-    observation.unexpectedConsoleErrors = consoleErrorOverflow +
+    observation.unexpectedConsoleErrors =
+      consoleErrorOverflow +
       countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback);
     observation.hostConsoleErrors = consoleErrors.filter(isYouTubeHostError).length;
     observation.consoleErrors = consoleErrors.map(({ type, text, url }) => ({
-      type, text: redactDiagnosticText(text), url: redactDiagnosticText(url),
+      type,
+      text: redactDiagnosticText(text),
+      url: redactDiagnosticText(url),
     }));
-    if (observation.status === 'passed' && (observation.pageErrorTypes.length > 0 || observation.unexpectedConsoleErrors > 0)) {
+    if (
+      observation.status === 'passed' &&
+      (observation.pageErrorTypes.length > 0 || observation.unexpectedConsoleErrors > 0)
+    ) {
       observation.status = 'unverified';
       observation.reason = 'unexpected-page-errors';
     }
@@ -397,14 +539,32 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
 }
 
 export function requireLiveSuccess(observations) {
-  assert(observations.every((item) => item.status === 'passed' && item.canvasAttached && item.renderedMessages > 0 &&
-    (item.pageErrorTypes?.length ?? 0) === 0 && (item.unexpectedConsoleErrors ?? 0) === 0),
-    'One or more requested live pages did not prove installed application rendering');
+  assert(
+    observations.every(
+      (item) =>
+        item.status === 'passed' &&
+        item.canvasAttached &&
+        item.renderedMessages > 0 &&
+        (item.pageErrorTypes?.length ?? 0) === 0 &&
+        (item.unexpectedConsoleErrors ?? 0) === 0
+    ),
+    'One or more requested live pages did not prove installed application rendering'
+  );
 }
 
 /** Attempt every owned cleanup stage even when an earlier operation fails. */
 export async function cleanupChromeInstallation(
-  { browserProcessId, browserProcessIdentity, context, cdp, extensionId, profile, output, result, root },
+  {
+    browserProcessId,
+    browserProcessIdentity,
+    context,
+    cdp,
+    extensionId,
+    profile,
+    output,
+    result,
+    root,
+  },
   {
     checkProcessAlive = isProcessAlive,
     terminateProcessTree = () => terminateOwnedChromeProcess(browserProcessIdentity),
@@ -421,7 +581,9 @@ export async function cleanupChromeInstallation(
     try {
       await cdp.send('Extensions.uninstall', { id: extensionId });
       result.cleanup.extensionUninstalled = true;
-    } catch (error) { recordError('extension-uninstall', error); }
+    } catch (error) {
+      recordError('extension-uninstall', error);
+    }
   }
   try {
     await context?.close();
@@ -433,7 +595,9 @@ export async function cleanupChromeInstallation(
       if (!ownedBrowser) throw new Error('Owned browser cleanup handle is unavailable');
       await ownedBrowser.close();
       result.cleanup.browserClosed = true;
-    } catch (fallbackError) { recordError('browser-close', fallbackError); }
+    } catch (fallbackError) {
+      recordError('browser-close', fallbackError);
+    }
   }
   let browserProcessExited = result.cleanup.browserClosed === true;
   if (browserProcessId !== undefined) {
@@ -441,11 +605,7 @@ export async function cleanupChromeInstallation(
       if (result.cleanup.browserClosed === true) {
         browserProcessExited = waitForExit
           ? await waitForExit(browserProcessId, GRACEFUL_PROCESS_EXIT_MS)
-          : await waitForProcessExit(
-              browserProcessId,
-              checkProcessAlive,
-              GRACEFUL_PROCESS_EXIT_MS
-            );
+          : await waitForProcessExit(browserProcessId, checkProcessAlive, GRACEFUL_PROCESS_EXIT_MS);
       } else {
         browserProcessExited = !(await checkProcessAlive(browserProcessId));
       }
@@ -489,7 +649,9 @@ export async function cleanupChromeInstallation(
     try {
       await removeOwnedChromeProfile(root, profile);
       result.cleanup.profileRemoved = true;
-    } catch (error) { recordError('profile-remove', error); }
+    } catch (error) {
+      recordError('profile-remove', error);
+    }
   } else {
     result.cleanup.profilePreserved = true;
   }
@@ -501,13 +663,21 @@ export async function cleanupChromeInstallation(
 
 /** Install real browser packages in an isolated profile and exercise their normal delivery. */
 export async function runChromeInstallation({
-  chromium, root, output, browserName = 'chrome', headless = false,
-  installation, liveUrls = [], liveObservation = null,
+  chromium,
+  root,
+  output,
+  browserName = 'chrome',
+  headless = false,
+  installation,
+  liveUrls = [],
+  liveObservation = null,
 }) {
   assert(['chrome', 'msedge'].includes(browserName), 'Unsupported Chromium channel');
   assert(['extension', 'userscript'].includes(installation), 'Unknown installation mode');
-  assert(Array.isArray(liveUrls) && liveUrls.length <= 3,
-    'At most three live URLs can run within the guest deadline');
+  assert(
+    Array.isArray(liveUrls) && liveUrls.length <= 3,
+    'At most three live URLs can run within the guest deadline'
+  );
   if (liveObservation !== null) {
     assert.deepEqual(liveObservation, { mode: 'duration', duration_seconds: 1200 });
     assert.equal(browserName, 'chrome', 'Duration observation requires installed Chrome');
@@ -515,7 +685,12 @@ export async function runChromeInstallation({
     assert.equal(installation, 'extension', 'Duration observation requires the extension');
     assert.equal(liveUrls.length, 1, 'Duration observation requires one public live URL');
     return runChromeDurationInstallation({
-      chromium, root, output, installation, liveUrls, liveObservation,
+      chromium,
+      root,
+      output,
+      installation,
+      liveUrls,
+      liveObservation,
     });
   }
   const profile = await mkdtemp(join(root, 'chrome-install-'));
@@ -525,8 +700,15 @@ export async function runChromeInstallation({
   let browserProcessId;
   let browserProcessIdentity;
   let primaryError;
-  const result = { installation, fixture: null, placementTiming: null, bitmapLifecycle: null,
-    live: [], liveWorkflowCoverage: null, cleanup: {} };
+  const result = {
+    installation,
+    fixture: null,
+    placementTiming: null,
+    bitmapLifecycle: null,
+    live: [],
+    liveWorkflowCoverage: null,
+    cleanup: {},
+  };
   try {
     context = await chromium.launchPersistentContext(profile, {
       channel: browserName,
@@ -556,22 +738,39 @@ export async function runChromeInstallation({
       result.userscriptManager = installed;
       result.installationMethod = 'real-manager-ui-import';
     }
-    result.fixture = await runFixture({ browser: context.browser(), root, output,
-      installedContext: context, installedExtensionId: extensionId,
-      expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
+    result.fixture = await runFixture({
+      browser: context.browser(),
+      root,
+      output,
+      installedContext: context,
+      installedExtensionId: extensionId,
+      expectedRenderer: installation === 'extension' ? 'worker' : 'main',
+    });
     if (browserName === 'msedge' && installation === 'extension') {
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
-        context, root, extensionId,
+        context,
+        root,
+        extensionId,
       });
-      assert.equal(result.bitmapLifecycle.status, 'passed',
-        'Installed Edge real bitmap lifecycle fixture failed');
+      assert.equal(
+        result.bitmapLifecycle.status,
+        'passed',
+        'Installed Edge real bitmap lifecycle fixture failed'
+      );
       // A baseline-only harness commit can set this to true with the same probe bytes.
       const comparisonOnly = false;
       result.placementTiming = await runPlacementTimingFixture({
-        context, root, output, extensionId, comparisonOnly,
+        context,
+        root,
+        output,
+        extensionId,
+        comparisonOnly,
       });
-      assert.equal(result.placementTiming.status, 'passed',
-        'Installed Edge placement or replay fixture did not satisfy its observations');
+      assert.equal(
+        result.placementTiming.status,
+        'passed',
+        'Installed Edge placement or replay fixture did not satisfy its observations'
+      );
     }
     for (const [index, url] of liveUrls.entries()) {
       const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
@@ -579,14 +778,28 @@ export async function runChromeInstallation({
     }
     if (liveUrls.length > 0) {
       const observedModes = [...new Set(result.live.map((item) => item.chatMode))];
-      const crossWatch = result.live.some((item) => item.workflow?.navigation?.kind === 'cross-watch' &&
-        item.workflow.navigation.status === 'passed');
-      result.liveWorkflowCoverage = { observedModes, crossWatch,
-        status: observedModes.includes('live') && observedModes.includes('replay') && crossWatch &&
-          result.live.every((item) => item.status === 'passed') ? 'complete' : 'partial' };
+      const crossWatch = result.live.some(
+        (item) =>
+          item.workflow?.navigation?.kind === 'cross-watch' &&
+          item.workflow.navigation.status === 'passed'
+      );
+      result.liveWorkflowCoverage = {
+        observedModes,
+        crossWatch,
+        status:
+          observedModes.includes('live') &&
+          observedModes.includes('replay') &&
+          crossWatch &&
+          result.live.every((item) => item.status === 'passed')
+            ? 'complete'
+            : 'partial',
+      };
       if (browserName === 'msedge' && installation === 'extension' && liveUrls.length >= 2) {
-        assert.equal(result.liveWorkflowCoverage.status, 'complete',
-          'Public live and replay workflow coverage is incomplete');
+        assert.equal(
+          result.liveWorkflowCoverage.status,
+          'complete',
+          'Public live and replay workflow coverage is incomplete'
+        );
       }
     }
     requireLiveSuccess(result.live);
@@ -608,14 +821,20 @@ export async function runChromeInstallation({
         root,
       });
     } catch (cleanupError) {
-      if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');
+      if (primaryError)
+        throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');
       throw cleanupError;
     }
   }
 }
 
 async function runChromeDurationInstallation({
-  chromium, root, output, installation, liveUrls, liveObservation,
+  chromium,
+  root,
+  output,
+  installation,
+  liveUrls,
+  liveObservation,
 }) {
   const [{ launchOwnedNaturalChrome }, { runLiveDuration }] = await Promise.all([
     import('./natural-chrome.mjs'),

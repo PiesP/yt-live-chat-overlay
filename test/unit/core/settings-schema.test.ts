@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, expect, it } from 'vitest';
+import type { OverlaySettings } from '@app-types';
 import {
-  DEFAULT_SETTINGS,
-  SETTINGS_VERSION,
-  STORAGE_KEY,
   applySettingsPatch,
   cloneSettings,
+  DEFAULT_SETTINGS,
   getOutlineDisplayScale,
   getRootDisplayMeta,
   normalizeStoredSettings,
   resolveLimits,
   resolveOutlineLimits,
+  SETTINGS_VERSION,
+  STORAGE_KEY,
   shouldResetRendererForSettingsChange,
 } from '@settings/schema';
-import type { OverlaySettings } from '@app-types';
+import { describe, expect, it } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════
 // Constants
@@ -793,8 +793,8 @@ describe('normalizeStoredSettings', () => {
 // isLogLevel
 // ═══════════════════════════════════════════════════════════
 
-import { clampNumber, isColorValue, isLogLevel } from '@settings/schema';
 import { migrateSettings } from '@settings/defaults';
+import { clampNumber, isColorValue, isLogLevel } from '@settings/schema';
 
 describe('isLogLevel', () => {
   it("'warn' returns true", () => {

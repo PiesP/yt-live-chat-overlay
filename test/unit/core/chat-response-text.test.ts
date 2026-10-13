@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
 import {
   ChatResponseTooLargeError,
   readBoundedChatResponseText,
 } from '@chat/youtube/response-text';
+import { describe, expect, it, vi } from 'vitest';
 
 const NOT_SETTLED = Symbol('not-settled');
 
@@ -56,9 +56,7 @@ describe('readBoundedChatResponseText', () => {
       { headers: { 'content-length': '11' } }
     );
     const clone = original.clone();
-    const read = readBoundedChatResponseText(clone, 10).catch(
-      (reason: unknown) => reason
-    );
+    const read = readBoundedChatResponseText(clone, 10).catch((reason: unknown) => reason);
 
     try {
       await expect(settleWithin(read)).resolves.toBeInstanceOf(ChatResponseTooLargeError);
@@ -83,9 +81,9 @@ describe('readBoundedChatResponseText', () => {
       cancel,
     });
 
-    await expect(
-      readBoundedChatResponseText(new Response(body), 10)
-    ).rejects.toBeInstanceOf(ChatResponseTooLargeError);
+    await expect(readBoundedChatResponseText(new Response(body), 10)).rejects.toBeInstanceOf(
+      ChatResponseTooLargeError
+    );
     expect(cancel).toHaveBeenCalledOnce();
   });
 
@@ -99,9 +97,7 @@ describe('readBoundedChatResponseText', () => {
       })
     );
     const clone = original.clone();
-    const read = readBoundedChatResponseText(clone, 10).catch(
-      (reason: unknown) => reason
-    );
+    const read = readBoundedChatResponseText(clone, 10).catch((reason: unknown) => reason);
 
     try {
       await expect(settleWithin(read)).resolves.toBeInstanceOf(ChatResponseTooLargeError);
@@ -115,9 +111,7 @@ describe('readBoundedChatResponseText', () => {
 
   it('accepts a response exactly at the byte limit', async () => {
     const text = '12345678';
-    await expect(
-      readBoundedChatResponseText(new Response(text), 8)
-    ).resolves.toBe(text);
+    await expect(readBoundedChatResponseText(new Response(text), 8)).resolves.toBe(text);
   });
 
   it('falls back to text() when a response has no readable body', async () => {

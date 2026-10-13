@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { LaneAllocator } from '@renderer/layout/lane-allocator';
-import type { LaneAllocatorOptions } from '@renderer/layout/lane-allocator';
 import type { OverlayDimensions } from '@app-types';
+import { LaneAllocator, type LaneAllocatorOptions } from '@renderer/layout/lane-allocator';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

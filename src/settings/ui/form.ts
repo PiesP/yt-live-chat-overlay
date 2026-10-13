@@ -15,11 +15,6 @@ import {
 } from '@renderer/layout/row-geometry';
 import { estimateMessageDimensions } from '@renderer/shared';
 import { getFontString, measureTextWidth } from '@renderer/text-measure';
-import type {
-  OutlineSettingKey,
-  RootNumericSettingKey,
-  RootScalarSettingKey,
-} from '@settings/schema';
 import {
   AUTHOR_BACKGROUND_ALPHA_HEX,
   AUTHOR_COLOR_KEYS,
@@ -28,20 +23,23 @@ import {
   getRootDisplayMeta,
   normalizeBackgroundColor,
   OUTLINE_NUMERIC_KEYS,
+  type OutlineSettingKey,
+  type RootNumericSettingKey,
+  type RootScalarSettingKey,
   resolveLimits,
   resolveOutlineLimits,
 } from '@settings/schema';
 import { parseSettingsControlName } from '@settings/ui/control-codec';
-import type {
-  AuthorGridField,
-  DisclosureDef,
-  FieldDef,
-  FontChipsField,
-  FontPreviewField,
-  PaneDef,
-  WeightToggleField,
+import {
+  type AuthorGridField,
+  type DisclosureDef,
+  type FieldDef,
+  type FontChipsField,
+  type FontPreviewField,
+  PANES,
+  type PaneDef,
+  type WeightToggleField,
 } from '@settings/ui/panes';
-import { PANES } from '@settings/ui/panes';
 import { TranslationService } from '@translation/service';
 import { createLogger } from '@util/logging';
 

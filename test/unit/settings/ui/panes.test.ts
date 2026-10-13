@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
-import { PANES } from '@settings/ui/panes';
-import type { PaneDef, FieldDef } from '@settings/ui/panes';
+
 import { ROOT_SETTING_META } from '@settings/meta';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { type FieldDef, PANES, type PaneDef } from '@settings/ui/panes';
+import { describe, expect, it } from 'vitest';
 
 function allSections(pane: PaneDef): PaneDef['sections'] {
   return [
@@ -43,8 +43,16 @@ describe('SettingsPanes', () => {
 
   it('each field has a valid type', () => {
     const validTypes = new Set([
-      'number', 'checkbox', 'select', 'text', 'font-preview', 'weight-toggle',
-      'font-chips', 'enabled', 'author-grid', 'range',
+      'number',
+      'checkbox',
+      'select',
+      'text',
+      'font-preview',
+      'weight-toggle',
+      'font-chips',
+      'enabled',
+      'author-grid',
+      'range',
     ]);
 
     for (const pane of PANES) {
@@ -67,8 +75,8 @@ describe('SettingsPanes', () => {
   it('comments pane has enabled field', () => {
     const commentsPane = PANES.find((p: PaneDef) => p.id === 'comments');
     expect(commentsPane).toBeDefined();
-    const hasEnabled = commentsPane!.sections.some(
-      (s) => s.fields.some((f: FieldDef) => f.type === 'enabled')
+    const hasEnabled = commentsPane!.sections.some((s) =>
+      s.fields.some((f: FieldDef) => f.type === 'enabled')
     );
     expect(hasEnabled).toBe(true);
   });
@@ -76,8 +84,8 @@ describe('SettingsPanes', () => {
   it('comments pane has danmakuMode select', () => {
     const commentsPane = PANES.find((p: PaneDef) => p.id === 'comments');
     expect(commentsPane).toBeDefined();
-    const hasModeSelect = commentsPane!.sections.some(
-      (s) => s.fields.some(
+    const hasModeSelect = commentsPane!.sections.some((s) =>
+      s.fields.some(
         (f: FieldDef) => f.type === 'select' && (f as { key: string }).key === 'danmakuMode'
       )
     );
@@ -122,8 +130,8 @@ describe('SettingsPanes', () => {
   it('colors pane has author-grid field', () => {
     const colorsPane = PANES.find((p: PaneDef) => p.id === 'colors');
     expect(colorsPane).toBeDefined();
-    const hasAuthorGrid = colorsPane!.sections.some(
-      (s) => s.fields.some((f: FieldDef) => f.type === 'author-grid')
+    const hasAuthorGrid = colorsPane!.sections.some((s) =>
+      s.fields.some((f: FieldDef) => f.type === 'author-grid')
     );
     expect(hasAuthorGrid).toBe(true);
   });
@@ -164,7 +172,8 @@ describe('SettingsPanes', () => {
           if (!('key' in field)) continue;
 
           if (field.modifier) {
-            const nestedSettings = DEFAULT_SETTINGS[field.modifier as keyof typeof DEFAULT_SETTINGS];
+            const nestedSettings =
+              DEFAULT_SETTINGS[field.modifier as keyof typeof DEFAULT_SETTINGS];
             expect(nestedSettings, `${field.modifier}.${field.key}`).toBeTypeOf('object');
             expect(field.key in (nestedSettings as unknown as Record<string, unknown>)).toBe(true);
           } else {

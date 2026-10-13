@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { OverlaySettings } from '@app-types';
+import { resolveActiveLanguage } from '@i18n/index';
 import { MAX_SETTINGS_IMPORT_BYTES, SettingsUi } from '@settings/ui/controller';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
-import type { OverlaySettings } from '@app-types';
-import { resolveActiveLanguage } from '@i18n/index';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock findPlayerContainerElement so it returns our player element
 vi.mock('@util/dom', async () => {
-  const actual = await vi.importActual('@util/dom') as Record<string, unknown>;
+  const actual = (await vi.importActual('@util/dom')) as Record<string, unknown>;
   return {
     ...actual,
     findPlayerContainerElement: vi.fn(),
@@ -21,35 +22,100 @@ import { findPlayerContainerElement as mockFinder } from '@util/dom';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   return {
-    enabled: true, danmakuMode: 'scroll' as const, speedPxPerSec: 250,
-    fontSize: 32, opacity: 1, superChatOpacity: 0.95, safeTop: 0, safeBottom: 0,
-    maxConcurrentMessages: 300, allowShortTextMessages: false, minTextLength: 1,
+    enabled: true,
+    danmakuMode: 'scroll' as const,
+    speedPxPerSec: 250,
+    fontSize: 32,
+    opacity: 1,
+    superChatOpacity: 0.95,
+    safeTop: 0,
+    safeBottom: 0,
+    maxConcurrentMessages: 300,
+    allowShortTextMessages: false,
+    minTextLength: 1,
     logLevel: 'warn' as const,
-    showAuthor: { normal: false, member: true, moderator: true, owner: true, verified: true, superChat: true },
-    colors: { normal: '#FFFFFF', member: '#0F9D58', moderator: '#5E84F1', owner: '#FFD600', verified: '#AAAAAA' },
+    showAuthor: {
+      normal: false,
+      member: true,
+      moderator: true,
+      owner: true,
+      verified: true,
+      superChat: true,
+    },
+    colors: {
+      normal: '#FFFFFF',
+      member: '#0F9D58',
+      moderator: '#5E84F1',
+      owner: '#FFD600',
+      verified: '#AAAAAA',
+    },
     outline: { enabled: true, widthPx: 2, opacity: 0.7 },
-    laneSpacing: 1, showDebugOverlay: false, ignoreReducedMotion: false,
-    authorRateLimit: 'normal' as const, backlogMaxRate: 10, backlogSpeedMultiplier: 1,
-    backlogMode: 'playback' as const, backlogRecentMinutes: 5, backlogOpacityMultiplier: 0.5,
-    depthLayersEnabled: false, depthNearSpeedMul: 1.2, depthFarSpeedMul: 0.8, depthFarOpacityMul: 0.6,
-    modOwnerDurationMultiplier: 1.5, showSuperChatAmount: true,
-    fontWeight: 'bold' as const, fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
-    preserveUserColor: true, superChatMaxBodyLines: 3, membershipMaxBodyLines: 2,
-    fadeDurationMs: 300, minPollIntervalMs: 1000, maxPollIntervalMs: 10000,
-    language: 'en' as const, translationEnabled: false, translationService: 'auto' as const,
-    translationSource: 'auto' as const, translationTarget: 'en' as const,
-    translationMode: 'dual' as const, exitPaddingPx: 50,
-    scrollDurationMinMs: 3000, scrollDurationMaxMs: 15000, topBottomDurationMs: 5000,
-    queueMaxSize: 500, backgroundQueueMax: 200, maxMessageAgeMs: 30000, headwayGapRatio: 0.3,
-    emojiCacheMb: 20, photoCacheMb: 10, stickerCacheMb: 5, textCacheMb: 5,
-    translationBatchSize: 5, emojiFetchLimit: 20, failedEmojiRetryMins: 5,
-    burstSampleWindow: 60, burstElevatedThreshold: 5, burstHighThreshold: 15, burstExtremeThreshold: 30,
-    backlogInjectionMax: 50, backlogDensityRampMs: 5000, livePollFallbackMs: 2000, livePollFailureLimit: 5,
-    speedBoostThreshold: 2, backlogPauseThreshold: 0.3, backlogResumeThreshold: 0.1,
-    activityTimeoutMs: 60000, staggerMaxDelayMs: 100, staggerMediumDelayMs: 50,
-    emojiFetchTimeoutMs: 5000, backlogDensityRampMaxMs: 10000, backlogInjectionRateMin: 1,
-    speedBoostMax: 1, speedBoostDenom: 2, backlogToggleCooldownMs: 2000,
-    replayPrefetchPages: 50, replayBatchLimit: 50,
+    laneSpacing: 1,
+    showDebugOverlay: false,
+    ignoreReducedMotion: false,
+    authorRateLimit: 'normal' as const,
+    backlogMaxRate: 10,
+    backlogSpeedMultiplier: 1,
+    backlogMode: 'playback' as const,
+    backlogRecentMinutes: 5,
+    backlogOpacityMultiplier: 0.5,
+    depthLayersEnabled: false,
+    depthNearSpeedMul: 1.2,
+    depthFarSpeedMul: 0.8,
+    depthFarOpacityMul: 0.6,
+    modOwnerDurationMultiplier: 1.5,
+    showSuperChatAmount: true,
+    fontWeight: 'bold' as const,
+    fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
+    preserveUserColor: true,
+    superChatMaxBodyLines: 3,
+    membershipMaxBodyLines: 2,
+    fadeDurationMs: 300,
+    minPollIntervalMs: 1000,
+    maxPollIntervalMs: 10000,
+    language: 'en' as const,
+    translationEnabled: false,
+    translationService: 'auto' as const,
+    translationSource: 'auto' as const,
+    translationTarget: 'en' as const,
+    translationMode: 'dual' as const,
+    exitPaddingPx: 50,
+    scrollDurationMinMs: 3000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    maxMessageAgeMs: 30000,
+    headwayGapRatio: 0.3,
+    emojiCacheMb: 20,
+    photoCacheMb: 10,
+    stickerCacheMb: 5,
+    textCacheMb: 5,
+    translationBatchSize: 5,
+    emojiFetchLimit: 20,
+    failedEmojiRetryMins: 5,
+    burstSampleWindow: 60,
+    burstElevatedThreshold: 5,
+    burstHighThreshold: 15,
+    burstExtremeThreshold: 30,
+    backlogInjectionMax: 50,
+    backlogDensityRampMs: 5000,
+    livePollFallbackMs: 2000,
+    livePollFailureLimit: 5,
+    speedBoostThreshold: 2,
+    backlogPauseThreshold: 0.3,
+    backlogResumeThreshold: 0.1,
+    activityTimeoutMs: 60000,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    emojiFetchTimeoutMs: 5000,
+    backlogDensityRampMaxMs: 10000,
+    backlogInjectionRateMin: 1,
+    speedBoostMax: 1,
+    speedBoostDenom: 2,
+    backlogToggleCooldownMs: 2000,
+    replayPrefetchPages: 50,
+    replayBatchLimit: 50,
     ...overrides,
   } as OverlaySettings;
 }
@@ -59,17 +125,19 @@ describe('SettingsUi', () => {
     // jsdom doesn't implement HTMLDialogElement.close() / showModal()
     // Patch the prototype so SettingsUi can create functional dialogs
     const origCreateElement = document.createElement.bind(document);
-    vi.spyOn(document, 'createElement').mockImplementation((tag: string, _options?: ElementCreationOptions) => {
-      const el = origCreateElement(tag);
-      if (tag === 'dialog') {
-        (el as any).close = vi.fn();
-        (el as any).showModal = vi.fn();
-        (el as any).show = vi.fn();
-        // 'open' property for dialog state
-        Object.defineProperty(el, 'open', { value: false, writable: true, configurable: true });
+    vi.spyOn(document, 'createElement').mockImplementation(
+      (tag: string, _options?: ElementCreationOptions) => {
+        const el = origCreateElement(tag);
+        if (tag === 'dialog') {
+          (el as any).close = vi.fn();
+          (el as any).showModal = vi.fn();
+          (el as any).show = vi.fn();
+          // 'open' property for dialog state
+          Object.defineProperty(el, 'open', { value: false, writable: true, configurable: true });
+        }
+        return el;
       }
-      return el;
-    });
+    );
   });
 
   afterEach(() => {
@@ -91,7 +159,7 @@ describe('SettingsUi', () => {
       overrides?.onChange ?? vi.fn(),
       overrides?.resetSettings ?? vi.fn(),
       overrides?.onPersist,
-      overrides?.onReload,
+      overrides?.onReload
     );
   }
 
@@ -113,11 +181,16 @@ describe('SettingsUi', () => {
   it('destroy disconnects the mounted preview observer and cancels its pending frame', async () => {
     const observed: Element[] = [];
     const disconnect = vi.fn();
-    vi.stubGlobal('ResizeObserver', class {
-      observe(target: Element): void { observed.push(target); }
-      unobserve(): void {}
-      disconnect = disconnect;
-    });
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(target: Element): void {
+          observed.push(target);
+        }
+        unobserve(): void {}
+        disconnect = disconnect;
+      }
+    );
     vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(73);
     const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
     const player = document.createElement('div');
@@ -191,13 +264,7 @@ describe('SettingsUi', () => {
     mockedFinder.mockResolvedValue(playerEl);
 
     const onReload = vi.fn().mockResolvedValue(undefined);
-    const c = new SettingsUi(
-      () => makeDefaults(),
-      vi.fn(),
-      vi.fn(),
-      undefined,
-      onReload,
-    );
+    const c = new SettingsUi(() => makeDefaults(), vi.fn(), vi.fn(), undefined, onReload);
     await c.attach();
 
     const reloadBtn = document.getElementById('yt-chat-overlay-reload-button');

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -11,10 +11,17 @@ import * as chromeInstallModule from '../../../validation/windows/chrome-install
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.mjs';
 
-const { cleanupChromeInstallation, enableDeveloperMode, readOwnedBrowserProcessId,
-  isOwnedManagerOptionsUrl, readManagerUiLabels, readPublicPageState, requireLiveSuccess,
-  requireManagerUiLabels, selectPublicSeekTarget } =
-  chromeInstallModule;
+const {
+  cleanupChromeInstallation,
+  enableDeveloperMode,
+  readOwnedBrowserProcessId,
+  isOwnedManagerOptionsUrl,
+  readManagerUiLabels,
+  readPublicPageState,
+  requireLiveSuccess,
+  requireManagerUiLabels,
+  selectPublicSeekTarget,
+} = chromeInstallModule;
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -41,12 +48,20 @@ describe('installed Chrome acceptance outcomes', () => {
     ['https://www.youtube.com/watch?v=fixture&next=https://consent.youtube.com/', false, false],
     ['https://accounts.google.com.attacker.example/', false, false],
     ['https://consent.youtube.com.attacker.example/', false, false],
-  ])('classifies redirect hosts without matching URL content: %s', async (href, loginRedirect, consentRedirect) => {
-    const page = { evaluate: async (read: () => unknown) => runInNewContext(`(${read})()`, {
-      window: {}, location: { href }, URL,
-    }) };
-    expect(await readPublicPageState(page)).toMatchObject({ loginRedirect, consentRedirect });
-  });
+  ])(
+    'classifies redirect hosts without matching URL content: %s',
+    async (href, loginRedirect, consentRedirect) => {
+      const page = {
+        evaluate: async (read: () => unknown) =>
+          runInNewContext(`(${read})()`, {
+            window: {},
+            location: { href },
+            URL,
+          }),
+      };
+      expect(await readPublicPageState(page)).toMatchObject({ loginRedirect, consentRedirect });
+    }
+  );
 
   it('selects a real seek movement only from a usable public media range', () => {
     expect(selectPublicSeekTarget({ currentTime: 10, start: 0, end: 100 })).toBe(13);
@@ -56,57 +71,94 @@ describe('installed Chrome acceptance outcomes', () => {
   });
 
   it.each([
-    [{ Utilities: '도구', Install: '설치', Installed_userscripts: '설치된 유저 스크립트' },
-      { utilities: '도구', install: '설치', installedUserscripts: '설치된 유저 스크립트' }],
-    [{ Utilities: 'Utilities', Install: 'Install', Installed_userscripts: 'Installed Userscripts' },
-      { utilities: 'Utilities', install: 'Install', installedUserscripts: 'Installed Userscripts' }],
+    [
+      { Utilities: '도구', Install: '설치', Installed_userscripts: '설치된 유저 스크립트' },
+      { utilities: '도구', install: '설치', installedUserscripts: '설치된 유저 스크립트' },
+    ],
+    [
+      {
+        Utilities: 'Utilities',
+        Install: 'Install',
+        Installed_userscripts: 'Installed Userscripts',
+      },
+      { utilities: 'Utilities', install: 'Install', installedUserscripts: 'Installed Userscripts' },
+    ],
   ])('reads bundled manager labels from its owned options page: %j', async (messages, expected) => {
     const optionsUrl = 'chrome-extension://owned/options.html';
-    const page = { url: () => optionsUrl,
-      evaluate: async (read: (id: string) => unknown, id: string) => runInNewContext(
-        `(${read})(${JSON.stringify(id)})`, {
-          URL, location: { href: optionsUrl },
-          chrome: { i18n: { getMessage: (key: string) => messages[key as keyof typeof messages] ?? '' } },
-        }
-      ) };
+    const page = {
+      url: () => optionsUrl,
+      evaluate: async (read: (id: string) => unknown, id: string) =>
+        runInNewContext(`(${read})(${JSON.stringify(id)})`, {
+          URL,
+          location: { href: optionsUrl },
+          chrome: {
+            i18n: { getMessage: (key: string) => messages[key as keyof typeof messages] ?? '' },
+          },
+        }),
+    };
     expect(await readManagerUiLabels(page, 'owned')).toEqual(expected);
   });
 
   it('rejects manager label lookup outside its owned options page and after navigation', async () => {
     const optionsUrl = 'chrome-extension://owned/options.html';
-    for (const url of ['about:blank', 'https://example.com/',
-      'chrome-extension://other/options.html', 'chrome-extension://owned/ask.html',
-      'chrome-extension://owned/options.html?token=private']) {
+    for (const url of [
+      'about:blank',
+      'https://example.com/',
+      'chrome-extension://other/options.html',
+      'chrome-extension://owned/ask.html',
+      'chrome-extension://owned/options.html?token=private',
+    ]) {
       expect(isOwnedManagerOptionsUrl(url, 'owned')).toBe(false);
       const evaluate = vi.fn();
-      await expect(readManagerUiLabels({ url: () => url, evaluate }, 'owned'))
-        .rejects.toThrow('owned options page');
+      await expect(readManagerUiLabels({ url: () => url, evaluate }, 'owned')).rejects.toThrow(
+        'owned options page'
+      );
       expect(evaluate).not.toHaveBeenCalled();
     }
     expect(isOwnedManagerOptionsUrl(optionsUrl, 'owned')).toBe(true);
     const evaluateFrom = (frameUrl: string) => (read: (id: string) => unknown, id: string) =>
       runInNewContext(`(${read})(${JSON.stringify(id)})`, {
-        URL, location: { href: frameUrl }, chrome: { i18n: { getMessage: () => 'label' } },
+        URL,
+        location: { href: frameUrl },
+        chrome: { i18n: { getMessage: () => 'label' } },
       });
-    await expect(readManagerUiLabels({ url: () => optionsUrl,
-      evaluate: evaluateFrom('https://example.com/') }, 'owned'))
-      .rejects.toThrow('navigated away');
+    await expect(
+      readManagerUiLabels(
+        { url: () => optionsUrl, evaluate: evaluateFrom('https://example.com/') },
+        'owned'
+      )
+    ).rejects.toThrow('navigated away');
     let reportedUrl = optionsUrl;
-    await expect(readManagerUiLabels({ url: () => reportedUrl,
-      evaluate: (read: (id: string) => unknown, id: string) => {
-        const labels = evaluateFrom(optionsUrl)(read, id);
-        reportedUrl = 'chrome-extension://other/options.html';
-        return labels;
-      } }, 'owned')).rejects.toThrow('navigated away after label lookup');
+    await expect(
+      readManagerUiLabels(
+        {
+          url: () => reportedUrl,
+          evaluate: (read: (id: string) => unknown, id: string) => {
+            const labels = evaluateFrom(optionsUrl)(read, id);
+            reportedUrl = 'chrome-extension://other/options.html';
+            return labels;
+          },
+        },
+        'owned'
+      )
+    ).rejects.toThrow('navigated away after label lookup');
   });
 
   it('requires three bounded manager UI labels', () => {
-    const valid = { utilities: 'Utilities', install: 'Install',
-      installedUserscripts: 'Installed Userscripts' };
+    const valid = {
+      utilities: 'Utilities',
+      install: 'Install',
+      installedUserscripts: 'Installed Userscripts',
+    };
     expect(requireManagerUiLabels(valid)).toEqual(valid);
-    for (const labels of [null, [], { ...valid, utilities: '' },
-      { ...valid, install: 'x'.repeat(81) }, { ...valid, utilities: 'Tools\nother' },
-      { ...valid, extra: 'unexpected' }]) {
+    for (const labels of [
+      null,
+      [],
+      { ...valid, utilities: '' },
+      { ...valid, install: 'x'.repeat(81) },
+      { ...valid, utilities: 'Tools\nother' },
+      { ...valid, extra: 'unexpected' },
+    ]) {
       expect(() => requireManagerUiLabels(labels)).toThrow();
     }
   });
@@ -114,7 +166,9 @@ describe('installed Chrome acceptance outcomes', () => {
   it('uses the visible Edge switch and its checked property, while keeping Chrome controls', async () => {
     for (const browserName of ['msedge', 'chrome']) {
       const visible = { checked: browserName === 'chrome', getAttribute: () => 'false' };
-      const click = vi.fn(async () => { visible.checked = true; });
+      const click = vi.fn(async () => {
+        visible.checked = true;
+      });
       const locator = vi.fn((selector: string) => {
         const expected = browserName === 'msedge' ? '#dev-switch:visible' : '#devMode';
         if (selector !== expected) throw new Error('Selected a hidden or unsupported toggle');
@@ -149,73 +203,169 @@ describe('installed Chrome acceptance outcomes', () => {
       })),
       close: vi.fn(async () => {}),
     };
-    await expect(enableDeveloperMode({ newPage: async () => page }, 'msedge'))
-      .rejects.toThrow('Developer mode is disabled');
+    await expect(enableDeveloperMode({ newPage: async () => page }, 'msedge')).rejects.toThrow(
+      'Developer mode is disabled'
+    );
     expect(page.close).toHaveBeenCalledOnce();
   });
 
   it('requires an observed page-policy restriction before accepting extension main rendering', () => {
     const { validateLiveRenderer, countUnexpectedLiveErrors } = liveRenderingModule;
-    const blocked = { type: 'error', text: "This document requires 'TrustedScriptURL' assignment. The action has been blocked.", url: 'chrome-extension://owned/page-script.js' };
-    expect(validateLiveRenderer('worker', 'extension', [], true)).toEqual({ renderer: 'worker', workerPolicyFallback: false });
-    expect(validateLiveRenderer('main', 'extension', [blocked], true))
-      .toEqual({ renderer: 'main', workerPolicyFallback: true });
+    const blocked = {
+      type: 'error',
+      text: "This document requires 'TrustedScriptURL' assignment. The action has been blocked.",
+      url: 'chrome-extension://owned/page-script.js',
+    };
+    expect(validateLiveRenderer('worker', 'extension', [], true)).toEqual({
+      renderer: 'worker',
+      workerPolicyFallback: false,
+    });
+    expect(validateLiveRenderer('main', 'extension', [blocked], true)).toEqual({
+      renderer: 'main',
+      workerPolicyFallback: true,
+    });
     expect(() => validateLiveRenderer('main', 'extension', [], true)).toThrow();
     expect(() => validateLiveRenderer('main', 'extension', [blocked], false)).toThrow();
-    expect(() => validateLiveRenderer('main', 'extension', [{ ...blocked, type: 'info' }], true)).toThrow();
-    expect(() => validateLiveRenderer('main', 'extension', [{ ...blocked, url: 'https://www.youtube.com/host.js' }], true)).toThrow();
+    expect(() =>
+      validateLiveRenderer('main', 'extension', [{ ...blocked, type: 'info' }], true)
+    ).toThrow();
+    expect(() =>
+      validateLiveRenderer(
+        'main',
+        'extension',
+        [{ ...blocked, url: 'https://www.youtube.com/host.js' }],
+        true
+      )
+    ).toThrow();
     expect(() => validateLiveRenderer('unknown', 'extension', [blocked], true)).toThrow();
     expect(countUnexpectedLiveErrors([blocked], true)).toBe(0);
     expect(countUnexpectedLiveErrors([blocked], false)).toBe(1);
-    expect(countUnexpectedLiveErrors([blocked, { type: 'error', text: 'app crashed' }], true)).toBe(1);
+    expect(countUnexpectedLiveErrors([blocked, { type: 'error', text: 'app crashed' }], true)).toBe(
+      1
+    );
   });
   it('rejects a loaded page that did not render the installed application', () => {
     expect(() => requireLiveSuccess([{ status: 'unverified', canvasAttached: false }])).toThrow();
-    expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 0 }])).toThrow();
-    expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1 }])).not.toThrow();
-    expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1, pageErrorTypes: ['TypeError'] }])).toThrow();
-    expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1, unexpectedConsoleErrors: 1 }])).toThrow();
+    expect(() =>
+      requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 0 }])
+    ).toThrow();
+    expect(() =>
+      requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1 }])
+    ).not.toThrow();
+    expect(() =>
+      requireLiveSuccess([
+        {
+          status: 'passed',
+          canvasAttached: true,
+          renderedMessages: 1,
+          pageErrorTypes: ['TypeError'],
+        },
+      ])
+    ).toThrow();
+    expect(() =>
+      requireLiveSuccess([
+        { status: 'passed', canvasAttached: true, renderedMessages: 1, unexpectedConsoleErrors: 1 },
+      ])
+    ).toThrow();
   });
   it('separates only named native YouTube failures and removes signed URL queries', () => {
-    const { isYouTubeHostError, countUnexpectedLiveErrors, redactDiagnosticText } = liveRenderingModule;
-    const prefix = 'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
-    const host = { level: 'error', text: prefix + 'https://rr1.googlevideo.com/videoplayback?sig=private' };
+    const { isYouTubeHostError, countUnexpectedLiveErrors, redactDiagnosticText } =
+      liveRenderingModule;
+    const prefix =
+      'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
+    const host = {
+      level: 'error',
+      text: prefix + 'https://rr1.googlevideo.com/videoplayback?sig=private',
+    };
     expect(isYouTubeHostError(host)).toBe(true);
-    expect(isYouTubeHostError({ type: 'error', text: 'Failed to load resource: net::ERR_NAME_NOT_RESOLVED', url: 'https://rr1.googlevideo.com/videoplayback' })).toBe(true);
-    expect(isYouTubeHostError({ type: 'error', text: 'Failed to load resource: 401', url: 'https://accounts.google.com/ServiceLogin' })).toBe(true);
-    expect(isYouTubeHostError({ type: 'error', text: "Access to fetch at 'https://googleads.g.doubleclick.net/pagead/viewthroughconversion/123/?id=x' from origin 'https://www.youtube.com' has been blocked by CORS policy." })).toBe(true);
-    expect(isYouTubeHostError({ type: 'error', text: 'Failed to load resource: 500', url: 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat' })).toBe(false);
-    expect(isYouTubeHostError({ ...host, text: prefix + 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat' })).toBe(false);
-    expect(isYouTubeHostError({ ...host, text: prefix + 'https://googlevideo.com.attacker.example/videoplayback' })).toBe(false);
-    expect(countUnexpectedLiveErrors([host, { level: 'error', text: '[Youtubei] app failed' }], false)).toBe(1);
+    expect(
+      isYouTubeHostError({
+        type: 'error',
+        text: 'Failed to load resource: net::ERR_NAME_NOT_RESOLVED',
+        url: 'https://rr1.googlevideo.com/videoplayback',
+      })
+    ).toBe(true);
+    expect(
+      isYouTubeHostError({
+        type: 'error',
+        text: 'Failed to load resource: 401',
+        url: 'https://accounts.google.com/ServiceLogin',
+      })
+    ).toBe(true);
+    expect(
+      isYouTubeHostError({
+        type: 'error',
+        text: "Access to fetch at 'https://googleads.g.doubleclick.net/pagead/viewthroughconversion/123/?id=x' from origin 'https://www.youtube.com' has been blocked by CORS policy.",
+      })
+    ).toBe(true);
+    expect(
+      isYouTubeHostError({
+        type: 'error',
+        text: 'Failed to load resource: 500',
+        url: 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat',
+      })
+    ).toBe(false);
+    expect(
+      isYouTubeHostError({
+        ...host,
+        text: prefix + 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat',
+      })
+    ).toBe(false);
+    expect(
+      isYouTubeHostError({
+        ...host,
+        text: prefix + 'https://googlevideo.com.attacker.example/videoplayback',
+      })
+    ).toBe(false);
+    expect(
+      countUnexpectedLiveErrors([host, { level: 'error', text: '[Youtubei] app failed' }], false)
+    ).toBe(1);
     expect(redactDiagnosticText(host.text)).not.toContain('sig=');
   });
 
   it('accepts one exact browser process identity from the browser CDP session', () => {
-    expect(readOwnedBrowserProcessId({
-      processInfo: [
-        { id: 123, type: 'renderer' },
-        { id: 456, type: 'browser' },
-      ],
-    })).toBe(456);
+    expect(
+      readOwnedBrowserProcessId({
+        processInfo: [
+          { id: 123, type: 'renderer' },
+          { id: 456, type: 'browser' },
+        ],
+      })
+    ).toBe(456);
     expect(() => readOwnedBrowserProcessId({ processInfo: [] })).toThrow();
-    expect(() => readOwnedBrowserProcessId({
-      processInfo: [{ id: 1, type: 'browser' }, { id: 2, type: 'browser' }],
-    })).toThrow();
+    expect(() =>
+      readOwnedBrowserProcessId({
+        processInfo: [
+          { id: 1, type: 'browser' },
+          { id: 2, type: 'browser' },
+        ],
+      })
+    ).toThrow();
   });
 
   it('still closes the browser and removes its profile when uninstall fails', async () => {
     const paths = await fixture();
     const close = vi.fn(async () => {});
     const result = { cleanup: {} };
-    await expect(cleanupChromeInstallation({
-      context: { close }, cdp: { send: async () => { throw new Error('uninstall failed'); } },
-      extensionId: 'owned', ...paths, result,
-    })).rejects.toThrow(AggregateError);
+    await expect(
+      cleanupChromeInstallation({
+        context: { close },
+        cdp: {
+          send: async () => {
+            throw new Error('uninstall failed');
+          },
+        },
+        extensionId: 'owned',
+        ...paths,
+        result,
+      })
+    ).rejects.toThrow(AggregateError);
     expect(close).toHaveBeenCalledOnce();
     await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(paths.root, 'keep'), 'utf8')).toBe('unrelated fixture');
-    const evidence = JSON.parse(await readFile(join(paths.output, 'installation-result.json'), 'utf8'));
+    const evidence = JSON.parse(
+      await readFile(join(paths.output, 'installation-result.json'), 'utf8')
+    );
     expect(evidence.cleanup).toMatchObject({
       browserClosed: true,
       profileRemoved: true,
@@ -228,10 +378,20 @@ describe('installed Chrome acceptance outcomes', () => {
     const paths = await fixture();
     const browserClose = vi.fn(async () => {});
     const result = { cleanup: {} };
-    await expect(cleanupChromeInstallation({
-      context: { close: async () => { throw new Error('context failed'); }, browser: () => ({ close: browserClose }) },
-      cdp: null, extensionId: null, ...paths, result,
-    })).rejects.toThrow(AggregateError);
+    await expect(
+      cleanupChromeInstallation({
+        context: {
+          close: async () => {
+            throw new Error('context failed');
+          },
+          browser: () => ({ close: browserClose }),
+        },
+        cdp: null,
+        extensionId: null,
+        ...paths,
+        result,
+      })
+    ).rejects.toThrow(AggregateError);
     expect(browserClose).toHaveBeenCalledOnce();
     await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(result.cleanup).toMatchObject({
@@ -247,22 +407,33 @@ describe('installed Chrome acceptance outcomes', () => {
     const terminateProcessTree = vi.fn(async () => {});
     const checkProcessAlive = vi.fn().mockResolvedValue(true);
     const result = { cleanup: {} };
-    await expect(cleanupChromeInstallation({
-      browserProcessId: 456,
-      context: {
-        close: async () => { throw new Error('context failed'); },
-        browser: () => ({ close: async () => { throw new Error('browser failed'); } }),
-      },
-      cdp: null,
-      extensionId: null,
-      ...paths,
-      result,
-      root: paths.root,
-    }, {
-      checkProcessAlive,
-      terminateProcessTree,
-      waitForExit: vi.fn().mockResolvedValue(true),
-    })).rejects.toThrow(AggregateError);
+    await expect(
+      cleanupChromeInstallation(
+        {
+          browserProcessId: 456,
+          context: {
+            close: async () => {
+              throw new Error('context failed');
+            },
+            browser: () => ({
+              close: async () => {
+                throw new Error('browser failed');
+              },
+            }),
+          },
+          cdp: null,
+          extensionId: null,
+          ...paths,
+          result,
+          root: paths.root,
+        },
+        {
+          checkProcessAlive,
+          terminateProcessTree,
+          waitForExit: vi.fn().mockResolvedValue(true),
+        }
+      )
+    ).rejects.toThrow(AggregateError);
 
     expect(terminateProcessTree).toHaveBeenCalledOnce();
     expect(terminateProcessTree).toHaveBeenCalledWith(456);
@@ -280,24 +451,37 @@ describe('installed Chrome acceptance outcomes', () => {
 
   it('preserves the owned profile when browser-tree termination cannot be proven', async () => {
     const paths = await fixture();
-    const terminateProcessTree = vi.fn(async () => { throw new Error('tree remains'); });
+    const terminateProcessTree = vi.fn(async () => {
+      throw new Error('tree remains');
+    });
     const result = { cleanup: {} };
-    await expect(cleanupChromeInstallation({
-      browserProcessId: 789,
-      context: {
-        close: async () => { throw new Error('context failed'); },
-        browser: () => ({ close: async () => { throw new Error('browser failed'); } }),
-      },
-      cdp: null,
-      extensionId: null,
-      ...paths,
-      result,
-      root: paths.root,
-    }, {
-      checkProcessAlive: vi.fn().mockResolvedValue(true),
-      terminateProcessTree,
-      waitForExit: vi.fn().mockResolvedValue(false),
-    })).rejects.toThrow(AggregateError);
+    await expect(
+      cleanupChromeInstallation(
+        {
+          browserProcessId: 789,
+          context: {
+            close: async () => {
+              throw new Error('context failed');
+            },
+            browser: () => ({
+              close: async () => {
+                throw new Error('browser failed');
+              },
+            }),
+          },
+          cdp: null,
+          extensionId: null,
+          ...paths,
+          result,
+          root: paths.root,
+        },
+        {
+          checkProcessAlive: vi.fn().mockResolvedValue(true),
+          terminateProcessTree,
+          waitForExit: vi.fn().mockResolvedValue(false),
+        }
+      )
+    ).rejects.toThrow(AggregateError);
 
     expect(terminateProcessTree).toHaveBeenCalledWith(789);
     expect(await stat(paths.profile)).toBeDefined();

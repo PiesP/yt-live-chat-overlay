@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createExtensionContentConfig } from '../../../tooling/vite/configs/extension-content.ts';
 import { createExtensionPageConfig } from '../../../tooling/vite/configs/extension-page.ts';
 
-const buildEnv = { command: 'build', isPreview: false, isSsrBuild: false, mode: 'production' } as const;
+const buildEnv = {
+  command: 'build',
+  isPreview: false,
+  isSsrBuild: false,
+  mode: 'production',
+} as const;
 const packageJson = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../..', 'package.json'), 'utf8')
 ) as { version: string };

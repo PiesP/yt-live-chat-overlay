@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+
 import { ChatPanelObserver } from '@chat/panel-observer';
+import { describe, expect, it } from 'vitest';
 
 describe('ChatPanelObserver state reset', () => {
   it('stop() resets isPaused so next start() → pause() works', () => {

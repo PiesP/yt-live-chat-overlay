@@ -10,8 +10,7 @@
  */
 
 import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
-import type { JsonObject } from '@chat/youtube/request';
-import { asRecord, getString } from '@chat/youtube/request';
+import { asRecord, getString, type JsonObject } from '@chat/youtube/request';
 import { parseAnyColor } from '@renderer/color-utils';
 import { colors, SUPERCHAT_TIER_KEYS } from '@util/design-tokens';
 

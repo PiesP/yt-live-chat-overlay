@@ -1,68 +1,149 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
-import { CanvasRenderer } from '@renderer/canvas-renderer';
-import {
-  getBidiLayoutCacheUsage,
-  resolveTextDirection,
-} from '@renderer/canvas/bidi-layout';
-import { RenderWorkerManager } from '@renderer/worker/manager';
-import type { WorkerRecoveryMessage } from '@renderer/worker/manager';
-import type { WorkerStatsMessage } from '@renderer/worker/types';
-import type { CanvasMessage } from '@renderer/constants';
+
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { LanguageDetectorService } from '@translation/language-detector';
-import { ImageFetchManager } from '@media/image-fetch-manager';
-import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
-import type { LaneAllocator } from '@renderer/layout/lane-allocator';
-import { getRowSlotCount } from '@renderer/layout/row-geometry';
-import { messageXAtTime, motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
+import { ImageFetchManager } from '@media/image-fetch-manager';
 import { LruMap } from '@piesp/browser-core/util';
-import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
+import { CanvasRenderer } from '@renderer/canvas-renderer';
+import { type CanvasMessage, GRADIENT_CACHE_MAX } from '@renderer/constants';
+import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import {
+  messageXAtTime,
+  motionPlanFromMessage,
+  motionPlansCollide,
+} from '@renderer/layout/message-schedule';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
+import type { WorkerStatsMessage } from '@renderer/worker/types';
+import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
+import { LanguageDetectorService } from '@translation/language-detector';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock OffscreenCanvas
-vi.stubGlobal('OffscreenCanvas', class {
-  width = 0;
-  height = 0;
-  getContext(_t: string) { return null; }
-  transferToImageBitmap() { return {}; }
-  convertToBlob() { return Promise.resolve(new Blob()); }
-});
+vi.stubGlobal(
+  'OffscreenCanvas',
+  class {
+    width = 0;
+    height = 0;
+    getContext(_t: string) {
+      return null;
+    }
+    transferToImageBitmap() {
+      return {};
+    }
+    convertToBlob() {
+      return Promise.resolve(new Blob());
+    }
+  }
+);
 
 function makeSettings(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   return {
-    enabled: true, danmakuMode: 'scroll' as const, speedPxPerSec: 250,
-    fontSize: 32, opacity: 1, superChatOpacity: 0.95, safeTop: 0, safeBottom: 0,
-    maxConcurrentMessages: 300, allowShortTextMessages: false, minTextLength: 1,
+    enabled: true,
+    danmakuMode: 'scroll' as const,
+    speedPxPerSec: 250,
+    fontSize: 32,
+    opacity: 1,
+    superChatOpacity: 0.95,
+    safeTop: 0,
+    safeBottom: 0,
+    maxConcurrentMessages: 300,
+    allowShortTextMessages: false,
+    minTextLength: 1,
     logLevel: 'warn' as const,
-    showAuthor: { normal: false, member: true, moderator: true, owner: true, verified: true, superChat: true },
-    backgroundColors: { normal: '#00000000', member: '#00000000', moderator: '#00000000', owner: '#00000000', verified: '#00000000', superChat: '#00000000' },
-    colors: { normal: '#FFFFFF', member: '#0F9D58', moderator: '#5E84F1', owner: '#FFD600', verified: '#AAAAAA' },
+    showAuthor: {
+      normal: false,
+      member: true,
+      moderator: true,
+      owner: true,
+      verified: true,
+      superChat: true,
+    },
+    backgroundColors: {
+      normal: '#00000000',
+      member: '#00000000',
+      moderator: '#00000000',
+      owner: '#00000000',
+      verified: '#00000000',
+      superChat: '#00000000',
+    },
+    colors: {
+      normal: '#FFFFFF',
+      member: '#0F9D58',
+      moderator: '#5E84F1',
+      owner: '#FFD600',
+      verified: '#AAAAAA',
+    },
     outline: { enabled: true, widthPx: 2, opacity: 0.7 },
-    laneSpacing: 1, showDebugOverlay: false, ignoreReducedMotion: false,
-    authorRateLimit: 'normal' as const, backlogMaxRate: 10, backlogSpeedMultiplier: 1,
-    backlogMode: 'playback' as const, backlogRecentMinutes: 5, backlogOpacityMultiplier: 0.5,
-    depthLayersEnabled: false, depthNearSpeedMul: 1.2, depthFarSpeedMul: 0.8, depthFarOpacityMul: 0.6,
-    modOwnerDurationMultiplier: 1.5, showSuperChatAmount: true,
-    fontWeight: 'bold' as const, fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
-    preserveUserColor: true, superChatMaxBodyLines: 3, membershipMaxBodyLines: 2,
-    fadeDurationMs: 300, minPollIntervalMs: 1000, maxPollIntervalMs: 10000,
-    language: 'en' as const, translationEnabled: false, translationService: 'auto' as const,
-    translationSource: 'auto' as const, translationTarget: 'en' as const,
-    translationMode: 'dual' as const, exitPaddingPx: 50,
-    scrollDurationMinMs: 3000, scrollDurationMaxMs: 15000, topBottomDurationMs: 5000,
-    queueMaxSize: 500, backgroundQueueMax: 200, maxMessageAgeMs: 30000, headwayGapRatio: 0.3,
-    emojiCacheMb: 20, photoCacheMb: 10, stickerCacheMb: 5, textCacheMb: 5,
-    translationBatchSize: 5, emojiFetchLimit: 20, failedEmojiRetryMins: 5,
-    burstSampleWindow: 60, burstElevatedThreshold: 5, burstHighThreshold: 15, burstExtremeThreshold: 30,
-    backlogInjectionMax: 50, backlogDensityRampMs: 5000, livePollFallbackMs: 2000, livePollFailureLimit: 5,
-    speedBoostThreshold: 2, backlogPauseThreshold: 0.3, backlogResumeThreshold: 0.1,
-    activityTimeoutMs: 60000, staggerMaxDelayMs: 100, staggerMediumDelayMs: 50,
-    emojiFetchTimeoutMs: 5000, backlogDensityRampMaxMs: 10000, backlogInjectionRateMin: 1,
-    speedBoostMax: 1, speedBoostDenom: 2, backlogToggleCooldownMs: 2000,
-    replayPrefetchPages: 50, replayBatchLimit: 50,
+    laneSpacing: 1,
+    showDebugOverlay: false,
+    ignoreReducedMotion: false,
+    authorRateLimit: 'normal' as const,
+    backlogMaxRate: 10,
+    backlogSpeedMultiplier: 1,
+    backlogMode: 'playback' as const,
+    backlogRecentMinutes: 5,
+    backlogOpacityMultiplier: 0.5,
+    depthLayersEnabled: false,
+    depthNearSpeedMul: 1.2,
+    depthFarSpeedMul: 0.8,
+    depthFarOpacityMul: 0.6,
+    modOwnerDurationMultiplier: 1.5,
+    showSuperChatAmount: true,
+    fontWeight: 'bold' as const,
+    fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
+    preserveUserColor: true,
+    superChatMaxBodyLines: 3,
+    membershipMaxBodyLines: 2,
+    fadeDurationMs: 300,
+    minPollIntervalMs: 1000,
+    maxPollIntervalMs: 10000,
+    language: 'en' as const,
+    translationEnabled: false,
+    translationService: 'auto' as const,
+    translationSource: 'auto' as const,
+    translationTarget: 'en' as const,
+    translationMode: 'dual' as const,
+    exitPaddingPx: 50,
+    scrollDurationMinMs: 3000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    maxMessageAgeMs: 30000,
+    headwayGapRatio: 0.3,
+    emojiCacheMb: 20,
+    photoCacheMb: 10,
+    stickerCacheMb: 5,
+    textCacheMb: 5,
+    translationBatchSize: 5,
+    emojiFetchLimit: 20,
+    failedEmojiRetryMins: 5,
+    burstSampleWindow: 60,
+    burstElevatedThreshold: 5,
+    burstHighThreshold: 15,
+    burstExtremeThreshold: 30,
+    backlogInjectionMax: 50,
+    backlogDensityRampMs: 5000,
+    livePollFallbackMs: 2000,
+    livePollFailureLimit: 5,
+    speedBoostThreshold: 2,
+    backlogPauseThreshold: 0.3,
+    backlogResumeThreshold: 0.1,
+    activityTimeoutMs: 60000,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    emojiFetchTimeoutMs: 5000,
+    backlogDensityRampMaxMs: 10000,
+    backlogInjectionRateMin: 1,
+    speedBoostMax: 1,
+    speedBoostDenom: 2,
+    backlogToggleCooldownMs: 2000,
+    replayPrefetchPages: 50,
+    replayBatchLimit: 50,
     ...overrides,
   } as OverlaySettings;
 }
@@ -107,7 +188,9 @@ describe('Canvas gradient cache', () => {
     vi.spyOn(canvas, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
     internals.canvas = canvas;
     renderer.isPaused = true;
-    internals.superChatGradientCache.set('old', { addColorStop: vi.fn() } as unknown as CanvasGradient);
+    internals.superChatGradientCache.set('old', {
+      addColorStop: vi.fn(),
+    } as unknown as CanvasGradient);
 
     internals.handleContextRestored();
 
@@ -123,52 +206,87 @@ describe('Canvas reservation safety', () => {
     vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const overlay = new Overlay();
-    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 640, height: 40 };
-    const renderer = new CanvasRenderer(overlay, makeSettings({
-      danmakuMode: mode, speedPxPerSec: 350, scrollDurationMinMs: 5000, laneSpacing: 0,
-      scrollDurationMaxMs: 30000, exitPaddingPx: 100, headwayGapRatio: 0.08,
-      outline: { enabled: false, widthPx: 0, opacity: 0 },
-    }));
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 640,
+      height: 40,
+    };
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({
+        danmakuMode: mode,
+        speedPxPerSec: 350,
+        scrollDurationMinMs: 5000,
+        laneSpacing: 0,
+        scrollDurationMaxMs: 30000,
+        exitPaddingPx: 100,
+        headwayGapRatio: 0.08,
+        outline: { enabled: false, widthPx: 0, opacity: 0 },
+      })
+    );
     const internals = renderer as unknown as {
       laneAllocator: LaneAllocator;
       activeMessages: CanvasMessage[];
       reducedMotion: boolean;
       pausedAt: number | null;
-      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
       estimateDimensions(message: ChatMessage): { width: number; height: number };
       drainQueue(now: number): void;
       reflowActiveMessages(dimensions: { width: number; height: number }): void;
     };
     internals.laneAllocator.restore({
-      heap: [[0, 0], [1, 0]], indexMap: { 0: 0, 1: 1 },
-      laneHeight: 20, laneCount: 2, speedTierLanes: {},
+      heap: [
+        [0, 0],
+        [1, 0],
+      ],
+      indexMap: { 0: 0, 1: 1 },
+      laneHeight: 20,
+      laneCount: 2,
+      speedTierLanes: {},
     });
-    internals.estimateDimensions = (message) => ({ width: message.id === 'short' ? 100 : 600, height: 20 });
+    internals.estimateDimensions = (message) => ({
+      width: message.id === 'short' ? 100 : 600,
+      height: 20,
+    });
     return { renderer, internals };
   }
 
-  it.each(['scroll', 'reverse'] as const)('validates future reservations and chooses a safe alternative in %s', (mode) => {
-    const { renderer, internals } = setup(mode);
-    for (const id of ['first', 'short', 'long']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
-    internals.drainQueue(0);
-    expect(internals.activeMessages).toHaveLength(3);
-    const short = internals.activeMessages.find((m) => m.message.id === 'short');
-    const long = internals.activeMessages.find((m) => m.message.id === 'long');
-    expect(short?.startTime).toBeGreaterThan(0);
-    expect(long?.laneIndex).not.toBe(short?.laneIndex);
-    for (const a of internals.activeMessages) {
-      for (const b of internals.activeMessages) {
-        if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
-        expect(motionPlansCollide(motionPlanFromMessage(a, mode, 640, 100), motionPlanFromMessage(b, mode, 640, 100), 0.08, 0)).toBe(false);
+  it.each(['scroll', 'reverse'] as const)(
+    'validates future reservations and chooses a safe alternative in %s',
+    (mode) => {
+      const { renderer, internals } = setup(mode);
+      for (const id of ['first', 'short', 'long'])
+        internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+      internals.drainQueue(0);
+      expect(internals.activeMessages).toHaveLength(3);
+      const short = internals.activeMessages.find((m) => m.message.id === 'short');
+      const long = internals.activeMessages.find((m) => m.message.id === 'long');
+      expect(short?.startTime).toBeGreaterThan(0);
+      expect(long?.laneIndex).not.toBe(short?.laneIndex);
+      for (const a of internals.activeMessages) {
+        for (const b of internals.activeMessages) {
+          if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+          expect(
+            motionPlansCollide(
+              motionPlanFromMessage(a, mode, 640, 100),
+              motionPlanFromMessage(b, mode, 640, 100),
+              0.08,
+              0
+            )
+          ).toBe(false);
+        }
       }
+      renderer.destroy();
     }
-    renderer.destroy();
-  });
+  );
 
   it('reserves centered reduced-motion rectangles for their full displayed lifetime', () => {
     const { renderer, internals } = setup();
     internals.reducedMotion = true;
-    for (const id of ['first', 'short', 'long']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    for (const id of ['first', 'short', 'long'])
+      internals.pendingQueue.enqueue(makeMessage(id, id), 0);
     internals.drainQueue(0);
     const sameLane = internals.activeMessages.filter((m) => m.laneIndex === 0);
     expect(sameLane).toHaveLength(2);
@@ -176,7 +294,9 @@ describe('Canvas reservation safety', () => {
     expect(second && first && second.startTime >= first.startTime + first.duration).toBe(true);
     for (const message of internals.activeMessages) {
       expect(message.motion?.isScrolling).toBe(false);
-      expect(message.motion && messageXAtTime(message.motion, message.startTime + 600)).toBe(Math.floor((640 - message.width) / 2));
+      expect(message.motion && messageXAtTime(message.motion, message.startTime + 600)).toBe(
+        Math.floor((640 - message.width) / 2)
+      );
     }
     renderer.destroy();
   });
@@ -188,7 +308,9 @@ describe('Canvas reservation safety', () => {
     internals.reflowActiveMessages({ width: 640, height: 40 });
     expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 1000)).toBe(true);
     internals.laneAllocator.shiftAll(9000);
-    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(true);
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(
+      true
+    );
     renderer.destroy();
   });
 
@@ -198,14 +320,20 @@ describe('Canvas reservation safety', () => {
     const dimensions = { width: 640, height: 400 };
     const overlay = new Overlay();
     (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
-    const renderer = new CanvasRenderer(overlay, makeSettings({ danmakuMode: 'top', laneSpacing: 8 }));
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ danmakuMode: 'top', laneSpacing: 8 })
+    );
     const internals = renderer as unknown as {
       laneAllocator: LaneAllocator;
       activeMessages: CanvasMessage[];
       activeMessagesByLane: Map<number, CanvasMessage[]>;
       pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
       estimateDimensions(message: ChatMessage): { width: number; height: number };
-      applyMessageGeometry(message: CanvasMessage, geometry: { width: number; height: number; translationHeight: number }): boolean;
+      applyMessageGeometry(
+        message: CanvasMessage,
+        geometry: { width: number; height: number; translationHeight: number }
+      ): boolean;
       drainQueue(now: number): void;
       reflowActiveMessages(dimensions: { width: number; height: number }): void;
     };
@@ -218,7 +346,13 @@ describe('Canvas reservation safety', () => {
     expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
     const first = internals.activeMessages[0];
     if (!first) throw new Error('first row was not activated');
-    expect(internals.applyMessageGeometry(first, { width: first.width, height: baselineHeight + 2, translationHeight: 0 })).toBe(true);
+    expect(
+      internals.applyMessageGeometry(first, {
+        width: first.width,
+        height: baselineHeight + 2,
+        translationHeight: 0,
+      })
+    ).toBe(true);
     internals.reflowActiveMessages(dimensions);
     const [taller, second] = internals.activeMessages;
     expect(internals.activeMessages).toHaveLength(2);
@@ -231,51 +365,108 @@ describe('Canvas reservation safety', () => {
   });
 
   it.each([
-    { name: 'mixed heights with only 1px clearance', activeY: 5, activeHeight: 46, candidateY: 52, allowed: false },
-    { name: 'exactly 8px of clearance', activeY: 0, activeHeight: 44, candidateY: 52, allowed: true },
-    { name: 'fractional safe-zone origin at exact clearance', activeY: 15.99, activeHeight: 44, candidateY: 67.99, allowed: true },
-    { name: 'fractional origin with 7.9px clearance', activeY: 15.99, activeHeight: 44.1, candidateY: 67.99, allowed: false },
-  ])('checks normal Canvas admission for $name', ({ activeY, activeHeight, candidateY, allowed }) => {
-    vi.spyOn(performance, 'now').mockReturnValue(1000);
-    const overlay = new Overlay();
-    const dimensions = { width: 640, height: 156 };
-    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
-    const renderer = new CanvasRenderer(overlay, makeSettings({
-      danmakuMode: 'top', laneSpacing: 8, safeTop: activeY === 15.99 ? 15.99 / dimensions.height : 0,
-    }));
-    const internals = renderer as unknown as {
-      laneAllocator: LaneAllocator;
-      activeMessagesByLane: Map<number, CanvasMessage[]>;
-      estimateDimensions(message: ChatMessage): { width: number; height: number };
-      checkPlacement(message: ChatMessage, now: number, dimensions: { width: number; height: number }): { ok: boolean };
-    };
-    const heap = Array.from({ length: 12 }, (_, lane) => [lane, 1000] as [number, number]);
-    internals.laneAllocator.restore({
-      heap, indexMap: Object.fromEntries(heap.map(([lane], index) => [lane, index])),
-      laneHeight: 13, laneCount: 12, speedTierLanes: {},
-    });
-    internals.estimateDimensions = () => ({ width: 100, height: 44 });
-    const original = makeMessage('active', 'active');
-    const active = {
-      message: original, renderMessage: original,
-      startTime: 0, fadeStartTime: 0, duration: 5000, invDuration: 1 / 5000,
-      width: 100, height: activeHeight, startX: 270, x: 270, y: activeY,
-      pausedDuration: 0, laneIndex: 0, staggerDelay: 0, speedTier: 1,
-      ghostText: 'active', laneArrayIndices: [],
-    } as CanvasMessage;
-    for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
-      internals.activeMessagesByLane.set(lane, [active]);
-    }
-    const placement = {
-      laneIndex: 4, waitMs: 0, laneY: candidateY, slotCount: 4, verticalOffset: 0,
-    };
-    vi.spyOn(internals.laneAllocator, 'findPlacement')
-      .mockReturnValueOnce(placement)
-      .mockReturnValue(null);
+    {
+      name: 'mixed heights with only 1px clearance',
+      activeY: 5,
+      activeHeight: 46,
+      candidateY: 52,
+      allowed: false,
+    },
+    {
+      name: 'exactly 8px of clearance',
+      activeY: 0,
+      activeHeight: 44,
+      candidateY: 52,
+      allowed: true,
+    },
+    {
+      name: 'fractional safe-zone origin at exact clearance',
+      activeY: 15.99,
+      activeHeight: 44,
+      candidateY: 67.99,
+      allowed: true,
+    },
+    {
+      name: 'fractional origin with 7.9px clearance',
+      activeY: 15.99,
+      activeHeight: 44.1,
+      candidateY: 67.99,
+      allowed: false,
+    },
+  ])(
+    'checks normal Canvas admission for $name',
+    ({ activeY, activeHeight, candidateY, allowed }) => {
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      const overlay = new Overlay();
+      const dimensions = { width: 640, height: 156 };
+      (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+      const renderer = new CanvasRenderer(
+        overlay,
+        makeSettings({
+          danmakuMode: 'top',
+          laneSpacing: 8,
+          safeTop: activeY === 15.99 ? 15.99 / dimensions.height : 0,
+        })
+      );
+      const internals = renderer as unknown as {
+        laneAllocator: LaneAllocator;
+        activeMessagesByLane: Map<number, CanvasMessage[]>;
+        estimateDimensions(message: ChatMessage): { width: number; height: number };
+        checkPlacement(
+          message: ChatMessage,
+          now: number,
+          dimensions: { width: number; height: number }
+        ): { ok: boolean };
+      };
+      const heap = Array.from({ length: 12 }, (_, lane) => [lane, 1000] as [number, number]);
+      internals.laneAllocator.restore({
+        heap,
+        indexMap: Object.fromEntries(heap.map(([lane], index) => [lane, index])),
+        laneHeight: 13,
+        laneCount: 12,
+        speedTierLanes: {},
+      });
+      internals.estimateDimensions = () => ({ width: 100, height: 44 });
+      const original = makeMessage('active', 'active');
+      const active = {
+        message: original,
+        renderMessage: original,
+        startTime: 0,
+        fadeStartTime: 0,
+        duration: 5000,
+        invDuration: 1 / 5000,
+        width: 100,
+        height: activeHeight,
+        startX: 270,
+        x: 270,
+        y: activeY,
+        pausedDuration: 0,
+        laneIndex: 0,
+        staggerDelay: 0,
+        speedTier: 1,
+        ghostText: 'active',
+        laneArrayIndices: [],
+      } as CanvasMessage;
+      for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
+        internals.activeMessagesByLane.set(lane, [active]);
+      }
+      const placement = {
+        laneIndex: 4,
+        waitMs: 0,
+        laneY: candidateY,
+        slotCount: 4,
+        verticalOffset: 0,
+      };
+      vi.spyOn(internals.laneAllocator, 'findPlacement')
+        .mockReturnValueOnce(placement)
+        .mockReturnValue(null);
 
-    expect(internals.checkPlacement(makeMessage('candidate', 'candidate'), 1000, dimensions).ok).toBe(allowed);
-    renderer.destroy();
-  });
+      expect(
+        internals.checkPlacement(makeMessage('candidate', 'candidate'), 1000, dimensions).ok
+      ).toBe(allowed);
+      renderer.destroy();
+    }
+  );
 });
 
 describe('CanvasRenderer', () => {
@@ -302,16 +493,19 @@ describe('CanvasRenderer', () => {
     [false, true, false],
     [true, false, true],
     [true, true, false],
-  ])('resolves system reduced motion %s and stored override %s to %s', (systemReduced, override, expected) => {
-    const renderer = new CanvasRenderer(overlay, makeSettings({ ignoreReducedMotion: override }));
-    const internals = renderer as unknown as {
-      reducedMotion: boolean;
-      readonly isReducedMotionActive: boolean;
-    };
-    internals.reducedMotion = systemReduced;
-    expect(internals.isReducedMotionActive).toBe(expected);
-    renderer.destroy();
-  });
+  ])(
+    'resolves system reduced motion %s and stored override %s to %s',
+    (systemReduced, override, expected) => {
+      const renderer = new CanvasRenderer(overlay, makeSettings({ ignoreReducedMotion: override }));
+      const internals = renderer as unknown as {
+        reducedMotion: boolean;
+        readonly isReducedMotionActive: boolean;
+      };
+      internals.reducedMotion = systemReduced;
+      expect(internals.isReducedMotionActive).toBe(expected);
+      renderer.destroy();
+    }
+  );
 
   it('constructs and updates from normalized fractional cache budgets', () => {
     const storedSettings = normalizeStoredSettings({
@@ -353,7 +547,10 @@ describe('CanvasRenderer', () => {
     });
 
     expect(enqueueMessage).toHaveBeenCalledOnce();
-    expect(enqueueMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'exact-resource-limit' }), true);
+    expect(enqueueMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'exact-resource-limit' }),
+      true
+    );
     renderer.destroy();
   });
 
@@ -729,11 +926,7 @@ describe('CanvasRenderer', () => {
       activeMessages: CanvasMessage[];
       pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
       translationConfigurationGeneration: number;
-      queueTranslationResult(
-        msg: CanvasMessage,
-        text: string | null,
-        generation: number
-      ): void;
+      queueTranslationResult(msg: CanvasMessage, text: string | null, generation: number): void;
       applyPendingTranslations(): void;
     };
     internals.activeMessages.push(message);
@@ -764,11 +957,7 @@ describe('CanvasRenderer', () => {
       pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
       translationConfigurationGeneration: number;
       estimateTranslatedDimensions: typeof estimateTranslatedDimensions;
-      queueTranslationResult(
-        msg: CanvasMessage,
-        text: string | null,
-        generation: number
-      ): void;
+      queueTranslationResult(msg: CanvasMessage, text: string | null, generation: number): void;
     };
     internals.estimateTranslatedDimensions = estimateTranslatedDimensions;
 
@@ -825,7 +1014,10 @@ describe('CanvasRenderer', () => {
     const original = makeMessage('stale-worker-translation', 'original');
     let resolveTranslation: ((value: string | null) => void) | undefined;
     const translate = vi.fn(
-      () => new Promise<string | null>((resolve) => { resolveTranslation = resolve; })
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveTranslation = resolve;
+        })
     );
     const sendTranslation = vi.fn();
     const internals = renderer as unknown as {
@@ -1341,15 +1533,13 @@ describe('CanvasRenderer', () => {
         destroy(): void;
       };
       startRenderLoop(): void;
-      finalizeDrainBatch(
-        batch: {
-          candidates: readonly ChatMessage[];
-          committed: ChatMessage[];
-          unplaceable: ChatMessage[];
-          batchIndex: number;
-          staggerCursorMs: number;
-        }
-      ): void;
+      finalizeDrainBatch(batch: {
+        candidates: readonly ChatMessage[];
+        committed: ChatMessage[];
+        unplaceable: ChatMessage[];
+        batchIndex: number;
+        staggerCursorMs: number;
+      }): void;
     };
     renderer.pause();
     vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
@@ -1394,91 +1584,123 @@ describe('CanvasRenderer', () => {
 
     const recoveredMessages = internals.pendingQueue.toArray();
     const onMessagesDropped = vi.spyOn(renderer.observability, 'onMessagesDropped');
-    internals.finalizeDrainBatch(
-      {
-        candidates: recoveredMessages,
-        committed: [],
-        unplaceable: recoveredMessages,
-        batchIndex: 0,
-        staggerCursorMs: 0,
-      }
-    );
+    internals.finalizeDrainBatch({
+      candidates: recoveredMessages,
+      committed: [],
+      unplaceable: recoveredMessages,
+      batchIndex: 0,
+      staggerCursorMs: 0,
+    });
     expect(onMessagesDropped).toHaveBeenCalledWith(3, 'oversized');
     renderer.destroy();
   });
 
   it.each([
-    { paused: false, backlog: false }, { paused: true, backlog: false },
-    { paused: false, backlog: true }, { paused: true, backlog: true },
-  ])('restores Worker progress and future reservations across fallback (paused=$paused, backlog=$backlog)', async ({ paused, backlog }) => {
-    let clock = 1000;
-    const viewportWidth = backlog ? 1920 : 640;
-    const messageWidth = backlog ? 1980 : 100;
-    const durationMs = backlog ? 8000 : 5000;
-    vi.spyOn(performance, 'now').mockImplementation(() => clock);
-    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: viewportWidth, height: 360 });
-    const renderer = new CanvasRenderer(overlay, makeSettings({
-      speedPxPerSec: backlog ? 250 : 350, backlogSpeedMultiplier: 2,
-      scrollDurationMinMs: 5000, scrollDurationMaxMs: 30000,
-      exitPaddingPx: 100, headwayGapRatio: 0.08,
-    }));
-    const internals = renderer as unknown as {
-      activeMessages: CanvasMessage[];
-      pendingQueue: { toArray(): ChatMessage[] };
-      fallbackInProgress: boolean;
-      workerManager: { snapshotMessages(): Promise<WorkerRecoveryMessage[]>; destroy(): void; setActive(active: boolean): void };
-      replaceCanvas(): boolean;
-      reflowActiveMessages(size: { width: number; height: number }): void;
-      startRenderLoop(): void;
-    };
-    if (paused) renderer.pause();
-    vi.spyOn(internals, 'replaceCanvas').mockReturnValue(true);
-    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
-    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
-    const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
-    const origin = performance.timeOrigin;
-    vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
-      ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
-        message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog }, trackDrops: false,
-        activeMotion: {
-          id: `active-${laneIndex}`, mode: 'scroll', startX: viewportWidth,
-          width: messageWidth, height: 20, y: laneIndex * 20, laneIndex, laneSlotCount: 1,
-          durationMs, startEpochMs: origin + start, fadeStartEpochMs: origin + start,
-          speedTier: backlog ? 3 : 1, epoch: 0, capturedAtEpochMs: origin + 1000,
-          effectiveNowEpochMs: origin + 1000, isPaused: paused,
-          viewportWidthPx: viewportWidth, exitPaddingPx: 100,
-        },
-      })),
-      { message: makeMessage('pending-only', 'pending'), trackDrops: true },
-    ]);
-    clock = 1500;
-    renderer.fallbackToMainThread('controlled-snapshot');
-    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
-    expect(internals.activeMessages).toHaveLength(2);
-    expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
-    const [visible, future] = internals.activeMessages;
-    expect(visible?.startTime).toBe(0);
-    expect(future?.startTime).toBe(2000);
-    const effectiveNow = paused ? 1000 : 1500;
-    expect(visible?.x).toBeCloseTo(viewportWidth - effectiveNow * ((viewportWidth + messageWidth + 100) / durationMs));
-    expect(future?.x).toBe(viewportWidth);
-    if (backlog) {
-      internals.reflowActiveMessages({ width: viewportWidth, height: 360 });
-      const reflowed = internals.activeMessages;
-      expect(reflowed).toHaveLength(2);
-      expect(reflowed.every((message) => message.duration === 8000 && message.speedTier === 3)).toBe(true);
-      expect(reflowed[0]?.startTime).toBe(0);
-      expect(reflowed[1]?.startTime).toBe(2000);
+    { paused: false, backlog: false },
+    { paused: true, backlog: false },
+    { paused: false, backlog: true },
+    { paused: true, backlog: true },
+  ])(
+    'restores Worker progress and future reservations across fallback (paused=$paused, backlog=$backlog)',
+    async ({ paused, backlog }) => {
+      let clock = 1000;
+      const viewportWidth = backlog ? 1920 : 640;
+      const messageWidth = backlog ? 1980 : 100;
+      const durationMs = backlog ? 8000 : 5000;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: viewportWidth, height: 360 });
+      const renderer = new CanvasRenderer(
+        overlay,
+        makeSettings({
+          speedPxPerSec: backlog ? 250 : 350,
+          backlogSpeedMultiplier: 2,
+          scrollDurationMinMs: 5000,
+          scrollDurationMaxMs: 30000,
+          exitPaddingPx: 100,
+          headwayGapRatio: 0.08,
+        })
+      );
+      const internals = renderer as unknown as {
+        activeMessages: CanvasMessage[];
+        pendingQueue: { toArray(): ChatMessage[] };
+        fallbackInProgress: boolean;
+        workerManager: {
+          snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+          destroy(): void;
+          setActive(active: boolean): void;
+        };
+        replaceCanvas(): boolean;
+        reflowActiveMessages(size: { width: number; height: number }): void;
+        startRenderLoop(): void;
+      };
+      if (paused) renderer.pause();
+      vi.spyOn(internals, 'replaceCanvas').mockReturnValue(true);
+      vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+      vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+      const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
+      const origin = performance.timeOrigin;
+      vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
+        ...[0, 2000].map(
+          (start, laneIndex): WorkerRecoveryMessage => ({
+            message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog },
+            trackDrops: false,
+            activeMotion: {
+              id: `active-${laneIndex}`,
+              mode: 'scroll',
+              startX: viewportWidth,
+              width: messageWidth,
+              height: 20,
+              y: laneIndex * 20,
+              laneIndex,
+              laneSlotCount: 1,
+              durationMs,
+              startEpochMs: origin + start,
+              fadeStartEpochMs: origin + start,
+              speedTier: backlog ? 3 : 1,
+              epoch: 0,
+              capturedAtEpochMs: origin + 1000,
+              effectiveNowEpochMs: origin + 1000,
+              isPaused: paused,
+              viewportWidthPx: viewportWidth,
+              exitPaddingPx: 100,
+            },
+          })
+        ),
+        { message: makeMessage('pending-only', 'pending'), trackDrops: true },
+      ]);
+      clock = 1500;
+      renderer.fallbackToMainThread('controlled-snapshot');
+      await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+      expect(internals.activeMessages).toHaveLength(2);
+      expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
+      const [visible, future] = internals.activeMessages;
+      expect(visible?.startTime).toBe(0);
+      expect(future?.startTime).toBe(2000);
+      const effectiveNow = paused ? 1000 : 1500;
+      expect(visible?.x).toBeCloseTo(
+        viewportWidth - effectiveNow * ((viewportWidth + messageWidth + 100) / durationMs)
+      );
+      expect(future?.x).toBe(viewportWidth);
+      if (backlog) {
+        internals.reflowActiveMessages({ width: viewportWidth, height: 360 });
+        const reflowed = internals.activeMessages;
+        expect(reflowed).toHaveLength(2);
+        expect(
+          reflowed.every((message) => message.duration === 8000 && message.speedTier === 3)
+        ).toBe(true);
+        expect(reflowed[0]?.startTime).toBe(0);
+        expect(reflowed[1]?.startTime).toBe(2000);
+      }
+      expect(rendered).not.toHaveBeenCalled();
+      if (paused) {
+        clock = 5000;
+        renderer.resume();
+        expect(visible?.pausedDuration).toBe(4000);
+        expect(future && future.startTime + future.pausedDuration).toBe(6000);
+      }
+      renderer.destroy();
     }
-    expect(rendered).not.toHaveBeenCalled();
-    if (paused) {
-      clock = 5000;
-      renderer.resume();
-      expect(visible?.pausedDuration).toBe(4000);
-      expect(future && future.startTime + future.pausedDuration).toBe(6000);
-    }
-    renderer.destroy();
-  });
+  );
 
   it('keeps failed canvas recovery unhealthy and retries without losing buffered ingress', async () => {
     const container = document.createElement('div');
@@ -1642,10 +1864,16 @@ describe('CanvasRenderer', () => {
 
   it('bounds failed sync attempts and eventually reaches a placeable message beyond the prefix', () => {
     vi.spyOn(performance, 'now').mockReturnValue(0);
-    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 1280, height: 720 };
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 1280,
+      height: 720,
+    };
     const renderer = new CanvasRenderer(overlay, makeSettings());
     const internals = renderer as unknown as {
-      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
       placeQueuedMessage: ReturnType<typeof vi.fn>;
       drainQueue(now: number): void;
     };
@@ -1653,7 +1881,8 @@ describe('CanvasRenderer', () => {
       internals.pendingQueue.enqueue(makeMessage(`${index}`, 'bounded'), 0);
     }
     internals.placeQueuedMessage = vi.fn((message: ChatMessage) => ({
-      placed: message.id === '79', oversized: false,
+      placed: message.id === '79',
+      oversized: false,
     }));
     for (let frame = 0; frame < 3; frame++) {
       const before = internals.placeQueuedMessage.mock.calls.length;
@@ -1668,15 +1897,24 @@ describe('CanvasRenderer', () => {
   it('counts failed collision work against the time budget and lets a lower priority group progress', () => {
     let clock = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => clock);
-    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = { width: 1280, height: 720 };
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 1280,
+      height: 720,
+    };
     const renderer = new CanvasRenderer(overlay, makeSettings());
     const internals = renderer as unknown as {
-      pendingQueue: { enqueue(message: ChatMessage, priority: number): void; toArray(): ChatMessage[] };
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
       placeQueuedMessage: ReturnType<typeof vi.fn>;
       drainQueue(now: number): void;
     };
     for (let index = 0; index < 40; index++) {
-      internals.pendingQueue.enqueue({ ...makeMessage(`paid-${index}`, 'paid'), kind: 'superchat' }, 100);
+      internals.pendingQueue.enqueue(
+        { ...makeMessage(`paid-${index}`, 'paid'), kind: 'superchat' },
+        100
+      );
     }
     internals.pendingQueue.enqueue(makeMessage('normal', 'normal'), 0);
     internals.placeQueuedMessage = vi.fn((message: ChatMessage) => {

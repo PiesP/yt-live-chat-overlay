@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'vitest';
-import { PANES } from '@settings/ui/panes';
 import { TRANSLATION_MAPS } from '@i18n/index';
+import { PANES } from '@settings/ui/panes';
+import { describe, expect, test } from 'vitest';
 
 function collectI18nKeys(): string[] {
   const keys: string[] = [];
@@ -32,27 +32,40 @@ function collectI18nKeys(): string[] {
 
   // Modal chrome keys used in form.ts and controller.ts
   keys.push(
-    'app.title', 'app.close', 'app.settingsCategories',
-    'app.enabled', 'actions.reset', 'actions.export', 'actions.import',
-    'app.done', 'app.cancel',
-    'reset.confirm', 'import.invalidFormat', 'import.success',
-    'import.invalidJson', 'app.settings', 'reset.confirmDesc',
-    'format.valueAdjusted', 'format.shortMessagesShown',
-    'app.autoSave', 'app.reload', 'appearance.authorsBackground',
-    'danmaku.preview', 'danmaku.previewMessage',
-    'translation.capabilityDetected', 'translation.capabilityUnavailable',
+    'app.title',
+    'app.close',
+    'app.settingsCategories',
+    'app.enabled',
+    'actions.reset',
+    'actions.export',
+    'actions.import',
+    'app.done',
+    'app.cancel',
+    'reset.confirm',
+    'import.invalidFormat',
+    'import.success',
+    'import.invalidJson',
+    'app.settings',
+    'reset.confirmDesc',
+    'format.valueAdjusted',
+    'format.shortMessagesShown',
+    'app.autoSave',
+    'app.reload',
+    'appearance.authorsBackground',
+    'danmaku.preview',
+    'danmaku.previewMessage',
+    'translation.capabilityDetected',
+    'translation.capabilityUnavailable'
   );
 
   return [...new Set(keys)];
 }
 
 // Keys that are intentionally not translated (native names, author enums)
-const UNTRANSLATED_KEYS = new Set([
-  'English', '한국어', '日本語', 'Español', '中文', 'العربية',
-]);
+const UNTRANSLATED_KEYS = new Set(['English', '한국어', '日本語', 'Español', '中文', 'العربية']);
 
 describe('i18n key coverage', () => {
-  const languages = Object.keys(TRANSLATION_MAPS).filter(l => l !== 'en');
+  const languages = Object.keys(TRANSLATION_MAPS).filter((l) => l !== 'en');
 
   for (const lang of languages) {
     test(`all PANES keys exist in ${lang} translation map`, () => {
@@ -65,9 +78,10 @@ describe('i18n key coverage', () => {
         const entry = map[key as keyof typeof map];
         if (entry === undefined) missing.push(key);
       }
-      expect(missing,
+      expect(
+        missing,
         `Missing ${missing.length} translation(s) in ${lang}:\n` +
-        missing.map(k => `  - "${k}"`).join('\n')
+          missing.map((k) => `  - "${k}"`).join('\n')
       ).toEqual([]);
     });
   }

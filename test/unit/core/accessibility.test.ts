@@ -4,10 +4,10 @@
  * Verifies all ARIA, keyboard navigation, and screen reader support features.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SettingsUiForm, BACKDROP_ID } from '@settings/ui/form';
-import { PANES } from '@settings/ui/panes';
 import type { OverlaySettings } from '@app-types';
+import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
+import { PANES } from '@settings/ui/panes';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -315,9 +315,7 @@ describe('Form labels (settings-ui-form.ts)', () => {
         (el): el is HTMLDivElement =>
           el instanceof HTMLDivElement && el.getAttribute('role') === 'tabpanel'
       )
-      .flatMap((el) =>
-        Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      )
+      .flatMap((el) => Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')))
       .filter((el) => el.name === 'showSuperChatAmount');
 
     expect(checkboxes.length).toBeGreaterThan(0);
@@ -337,9 +335,7 @@ describe('Form labels (settings-ui-form.ts)', () => {
 
     const allCheckboxes = content
       .filter((el) => el instanceof HTMLDivElement)
-      .flatMap((el) =>
-        Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      );
+      .flatMap((el) => Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')));
 
     const ids = allCheckboxes.map((el) => el.id).filter(Boolean);
     const uniqueIds = new Set(ids);
@@ -352,9 +348,7 @@ describe('Form labels (settings-ui-form.ts)', () => {
 
     const allNumbers = content
       .filter((el) => el instanceof HTMLDivElement)
-      .flatMap((el) =>
-        Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]'))
-      );
+      .flatMap((el) => Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]')));
 
     const ids = allNumbers.map((el) => el.id).filter(Boolean);
     const uniqueIds = new Set(ids);
@@ -371,13 +365,9 @@ describe('Form labels (settings-ui-form.ts)', () => {
     // Range value display inputs have a predictable ID pattern: range-value-{key}
     const allNumbers = content
       .filter((el) => el instanceof HTMLDivElement)
-      .flatMap((el) =>
-        Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]'))
-      );
+      .flatMap((el) => Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]')));
 
-    const standaloneNumbers = allNumbers.filter(
-      (input) => !input.id.startsWith('range-value-')
-    );
+    const standaloneNumbers = allNumbers.filter((input) => !input.id.startsWith('range-value-'));
 
     expect(standaloneNumbers.length).toBeGreaterThan(0);
 
@@ -394,9 +384,7 @@ describe('Form labels (settings-ui-form.ts)', () => {
 
     const rangeCompanionNumbers = content
       .filter((el) => el instanceof HTMLDivElement)
-      .flatMap((el) =>
-        Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]'))
-      )
+      .flatMap((el) => Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]')))
       .filter((input) => input.id.startsWith('range-value-'));
 
     expect(rangeCompanionNumbers.length).toBeGreaterThan(0);
@@ -516,7 +504,9 @@ describe('Range slider ARIA (settings-ui-form.ts)', () => {
 
     for (const container of rangeContainers) {
       const slider = container.querySelector('input[type="range"]') as HTMLInputElement | null;
-      const numberInput = container.querySelector('input[type="number"]') as HTMLInputElement | null;
+      const numberInput = container.querySelector(
+        'input[type="number"]'
+      ) as HTMLInputElement | null;
       expect(slider).not.toBeNull();
       expect(numberInput).not.toBeNull();
 
@@ -827,7 +817,7 @@ describe('Validation errors (settings-ui-form.ts)', () => {
     input.type = 'number';
     input.name = 'fontSize';
 
-    const errorId = `error-fontSize-12345`;
+    const errorId = 'error-fontSize-12345';
     input.setAttribute('aria-describedby', errorId);
 
     expect(input.getAttribute('aria-describedby')).toBe(errorId);
@@ -1059,7 +1049,8 @@ describe('Action buttons', () => {
     const content = form.createModalContent();
 
     const actionsWrapper = content.find(
-      (el) => el instanceof HTMLDivElement && el.className === 'yt-chat-overlay-settings-actions-wrapper'
+      (el) =>
+        el instanceof HTMLDivElement && el.className === 'yt-chat-overlay-settings-actions-wrapper'
     ) as HTMLDivElement | undefined;
 
     expect(actionsWrapper).toBeDefined();
@@ -1089,9 +1080,7 @@ describe('Color inputs ARIA', () => {
 
     const colorInputs = content
       .filter((el) => el instanceof HTMLDivElement)
-      .flatMap((el) =>
-        Array.from(el.querySelectorAll<HTMLInputElement>('input[type="color"]'))
-      );
+      .flatMap((el) => Array.from(el.querySelectorAll<HTMLInputElement>('input[type="color"]')));
 
     expect(colorInputs.length).toBeGreaterThan(0);
 

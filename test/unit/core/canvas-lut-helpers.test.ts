@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
-import { fastSin, computePulseAlpha } from '@renderer/canvas/lut-helpers';
+import { computePulseAlpha, fastSin } from '@renderer/canvas/lut-helpers';
+import { describe, expect, it } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // fastSin

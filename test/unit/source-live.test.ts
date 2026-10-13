@@ -20,10 +20,7 @@ type LiveSourceInternals = {
     continuation: InnertubeContinuationData,
     signal?: AbortSignal
   ) => Promise<LiveChatPayload | null>;
-  handleLivePayload: (
-    payload: LiveChatPayload,
-    isInitialSeed?: boolean
-  ) => Promise<void>;
+  handleLivePayload: (payload: LiveChatPayload, isInitialSeed?: boolean) => Promise<void>;
   calculateAdaptiveDelay: (timeoutMs: number) => number;
   resetSessionState: () => void;
   runLiveLoop: (signal?: AbortSignal) => Promise<void>;
@@ -133,7 +130,9 @@ describe('LiveChatSource empty-response polling', () => {
     const request = vi.spyOn(internals, 'requestLivePayload').mockImplementation(async () => {
       starts.push(Date.now());
       if (request.mock.calls.length === 1) {
-        return new Promise<LiveChatPayload>((resolve) => { finishFirst = resolve; });
+        return new Promise<LiveChatPayload>((resolve) => {
+          finishFirst = resolve;
+        });
       }
       return makePayload(`burst-${request.mock.calls.length}`);
     });
@@ -202,10 +201,9 @@ describe('LiveChatSource empty-response polling', () => {
     internals.bootstrap = makeBootstrap();
 
     await expect(
-      internals.requestPayload(
-        async () => ({ continuationContents: {} }),
-        { continuation: 'current' }
-      )
+      internals.requestPayload(async () => ({ continuationContents: {} }), {
+        continuation: 'current',
+      })
     ).rejects.toMatchObject({ name: 'LiveChatProtocolError' });
     expect(source.isActive(1_000)).toBe(false);
 
@@ -256,9 +254,7 @@ describe('LiveChatSource empty-response polling', () => {
       .mockRejectedValue(new LiveChatProtocolError('malformed response'));
 
     const loop = internals.runLiveLoop(controller.signal);
-    const outcome = expect(loop).rejects.toThrow(
-      'Live poll consecutive failure limit (2) reached',
-    );
+    const outcome = expect(loop).rejects.toThrow('Live poll consecutive failure limit (2) reached');
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.advanceTimersByTimeAsync(4_000);
 

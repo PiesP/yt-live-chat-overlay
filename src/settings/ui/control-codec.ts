@@ -3,8 +3,12 @@
 
 import type { AuthorType, OverlaySettings } from '@app-types';
 import { ROOT_SETTING_META, SHOW_AUTHOR_KEYS } from '@settings/meta';
-import type { OutlineSettingKey, RootScalarSettingKey } from '@settings/schema';
-import { AUTHOR_COLOR_KEYS, OUTLINE_NUMERIC_KEYS } from '@settings/schema';
+import {
+  AUTHOR_COLOR_KEYS,
+  OUTLINE_NUMERIC_KEYS,
+  type OutlineSettingKey,
+  type RootScalarSettingKey,
+} from '@settings/schema';
 
 export type SettingsControlTarget =
   | { group: 'outline'; key: OutlineSettingKey }

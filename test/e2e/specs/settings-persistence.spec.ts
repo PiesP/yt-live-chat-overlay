@@ -12,29 +12,24 @@
  * save/load mechanism works correctly.
  */
 
-import { test, expect, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { expect, type Page, test } from '@playwright/test';
 import {
+  applySettings,
   BUTTON_ID,
   DEFAULT_SETTINGS,
+  getSettings,
   injectUserscript,
   MOCK_WATCH_URL,
-  setupOverlayPage,
-  setupMockPageRoute,
-  getSettings,
-  applySettings,
   readStoredSettings,
   SETTINGS_STORAGE_KEY,
-  waitForStoredSettings,
+  setupMockPageRoute,
+  setupOverlayPage,
   USERSCRIPT_PATH,
+  waitForStoredSettings,
 } from '../fixtures/test-utils';
 
-const CACHE_KEYS = [
-  'emojiCacheMb',
-  'photoCacheMb',
-  'stickerCacheMb',
-  'textCacheMb',
-] as const;
+const CACHE_KEYS = ['emojiCacheMb', 'photoCacheMb', 'stickerCacheMb', 'textCacheMb'] as const;
 
 function installPersistentSettings(init: { settings: string }): void {
   if (localStorage.getItem('yt-live-chat-overlay-settings') === null) {
@@ -44,7 +39,7 @@ function installPersistentSettings(init: { settings: string }): void {
 
 async function setupPersistentSettingsPage(
   page: Page,
-  settings: Record<string, unknown>,
+  settings: Record<string, unknown>
 ): Promise<void> {
   await setupMockPageRoute(page);
   await page.addInitScript(installPersistentSettings, {
@@ -59,10 +54,7 @@ async function setupPersistentSettingsPage(
   });
 }
 
-async function expectNormalizedCacheSettings(
-  page: Page,
-  unrelatedOpacity: number,
-): Promise<void> {
+async function expectNormalizedCacheSettings(page: Page, unrelatedOpacity: number): Promise<void> {
   await expect
     .poll(async () => {
       const settings = await getSettings(page);
@@ -74,10 +66,7 @@ async function expectNormalizedCacheSettings(
     .toEqual({ cacheValues: [1, 1, 1, 1], opacity: unrelatedOpacity });
 }
 
-async function appendRenderableMessage(
-  page: Page,
-  id: string,
-): Promise<void> {
+async function appendRenderableMessage(page: Page, id: string): Promise<void> {
   await page.evaluate((messageId) => {
     const items = document.querySelector('yt-live-chat-item-list-renderer #items');
     if (!items) throw new Error('Mock live chat items container is missing');
@@ -98,7 +87,7 @@ test.describe('Settings Persistence', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`,
+        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`
       );
     }
   });
@@ -167,15 +156,23 @@ test.describe('Settings Persistence', () => {
   });
 
   for (const persistedOverride of [false, true]) {
-    test(`preserves the existing reduced-motion override ${persistedOverride} through the settings form`, async ({ page }) => {
-      await setupPersistentSettingsPage(page, { ...DEFAULT_SETTINGS, language: 'en', ignoreReducedMotion: persistedOverride });
+    test(`preserves the existing reduced-motion override ${persistedOverride} through the settings form`, async ({
+      page,
+    }) => {
+      await setupPersistentSettingsPage(page, {
+        ...DEFAULT_SETTINGS,
+        language: 'en',
+        ignoreReducedMotion: persistedOverride,
+      });
       await page.locator('#movie_player').hover();
       await page.locator(`#${BUTTON_ID}`).click();
       const modal = page.locator('#yt-chat-overlay-settings-backdrop');
       await modal.locator('#tab-advanced').click();
       const checkbox = modal.getByRole('checkbox', { name: 'Always animate scrolling comments' });
       await expect(checkbox).toBeChecked({ checked: persistedOverride });
-      await expect(modal.locator('.yt-chat-overlay-settings-autosave-hint')).toContainText('saved when you close settings');
+      await expect(modal.locator('.yt-chat-overlay-settings-autosave-hint')).toContainText(
+        'saved when you close settings'
+      );
       await page.keyboard.press('Escape');
       await waitForStoredSettings(page, { ignoreReducedMotion: persistedOverride });
 
@@ -193,7 +190,7 @@ test.describe('Settings Persistence', () => {
 
     // Then reset to defaults
     await page.evaluate(() => {
-      const w = (window as unknown) as Record<string, unknown>;
+      const w = window as unknown as Record<string, unknown>;
       const handle = w.__ytChatOverlay as { resetSettings?: () => void } | undefined;
       handle?.resetSettings?.();
     });
@@ -238,9 +235,7 @@ test.describe('Settings Persistence', () => {
     await page.locator('#movie_player').hover();
     await page.locator(`#${BUTTON_ID}`).click();
     const fileChooserPromise = page.waitForEvent('filechooser');
-    await page
-      .locator('#yt-chat-overlay-settings-backdrop button[data-action="import"]')
-      .click();
+    await page.locator('#yt-chat-overlay-settings-backdrop button[data-action="import"]').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles({
       name: 'fractional-cache-settings.json',
@@ -254,22 +249,25 @@ test.describe('Settings Persistence', () => {
           opacity: unrelatedOpacity,
           allowShortTextMessages: true,
           showDebugOverlay: true,
-        }),
+        })
       ),
     });
 
     await expectNormalizedCacheSettings(page, unrelatedOpacity);
     await expect
       .poll(() =>
-        page.evaluate(({ cacheKeys, storageKey }) => {
-          const raw = localStorage.getItem(storageKey);
-          if (!raw) return null;
-          const stored = JSON.parse(raw) as Record<string, unknown>;
-          return {
-            cacheValues: cacheKeys.map((key) => stored[key]),
-            opacity: stored.opacity,
-          };
-        }, { cacheKeys: CACHE_KEYS, storageKey: SETTINGS_STORAGE_KEY }),
+        page.evaluate(
+          ({ cacheKeys, storageKey }) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return null;
+            const stored = JSON.parse(raw) as Record<string, unknown>;
+            return {
+              cacheValues: cacheKeys.map((key) => stored[key]),
+              opacity: stored.opacity,
+            };
+          },
+          { cacheKeys: CACHE_KEYS, storageKey: SETTINGS_STORAGE_KEY }
+        )
       )
       .toEqual({ cacheValues: [1, 1, 1, 1], opacity: unrelatedOpacity });
 
@@ -279,7 +277,7 @@ test.describe('Settings Persistence', () => {
     await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
     await appendRenderableMessage(page, 'settings-import-reload-message');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1',
+      'Rcvd: 1 | Rndr: 1'
     );
     expect(runtimeErrors).toEqual([]);
   });
@@ -303,7 +301,7 @@ test.describe('Settings Persistence', () => {
     await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
     await appendRenderableMessage(page, 'settings-preseed-startup-message');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1',
+      'Rcvd: 1 | Rndr: 1'
     );
     expect(runtimeErrors).toEqual([]);
   });

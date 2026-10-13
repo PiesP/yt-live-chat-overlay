@@ -3,7 +3,6 @@
 
 import type { FontWeight, OverlayDimensions } from '@app-types';
 import { SPEED_TIER } from '@renderer/constants';
-import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   buildLaneHeap,
   commitPlacementShared,
@@ -11,6 +10,7 @@ import {
   computeOccupancyMs,
   findPlacementShared,
   heapSiftDown,
+  type LaneSelectionStrategy,
   resetBatchShared,
 } from '@renderer/layout/lane-shared';
 import {

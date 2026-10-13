@@ -17,19 +17,45 @@ const dimensions = { width: 640, height: 160 };
 
 function makeContext() {
   return {
-    setTransform: vi.fn(), getTransform: vi.fn(() => ({ a: 1 })), scale: vi.fn(),
-    clearRect: vi.fn(), measureText: vi.fn((text: string) => ({
-      width: text.length * 10, actualBoundingBoxAscent: 16, actualBoundingBoxDescent: 4,
+    setTransform: vi.fn(),
+    getTransform: vi.fn(() => ({ a: 1 })),
+    scale: vi.fn(),
+    clearRect: vi.fn(),
+    measureText: vi.fn((text: string) => ({
+      width: text.length * 10,
+      actualBoundingBoxAscent: 16,
+      actualBoundingBoxDescent: 4,
     })),
-    fillText: vi.fn(), strokeText: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(),
-    drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), translate: vi.fn(),
-    beginPath: vi.fn(), closePath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
-    arc: vi.fn(), arcTo: vi.fn(), fill: vi.fn(), stroke: vi.fn(), clip: vi.fn(),
+    fillText: vi.fn(),
+    strokeText: vi.fn(),
+    fillRect: vi.fn(),
+    strokeRect: vi.fn(),
+    drawImage: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    beginPath: vi.fn(),
+    closePath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    arc: vi.fn(),
+    arcTo: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    clip: vi.fn(),
     createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
     createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
-    font: '', textBaseline: 'top', textAlign: 'left', textRendering: 'optimizeSpeed',
-    fontKerning: 'none', fillStyle: '', strokeStyle: '', lineWidth: 1,
-    globalAlpha: 1, filter: 'none', imageSmoothingEnabled: true,
+    font: '',
+    textBaseline: 'top',
+    textAlign: 'left',
+    textRendering: 'optimizeSpeed',
+    fontKerning: 'none',
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 1,
+    globalAlpha: 1,
+    filter: 'none',
+    imageSmoothingEnabled: true,
   };
 }
 
@@ -37,9 +63,16 @@ type TestContext = ReturnType<typeof makeContext>;
 
 class TestOffscreenCanvas {
   readonly context = makeContext();
-  constructor(public width = dimensions.width, public height = dimensions.height) {}
-  getContext(): TestContext { return this.context; }
-  transferToImageBitmap(): { close(): void } { return { close() {} }; }
+  constructor(
+    public width = dimensions.width,
+    public height = dimensions.height
+  ) {}
+  getContext(): TestContext {
+    return this.context;
+  }
+  transferToImageBitmap(): { close(): void } {
+    return { close() {} };
+  }
 }
 
 class CoupledWorker {
@@ -51,7 +84,9 @@ class CoupledWorker {
   readonly messages: unknown[] = [];
   private readonly listeners = new Set<EventListener>();
 
-  constructor() { CoupledWorker.last = this; }
+  constructor() {
+    CoupledWorker.last = this;
+  }
 
   postMessage(data: unknown): void {
     this.messages.push(data);
@@ -75,8 +110,14 @@ class CoupledWorker {
 
 function makeMessage(id: string, offsetMs: number): ChatMessage {
   return {
-    id, text: id, content: [{ type: 'text', content: id }], kind: 'text',
-    author: id, authorType: 'normal', timestamp: Date.now(), videoOffsetMs: offsetMs,
+    id,
+    text: id,
+    content: [{ type: 'text', content: id }],
+    kind: 'text',
+    author: id,
+    authorType: 'normal',
+    timestamp: Date.now(),
+    videoOffsetMs: offsetMs,
   };
 }
 
@@ -97,8 +138,14 @@ interface Harness {
   flush(): Promise<void>;
   frame(now: number): void;
   active(): Array<{
-    id: string; laneIndex: number; startTime: number; duration: number;
-    x: number; y: number; width: number; height: number;
+    id: string;
+    laneIndex: number;
+    startTime: number;
+    duration: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
     motion: NonNullable<CanvasMessage['motion']>;
   }>;
   resize(width: number, height: number): Promise<void>;
@@ -112,27 +159,43 @@ function createHarness(
 ): Harness {
   const settings: OverlaySettings = {
     ...DEFAULT_SETTINGS,
-    fontSize: 20, speedPxPerSec: 350, laneSpacing: 0,
-    safeTop: 0, safeBottom: 0, depthLayersEnabled: false,
+    fontSize: 20,
+    speedPxPerSec: 350,
+    laneSpacing: 0,
+    safeTop: 0,
+    safeBottom: 0,
+    depthLayersEnabled: false,
     outline: { enabled: false, widthPx: 0, opacity: 0 },
-    staggerMaxDelayMs: 100, staggerMediumDelayMs: 50,
-    scrollDurationMinMs: 5_000, scrollDurationMaxMs: 30_000,
-    exitPaddingPx: 100, headwayGapRatio: 0.08,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    scrollDurationMinMs: 5_000,
+    scrollDurationMaxMs: 30_000,
+    exitPaddingPx: 100,
+    headwayGapRatio: 0.08,
     ...settingsOverrides,
   };
   const mainContext = makeContext();
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() =>
-    mainContext as unknown as CanvasRenderingContext2D
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+    () => mainContext as unknown as CanvasRenderingContext2D
   );
   vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas);
-  vi.stubGlobal('ImageBitmap', class { close(): void {} });
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'ImageBitmap',
+    class {
+      close(): void {}
+    }
+  );
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1)
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   vi.stubGlobal('Worker', mode === 'worker' ? CoupledWorker : undefined);
   if (mode === 'worker') {
     vi.stubGlobal('postMessage', (data: unknown) => CoupledWorker.last?.receive(data));
     Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
-      configurable: true, value: () => new TestOffscreenCanvas(),
+      configurable: true,
+      value: () => new TestOffscreenCanvas(),
     });
   }
 
@@ -173,7 +236,11 @@ function createHarness(
     flushReplayBuffer(): void;
   };
   const harness: Harness = {
-    source, renderer, mainContext, worker, delivered,
+    source,
+    renderer,
+    mainContext,
+    worker,
+    delivered,
     playback: { offsetMs: 10_000, paused: false },
     insert(id, offsetMs) {
       sourceInternals.replayBuffer.insert(makeMessage(id, offsetMs), offsetMs);
@@ -192,33 +259,51 @@ function createHarness(
     },
     active() {
       if (worker) {
-        const active = (worker.backend as unknown as { activeMessages: ActiveMessage[] }).activeMessages;
+        const active = (worker.backend as unknown as { activeMessages: ActiveMessage[] })
+          .activeMessages;
         return active.map((message) => {
           if (!message.motion) throw new Error(`Missing committed Worker motion for ${message.id}`);
           return {
-            id: message.id, laneIndex: message.laneIndex, startTime: message.startTime,
-            duration: message.duration, x: message.x, y: message.y,
-            width: message.width, height: message.height, motion: message.motion,
+            id: message.id,
+            laneIndex: message.laneIndex,
+            startTime: message.startTime,
+            duration: message.duration,
+            x: message.x,
+            y: message.y,
+            width: message.width,
+            height: message.height,
+            motion: message.motion,
           };
         });
       }
       const active = (renderer as unknown as { activeMessages: CanvasMessage[] }).activeMessages;
       return active.map((message) => {
-        if (!message.motion) throw new Error(`Missing committed Canvas motion for ${message.message.id}`);
+        if (!message.motion)
+          throw new Error(`Missing committed Canvas motion for ${message.message.id}`);
         return {
-          id: message.message.id ?? '', laneIndex: message.laneIndex,
-          startTime: message.startTime, duration: message.duration,
-          x: message.x, y: message.y, width: message.width, height: message.height,
+          id: message.message.id ?? '',
+          laneIndex: message.laneIndex,
+          startTime: message.startTime,
+          duration: message.duration,
+          x: message.x,
+          y: message.y,
+          width: message.width,
+          height: message.height,
           motion: message.motion,
         };
       });
     },
     async resize(width, height) {
-      (overlay as unknown as { updateDimensionsFromRect(width: number, height: number): void }).updateDimensionsFromRect(width, height);
+      (
+        overlay as unknown as { updateDimensionsFromRect(width: number, height: number): void }
+      ).updateDimensionsFromRect(width, height);
       await Promise.resolve();
       await Promise.resolve();
     },
-    close() { runtime.destroy(); container.remove(); },
+    close() {
+      runtime.destroy();
+      container.remove();
+    },
   };
   vi.spyOn(sourceInternals, 'getPlaybackSnapshot').mockImplementation(() => harness.playback);
   sourceInternals.callback = (messages) => {
@@ -234,7 +319,9 @@ describe('Placement through source, runtime and renderer', () => {
   let harness: Harness | null = null;
   const clock = { now: 10_000 };
 
-  beforeEach(() => { clock.now = 10_000; });
+  beforeEach(() => {
+    clock.now = 10_000;
+  });
 
   afterEach(() => {
     harness?.close();
@@ -245,148 +332,203 @@ describe('Placement through source, runtime and renderer', () => {
     CoupledWorker.last = null;
   });
 
-  it.each(['main', 'worker'] as const)('keeps future replay offsets out of %s drawing across pause and frame hitches', async (mode) => {
-    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
-    vi.spyOn(Math, 'random').mockReturnValue(0.25);
-    harness = createHarness(mode, clock);
-    for (const [id, offset] of [
-      ['too-late', 7_999], ['late-boundary', 8_000], ['due', 10_000],
-      ['just-future', 10_001], ['prefetched', 11_500],
-    ] as const) harness.insert(id, offset);
+  it.each(['main', 'worker'] as const)(
+    'keeps future replay offsets out of %s drawing across pause and frame hitches',
+    async (mode) => {
+      vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+      vi.spyOn(Math, 'random').mockReturnValue(0.25);
+      harness = createHarness(mode, clock);
+      for (const [id, offset] of [
+        ['too-late', 7_999],
+        ['late-boundary', 8_000],
+        ['due', 10_000],
+        ['just-future', 10_001],
+        ['prefetched', 11_500],
+      ] as const)
+        harness.insert(id, offset);
 
-    await harness.flush();
-    harness.frame(10_000);
-    expect(harness.delivered).toEqual(['late-boundary', 'due']);
-    expect(harness.active().map((message) => message.id)).toEqual(['late-boundary', 'due']);
-    // At activation the fade opacity is zero; the next animation frame draws.
-    harness.frame(10_016);
-    const drawnContext = harness.worker
-      ? (harness.worker.backend as unknown as { ctx: TestContext }).ctx
-      : harness.mainContext;
-    expect(drawnContext.fillText.mock.calls.length + drawnContext.drawImage.mock.calls.length)
-      .toBeGreaterThan(0);
+      await harness.flush();
+      harness.frame(10_000);
+      expect(harness.delivered).toEqual(['late-boundary', 'due']);
+      expect(harness.active().map((message) => message.id)).toEqual(['late-boundary', 'due']);
+      // At activation the fade opacity is zero; the next animation frame draws.
+      harness.frame(10_016);
+      const drawnContext = harness.worker
+        ? (harness.worker.backend as unknown as { ctx: TestContext }).ctx
+        : harness.mainContext;
+      expect(
+        drawnContext.fillText.mock.calls.length + drawnContext.drawImage.mock.calls.length
+      ).toBeGreaterThan(0);
 
-    harness.playback = { offsetMs: 10_001, paused: true };
-    await harness.flush();
-    harness.frame(10_032);
-    expect(harness.delivered).toEqual(['late-boundary', 'due']);
+      harness.playback = { offsetMs: 10_001, paused: true };
+      await harness.flush();
+      harness.frame(10_032);
+      expect(harness.delivered).toEqual(['late-boundary', 'due']);
 
-    harness.playback = { offsetMs: 10_001, paused: false };
-    await harness.flush();
-    harness.frame(10_048);
-    expect(harness.delivered).toContain('just-future');
-    expect(harness.delivered).not.toContain('prefetched');
+      harness.playback = { offsetMs: 10_001, paused: false };
+      await harness.flush();
+      harness.frame(10_048);
+      expect(harness.delivered).toContain('just-future');
+      expect(harness.delivered).not.toContain('prefetched');
 
-    harness.playback = { offsetMs: 11_500, paused: false };
-    await harness.flush();
-    harness.frame(11_500);
-    expect(harness.delivered).toContain('prefetched');
-    expect(harness.active().some((message) => message.id === 'prefetched')).toBe(true);
-    for (const [index, left] of harness.active().entries()) {
-      for (const right of harness.active().slice(index + 1)) {
-        if (left.laneIndex !== right.laneIndex) continue;
-        expect(motionPlansCollide(left.motion, right.motion, 0.08, clock.now)).toBe(false);
+      harness.playback = { offsetMs: 11_500, paused: false };
+      await harness.flush();
+      harness.frame(11_500);
+      expect(harness.delivered).toContain('prefetched');
+      expect(harness.active().some((message) => message.id === 'prefetched')).toBe(true);
+      for (const [index, left] of harness.active().entries()) {
+        for (const right of harness.active().slice(index + 1)) {
+          if (left.laneIndex !== right.laneIndex) continue;
+          expect(motionPlansCollide(left.motion, right.motion, 0.08, clock.now)).toBe(false);
+        }
       }
     }
-  });
+  );
 
-  it.each(['main', 'worker'] as const)('clears the old %s timeline on seek and ignores a stopped source', async (mode) => {
-    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
-    harness = createHarness(mode, clock);
-    harness.insert('old', 10_000);
-    harness.insert('old-future', 11_500);
-    await harness.flush();
-    harness.frame(10_000);
-    expect(harness.active().map((message) => message.id)).toContain('old');
+  it.each(['main', 'worker'] as const)(
+    'clears the old %s timeline on seek and ignores a stopped source',
+    async (mode) => {
+      vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+      harness = createHarness(mode, clock);
+      harness.insert('old', 10_000);
+      harness.insert('old-future', 11_500);
+      await harness.flush();
+      harness.frame(10_000);
+      expect(harness.active().map((message) => message.id)).toContain('old');
 
-    (harness.source as unknown as { handleSeeked(offsetMs: number): void }).handleSeeked(5_000);
-    await Promise.resolve();
-    expect(harness.active()).toEqual([]);
-    harness.playback = { offsetMs: 5_000, paused: false };
-    harness.insert('new', 5_000);
-    await harness.flush();
-    harness.frame(10_016);
-    expect(harness.delivered).toEqual(['old', 'new']);
-    expect(harness.active().map((message) => message.id)).toEqual(['new']);
+      (harness.source as unknown as { handleSeeked(offsetMs: number): void }).handleSeeked(5_000);
+      await Promise.resolve();
+      expect(harness.active()).toEqual([]);
+      harness.playback = { offsetMs: 5_000, paused: false };
+      harness.insert('new', 5_000);
+      await harness.flush();
+      harness.frame(10_016);
+      expect(harness.delivered).toEqual(['old', 'new']);
+      expect(harness.active().map((message) => message.id)).toEqual(['new']);
 
-    harness.source.stop();
-    harness.insert('after-stop', 5_000);
-    await harness.flush();
-    harness.frame(10_032);
-    expect(harness.delivered).toEqual(['old', 'new']);
-  });
-
-  it.each((['main', 'worker'] as const).flatMap((mode) => [14, 32, 50].map((fontSize) => ({ mode, fontSize }))))('reconciles cached vertical geometry, density, pause and resize in $mode at $fontSize px', async ({ mode, fontSize }) => {
-    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-    harness = createHarness(mode, clock, { fontSize, laneSpacing: 0, showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false }, outline: { enabled: false, widthPx: 0, opacity: 0 } });
-    for (const id of ['日本語コメント1', '한국어댓글2']) harness.insert(id, 10_000);
-    await harness.flush(); harness.frame(10_000);
-    const initial = harness.active();
-    expect(initial).toHaveLength(2);
-    expect(Math.abs((initial[1]?.y ?? 0) - (initial[0]?.y ?? 0))).toBe(initial[0]?.height);
-    harness.frame(11_000);
-    const previous = harness.active();
-    const settings = (harness.renderer as unknown as { settings: OverlaySettings }).settings;
-    harness.renderer.setUserPaused(true);
-    const next = { ...settings, laneSpacing: 8, fontSize: 40, backgroundColors: { ...settings.backgroundColors, normal: '#00000040' }, outline: { enabled: true, widthPx: 4, opacity: 0.7 } };
-    harness.renderer.updateSettings(next);
-    await Promise.resolve(); await Promise.resolve();
-    // Apply a geometry refresh through Overlay's production resize callback.
-    await harness.resize(1280, 1080);
-    const changed = harness.active();
-    expect(changed).toHaveLength(2);
-    expect(changed.every((message) => message.height > (initial[0]?.height ?? 0))).toBe(true);
-    for (const message of changed) {
-      const old = previous.find((entry) => entry.id === message.id);
-      if (!old) throw new Error('lost prior placement');
-      const beforeProgress = (11_000 - old.motion.startTime) / old.duration;
-      expect((11_000 - message.motion.startTime) / message.duration).toBeCloseTo(beforeProgress);
+      harness.source.stop();
+      harness.insert('after-stop', 5_000);
+      await harness.flush();
+      harness.frame(10_032);
+      expect(harness.delivered).toEqual(['old', 'new']);
     }
-    if (mode === 'worker') {
-      if (!harness.worker) throw new Error('Worker missing');
-      const backend = harness.worker.backend as unknown as { laneHeight: number };
-      const beforeHeight = backend.laneHeight;
-      harness.worker.postMessage({ type: 'laneDensity', factor: 0.5 });
-      expect(backend.laneHeight).toBeCloseTo(beforeHeight / 4);
-    } else {
-      const allocator = (harness.renderer as unknown as { laneAllocator: { updateLaneDensityFactor(factor: number): void } }).laneAllocator;
-      allocator.updateLaneDensityFactor(0.5);
-      harness.renderer.resetAllocator({ width: 1280, height: 1080 });
-      (harness.renderer as unknown as { reflowActiveMessages(size: { width: number; height: number }): void }).reflowActiveMessages({ width: 1280, height: 1080 });
+  );
+
+  it.each(
+    (['main', 'worker'] as const).flatMap((mode) =>
+      [14, 32, 50].map((fontSize) => ({ mode, fontSize }))
+    )
+  )(
+    'reconciles cached vertical geometry, density, pause and resize in $mode at $fontSize px',
+    async ({ mode, fontSize }) => {
+      vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      harness = createHarness(mode, clock, {
+        fontSize,
+        laneSpacing: 0,
+        showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false },
+        outline: { enabled: false, widthPx: 0, opacity: 0 },
+      });
+      for (const id of ['日本語コメント1', '한국어댓글2']) harness.insert(id, 10_000);
+      await harness.flush();
+      harness.frame(10_000);
+      const initial = harness.active();
+      expect(initial).toHaveLength(2);
+      expect(Math.abs((initial[1]?.y ?? 0) - (initial[0]?.y ?? 0))).toBe(initial[0]?.height);
+      harness.frame(11_000);
+      const previous = harness.active();
+      const settings = (harness.renderer as unknown as { settings: OverlaySettings }).settings;
+      harness.renderer.setUserPaused(true);
+      const next = {
+        ...settings,
+        laneSpacing: 8,
+        fontSize: 40,
+        backgroundColors: { ...settings.backgroundColors, normal: '#00000040' },
+        outline: { enabled: true, widthPx: 4, opacity: 0.7 },
+      };
+      harness.renderer.updateSettings(next);
+      await Promise.resolve();
+      await Promise.resolve();
+      // Apply a geometry refresh through Overlay's production resize callback.
+      await harness.resize(1280, 1080);
+      const changed = harness.active();
+      expect(changed).toHaveLength(2);
+      expect(changed.every((message) => message.height > (initial[0]?.height ?? 0))).toBe(true);
+      for (const message of changed) {
+        const old = previous.find((entry) => entry.id === message.id);
+        if (!old) throw new Error('lost prior placement');
+        const beforeProgress = (11_000 - old.motion.startTime) / old.duration;
+        expect((11_000 - message.motion.startTime) / message.duration).toBeCloseTo(beforeProgress);
+      }
+      if (mode === 'worker') {
+        if (!harness.worker) throw new Error('Worker missing');
+        const backend = harness.worker.backend as unknown as { laneHeight: number };
+        const beforeHeight = backend.laneHeight;
+        harness.worker.postMessage({ type: 'laneDensity', factor: 0.5 });
+        expect(backend.laneHeight).toBeCloseTo(beforeHeight / 4);
+      } else {
+        const allocator = (
+          harness.renderer as unknown as {
+            laneAllocator: { updateLaneDensityFactor(factor: number): void };
+          }
+        ).laneAllocator;
+        allocator.updateLaneDensityFactor(0.5);
+        harness.renderer.resetAllocator({ width: 1280, height: 1080 });
+        (
+          harness.renderer as unknown as {
+            reflowActiveMessages(size: { width: number; height: number }): void;
+          }
+        ).reflowActiveMessages({ width: 1280, height: 1080 });
+      }
+      clock.now = 12_000;
+      harness.renderer.setUserPaused(false);
+      const measurement =
+        mode === 'worker'
+          ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx.measureText
+          : harness.mainContext.measureText;
+      measurement.mockClear();
+      const originalMeasurement = measurement.getMockImplementation();
+      const measurementStacks: string[] = [];
+      measurement.mockImplementation((text) => {
+        measurementStacks.push(new Error().stack ?? '');
+        return (
+          originalMeasurement?.(text) ?? {
+            width: 0,
+            actualBoundingBoxAscent: 0,
+            actualBoundingBoxDescent: 0,
+          }
+        );
+      });
+      harness.frame(12_000);
+      // Existing inline-width/bitmap measurements have separate caches. The new
+      // vertical bounds must be prepared before this first resumed draw.
+      expect(measurementStacks.filter((stack) => stack.includes('measureTextTopBounds'))).toEqual(
+        []
+      );
+      const resumed = harness.active();
+      expect(resumed).toHaveLength(2);
+      const [first, second] = resumed;
+      if (!first || !second) throw new Error('resumed placements missing');
+      expect(
+        motionPlansCollide(first.motion, second.motion, 0.08, 12_000) &&
+          first.y + first.height > second.y &&
+          second.y + second.height > first.y
+      ).toBe(false);
+      harness.renderer.updateSettings(settings);
+      await Promise.resolve();
+      await Promise.resolve();
+      await harness.resize(640, 160);
+      harness.frame(12_000);
+      const restored = harness.active();
+      expect(restored).toHaveLength(2);
+      expect(restored.every((message) => message.height === initial[0]?.height)).toBe(true);
+      const drawing =
+        mode === 'worker'
+          ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx
+          : harness.mainContext;
+      expect(drawing.font).toContain(`${fontSize}px`);
     }
-    clock.now = 12_000;
-    harness.renderer.setUserPaused(false);
-    const measurement = mode === 'worker'
-      ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx.measureText : harness.mainContext.measureText;
-    measurement.mockClear();
-    const originalMeasurement = measurement.getMockImplementation();
-    const measurementStacks: string[] = [];
-    measurement.mockImplementation((text) => {
-      measurementStacks.push(new Error().stack ?? '');
-      return originalMeasurement?.(text) ?? { width: 0, actualBoundingBoxAscent: 0, actualBoundingBoxDescent: 0 };
-    });
-    harness.frame(12_000);
-    // Existing inline-width/bitmap measurements have separate caches. The new
-    // vertical bounds must be prepared before this first resumed draw.
-    expect(measurementStacks.filter((stack) => stack.includes('measureTextTopBounds'))).toEqual([]);
-    const resumed = harness.active();
-    expect(resumed).toHaveLength(2);
-    const [first, second] = resumed;
-    if (!first || !second) throw new Error('resumed placements missing');
-    expect(motionPlansCollide(first.motion, second.motion, 0.08, 12_000) &&
-      first.y + first.height > second.y && second.y + second.height > first.y).toBe(false);
-    harness.renderer.updateSettings(settings);
-    await Promise.resolve(); await Promise.resolve();
-    await harness.resize(640, 160);
-    harness.frame(12_000);
-    const restored = harness.active();
-    expect(restored).toHaveLength(2);
-    expect(restored.every((message) => message.height === initial[0]?.height)).toBe(true);
-    const drawing = mode === 'worker'
-      ? (harness.worker?.backend as unknown as { ctx: TestContext }).ctx : harness.mainContext;
-    expect(drawing.font).toContain(`${fontSize}px`);
-  });
+  );
 
   it('keeps committed geometry and drops equivalent across Canvas and Worker frame partitions', async () => {
     async function run(mode: 'main' | 'worker', frames: number[]) {
@@ -399,12 +541,19 @@ describe('Placement through source, runtime and renderer', () => {
       for (const frame of frames) current.frame(frame);
       const result = {
         delivered: [...current.delivered],
-        active: current.active().map((message) => ({
-          id: message.id, x: message.x, y: message.y, width: message.width,
-          startTime: message.startTime, duration: message.duration,
-          entry: message.motion.viewportEntryTime,
-          exit: message.motion.visibleExitTime,
-        })).sort((left, right) => left.id.localeCompare(right.id)),
+        active: current
+          .active()
+          .map((message) => ({
+            id: message.id,
+            x: message.x,
+            y: message.y,
+            width: message.width,
+            startTime: message.startTime,
+            duration: message.duration,
+            entry: message.motion.viewportEntryTime,
+            exit: message.motion.visibleExitTime,
+          }))
+          .sort((left, right) => left.id.localeCompare(right.id)),
         drops: current.worker
           ? (current.worker.backend as unknown as { totalDrops: number }).totalDrops
           : current.renderer.observability.getMetrics().totalDropped,
@@ -445,8 +594,10 @@ describe('Placement through source, runtime and renderer', () => {
         vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
         vi.spyOn(Math, 'random').mockReturnValue(0.25);
         const current = createHarness(rendererMode, clock, {
-          speedPxPerSec: 250, backlogSpeedMultiplier: 2,
-          staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
+          speedPxPerSec: 250,
+          backlogSpeedMultiplier: 2,
+          staggerMaxDelayMs: 0,
+          staggerMediumDelayMs: 0,
           danmakuMode: mode,
         });
         current.renderer.setReplayMode(false);
@@ -457,7 +608,9 @@ describe('Placement through source, runtime and renderer', () => {
         internals.estimateDimensions = () => ({ width, height: 20 });
         internals.getEffectiveSpeedPxPerSec = () => 250 * burst;
         current.renderer.addMessage({
-          ...makeLiveMessage('backlog'), isBacklog: true, authorType: author,
+          ...makeLiveMessage('backlog'),
+          isBacklog: true,
+          authorType: author,
         });
         await Promise.resolve();
         // The serialized burst sample is retained while this Backlog message waits.
@@ -465,18 +618,25 @@ describe('Placement through source, runtime and renderer', () => {
         current.frame(10_000);
         const active = current.active().find((message) => message.id === 'backlog');
         const dispatched = current.worker?.messages
-          .filter((message): message is { type: string; messages: Array<{ burstSpeedMultiplier: number }> } =>
-            typeof message === 'object' && message !== null &&
-            'type' in message && message.type === 'addMessages'
+          .filter(
+            (
+              message
+            ): message is { type: string; messages: Array<{ burstSpeedMultiplier: number }> } =>
+              typeof message === 'object' &&
+              message !== null &&
+              'type' in message &&
+              message.type === 'addMessages'
           )
           .flatMap((message) => message.messages);
         clock.now = 11_000;
         if (current.worker) {
-          (current.worker.backend as unknown as { reflowActiveMessages(): void })
-            .reflowActiveMessages();
+          (
+            current.worker.backend as unknown as { reflowActiveMessages(): void }
+          ).reflowActiveMessages();
         } else {
-          (current.renderer as unknown as { reflowActiveMessages(size: typeof dimensions): void })
-            .reflowActiveMessages(dimensions);
+          (
+            current.renderer as unknown as { reflowActiveMessages(size: typeof dimensions): void }
+          ).reflowActiveMessages(dimensions);
         }
         const reflowed = current.active().find((message) => message.id === 'backlog');
         current.close();
@@ -493,9 +653,7 @@ describe('Placement through source, runtime and renderer', () => {
         expect(worker.dispatched?.[0]?.burstSpeedMultiplier).toBeCloseTo(burst);
         expect(main.active?.motion.travelDistancePx).toBe(1_920 + width + 100);
         expect(main.active?.motion.durationMs).toBe(duration);
-        expect(main.active?.motion.actualVelocityPxPerMs).toBe(
-          (1_920 + width + 100) / duration
-        );
+        expect(main.active?.motion.actualVelocityPxPerMs).toBe((1_920 + width + 100) / duration);
         expect(worker.active?.motion).toMatchObject({
           durationMs: main.active?.motion.durationMs,
           actualVelocityPxPerMs: main.active?.motion.actualVelocityPxPerMs,
@@ -524,8 +682,11 @@ describe('Placement through source, runtime and renderer', () => {
         vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
         vi.spyOn(Math, 'random').mockReturnValue(0.25);
         const current = createHarness(rendererMode, clock, {
-          danmakuMode: motionMode, speedPxPerSec: 250, backlogSpeedMultiplier: 2,
-          staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
+          danmakuMode: motionMode,
+          speedPxPerSec: 250,
+          backlogSpeedMultiplier: 2,
+          staggerMaxDelayMs: 0,
+          staggerMediumDelayMs: 0,
         });
         current.renderer.setReplayMode(false);
         const internals = current.renderer as unknown as {
@@ -561,14 +722,26 @@ describe('Placement through source, runtime and renderer', () => {
         expect(mainFirst.laneIndex).toBe(mainSecond.laneIndex);
         expect(workerFirst.laneIndex).toBe(workerSecond.laneIndex);
         expect(motionPlansCollide(mainFirst.motion, mainSecond.motion, 0.08, 10_000)).toBe(false);
-        expect(motionPlansCollide(workerFirst.motion, workerSecond.motion, 0.08, 10_000)).toBe(false);
-        expect(worker.map(({ id, laneIndex, motion }) => ({
-          id, laneIndex, startTime: motion.startTime,
-          entry: motion.viewportEntryTime, exit: motion.visibleExitTime,
-        }))).toEqual(main.map(({ id, laneIndex, motion }) => ({
-          id, laneIndex, startTime: motion.startTime,
-          entry: motion.viewportEntryTime, exit: motion.visibleExitTime,
-        })));
+        expect(motionPlansCollide(workerFirst.motion, workerSecond.motion, 0.08, 10_000)).toBe(
+          false
+        );
+        expect(
+          worker.map(({ id, laneIndex, motion }) => ({
+            id,
+            laneIndex,
+            startTime: motion.startTime,
+            entry: motion.viewportEntryTime,
+            exit: motion.visibleExitTime,
+          }))
+        ).toEqual(
+          main.map(({ id, laneIndex, motion }) => ({
+            id,
+            laneIndex,
+            startTime: motion.startTime,
+            entry: motion.viewportEntryTime,
+            exit: motion.visibleExitTime,
+          }))
+        );
       } finally {
         dimensions.width = 640;
         dimensions.height = 160;
@@ -607,14 +780,19 @@ describe('Placement through source, runtime and renderer', () => {
   );
 
   const pressureCases = [
-    { depth: 29, limit: 52 }, { depth: 30, limit: 50 },
-    { depth: 31, limit: 48 }, { depth: 49, limit: 3 },
-    { depth: 50, limit: 0 }, { depth: 51, limit: 0 },
+    { depth: 29, limit: 52 },
+    { depth: 30, limit: 50 },
+    { depth: 31, limit: 48 },
+    { depth: 49, limit: 3 },
+    { depth: 50, limit: 0 },
+    { depth: 51, limit: 0 },
   ];
 
-  it.each(pressureCases.flatMap(({ depth, limit }) =>
-    (['main', 'worker'] as const).map((mode) => ({ mode, depth, limit }))
-  ))('bounds $mode live entry at queue depth $depth', async ({ mode, depth, limit }) => {
+  it.each(
+    pressureCases.flatMap(({ depth, limit }) =>
+      (['main', 'worker'] as const).map((mode) => ({ mode, depth, limit }))
+    )
+  )('bounds $mode live entry at queue depth $depth', async ({ mode, depth, limit }) => {
     vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
     vi.spyOn(Math, 'random').mockReturnValue(0.25);
     harness = createHarness(mode, clock);
@@ -662,7 +840,8 @@ describe('Placement through source, runtime and renderer', () => {
       vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
       vi.spyOn(Math, 'random').mockReturnValue(0.25);
       harness = createHarness(mode, clock, {
-        staggerMaxDelayMs: 0, staggerMediumDelayMs: 0,
+        staggerMaxDelayMs: 0,
+        staggerMediumDelayMs: 0,
       });
       harness.renderer.setReplayMode(false);
       harness.renderer.addMessage(makeLiveMessage('zero-one'));

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageDetectorService } from '@translation/language-detector';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolvePromise: ((value: T) => void) | undefined;
@@ -58,9 +58,7 @@ describe('LanguageDetectorService detection', () => {
 
   it('uses the browser detector when confidence is sufficient and maps BCP 47 tags', async () => {
     const detector = {
-      detect: vi.fn().mockResolvedValue([
-        { detectedLanguage: 'ja-JP', confidence: 0.95 },
-      ]),
+      detect: vi.fn().mockResolvedValue([{ detectedLanguage: 'ja-JP', confidence: 0.95 }]),
       destroy: vi.fn(),
     };
     vi.stubGlobal('LanguageDetector', {
@@ -77,9 +75,7 @@ describe('LanguageDetectorService detection', () => {
 
   it('uses Unicode fallback when the detector confidence is below the threshold', async () => {
     const detector = {
-      detect: vi.fn().mockResolvedValue([
-        { detectedLanguage: 'en-US', confidence: 0.49 },
-      ]),
+      detect: vi.fn().mockResolvedValue([{ detectedLanguage: 'en-US', confidence: 0.49 }]),
       destroy: vi.fn(),
     };
     vi.stubGlobal('LanguageDetector', {

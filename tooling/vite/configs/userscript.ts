@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeConfig, type ConfigEnv, type UserConfig } from 'vite';
+import { type ConfigEnv, mergeConfig, type UserConfig } from 'vite';
 import monkeyPlugin from 'vite-plugin-monkey';
 import { BIDI_LICENSE_BANNER } from '../bidi-license.ts';
 import { basePreset } from '../presets/base.ts';

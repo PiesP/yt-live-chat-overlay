@@ -5,7 +5,7 @@
  * Canvas2D API support for renderer tests via the `canvas` package.
  */
 
-import { afterAll, beforeEach, vi } from "vitest";
+import { afterAll, beforeEach, vi } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════
 // GM_* API Mocks
@@ -13,17 +13,11 @@ import { afterAll, beforeEach, vi } from "vitest";
 
 const gmStorage = new Map<string, unknown>();
 
-(globalThis as Record<string, unknown>).GM_getValue = <T>(
-  key: string,
-  defaultValue?: T
-): T => {
+(globalThis as Record<string, unknown>).GM_getValue = <T>(key: string, defaultValue?: T): T => {
   return (gmStorage.get(key) as T) ?? (defaultValue as T);
 };
 
-(globalThis as Record<string, unknown>).GM_setValue = (
-  key: string,
-  value: unknown
-): void => {
+(globalThis as Record<string, unknown>).GM_setValue = (key: string, value: unknown): void => {
   gmStorage.set(key, value);
 };
 
@@ -58,8 +52,8 @@ const gmStorage = new Map<string, unknown>();
 
 (globalThis as Record<string, unknown>).GM_info = {
   script: {
-    version: "1.0.0",
-    name: "YT Live Chat Overlay",
+    version: '1.0.0',
+    name: 'YT Live Chat Overlay',
   },
 };
 
@@ -78,39 +72,45 @@ const gmStorage = new Map<string, unknown>();
 // ═══════════════════════════════════════════════════════════
 
 // requestAnimationFrame
-if (typeof globalThis.requestAnimationFrame !== "function") {
-  (globalThis as unknown as {
-    requestAnimationFrame: typeof requestAnimationFrame;
-  }).requestAnimationFrame = (cb: FrameRequestCallback) => {
+if (typeof globalThis.requestAnimationFrame !== 'function') {
+  (
+    globalThis as unknown as {
+      requestAnimationFrame: typeof requestAnimationFrame;
+    }
+  ).requestAnimationFrame = (cb: FrameRequestCallback) => {
     return setTimeout(
-      () => cb(typeof performance !== "undefined" ? performance.now() : Date.now()),
+      () => cb(typeof performance !== 'undefined' ? performance.now() : Date.now()),
       16
     ) as unknown as number;
   };
 }
 
-if (typeof globalThis.cancelAnimationFrame !== "function") {
-  (globalThis as unknown as {
-    cancelAnimationFrame: typeof cancelAnimationFrame;
-  }).cancelAnimationFrame = (id: number) => {
+if (typeof globalThis.cancelAnimationFrame !== 'function') {
+  (
+    globalThis as unknown as {
+      cancelAnimationFrame: typeof cancelAnimationFrame;
+    }
+  ).cancelAnimationFrame = (id: number) => {
     clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
   };
 }
 
 // ResizeObserver
-if (typeof globalThis.ResizeObserver !== "function") {
+if (typeof globalThis.ResizeObserver !== 'function') {
   class ResizeObserverMock {
     observe() {}
     unobserve() {}
     disconnect() {}
   }
-  (globalThis as unknown as {
-    ResizeObserver: typeof ResizeObserverMock;
-  }).ResizeObserver = ResizeObserverMock;
+  (
+    globalThis as unknown as {
+      ResizeObserver: typeof ResizeObserverMock;
+    }
+  ).ResizeObserver = ResizeObserverMock;
 }
 
 // IntersectionObserver
-if (typeof globalThis.IntersectionObserver !== "function") {
+if (typeof globalThis.IntersectionObserver !== 'function') {
   class IntersectionObserverMock {
     constructor(_cb: IntersectionObserverCallback) {}
     observe() {}
@@ -125,11 +125,11 @@ if (typeof globalThis.IntersectionObserver !== "function") {
 }
 
 // MatchMedia
-if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   window.matchMedia = (_query: string): MediaQueryList => {
     return {
       matches: false,
-      media: "",
+      media: '',
       onchange: null,
       addListener: () => {},
       removeListener: () => {},
@@ -151,7 +151,7 @@ const loggerMock = {
   error: vi.fn(),
 };
 
-vi.mock("@util/logging", () => ({
+vi.mock('@util/logging', () => ({
   createLogger: vi.fn(() => loggerMock),
   logger: loggerMock,
 }));
@@ -162,8 +162,8 @@ vi.mock("@util/logging", () => ({
 
 beforeEach(() => {
   gmStorage.clear();
-  if (typeof document !== "undefined") {
-    document.body.innerHTML = "";
+  if (typeof document !== 'undefined') {
+    document.body.innerHTML = '';
   }
 });
 

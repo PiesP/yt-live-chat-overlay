@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { RenderWorkerManager } from '@renderer/worker/manager';
 import type { OverlaySettings } from '@app-types';
+import { RenderWorkerManager } from '@renderer/worker/manager';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // ── Mock Worker ──────────────────────────────────────────────────────
 

@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
 import {
   commitDrainBatch,
   createDrainBatch,
+  nextDrainPriority,
   recordDrainResult,
   selectDrainCandidates,
-  nextDrainPriority,
 } from '@renderer/canvas/drain-batch';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('Canvas drain batch bookkeeping', () => {
   it('rotates beyond repeated failures without losing or reordering the queue', () => {
@@ -25,7 +25,10 @@ describe('Canvas drain batch bookkeeping', () => {
   });
 
   it('visits high priority first and resumes another group after a time-budget interruption', () => {
-    const queue = [...Array.from({ length: 40 }, (_, id) => ({ id, priority: 100 })), { id: 40, priority: 0 }];
+    const queue = [
+      ...Array.from({ length: 40 }, (_, id) => ({ id, priority: 100 })),
+      { id: 40, priority: 0 },
+    ];
     const priorityOf = (m: (typeof queue)[number]) => m.priority;
     const first = selectDrainCandidates(queue, priorityOf, new Map());
     expect(first[0]?.priority).toBe(100);

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, expect, it } from 'vitest';
 import {
   getRenderMessageResourceViolation,
   inspectBoundedRenderText,
   MAX_RENDER_CONTENT_SEGMENTS,
   MAX_RENDER_FIELD_CODE_POINTS,
 } from '@chat/render-resource-limits';
+import { describe, expect, it } from 'vitest';
 
 describe('render message resource limits', () => {
   it('accepts the exact BMP and astral code-point boundaries', () => {
@@ -20,12 +20,12 @@ describe('render message resource limits', () => {
   });
 
   it('rejects one code point above the boundary through both fast paths', () => {
-    expect(
-      inspectBoundedRenderText('a'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1), 'body')
-    ).toEqual({ violation: { field: 'body', reason: 'code-point-length' } });
-    expect(
-      inspectBoundedRenderText('😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1), 'body')
-    ).toEqual({ violation: { field: 'body', reason: 'utf16-length' } });
+    expect(inspectBoundedRenderText('a'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1), 'body')).toEqual({
+      violation: { field: 'body', reason: 'code-point-length' },
+    });
+    expect(inspectBoundedRenderText('😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1), 'body')).toEqual(
+      { violation: { field: 'body', reason: 'utf16-length' } }
+    );
   });
 
   it('counts rich content instead of double-counting its derived plain text', () => {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { VideoPauseController } from '@app/video-pause-controller';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function createVideo(paused: boolean): HTMLVideoElement {
   const video = document.createElement('video');

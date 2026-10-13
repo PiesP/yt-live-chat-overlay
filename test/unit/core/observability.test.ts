@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ObservabilityReporter } from "@util/observability";
 
-describe("ObservabilityReporter", () => {
+import { ObservabilityReporter } from '@util/observability';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+describe('ObservabilityReporter', () => {
   let reporter: ObservabilityReporter;
 
   beforeEach(() => {
@@ -17,21 +18,21 @@ describe("ObservabilityReporter", () => {
   // Initial state
   // ═══════════════════════════════════════════════════════════
 
-  it("starts with zero counts", () => {
+  it('starts with zero counts', () => {
     const metrics = reporter.getMetrics();
     expect(metrics.totalReceived).toBe(0);
     expect(metrics.totalRendered).toBe(0);
     expect(metrics.totalDropped).toBe(0);
     expect(metrics.dropRate).toBe(0);
     expect(metrics.queueDepth).toBe(0);
-    expect(metrics.burstLevel).toBe("normal");
+    expect(metrics.burstLevel).toBe('normal');
   });
 
   // ═══════════════════════════════════════════════════════════
   // Message lifecycle
   // ═══════════════════════════════════════════════════════════
 
-  it("tracks received → rendered counts", () => {
+  it('tracks received → rendered counts', () => {
     reporter.onMessageReceived();
     reporter.onMessageReceived();
     reporter.onMessageRendered();
@@ -43,10 +44,10 @@ describe("ObservabilityReporter", () => {
     expect(metrics.totalDropped).toBe(0);
   });
 
-  it("tracks dropped messages", () => {
+  it('tracks dropped messages', () => {
     reporter.onMessageReceived();
     reporter.onMessageReceived();
-    reporter.onMessageDropped("queue_priority");
+    reporter.onMessageDropped('queue_priority');
 
     const metrics = reporter.getMetrics();
     expect(metrics.totalReceived).toBe(2);
@@ -54,14 +55,14 @@ describe("ObservabilityReporter", () => {
     expect(metrics.dropRate).toBe(0.5);
   });
 
-  it("adds batched Worker render and drop totals without per-message loops", () => {
+  it('adds batched Worker render and drop totals without per-message loops', () => {
     reporter.onMessageReceived();
     reporter.onMessageReceived();
     reporter.onMessageReceived();
     reporter.onMessageReceived();
 
     reporter.onMessagesRendered(3);
-    reporter.onMessagesDropped(2, "worker_backpressure");
+    reporter.onMessagesDropped(2, 'worker_backpressure');
 
     const metrics = reporter.getMetrics();
     expect(metrics.totalRendered).toBe(3);
@@ -69,9 +70,9 @@ describe("ObservabilityReporter", () => {
     expect(metrics.dropRate).toBe(0.5);
   });
 
-  it("counts batched pre-render drops in the received denominator", () => {
+  it('counts batched pre-render drops in the received denominator', () => {
     reporter.onMessagesReceived(3);
-    reporter.onMessagesDropped(3, "replay_late");
+    reporter.onMessagesDropped(3, 'replay_late');
     expect(reporter.getMetrics()).toMatchObject({
       totalReceived: 3,
       totalDropped: 3,
@@ -86,12 +87,12 @@ describe("ObservabilityReporter", () => {
     });
   });
 
-  it("keeps an all-late batch in the new window after idle expiry without a HUD tick", () => {
+  it('keeps an all-late batch in the new window after idle expiry without a HUD tick', () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 60_000);
 
     reporter.onMessagesReceived(3);
-    reporter.onMessagesDropped(3, "replay_late");
+    reporter.onMessagesDropped(3, 'replay_late');
 
     expect(reporter.getMetrics()).toMatchObject({
       totalReceived: 3,
@@ -100,14 +101,14 @@ describe("ObservabilityReporter", () => {
     });
   });
 
-  it("keeps ordinary drops in the new window after idle expiry", () => {
+  it('keeps ordinary drops in the new window after idle expiry', () => {
     vi.useFakeTimers();
     reporter.onMessageReceived();
-    reporter.onMessageDropped("queue_priority");
+    reporter.onMessageDropped('queue_priority');
     vi.setSystemTime(Date.now() + 60_000);
 
     reporter.onMessageReceived();
-    reporter.onMessageDropped("queue_priority");
+    reporter.onMessageDropped('queue_priority');
 
     expect(reporter.getMetrics()).toMatchObject({
       totalReceived: 2,
@@ -116,15 +117,15 @@ describe("ObservabilityReporter", () => {
     });
   });
 
-  it("ignores invalid received batch counts", () => {
+  it('ignores invalid received batch counts', () => {
     for (const count of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
       reporter.onMessagesReceived(count);
     }
     expect(reporter.getMetrics().totalReceived).toBe(0);
   });
 
-  it("computes zero drop rate when no messages received", () => {
-    reporter.onMessageDropped("queue_priority");
+  it('computes zero drop rate when no messages received', () => {
+    reporter.onMessageDropped('queue_priority');
     const metrics = reporter.getMetrics();
     expect(metrics.totalDropped).toBe(1);
     // 0 received → dropRate = 0 (avoids division by zero)
@@ -135,22 +136,22 @@ describe("ObservabilityReporter", () => {
   // State updates
   // ═══════════════════════════════════════════════════════════
 
-  it("updates queue depth", () => {
+  it('updates queue depth', () => {
     reporter.updateQueueDepth(42);
     expect(reporter.getMetrics().queueDepth).toBe(42);
   });
 
-  it("updates burst level", () => {
-    reporter.updateBurstLevel("high");
-    expect(reporter.getMetrics().burstLevel).toBe("high");
+  it('updates burst level', () => {
+    reporter.updateBurstLevel('high');
+    expect(reporter.getMetrics().burstLevel).toBe('high');
   });
 
-  it("updates active messages count", () => {
+  it('updates active messages count', () => {
     reporter.updateActiveMessages(15);
     expect(reporter.getMetrics().activeMessages).toBe(15);
   });
 
-  it("clamps lane utilization to [0, 1]", () => {
+  it('clamps lane utilization to [0, 1]', () => {
     reporter.updateLaneUtilization(1.5);
     expect(reporter.getMetrics().laneUtilization).toBe(1);
 
@@ -158,7 +159,7 @@ describe("ObservabilityReporter", () => {
     expect(reporter.getMetrics().laneUtilization).toBe(0);
   });
 
-  it("clamps backlog progress to [0, 1]", () => {
+  it('clamps backlog progress to [0, 1]', () => {
     reporter.updateBacklogProgress(1.5);
     expect(reporter.getMetrics().backlogProgress).toBe(1);
 
@@ -170,37 +171,37 @@ describe("ObservabilityReporter", () => {
   // Debug overlay
   // ═══════════════════════════════════════════════════════════
 
-  it("creates debug overlay when showDebug is true", () => {
+  it('creates debug overlay when showDebug is true', () => {
     reporter.setShowDebug(true);
-    const el = document.getElementById("yt-chat-overlay-debug");
+    const el = document.getElementById('yt-chat-overlay-debug');
     expect(el).not.toBeNull();
     reporter.destroy();
   });
 
-  it("does not create debug overlay when showDebug is false", () => {
-    const el = document.getElementById("yt-chat-overlay-debug");
+  it('does not create debug overlay when showDebug is false', () => {
+    const el = document.getElementById('yt-chat-overlay-debug');
     expect(el).toBeNull();
   });
 
-  it("tick updates overlay content when visible", () => {
+  it('tick updates overlay content when visible', () => {
     reporter.setShowDebug(true);
     reporter.onMessageReceived();
     reporter.tick();
 
-    const el = document.getElementById("yt-chat-overlay-debug");
-    expect(el?.textContent).toContain("Rcvd:");
-    expect(el?.textContent).toContain("1");
+    const el = document.getElementById('yt-chat-overlay-debug');
+    expect(el?.textContent).toContain('Rcvd:');
+    expect(el?.textContent).toContain('1');
     reporter.destroy();
   });
 
-  it("labels frame timings unavailable when rendering is Worker-owned", () => {
+  it('labels frame timings unavailable when rendering is Worker-owned', () => {
     reporter.setShowDebug(true);
     reporter.setFrameTimingAvailable(false);
     reporter.tick();
 
-    const el = document.getElementById("yt-chat-overlay-debug");
-    expect(el?.textContent).toContain("Render: n/a | Drain: n/a");
-    expect(el?.textContent).toContain("Coll: n/a | Text: n/a");
+    const el = document.getElementById('yt-chat-overlay-debug');
+    expect(el?.textContent).toContain('Render: n/a | Drain: n/a');
+    expect(el?.textContent).toContain('Coll: n/a | Text: n/a');
     reporter.destroy();
   });
 
@@ -208,7 +209,7 @@ describe("ObservabilityReporter", () => {
   // Snapshot isolation
   // ═══════════════════════════════════════════════════════════
 
-  it("getMetrics returns a snapshot (not live reference)", () => {
+  it('getMetrics returns a snapshot (not live reference)', () => {
     reporter.onMessageReceived();
     const snapshot = reporter.getMetrics();
     reporter.onMessageReceived();

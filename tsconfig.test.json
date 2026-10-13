@@ -1,9 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": [
-      "vitest/globals"
-    ],
+    "types": ["vitest/globals"],
     "strict": true,
     "strictNullChecks": true,
     "exactOptionalPropertyTypes": true,
@@ -14,13 +12,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": [
-    "src/**/*.d.ts",
-    "test/**/*.ts"
-  ],
-  "exclude": [
-    "test/e2e",
-    "test/node_modules",
-    "test/unit/config/fixtures/devtools-endpoint.ts"
-  ]
+  "include": ["src/**/*.d.ts", "test/**/*.ts"],
+  "exclude": ["test/e2e", "test/node_modules", "test/unit/config/fixtures/devtools-endpoint.ts"]
 }

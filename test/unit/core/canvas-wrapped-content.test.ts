@@ -9,8 +9,11 @@ vi.mock('@renderer/text-measure', () => ({
   measureTextWidth: (text: string): number => (text === 'i' ? 4 : text.length * 10),
 }));
 
-import { renderWrappedContentSegments } from '@renderer/canvas/shared';
-import type { AnyCanvasContext, TextBitmapCache } from '@renderer/canvas/shared';
+import {
+  type AnyCanvasContext,
+  renderWrappedContentSegments,
+  type TextBitmapCache,
+} from '@renderer/canvas/shared';
 
 function createContext(): CanvasRenderingContext2D {
   return {
@@ -35,10 +38,10 @@ describe('renderWrappedContentSegments', () => {
       const widths: Readonly<Record<string, number>> = {
         ' ': 4,
         '…': 10,
-        '후원': 20,
-        '카드의': 30,
+        후원: 20,
+        카드의: 30,
         ' 카드의': 42,
-        '긴': 10,
+        긴: 10,
         ' 긴': 18,
       };
       return widths[text] ?? text.length * 10;
@@ -202,8 +205,12 @@ describe('renderWrappedContentSegments', () => {
       ' ',
       'مرحبا',
     ]);
-    expect(fillText.mock.invocationCallOrder[1]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
-    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[2]!);
+    expect(fillText.mock.invocationCallOrder[1]).toBeLessThan(
+      drawImage.mock.invocationCallOrder[0]!
+    );
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(
+      fillText.mock.invocationCallOrder[2]!
+    );
   });
 
   it('places a wrapped inline emoji between two Arabic runs in visual order', () => {
@@ -233,8 +240,12 @@ describe('renderWrappedContentSegments', () => {
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
     expect(fillText.mock.calls.map(([text]) => text)).toEqual(['بكم', ' ', 'مرحبا']);
-    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
-    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(
+      drawImage.mock.invocationCallOrder[0]!
+    );
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(
+      fillText.mock.invocationCallOrder[1]!
+    );
   });
 
   it('places a truncation ellipsis at the visual left of an RTL line', () => {

@@ -96,8 +96,12 @@ describe('fetch interceptor response identities', () => {
     const original = vi.fn(() => response);
     const pageWindow = {
       fetch: original,
-      get Request(): never { throw new Error('page Request getter must not be read'); },
-      get URL(): never { throw new Error('page URL getter must not be read'); },
+      get Request(): never {
+        throw new Error('page Request getter must not be read');
+      },
+      get URL(): never {
+        throw new Error('page URL getter must not be read');
+      },
     } as unknown as Window & typeof globalThis;
     const onMessages = vi.fn();
     const restore = installFetchInterceptor(pageWindow, () => settings, onMessages);
@@ -141,7 +145,11 @@ describe('fetch interceptor response identities', () => {
     };
     const pageWindow = { fetch: original } as unknown as Window & typeof globalThis;
     const restore = installFetchInterceptor(pageWindow, () => settings, vi.fn());
-    const request = { get url(): string { throw new Error('unreadable URL'); } } as Request;
+    const request = {
+      get url(): string {
+        throw new Error('unreadable URL');
+      },
+    } as Request;
 
     await expect(pageWindow.fetch(request)).resolves.toBe(response);
     expect(calls).toBe(1);
@@ -225,19 +233,22 @@ describe('fetch interceptor response identities', () => {
     let activeReads = 0;
     let maxActiveReads = 0;
     const cloneSpies = bodies.map((body) =>
-      vi.fn(() => ({
-        body: null,
-        headers: new Headers(),
-        text: async () => {
-          activeReads++;
-          maxActiveReads = Math.max(maxActiveReads, activeReads);
-          try {
-            return await body.promise;
-          } finally {
-            activeReads--;
-          }
-        },
-      }) as unknown as Response)
+      vi.fn(
+        () =>
+          ({
+            body: null,
+            headers: new Headers(),
+            text: async () => {
+              activeReads++;
+              maxActiveReads = Math.max(maxActiveReads, activeReads);
+              try {
+                return await body.promise;
+              } finally {
+                activeReads--;
+              }
+            },
+          }) as unknown as Response
+      )
     );
     let responseIndex = 0;
     window.fetch = vi.fn(async () => {

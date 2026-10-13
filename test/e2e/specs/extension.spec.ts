@@ -15,10 +15,10 @@
  * chrome.* APIs — this file tests the real extension path.
  */
 
-import { chromium, test, expect } from '@playwright/test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { chromium, expect, test } from '@playwright/test';
 import { MOCK_HTML } from '../fixtures/test-utils';
 
 const EXTENSION_PATH = resolve(process.cwd(), 'dist-extension');
@@ -73,18 +73,20 @@ test.describe('Chrome Extension', () => {
         timeout: 30_000,
       });
 
-      await expect.poll(
-        () => page.evaluate(() => typeof window.__ytExtensionBridge === 'object'),
-        { timeout: 15_000 },
-      ).toBe(true);
+      await expect
+        .poll(() => page.evaluate(() => typeof window.__ytExtensionBridge === 'object'), {
+          timeout: 15_000,
+        })
+        .toBe(true);
       const bridge = await page.evaluate(() => window.__ytExtensionBridge);
       expect(bridge).toMatchObject({
         workerSupported: true,
         storageType: 'chrome.storage.local',
       });
       expect(bridge?.workerUrl).toMatch(/^blob:https:\/\/www\.youtube\.com\//);
-      await expect(page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]'))
-        .toHaveCount(1);
+      await expect(
+        page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]')
+      ).toHaveCount(1);
       await expect(page.locator('#yt-live-chat-overlay')).toBeAttached();
       await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
       await expect(page.locator('#yt-chat-overlay-settings-button')).toBeVisible();

@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
 import {
+  AUTHOR_COLOR_KEYS,
   getRootDisplayMeta,
   ROOT_SETTING_META,
   SHOW_AUTHOR_KEYS,
   VISUAL_ROOT_KEYS,
-  AUTHOR_COLOR_KEYS,
 } from '@settings/meta';
+import { describe, expect, it } from 'vitest';
 
 // ── getRootDisplayMeta ──────────────────────────────────────────
 

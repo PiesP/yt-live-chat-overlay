@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi } from 'vitest';
-import {
-  computeAgeFadeRate,
-  computeInvFadeDuration,
-  enqueueWithOverflow,
-} from '@renderer/shared';
-import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import type { ChatMessage } from '@app-types';
+import { computeAgeFadeRate, computeInvFadeDuration, enqueueWithOverflow } from '@renderer/shared';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
+import { describe, expect, it, vi } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // computeAgeFadeRate
@@ -75,7 +71,7 @@ describe('computeInvFadeDuration', () => {
 
 function makeMessage(
   kind: ChatMessage['kind'] = 'text',
-  overrides: Partial<ChatMessage> = {},
+  overrides: Partial<ChatMessage> = {}
 ): ChatMessage {
   return {
     content: [{ type: 'text', content: 'test msg' }],

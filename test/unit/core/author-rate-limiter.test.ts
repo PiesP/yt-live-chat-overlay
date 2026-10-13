@@ -1,8 +1,5 @@
+import { findFirstTimestampAfterCutoff, PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { describe, expect, it } from 'vitest';
-import {
-  findFirstTimestampAfterCutoff,
-  PerAuthorRateLimiter,
-} from '@media/author-rate-limiter';
 
 describe('findFirstTimestampAfterCutoff', () => {
   it.each([
@@ -18,7 +15,10 @@ describe('findFirstTimestampAfterCutoff', () => {
 
 describe('PerAuthorRateLimiter', () => {
   it('does not let high burst mode loosen the strict preset', () => {
-    const limiter = new PerAuthorRateLimiter(() => 'high', () => 0);
+    const limiter = new PerAuthorRateLimiter(
+      () => 'high',
+      () => 0
+    );
     limiter.updateConfig({ preset: 'strict' });
 
     expect(limiter.allow('author-1', 0)).toBe(true);
@@ -28,7 +28,10 @@ describe('PerAuthorRateLimiter', () => {
 
   it('allows a message again after the rate-limit window expires', () => {
     let now = 0;
-    const limiter = new PerAuthorRateLimiter(() => 'normal', () => now);
+    const limiter = new PerAuthorRateLimiter(
+      () => 'normal',
+      () => now
+    );
 
     for (let i = 0; i < 5; i++) {
       expect(limiter.allow('author-1', 0)).toBe(true);
@@ -40,7 +43,10 @@ describe('PerAuthorRateLimiter', () => {
   });
 
   it('does not rate-limit moderators, owners, or high-priority messages', () => {
-    const limiter = new PerAuthorRateLimiter(() => 'extreme', () => 0);
+    const limiter = new PerAuthorRateLimiter(
+      () => 'extreme',
+      () => 0
+    );
 
     expect(limiter.allow('moderator', 0, 'moderator')).toBe(true);
     expect(limiter.allow('owner', 0, 'owner')).toBe(true);
@@ -49,7 +55,10 @@ describe('PerAuthorRateLimiter', () => {
   });
 
   it('clears recorded timestamps when rate limiting is disabled', () => {
-    const limiter = new PerAuthorRateLimiter(() => 'normal', () => 0);
+    const limiter = new PerAuthorRateLimiter(
+      () => 'normal',
+      () => 0
+    );
 
     expect(limiter.allow('author-1', 0)).toBe(true);
     expect(limiter.size()).toBe(1);
@@ -61,7 +70,10 @@ describe('PerAuthorRateLimiter', () => {
   });
 
   it('applies the extreme burst limit independently per author', () => {
-    const limiter = new PerAuthorRateLimiter(() => 'extreme', () => 0);
+    const limiter = new PerAuthorRateLimiter(
+      () => 'extreme',
+      () => 0
+    );
 
     expect(limiter.allow('author-1', 0)).toBe(true);
     expect(limiter.allow('author-1', 0)).toBe(true);

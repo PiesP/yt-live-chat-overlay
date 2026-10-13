@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { getCachedGradient } from '@renderer/canvas/gradient-utils';
-import type { GradientContext } from '@renderer/canvas/gradient-utils';
-import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { LruMap } from '@piesp/browser-core/util';
+import { type GradientContext, getCachedGradient } from '@renderer/canvas/gradient-utils';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 // ── Mock CanvasGradient ──────────────────────────────────────────────
 
-interface ColorStop { offset: number; color: string }
+interface ColorStop {
+  offset: number;
+  color: string;
+}
 
 class MockCanvasGradient {
   stops: ColorStop[] = [];

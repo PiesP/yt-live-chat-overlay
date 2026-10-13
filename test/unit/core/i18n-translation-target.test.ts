@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
 import { resolveTranslationTarget } from '@i18n/index';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 describe('resolveTranslationTarget', () => {
   afterEach(() => {

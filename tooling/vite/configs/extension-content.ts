@@ -1,5 +1,5 @@
-import { type ExtensionBrowser } from './extension-target.ts';
 import { createExtensionIifeConfig } from './extension-iife.ts';
+import type { ExtensionBrowser } from './extension-target.ts';
 
 export function createExtensionContentConfig(browser: ExtensionBrowser) {
   return createExtensionIifeConfig(browser, {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+
 import { createChatPreflight } from '@app/chat-availability-preflight';
+import { describe, expect, it } from 'vitest';
 
 describe('ChatAvailabilityPreflight', () => {
   it('starts in idle state', () => {

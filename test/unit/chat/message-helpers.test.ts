@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 PiesP
 
-import { describe, expect, it } from 'vitest';
 import {
-  stripControlCharacters,
-  normalizeInlineText,
-  truncateForKind,
-  hasEmojiContent,
   AUTHOR_TYPE_PRIORITY,
   EMOJI_ALIAS_PATTERN,
+  hasEmojiContent,
+  normalizeInlineText,
+  stripControlCharacters,
+  truncateForKind,
 } from '@chat/message-helpers';
+import { describe, expect, it } from 'vitest';
 
 describe('message-helpers', () => {
   describe('stripControlCharacters', () => {

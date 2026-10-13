@@ -23,14 +23,19 @@ function normalizeProfile(profile) {
   if (typeof profile !== 'string' || !win32.isAbsolute(profile) || /["\r\n]/u.test(profile)) {
     throw new Error('Owned Chrome profile must be a safe absolute Windows path');
   }
-  return win32.normalize(profile).replace(/[\\/]+$/u, '').toLowerCase();
+  return win32
+    .normalize(profile)
+    .replace(/[\\/]+$/u, '')
+    .toLowerCase();
 }
 
 function commandProfile(commandLine) {
   if (typeof commandLine !== 'string') return null;
-  const matches = [...commandLine.matchAll(
-    /(?:^|\s)(?:"--user-data-dir=([^"]+)"|--user-data-dir="([^"]+)"|--user-data-dir=([^\s"]+))(?=\s|$)/giu
-  )];
+  const matches = [
+    ...commandLine.matchAll(
+      /(?:^|\s)(?:"--user-data-dir=([^"]+)"|--user-data-dir="([^"]+)"|--user-data-dir=([^\s"]+))(?=\s|$)/giu
+    ),
+  ];
   if (matches.length !== 1) return null;
   return matches[0][1] ?? matches[0][2] ?? matches[0][3] ?? null;
 }
@@ -42,13 +47,18 @@ export function isOwnedChromeProcess(record, identity) {
     !identity ||
     typeof identity.executablePath !== 'string' ||
     typeof identity.profile !== 'string'
-  ) return false;
+  )
+    return false;
   const executablePath = record.ExecutablePath;
-  const name = typeof executablePath === 'string' ? win32.basename(executablePath).toLowerCase() : '';
+  const name =
+    typeof executablePath === 'string' ? win32.basename(executablePath).toLowerCase() : '';
   const profile = commandProfile(record.CommandLine);
   let normalizedCommandProfile;
-  try { normalizedCommandProfile = profile === null ? null : normalizeProfile(profile); }
-  catch { return false; }
+  try {
+    normalizedCommandProfile = profile === null ? null : normalizeProfile(profile);
+  } catch {
+    return false;
+  }
   return (
     record.ProcessId === identity.processId &&
     typeof record.CreationDate === 'string' &&
@@ -67,16 +77,21 @@ function queryWindowsProcess(processId, timeoutMs = COMMAND_TIMEOUT_MS) {
   validatePid(processId);
   const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${processId}';if($null -eq $p){'null'}else{$p|Select-Object ProcessId,CreationDate,ExecutablePath,CommandLine|ConvertTo-Json -Compress}`;
   return new Promise((resolveQuery, rejectQuery) => {
-    execFile(executable('WindowsPowerShell\\v1.0\\powershell.exe'), [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script,
-    ], { encoding: 'utf8', maxBuffer: 65_536, timeout: timeoutMs, windowsHide: true },
-    (error, stdout) => {
-      if (error) rejectQuery(error);
-      else {
-        try { resolveQuery(JSON.parse(stdout.trim().replace(/^\uFEFF/u, ''))); }
-        catch (parseError) { rejectQuery(parseError); }
+    execFile(
+      executable('WindowsPowerShell\\v1.0\\powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', maxBuffer: 65_536, timeout: timeoutMs, windowsHide: true },
+      (error, stdout) => {
+        if (error) rejectQuery(error);
+        else {
+          try {
+            resolveQuery(JSON.parse(stdout.trim().replace(/^\uFEFF/u, '')));
+          } catch (parseError) {
+            rejectQuery(parseError);
+          }
+        }
       }
-    });
+    );
   });
 }
 
@@ -84,13 +99,19 @@ function taskkillTree(processId) {
   validatePid(processId);
   return new Promise((resolveKill, rejectKill) => {
     const child = spawn(executable('taskkill.exe'), ['/PID', String(processId), '/T', '/F'], {
-      stdio: 'ignore', windowsHide: true,
+      stdio: 'ignore',
+      windowsHide: true,
     });
     const timeout = setTimeout(() => {
-      try { child.kill(); } catch {}
+      try {
+        child.kill();
+      } catch {}
       rejectKill(new Error('Timed out terminating the owned Chrome process tree'));
     }, COMMAND_TIMEOUT_MS);
-    child.once('error', (error) => { clearTimeout(timeout); rejectKill(error); });
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      rejectKill(error);
+    });
     child.once('exit', (code) => {
       clearTimeout(timeout);
       if (code === 0) resolveKill();
@@ -122,8 +143,11 @@ export async function captureOwnedChromeProcess(
 
 export async function terminateOwnedChromeProcess(
   identity,
-  { delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms)),
-    queryProcess = queryWindowsProcess, terminateTree = taskkillTree } = {}
+  {
+    delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms)),
+    queryProcess = queryWindowsProcess,
+    terminateTree = taskkillTree,
+  } = {}
 ) {
   validatePid(identity?.processId);
   const current = await queryProcess(identity.processId);
@@ -132,7 +156,11 @@ export async function terminateOwnedChromeProcess(
     throw new Error('Chrome process identity changed; refusing taskkill');
   }
   let terminationError;
-  try { await terminateTree(identity.processId); } catch (error) { terminationError = error; }
+  try {
+    await terminateTree(identity.processId);
+  } catch (error) {
+    terminationError = error;
+  }
   const deadline = Date.now() + COMMAND_TIMEOUT_MS;
   for (let attempt = 0; attempt < COMMAND_TIMEOUT_MS / POLL_MS; attempt++) {
     const remainingMs = deadline - Date.now();

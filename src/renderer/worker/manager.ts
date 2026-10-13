@@ -32,15 +32,15 @@ import {
   isValidWorkerStatsMessage,
   MAX_ADD_MESSAGES_PER_BATCH,
 } from './protocol-guards';
-import type {
-  WorkerActiveMotion,
-  WorkerBatchReceipt,
-  WorkerDropReasonCounts,
-  WorkerMessageGeometry,
-  WorkerMotionSnapshot,
-  WorkerStatsMessage,
+import {
+  WORKER_DROP_REASONS,
+  type WorkerActiveMotion,
+  type WorkerBatchReceipt,
+  type WorkerDropReasonCounts,
+  type WorkerMessageGeometry,
+  type WorkerMotionSnapshot,
+  type WorkerStatsMessage,
 } from './types';
-import { WORKER_DROP_REASONS } from './types';
 
 type DimensionResult = { width: number; height: number };
 type TranslatedDimensionResult = DimensionResult & { translationHeight: number };

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 PiesP
 
-import { describe, expect, it } from 'vitest';
 import {
-  computeErrorBackoffMs,
+  calculateAdaptiveDelay,
   computeBurstAdjustedMs,
   computeDensityAdjustedMs,
-  calculateAdaptiveDelay,
+  computeErrorBackoffMs,
   recordDensitySample,
 } from '@chat/live-poll-math';
+import { describe, expect, it } from 'vitest';
 
 const limits = { minPollIntervalMs: 500, maxPollIntervalMs: 30000 };
 

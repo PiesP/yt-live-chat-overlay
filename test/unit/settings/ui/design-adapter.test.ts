@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import {
-  DESIGN_ICON_CONTRACT,
-  QUIET_INSTRUMENTS_TOKENS,
-} from '@piesp/browser-core/design';
-import { describe, expect, it } from 'vitest';
+import { DESIGN_ICON_CONTRACT, QUIET_INSTRUMENTS_TOKENS } from '@piesp/browser-core/design';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
+import { describe, expect, it } from 'vitest';
 
 describe('settings Quiet Instruments adapter', () => {
   it('maps the dark settings roles to shared tokens without changing renderer tokens', () => {
@@ -85,9 +82,7 @@ describe('settings Quiet Instruments adapter', () => {
     expect(SETTINGS_UI_STYLES).toContain(`border-radius: ${SETTINGS_UI_DESIGN.radius.panel}`);
     expect(SETTINGS_UI_STYLES).toContain(`min-height: ${SETTINGS_UI_DESIGN.target.minimum}`);
     expect(SETTINGS_UI_STYLES).toContain(`font-size: ${SETTINGS_UI_DESIGN.icon.size}`);
-    expect(SETTINGS_UI_STYLES).toContain(
-      `font-size: ${SETTINGS_UI_DESIGN.typography.fontSize.sm}`
-    );
+    expect(SETTINGS_UI_STYLES).toContain(`font-size: ${SETTINGS_UI_DESIGN.typography.fontSize.sm}`);
     expect(SETTINGS_UI_STYLES).toContain(`padding: ${SETTINGS_UI_DESIGN.spacing.lg}px`);
     expect(SETTINGS_UI_STYLES).toContain(
       `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.danger} 55%, black)`

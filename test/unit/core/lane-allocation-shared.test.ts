@@ -1,23 +1,23 @@
-import { describe, it, expect } from 'vitest';
 import { SPEED_TIER } from '@renderer/constants';
 import {
-  computeBaseHeadwayPx,
+  allocateSingleLaneShared,
   areSpeedTiersCompatible,
+  buildLaneHeap,
+  commitPlacementShared,
+  computeBaseHeadwayPx,
   computeLaneY,
   computeOccupancyMs,
-  heapSiftDown,
-  heapSiftUp,
-  heapGetSlotAvailableAt,
-  heapUpdateLane,
-  buildLaneHeap,
-  resetBatchShared,
-  commitPlacementShared,
-  shiftLaneTimersShared,
-  allocateSingleLaneShared,
   findPlacementShared,
   HEADWAY_GAP_MAX_PX,
+  heapGetSlotAvailableAt,
+  heapSiftDown,
+  heapSiftUp,
+  heapUpdateLane,
+  type LaneAllocationState,
+  resetBatchShared,
+  shiftLaneTimersShared,
 } from '@renderer/layout/lane-shared';
-import type { LaneAllocationState } from '@renderer/layout/lane-shared';
+import { describe, expect, it } from 'vitest';
 
 // ── Helper: create a minimal LaneAllocationState ────────────────
 
@@ -311,23 +311,19 @@ describe('allocateSingleLaneShared', () => {
   it('uses the full safe-zone lane range for scrolling placement', () => {
     const state = makeState(8);
 
-    expect(
-      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0, 'spread')?.laneIndex
-    ).toBe(0);
-    expect(
-      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.999, 'spread')?.laneIndex
-    ).toBe(7);
+    expect(allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0, 'spread')?.laneIndex).toBe(0);
+    expect(allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.999, 'spread')?.laneIndex).toBe(
+      7
+    );
   });
 
   it('selects fixed lanes from the edge matching the display mode', () => {
     const state = makeState(8);
 
-    expect(
-      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'top')?.laneIndex
-    ).toBe(0);
-    expect(
-      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'bottom')?.laneIndex
-    ).toBe(7);
+    expect(allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'top')?.laneIndex).toBe(0);
+    expect(allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'bottom')?.laneIndex).toBe(
+      7
+    );
   });
 
   it('skips collided lanes', () => {
@@ -382,9 +378,10 @@ describe('findPlacementShared', () => {
       laneIndex: 0,
       waitMs: 0,
     });
-    expect(
-      findPlacementShared(bottomState, 0, 100, 40, 100, 1, () => 0.5, 'bottom')
-    ).toEqual({ laneIndex: 5, waitMs: 0 });
+    expect(findPlacementShared(bottomState, 0, 100, 40, 100, 1, () => 0.5, 'bottom')).toEqual({
+      laneIndex: 5,
+      waitMs: 0,
+    });
   });
 });
 
@@ -471,8 +468,12 @@ describe('shiftLaneTimersShared', () => {
     commitPlacementShared(state, 0, 1, 0, 600, 9000, SPEED_TIER.FAR);
     commitPlacementShared(state, 0, 1, 1000, 600, 5000, SPEED_TIER.MID);
     expect(state.speedTierLanes.get(0)?.tier).toBe(SPEED_TIER.FAR);
-    expect(findPlacementShared(state, 2000, 20, 20, 30000, SPEED_TIER.NEAR, () => 0, 'spread')).toBeNull();
-    expect(findPlacementShared(state, 2000, 20, 20, 30000, SPEED_TIER.NEAR, () => 0, 'spread', true)).toEqual({ laneIndex: 0, waitMs: 0 });
+    expect(
+      findPlacementShared(state, 2000, 20, 20, 30000, SPEED_TIER.NEAR, () => 0, 'spread')
+    ).toBeNull();
+    expect(
+      findPlacementShared(state, 2000, 20, 20, 30000, SPEED_TIER.NEAR, () => 0, 'spread', true)
+    ).toEqual({ laneIndex: 0, waitMs: 0 });
   });
 
   it('shifts all lane available times forward', () => {

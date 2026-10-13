@@ -35,9 +35,7 @@ describe('Verification configuration', () => {
   });
 
   it('keeps fast mutation semantic, enforceable, and diagnosable', () => {
-    const config = JSON.parse(
-      readFileSync(resolve(root, 'stryker.conf.fast.json'), 'utf8')
-    ) as {
+    const config = JSON.parse(readFileSync(resolve(root, 'stryker.conf.fast.json'), 'utf8')) as {
       mutate?: string[];
       reporters?: string[];
       jsonReporter?: { fileName?: string };
@@ -54,9 +52,7 @@ describe('Verification configuration', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
 
     expect(config.thresholds?.break).toBeGreaterThan(0);
-    expect(config.reporters).toEqual(
-      expect.arrayContaining(['clear-text', 'json', 'html'])
-    );
+    expect(config.reporters).toEqual(expect.arrayContaining(['clear-text', 'json', 'html']));
     expect(config.jsonReporter?.fileName).toBe('reports/mutation/fast.json');
     expect(config.mutate).toEqual(
       expect.arrayContaining([
@@ -102,14 +98,12 @@ describe('Verification configuration', () => {
   });
 
   it('reuses one artifact build pipeline without duplicating the quality gate', () => {
-    const packageJson = JSON.parse(
-      readFileSync(resolve(root, 'package.json'), 'utf8')
-    ) as { scripts?: Record<string, string> };
+    const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
     const scripts = packageJson.scripts ?? {};
 
-    expect(scripts['quality:fix']).toBe(
-      'pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s quality'
-    );
+    expect(scripts['quality:fix']).toBe('pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s quality');
     expect(scripts['build:targets:ci']).toBe(
       'pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts'
     );

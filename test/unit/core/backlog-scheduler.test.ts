@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   BacklogScheduler,
   computeAdaptiveMeanInterval,
   computeDensityRampFactor,
   decayActivityCount,
 } from '@util/backlog-scheduler';
+import { describe, expect, it } from 'vitest';
 
 const config = {
   backlogInjectionRateMin: 4,

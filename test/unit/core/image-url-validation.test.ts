@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
 import {
+  ALLOWED_IMAGE_HOST_SUFFIXES,
   isAllowedImageHostname,
   isAllowedImageUrl,
   normalizeYouTubeImageUrl,
-  ALLOWED_IMAGE_HOST_SUFFIXES,
 } from '@media/image-url-validation';
+import { describe, expect, it } from 'vitest';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 

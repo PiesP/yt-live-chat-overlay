@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { DRAIN_WORK_BUDGET_MS } from '@renderer/canvas/drain-batch';
 import type { MessageMotionPlan } from '@renderer/layout/message-schedule';
@@ -15,6 +14,7 @@ import {
 import { WorkerRenderer } from '@renderer/worker/renderer';
 import type { WorkerMessage, WorkerStatsMessage } from '@renderer/worker/types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const context = {
   setTransform: vi.fn(),
@@ -101,9 +101,12 @@ class TestWorker {
 }
 
 vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas);
-vi.stubGlobal('ImageBitmap', class {
-  close(): void {}
-});
+vi.stubGlobal(
+  'ImageBitmap',
+  class {
+    close(): void {}
+  }
+);
 vi.stubGlobal('Worker', TestWorker);
 const scheduledAnimationFrames: FrameRequestCallback[] = [];
 vi.stubGlobal(
@@ -247,14 +250,31 @@ interface AuthorAssetRendererState {
   isDestroyed: boolean;
   animFrameId: number | null;
   activateMessage(
-    message: WorkerMessage, now: number, placement: TestPlacement, batchIndex: number,
-    previousStaggerDelayMs: number, speedTier: number, width: number, height: number,
+    message: WorkerMessage,
+    now: number,
+    placement: TestPlacement,
+    batchIndex: number,
+    previousStaggerDelayMs: number,
+    speedTier: number,
+    width: number,
+    height: number,
     motion?: MessageMotionPlan
   ): number;
-  findPlacement(height: number, speedTier: number, now: number, strategy: string): TestPlacement | null;
+  findPlacement(
+    height: number,
+    speedTier: number,
+    now: number,
+    strategy: string
+  ): TestPlacement | null;
   checkCollision(
-    placement: TestPlacement, message: WorkerMessage, speedTier: number, batchIndex: number,
-    previousStaggerDelayMs: number, now: number, width: number, motion?: MessageMotionPlan
+    placement: TestPlacement,
+    message: WorkerMessage,
+    speedTier: number,
+    batchIndex: number,
+    previousStaggerDelayMs: number,
+    now: number,
+    width: number,
+    motion?: MessageMotionPlan
   ): boolean;
   prefetchImages(urls: string[], cache: unknown, ownerId: string): Promise<void>;
 }
@@ -271,13 +291,23 @@ const hiddenAuthorSettings: OverlaySettings = {
   showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false, superChat: false },
 };
 const regularAuthorMessage: ChatMessage = {
-  id: 'asset-regular', text: 'regular', content: [{ type: 'text', content: 'regular' }],
-  timestamp: 1, kind: 'text', authorType: 'normal', author: 'regular author',
+  id: 'asset-regular',
+  text: 'regular',
+  content: [{ type: 'text', content: 'regular' }],
+  timestamp: 1,
+  kind: 'text',
+  authorType: 'normal',
+  author: 'regular author',
   authorPhotoUrl: 'https://yt3.ggpht.com/regular-author.png',
 };
 const paidAuthorMessage: ChatMessage = {
-  id: 'asset-paid', text: 'paid', content: [{ type: 'text', content: 'paid' }],
-  timestamp: 1, kind: 'superchat', authorType: 'normal', author: 'paid author',
+  id: 'asset-paid',
+  text: 'paid',
+  content: [{ type: 'text', content: 'paid' }],
+  timestamp: 1,
+  kind: 'superchat',
+  authorType: 'normal',
+  author: 'paid author',
   authorPhotoUrl: 'https://yt3.ggpht.com/paid-author.png',
   superChat: { amount: '$5', tier: 'blue' },
 };
@@ -310,18 +340,25 @@ function createAuthorAssetFixture(
     }
   });
 
-  const diagnostics = () => JSON.stringify({
-    expectedIds: authorAssetIds,
-    activeIds: state.activeMessages.map(({ id }) => id),
-    pendingIds: state.pendingQueue.map(({ id }) => id),
-    now: clock.now, frames: clock.frames, queuedFrames: scheduledAnimationFrames.length,
-    resumePriority: state.drainResumePriority ?? null,
-    totalRendered: state.totalRendered, totalDrops: state.totalDrops, dropReasons: state.dropReasons,
-  });
-  const isReady = () => authorAssetIds.every((id) =>
-    state.activeMessages.some((message) => message.id === id) &&
-    !state.pendingQueue.some((message) => message.id === id)
-  );
+  const diagnostics = () =>
+    JSON.stringify({
+      expectedIds: authorAssetIds,
+      activeIds: state.activeMessages.map(({ id }) => id),
+      pendingIds: state.pendingQueue.map(({ id }) => id),
+      now: clock.now,
+      frames: clock.frames,
+      queuedFrames: scheduledAnimationFrames.length,
+      resumePriority: state.drainResumePriority ?? null,
+      totalRendered: state.totalRendered,
+      totalDrops: state.totalDrops,
+      dropReasons: state.dropReasons,
+    });
+  const isReady = () =>
+    authorAssetIds.every(
+      (id) =>
+        state.activeMessages.some((message) => message.id === id) &&
+        !state.pendingQueue.some((message) => message.id === id)
+    );
   const nextFrame = () => {
     const frame = scheduledAnimationFrames.shift();
     if (!frame) throw new Error(`Missing author-asset RAF callback: ${diagnostics()}`);
@@ -335,14 +372,25 @@ function createAuthorAssetFixture(
       await flushMicrotasks();
     }
     if (!isReady()) {
-      throw new Error(`Author-asset readiness frame limit (${AUTHOR_ASSET_FRAME_LIMIT}): ${diagnostics()}`);
+      throw new Error(
+        `Author-asset readiness frame limit (${AUTHOR_ASSET_FRAME_LIMIT}): ${diagnostics()}`
+      );
     }
     expect(state.activeMessages.map(({ id }) => id).sort()).toEqual([...authorAssetIds].sort());
     expect(state.pendingQueue).toHaveLength(0);
   };
   return {
-    manager, worker, renderer, state, prefetch, activate, findPlacement, checkCollision,
-    clock, nextFrame, waitUntilActive,
+    manager,
+    worker,
+    renderer,
+    state,
+    prefetch,
+    activate,
+    findPlacement,
+    checkCollision,
+    clock,
+    nextFrame,
+    waitUntilActive,
     async sendPair() {
       expect(manager.sendToWorker(regularAuthorMessage, regularAuthorMessage.id)).toBe(true);
       expect(manager.sendToWorker(paidAuthorMessage, paidAuthorMessage.id)).toBe(true);
@@ -380,8 +428,8 @@ async function withAuthorAssetFixture(
   let renderer: WorkerRenderer | undefined;
   let fixture: AuthorAssetFixture | undefined;
   try {
-    ({ manager, worker } = initializedManager(
-      hiddenAuthorSettings, (message) => (message.kind === 'superchat' ? 100 : 0)
+    ({ manager, worker } = initializedManager(hiddenAuthorSettings, (message) =>
+      message.kind === 'superchat' ? 100 : 0
     ));
     renderer = initializedRenderer(hiddenAuthorSettings);
     fixture = createAuthorAssetFixture(manager, worker, renderer, clock, elapsedWorkMs);
@@ -416,7 +464,9 @@ function expectAuthorRequests(fixture: AuthorAssetFixture, messages: ChatMessage
   }
   for (const message of messages) {
     expect(fixture.prefetch).toHaveBeenCalledWith(
-      [message.authorPhotoUrl], fixture.state.authorPhotoCache, message.id
+      [message.authorPhotoUrl],
+      fixture.state.authorPhotoCache,
+      message.id
     );
   }
 }
@@ -430,10 +480,15 @@ describe('Worker renderer state synchronization', () => {
 
   it('retains ordinary burst acceleration while Backlog ignores serialized burst', () => {
     const renderer = initializedRenderer({
-      ...DEFAULT_SETTINGS, speedPxPerSec: 250, backlogSpeedMultiplier: 2,
+      ...DEFAULT_SETTINGS,
+      speedPxPerSec: 250,
+      backlogSpeedMultiplier: 2,
     });
     const { getMessageVelocity } = renderer as unknown as {
-      getMessageVelocity(message: Pick<WorkerMessage, 'burstSpeedMultiplier'>, tier: number): number;
+      getMessageVelocity(
+        message: Pick<WorkerMessage, 'burstSpeedMultiplier'>,
+        tier: number
+      ): number;
     };
     const velocity = getMessageVelocity.bind(renderer);
     expect(velocity({ burstSpeedMultiplier: 1.35 }, 1)).toBe(337.5);
@@ -455,9 +510,12 @@ describe('Worker renderer state synchronization', () => {
   });
 
   it('accepts consistent known drop reasons and rejects malformed counters', () => {
-    expect(isValidWorkerStatsMessage({
-      ...validStats(), dropReasons: { queue_priority: 1, oversized: 2 },
-    })).toBe(true);
+    expect(
+      isValidWorkerStatsMessage({
+        ...validStats(),
+        dropReasons: { queue_priority: 1, oversized: 2 },
+      })
+    ).toBe(true);
     for (const dropReasons of [
       { queue_priority: 2 },
       { queue_priority: -1, oversized: 4 },
@@ -471,8 +529,12 @@ describe('Worker renderer state synchronization', () => {
 
   it('accepts only bounded batch receipts and clear-state fence acknowledgements', () => {
     const receipt = {
-      type: 'batchReceipt', epoch: 2, batchSequence: 7, pendingQueueDepth: 50,
-      admittedMessages: 1, minimumPendingPriority: 0,
+      type: 'batchReceipt',
+      epoch: 2,
+      batchSequence: 7,
+      pendingQueueDepth: 50,
+      admittedMessages: 1,
+      minimumPendingPriority: 0,
     };
     expect(isValidWorkerBatchReceipt(receipt)).toBe(true);
     for (const invalid of [
@@ -567,7 +629,10 @@ describe('Worker renderer state synchronization', () => {
 
     expect(latestStats()?.totalDrops).toBe(0);
     expect(latestStats()?.dropReasons).toMatchObject({
-      queue_priority: 0, queue_replaced: 0, oversized: 0, reflow_capacity: 0,
+      queue_priority: 0,
+      queue_replaced: 0,
+      oversized: 0,
+      reflow_capacity: 0,
     });
   });
 
@@ -607,7 +672,10 @@ describe('Worker renderer state synchronization', () => {
       },
     } as MessageEvent);
     expect((trackedQueue as unknown as { totalDrops: number }).totalDrops).toBe(1);
-    expect((trackedQueue as unknown as { dropReasons: { queue_replaced: number } }).dropReasons.queue_replaced).toBe(1);
+    expect(
+      (trackedQueue as unknown as { dropReasons: { queue_replaced: number } }).dropReasons
+        .queue_replaced
+    ).toBe(1);
   });
 
   it('publishes a final empty state before its idle render loop stops', () => {
@@ -658,18 +726,22 @@ describe('Worker renderer state synchronization', () => {
   it('reports reason-specific cumulative deltas without double counting repeats', () => {
     const { manager, observability, worker } = initializedManager();
     const first = {
-      ...validStats(), totalDrops: 2,
+      ...validStats(),
+      totalDrops: 2,
       dropReasons: { queue_priority: 1, oversized: 1 },
     };
     worker.emitMessage(first);
     worker.emitMessage(first);
     worker.emitMessage({
-      ...first, totalDrops: 4,
+      ...first,
+      totalDrops: 4,
       dropReasons: { queue_priority: 1, oversized: 2, reflow_capacity: 1 },
     });
     expect(observability.onMessagesDropped.mock.calls).toEqual([
-      [1, 'queue_priority'], [1, 'oversized'],
-      [1, 'oversized'], [1, 'reflow_capacity'],
+      [1, 'queue_priority'],
+      [1, 'oversized'],
+      [1, 'oversized'],
+      [1, 'reflow_capacity'],
     ]);
     manager.destroy();
     worker.acknowledgeDestroy();
@@ -678,13 +750,17 @@ describe('Worker renderer state synchronization', () => {
   it('keeps mixed legacy stats unlabeled until a reason baseline is established', () => {
     const { manager, observability, worker } = initializedManager();
     worker.emitMessage({ ...validStats(), totalDrops: 2 });
-    worker.emitMessage({ ...validStats(), totalDrops: 3,
-      dropReasons: { queue_priority: 2, oversized: 1 } });
-    worker.emitMessage({ ...validStats(), totalDrops: 4,
-      dropReasons: { queue_priority: 3, oversized: 1 } });
-    expect(observability.onMessagesDropped.mock.calls).toEqual([
-      [2], [1], [1, 'queue_priority'],
-    ]);
+    worker.emitMessage({
+      ...validStats(),
+      totalDrops: 3,
+      dropReasons: { queue_priority: 2, oversized: 1 },
+    });
+    worker.emitMessage({
+      ...validStats(),
+      totalDrops: 4,
+      dropReasons: { queue_priority: 3, oversized: 1 },
+    });
+    expect(observability.onMessagesDropped.mock.calls).toEqual([[2], [1], [1, 'queue_priority']]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -698,8 +774,9 @@ describe('Worker renderer state synchronization', () => {
       (message) => (message.kind === 'superchat' ? 100 : 0),
       dispatched
     );
-    (manager as unknown as { deps: { estimateDimensions: typeof estimateDimensions } }).deps.estimateDimensions =
-      estimateDimensions;
+    (
+      manager as unknown as { deps: { estimateDimensions: typeof estimateDimensions } }
+    ).deps.estimateDimensions = estimateDimensions;
     const renderer = initializedRenderer(settings);
     coupleWorker(worker, renderer);
     const makeIngress = (id: string, paid = false): ChatMessage => ({
@@ -714,7 +791,8 @@ describe('Worker renderer state synchronization', () => {
 
     for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`normal-${index}`));
     await flushMicrotasks();
-    for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`paid-${index}`, true));
+    for (let index = 0; index < 50; index++)
+      manager.sendToWorker(makeIngress(`paid-${index}`, true));
     await flushMicrotasks(120);
 
     const pending = (
@@ -724,7 +802,8 @@ describe('Worker renderer state synchronization', () => {
     expect(pending.every((message) => message.priority === 100)).toBe(true);
     expect(estimateDimensions).toHaveBeenCalledTimes(100);
 
-    for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`extra-${index}`, true));
+    for (let index = 0; index < 50; index++)
+      manager.sendToWorker(makeIngress(`extra-${index}`, true));
     await flushMicrotasks(60);
     expect(estimateDimensions).toHaveBeenCalledTimes(100);
     expect(dispatched).toHaveBeenCalledTimes(100);
@@ -743,8 +822,9 @@ describe('Worker renderer state synchronization', () => {
     const estimateDimensions = vi.fn(() => ({ width: 100, height: 20 }));
     const dispatched = vi.fn();
     const { manager, worker } = initializedManager(settings, () => 0, dispatched);
-    (manager as unknown as { deps: { estimateDimensions: typeof estimateDimensions } }).deps.estimateDimensions =
-      estimateDimensions;
+    (
+      manager as unknown as { deps: { estimateDimensions: typeof estimateDimensions } }
+    ).deps.estimateDimensions = estimateDimensions;
     const renderer = initializedRenderer(settings);
     coupleWorker(worker, renderer);
     const original: ChatMessage = {
@@ -836,9 +916,9 @@ describe('Worker renderer state synchronization', () => {
         fixture.nextFrame();
         const deferred = elapsedWorkMs >= DRAIN_WORK_BUDGET_MS;
         const attemptedIds = fixture.activate.mock.calls.map(([message]) => message.id);
-        expect(attemptedIds).toEqual(deferred ? [paidAuthorMessage.id] : [
-          paidAuthorMessage.id, regularAuthorMessage.id,
-        ]);
+        expect(attemptedIds).toEqual(
+          deferred ? [paidAuthorMessage.id] : [paidAuthorMessage.id, regularAuthorMessage.id]
+        );
         expect(fixture.state.activeMessages.map(({ id }) => id)).toEqual(attemptedIds);
         expect(fixture.state.pendingQueue.map(({ id }) => id)).toEqual(
           deferred ? [regularAuthorMessage.id] : []
@@ -846,9 +926,11 @@ describe('Worker renderer state synchronization', () => {
         expect(fixture.state.drainResumePriority).toBe(deferred ? 0 : undefined);
         expect(fixture.state.drainCursors.has(0)).toBe(!deferred);
         expect(fixture.findPlacement).toHaveBeenCalledTimes(deferred ? 1 : 2);
-        expect(fixture.findPlacement.mock.results.every(({ value }) =>
-          value !== null && value.waitMs === 0
-        )).toBe(true);
+        expect(
+          fixture.findPlacement.mock.results.every(
+            ({ value }) => value !== null && value.waitMs === 0
+          )
+        ).toBe(true);
         expect(fixture.checkCollision.mock.results.map(({ value }) => value)).toEqual(
           deferred ? [true] : [true, true]
         );
@@ -860,10 +942,12 @@ describe('Worker renderer state synchronization', () => {
         if (deferred) {
           expectAuthorRequests(fixture, [paidAuthorMessage]);
           // The original single-frame preparation cannot satisfy its two-resource assertion.
-          expect(() => expectAuthorRequests(fixture, [regularAuthorMessage, paidAuthorMessage]))
-            .toThrow();
+          expect(() =>
+            expectAuthorRequests(fixture, [regularAuthorMessage, paidAuthorMessage])
+          ).toThrow();
           expect(fixture.state.pendingQueue[0]).toMatchObject({
-            id: regularAuthorMessage.id, actionType: 'replace',
+            id: regularAuthorMessage.id,
+            actionType: 'replace',
             authorPhotoUrl: regularAuthorMessage.authorPhotoUrl,
           });
           await flushMicrotasks(20);
@@ -874,10 +958,13 @@ describe('Worker renderer state synchronization', () => {
         }
         expectAuthorRequests(fixture, [regularAuthorMessage, paidAuthorMessage]);
         expect(fixture.activate.mock.calls.map(([message]) => message.id)).toEqual([
-          paidAuthorMessage.id, regularAuthorMessage.id,
+          paidAuthorMessage.id,
+          regularAuthorMessage.id,
         ]);
         expect(fixture.checkCollision.mock.results.map(({ value }) => value)).toEqual([true, true]);
-        expect(fixture.state.activeMessages.map(({ id }) => id).sort()).toEqual([...authorAssetIds].sort());
+        expect(fixture.state.activeMessages.map(({ id }) => id).sort()).toEqual(
+          [...authorAssetIds].sort()
+        );
         expect(fixture.state.pendingQueue).toHaveLength(0);
         expect([...fixture.state.messageById.keys()].sort()).toEqual([...authorAssetIds].sort());
         expect(fixture.state.totalRendered).toBe(2);
@@ -903,7 +990,9 @@ describe('Worker renderer state synchronization', () => {
           await fixture.waitUntilActive();
         } else {
           // Keep legitimate pending work unready without replacing the activation algorithm.
-          fixture.renderer.handleMessage({ data: { type: 'setPaused', paused: true } } as MessageEvent);
+          fixture.renderer.handleMessage({
+            data: { type: 'setPaused', paused: true },
+          } as MessageEvent);
           const pausedFrame = scheduledAnimationFrames.shift();
           if (!pausedFrame) throw new Error('Expected paused fixture frame');
           const frame: FrameRequestCallback = (timestamp) => {
@@ -926,7 +1015,10 @@ describe('Worker renderer state synchronization', () => {
       if (!failedFixture) throw new Error('Failure fixture was not created');
       expect(failedFixture.worker.terminate).toHaveBeenCalledTimes(1);
       expect(failedFixture.state).toMatchObject({
-        isDestroyed: true, animFrameId: null, activeMessages: [], pendingQueue: [],
+        isDestroyed: true,
+        animFrameId: null,
+        activeMessages: [],
+        pendingQueue: [],
       });
       expect(failedFixture.state.messageById.size).toBe(0);
       expect(failedFixture.worker.postMessage.getMockImplementation()).toBeUndefined();
@@ -971,9 +1063,8 @@ describe('Worker renderer state synchronization', () => {
       .find((message) => message.type === 'addMessages');
     expect(sentBatch?.messages?.[0]?.trackDrops).toBe(false);
 
-    (
-      manager as unknown as { latestWorkerPendingDepth: number }
-    ).latestWorkerPendingDepth = DEFAULT_SETTINGS.queueMaxSize;
+    (manager as unknown as { latestWorkerPendingDepth: number }).latestWorkerPendingDepth =
+      DEFAULT_SETTINGS.queueMaxSize;
     expect(manager.sendToWorker({ ...replay, id: 'replay-backpressure-2' }, undefined, false)).toBe(
       false
     );
@@ -999,8 +1090,12 @@ describe('Worker renderer state synchronization', () => {
   it('does not admit or reinject messages after fallback detaches Worker routing', async () => {
     const { manager, worker } = initializedManager();
     const message: ChatMessage = {
-      id: 'detached-worker', text: 'detached', content: [{ type: 'text', content: 'detached' }],
-      timestamp: 1, kind: 'text', authorType: 'normal',
+      id: 'detached-worker',
+      text: 'detached',
+      content: [{ type: 'text', content: 'detached' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
     };
     manager.sendToWorker(message, message.id);
     await flushMicrotasks();
@@ -1161,9 +1256,7 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 0,
     });
-    await expect(firstSnapshot).resolves.toEqual([
-      { message: unacknowledged, trackDrops: true },
-    ]);
+    await expect(firstSnapshot).resolves.toEqual([{ message: unacknowledged, trackDrops: true }]);
 
     const expired = { ...unacknowledged, id: 'acknowledged-expired' };
     expect(manager.sendToWorker(expired, expired.id)).toBe(true);
@@ -1187,9 +1280,12 @@ describe('Worker renderer state synchronization', () => {
   it('attaches validated active motion only to the retained current-epoch message', async () => {
     const { manager, worker } = initializedManager();
     const message: ChatMessage = {
-      id: 'active-motion', text: 'active motion',
+      id: 'active-motion',
+      text: 'active motion',
       content: [{ type: 'text', content: 'active motion' }],
-      timestamp: 1, kind: 'text', authorType: 'normal',
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
     };
     expect(manager.sendToWorker(message, message.id)).toBe(true);
     await Promise.resolve();
@@ -1199,27 +1295,50 @@ describe('Worker renderer state synchronization', () => {
       .findLast((value) => value.type === 'snapshotMessages');
     expect(request?.epoch).toBe(0);
     const activeMotion = {
-      id: message.id, mode: 'scroll', startX: 640, width: 100, height: 20,
-      y: 20, laneIndex: 1, laneSlotCount: 1, durationMs: 5_000,
-      startEpochMs: 11_000, fadeStartEpochMs: 10_900, speedTier: 1,
+      id: message.id,
+      mode: 'scroll',
+      startX: 640,
+      width: 100,
+      height: 20,
+      y: 20,
+      laneIndex: 1,
+      laneSlotCount: 1,
+      durationMs: 5_000,
+      startEpochMs: 11_000,
+      fadeStartEpochMs: 10_900,
+      speedTier: 1,
     };
     worker.emitMessage({
-      type: 'messageSnapshot', requestId: request?.requestId, epoch: 0,
-      activeMessageIds: [message.id], pendingMessageIds: [], processedBatchSequence: 1,
+      type: 'messageSnapshot',
+      requestId: request?.requestId,
+      epoch: 0,
+      activeMessageIds: [message.id],
+      pendingMessageIds: [],
+      processedBatchSequence: 1,
       motionSnapshot: {
-        capturedAtEpochMs: 10_600, effectiveNowEpochMs: 10_000,
-        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+        capturedAtEpochMs: 10_600,
+        effectiveNowEpochMs: 10_000,
+        isPaused: true,
+        viewportWidthPx: 640,
+        exitPaddingPx: 100,
         activeMotions: [activeMotion],
       },
     });
-    await expect(snapshot).resolves.toEqual([{
-      message, trackDrops: false,
-      activeMotion: {
-        ...activeMotion, epoch: 0,
-        capturedAtEpochMs: 10_600, effectiveNowEpochMs: 10_000,
-        isPaused: true, viewportWidthPx: 640, exitPaddingPx: 100,
+    await expect(snapshot).resolves.toEqual([
+      {
+        message,
+        trackDrops: false,
+        activeMotion: {
+          ...activeMotion,
+          epoch: 0,
+          capturedAtEpochMs: 10_600,
+          effectiveNowEpochMs: 10_000,
+          isPaused: true,
+          viewportWidthPx: 640,
+          exitPaddingPx: 100,
+        },
       },
-    }]);
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1227,9 +1346,12 @@ describe('Worker renderer state synchronization', () => {
   it('uses explicit ID-only requeue when the Worker snapshot epoch is stale', async () => {
     const { manager, worker } = initializedManager();
     const message: ChatMessage = {
-      id: 'stale-motion', text: 'stale motion',
+      id: 'stale-motion',
+      text: 'stale motion',
       content: [{ type: 'text', content: 'stale motion' }],
-      timestamp: 1, kind: 'text', authorType: 'normal',
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
     };
     manager.sendToWorker(message, message.id);
     await Promise.resolve();
@@ -1238,8 +1360,12 @@ describe('Worker renderer state synchronization', () => {
       .map(([value]) => value as { type?: string; requestId?: number })
       .findLast((value) => value.type === 'snapshotMessages');
     worker.emitMessage({
-      type: 'messageSnapshot', requestId: request?.requestId, epoch: 1,
-      activeMessageIds: [message.id], pendingMessageIds: [], processedBatchSequence: 1,
+      type: 'messageSnapshot',
+      requestId: request?.requestId,
+      epoch: 1,
+      activeMessageIds: [message.id],
+      pendingMessageIds: [],
+      processedBatchSequence: 1,
     });
     await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
     manager.destroy();
@@ -1267,9 +1393,7 @@ describe('Worker renderer state synchronization', () => {
       minimumPendingPriority: 0,
     });
 
-    await expect(manager.snapshotMessages(0)).resolves.toEqual([
-      { message, trackDrops: true },
-    ]);
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([{ message, trackDrops: true }]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1316,20 +1440,29 @@ describe('Worker renderer state synchronization', () => {
 
   it('recovers bounded deferred paid ingress without dispatching it during fallback', async () => {
     const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50 };
-    const { manager, worker } = initializedManager(
-      settings,
-      (message) => (message.kind === 'superchat' ? 100 : 0)
+    const { manager, worker } = initializedManager(settings, (message) =>
+      message.kind === 'superchat' ? 100 : 0
     );
     const seed: ChatMessage = {
-      id: 'admission-seed', text: 'seed', content: [{ type: 'text', content: 'seed' }],
-      timestamp: 1, kind: 'text', authorType: 'normal',
+      id: 'admission-seed',
+      text: 'seed',
+      content: [{ type: 'text', content: 'seed' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
     };
     manager.sendToWorker(seed, seed.id);
     await flushMicrotasks();
     worker.emitMessage({
-      type: 'stats', activeMessages: 0, pendingQueueDepth: 0,
-      totalRendered: 1, totalDrops: 0, processedBatchSequence: 1,
-      laneUtilization: 0, activeMessageIds: [], pendingMessageIds: [],
+      type: 'stats',
+      activeMessages: 0,
+      pendingQueueDepth: 0,
+      totalRendered: 1,
+      totalDrops: 0,
+      processedBatchSequence: 1,
+      laneUtilization: 0,
+      activeMessageIds: [],
+      pendingMessageIds: [],
     });
     worker.postMessage.mockClear();
     worker.emitMessage({

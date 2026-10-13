@@ -13,9 +13,9 @@
  * - Create mock chat messages
  */
 
-import { type Page, type Route } from '@playwright/test';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { Page, Route } from '@playwright/test';
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
@@ -99,10 +99,13 @@ export function installYTMock(init: {
 }): void {
   const { preSeedSettings, defaults, platform = 'hybrid' } = init;
   const storage = new Map<string, unknown>();
-  const listeners = new Map<number, {
-    key: string;
-    callback: (key: string, oldVal: unknown, newVal: unknown, remote: boolean) => void;
-  }>();
+  const listeners = new Map<
+    number,
+    {
+      key: string;
+      callback: (key: string, oldVal: unknown, newVal: unknown, remote: boolean) => void;
+    }
+  >();
   let listenerId = 0;
 
   // Pre-seed settings if provided (for cross-reload persistence)
@@ -121,26 +124,40 @@ export function installYTMock(init: {
   };
   window.GM_getValue = <T = unknown>(key: string, defaultValue?: T): T | undefined =>
     storage.has(key) ? (storage.get(key) as T) : defaultValue;
-  window.GM_deleteValue = (key: string) => { storage.delete(key); };
+  window.GM_deleteValue = (key: string) => {
+    storage.delete(key);
+  };
   window.GM_listValues = () => Array.from(storage.keys());
   window.GM_addValueChangeListener = (
     key: string,
-    cb: (key: string, oldVal: unknown, newVal: unknown, remote: boolean) => void,
+    cb: (key: string, oldVal: unknown, newVal: unknown, remote: boolean) => void
   ): number => {
     const id = ++listenerId;
     listeners.set(id, { key, callback: cb });
     return id;
   };
-  window.GM_removeValueChangeListener = (id: number) => { listeners.delete(id); };
+  window.GM_removeValueChangeListener = (id: number) => {
+    listeners.delete(id);
+  };
   window.GM_registerMenuCommand = () => 0;
-  window.GM_openInTab = (url: string) => { window.open(url, '_blank'); };
+  window.GM_openInTab = (url: string) => {
+    window.open(url, '_blank');
+  };
   window.GM_cookie = {
-    list: () => document.cookie.split(';').filter(Boolean).map((c) => {
-      const [name, ...rest] = c.trim().split('=');
-      return { name: name!.trim(), value: rest.join('=').trim() };
-    }),
-    set: (cookie: { name: string; value: string }) => { document.cookie = `${cookie.name}=${cookie.value}`; },
-    delete: (name: string) => { document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`; },
+    list: () =>
+      document.cookie
+        .split(';')
+        .filter(Boolean)
+        .map((c) => {
+          const [name, ...rest] = c.trim().split('=');
+          return { name: name!.trim(), value: rest.join('=').trim() };
+        }),
+    set: (cookie: { name: string; value: string }) => {
+      document.cookie = `${cookie.name}=${cookie.value}`;
+    },
+    delete: (name: string) => {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    },
   };
 
   if (platform === 'hybrid') {
@@ -158,7 +175,9 @@ export function installYTMock(init: {
           get: async (keys: string | string[]) => {
             const result: Record<string, unknown> = {};
             const keyList = Array.isArray(keys) ? keys : [keys];
-            for (const k of keyList) { if (storage.has(k)) result[k] = storage.get(k); }
+            for (const k of keyList) {
+              if (storage.has(k)) result[k] = storage.get(k);
+            }
             return result;
           },
           set: async (items: Record<string, unknown>) => {
@@ -201,9 +220,10 @@ export async function setupMockPageRoute(page: Page): Promise<void> {
       await route.fulfill({
         status: 200,
         contentType: 'text/html',
-        body: url.pathname === '/watch' || url.pathname.startsWith('/live/')
-          ? MOCK_HTML
-          : MOCK_NON_WATCH_HTML,
+        body:
+          url.pathname === '/watch' || url.pathname.startsWith('/live/')
+            ? MOCK_HTML
+            : MOCK_NON_WATCH_HTML,
       });
     } else {
       // Abort JS, CSS, image, font, etc. requests — we don't need real YouTube resources
@@ -220,7 +240,7 @@ export async function setupMockPageRoute(page: Page): Promise<void> {
 export async function injectUserscript(page: Page): Promise<void> {
   if (!existsSync(USERSCRIPT_PATH)) {
     throw new Error(
-      `Dev userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`,
+      `Dev userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`
     );
   }
   const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
@@ -265,7 +285,7 @@ export async function setupOverlayPage(
       return typeof handle === 'object' && handle !== null;
     },
     undefined,
-    { timeout: 15_000 },
+    { timeout: 15_000 }
   );
 }
 
@@ -276,7 +296,7 @@ export async function setupOverlayPage(
  */
 export async function getSettings(page: Page): Promise<Record<string, unknown>> {
   return page.evaluate(() => {
-    const w = (window as unknown) as Record<string, unknown>;
+    const w = window as unknown as Record<string, unknown>;
     const handle = w.__ytChatOverlay as { getSettings?: () => Record<string, unknown> } | undefined;
     return handle?.getSettings?.() ?? {};
   });
@@ -287,11 +307,13 @@ export async function getSettings(page: Page): Promise<Record<string, unknown>> 
  */
 export async function applySettings(page: Page, partial: Record<string, unknown>): Promise<void> {
   const applied = await page.evaluate((settings) => {
-    const w = (window as unknown) as Record<string, unknown>;
-    const handle = w.__ytChatOverlay as {
-      applySettings?: (s: Record<string, unknown>) => void;
-      getSettings?: () => Record<string, unknown>;
-    } | undefined;
+    const w = window as unknown as Record<string, unknown>;
+    const handle = w.__ytChatOverlay as
+      | {
+          applySettings?: (s: Record<string, unknown>) => void;
+          getSettings?: () => Record<string, unknown>;
+        }
+      | undefined;
     if (typeof handle?.applySettings !== 'function' || typeof handle.getSettings !== 'function') {
       throw new Error('Overlay settings debug handle is not ready');
     }
@@ -305,7 +327,10 @@ export async function applySettings(page: Page, partial: Record<string, unknown>
 /**
  * Wait for the debounced settings write to contain the expected values.
  */
-export async function waitForStoredSettings(page: Page, expected: Record<string, unknown>): Promise<void> {
+export async function waitForStoredSettings(
+  page: Page,
+  expected: Record<string, unknown>
+): Promise<void> {
   // Storage APIs are asynchronous, so poll from the test runner. Passing an
   // async page function to waitForFunction can treat its Promise as truthy
   // before the storage read resolves.
@@ -313,10 +338,20 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const matched = await page.evaluate(
-      async ({ expected, storageKey }: { expected: Record<string, unknown>; storageKey: string }) => {
-        const chromeStorage = (window as unknown as {
-          chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
-        }).chrome?.storage?.local;
+      async ({
+        expected,
+        storageKey,
+      }: {
+        expected: Record<string, unknown>;
+        storageKey: string;
+      }) => {
+        const chromeStorage = (
+          window as unknown as {
+            chrome?: {
+              storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } };
+            };
+          }
+        ).chrome?.storage?.local;
         let raw: unknown;
         if (chromeStorage) {
           const stored = await chromeStorage?.get(storageKey);
@@ -336,26 +371,24 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
           const current = handle?.getSettings?.();
           if (!current) return false;
           const matchesExpected = (actual: unknown, wanted: unknown): boolean => {
-            if (
-              wanted !== null &&
-              typeof wanted === 'object' &&
-              !Array.isArray(wanted)
-            ) {
-              if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+            if (wanted !== null && typeof wanted === 'object' && !Array.isArray(wanted)) {
+              if (actual === null || typeof actual !== 'object' || Array.isArray(actual))
+                return false;
               return Object.entries(wanted as Record<string, unknown>).every(([key, value]) =>
-                matchesExpected((actual as Record<string, unknown>)[key], value),
+                matchesExpected((actual as Record<string, unknown>)[key], value)
               );
             }
             return JSON.stringify(actual) === JSON.stringify(wanted);
           };
-          return Object.entries(expected as Record<string, unknown>).every(([key, value]) =>
-            matchesExpected(saved[key], value) && matchesExpected(current[key], value),
+          return Object.entries(expected as Record<string, unknown>).every(
+            ([key, value]) =>
+              matchesExpected(saved[key], value) && matchesExpected(current[key], value)
           );
         } catch {
           return false;
         }
       },
-      { expected, storageKey: SETTINGS_STORAGE_KEY },
+      { expected, storageKey: SETTINGS_STORAGE_KEY }
     );
     if (matched) return;
     await page.waitForTimeout(Math.min(50, Math.max(1, deadline - Date.now())));
@@ -372,9 +405,13 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
  */
 export async function readStoredSettings(page: Page): Promise<string | undefined> {
   return page.evaluate(async (storageKey) => {
-    const chromeStorage = (window as unknown as {
-      chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
-    }).chrome?.storage?.local;
+    const chromeStorage = (
+      window as unknown as {
+        chrome?: {
+          storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } };
+        };
+      }
+    ).chrome?.storage?.local;
     if (chromeStorage) {
       const stored = await chromeStorage.get(storageKey);
       const chromeValue = stored?.[storageKey];

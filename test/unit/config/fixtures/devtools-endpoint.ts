@@ -91,8 +91,12 @@ test('handles short reads without truncating the record', async () => {
   await fs.writeFile(portFile, record);
   prepareHandle = (handle) => {
     const read = handle.read.bind(handle);
-    mock.method(handle, 'read', (buffer: NodeJS.ArrayBufferView, offset: number, length: number, position: number) =>
-      read(buffer, offset, Math.min(length, 2), position));
+    mock.method(
+      handle,
+      'read',
+      (buffer: NodeJS.ArrayBufferView, offset: number, length: number, position: number) =>
+        read(buffer, offset, Math.min(length, 2), position)
+    );
   };
   assert.equal(await readDevToolsEndpoint(profile, child, childState), endpoint);
 });
@@ -101,9 +105,14 @@ test('closes the handle and preserves a read error', async () => {
   await fs.writeFile(portFile, record);
   const failure = Object.assign(new Error('read failed'), { code: 'EIO' });
   prepareHandle = (handle) => {
-    mock.method(handle, 'read', async () => { throw failure; });
+    mock.method(handle, 'read', async () => {
+      throw failure;
+    });
   };
-  await assert.rejects(readDevToolsEndpoint(profile, child, childState), (error: unknown) => error === failure);
+  await assert.rejects(
+    readDevToolsEndpoint(profile, child, childState),
+    (error: unknown) => error === failure
+  );
 });
 
 for (const [name, contents] of [
@@ -127,7 +136,9 @@ test('rejects a directory', async () => {
 });
 
 test('waits for a missing file to be created', async () => {
-  const sleep = mock.fn(async (_ms: number) => { await fs.writeFile(portFile, record); });
+  const sleep = mock.fn(async (_ms: number) => {
+    await fs.writeFile(portFile, record);
+  });
   assert.equal(await readDevToolsEndpoint(profile, child, childState, { sleep }), endpoint);
   assert.equal(sleep.mock.callCount(), 1);
   assert.deepEqual(sleep.mock.calls[0]?.arguments, [100]);
@@ -135,9 +146,13 @@ test('waits for a missing file to be created', async () => {
 
 test('preserves spawn and child-exit errors', async () => {
   const spawnError = new Error('spawn failed');
-  await assert.rejects(readDevToolsEndpoint(profile, child, { spawnError }),
-    (error: unknown) => error === spawnError);
-  await assert.rejects(readDevToolsEndpoint(profile, { ...child, exitCode: 1 }, childState),
-    /exited before/u);
+  await assert.rejects(
+    readDevToolsEndpoint(profile, child, { spawnError }),
+    (error: unknown) => error === spawnError
+  );
+  await assert.rejects(
+    readDevToolsEndpoint(profile, { ...child, exitCode: 1 }, childState),
+    /exited before/u
+  );
   assert.equal(mockOpen.mock.callCount(), 0);
 });

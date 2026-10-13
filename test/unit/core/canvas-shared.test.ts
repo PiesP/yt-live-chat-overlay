@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
 import {
   canCacheTextBitmap,
   getDisplayText,
   getSafeTextHeight,
   measureEmojiAdvanceWidth,
   measureTextAdvanceWidth,
+  type SharedContentSegment,
   splitGraphemeClusters,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
-import type { SharedContentSegment } from '@renderer/canvas/shared';
 import { spacing } from '@util/design-tokens';
+import { describe, expect, it } from 'vitest';
 
 describe('canvas bitmap allocation guards', () => {
   it('rejects oversized dimensions and cache budgets before allocation', () => {
@@ -38,9 +38,7 @@ describe('canvas bitmap allocation guards', () => {
 describe('toSharedContentSegments', () => {
   describe('text segments', () => {
     it('converts a single text segment', () => {
-      const result = toSharedContentSegments([
-        { type: 'text', content: 'hello' },
-      ]);
+      const result = toSharedContentSegments([{ type: 'text', content: 'hello' }]);
       expect(result).toHaveLength(1);
       expect(result[0]).toEqual({ type: 'text', content: 'hello' });
     });
@@ -56,9 +54,7 @@ describe('toSharedContentSegments', () => {
     });
 
     it('handles text segment without content field', () => {
-      const result = toSharedContentSegments([
-        { type: 'text' },
-      ]);
+      const result = toSharedContentSegments([{ type: 'text' }]);
       expect(result).toHaveLength(1);
       expect(result[0]).toEqual({ type: 'text' });
       expect(result[0]!.content).toBeUndefined();
@@ -82,9 +78,7 @@ describe('toSharedContentSegments', () => {
     });
 
     it('flattens emoji segment without url (only alt)', () => {
-      const result = toSharedContentSegments([
-        { type: 'emoji', emoji: { url: '', alt: ':)' } },
-      ]);
+      const result = toSharedContentSegments([{ type: 'emoji', emoji: { url: '', alt: ':)' } }]);
       expect(result).toHaveLength(1);
       const seg = result[0] as SharedContentSegment;
       expect(seg.type).toBe('emoji');
@@ -106,9 +100,7 @@ describe('toSharedContentSegments', () => {
     });
 
     it('handles emoji segment with undefined emoji', () => {
-      const result = toSharedContentSegments([
-        { type: 'emoji' },
-      ]);
+      const result = toSharedContentSegments([{ type: 'emoji' }]);
       expect(result).toHaveLength(1);
       const seg = result[0] as SharedContentSegment;
       expect(seg.type).toBe('emoji');
@@ -197,10 +189,7 @@ describe('getDisplayText', () => {
   });
 
   it('returns empty string for all-emoji input', () => {
-    const result = getDisplayText([
-      { type: 'emoji' },
-      { type: 'emoji' },
-    ]);
+    const result = getDisplayText([{ type: 'emoji' }, { type: 'emoji' }]);
     expect(result).toBe('');
   });
 
@@ -209,10 +198,12 @@ describe('getDisplayText', () => {
   });
 
   it('returns empty string when all segments have empty content', () => {
-    expect(getDisplayText([
-      { type: 'text', content: '' },
-      { type: 'text', content: '' },
-    ])).toBe('');
+    expect(
+      getDisplayText([
+        { type: 'text', content: '' },
+        { type: 'text', content: '' },
+      ])
+    ).toBe('');
   });
 });
 

@@ -5,8 +5,8 @@
  * the setTimeout fallback paths naturally.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { scheduleOverlayTask } from '@util/scheduler-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('scheduleOverlayTask', () => {
   beforeEach(() => {

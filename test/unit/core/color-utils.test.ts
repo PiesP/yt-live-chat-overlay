@@ -1,13 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import type { RgbColor, SuperChatTier } from '@app-types';
 import {
-  parseAnyColor,
   computeOutlineColor,
-  toRgba,
   computeReadableTextColor,
+  parseAnyColor,
   resolveSuperChatRgb,
+  toRgba,
 } from '@renderer/color-utils';
-import type { SuperChatTier } from '@app-types';
-import type { RgbColor } from '@app-types';
+import { describe, expect, it } from 'vitest';
 
 // ── parseAnyColor ─────────────────────────────────────────────────────
 
@@ -210,10 +209,7 @@ describe('resolveSuperChatRgb', () => {
   });
 
   it('falls back to backgroundColor when headerBackgroundColor is absent', () => {
-    const result = resolveSuperChatRgb(
-      { backgroundColor: '#00FF00', tier: 'blue' },
-      makeColors()
-    );
+    const result = resolveSuperChatRgb({ backgroundColor: '#00FF00', tier: 'blue' }, makeColors());
     expect(result).toEqual({ r: 0, g: 255, b: 0 });
   });
 
@@ -226,20 +222,14 @@ describe('resolveSuperChatRgb', () => {
   });
 
   it('falls back to tier color when no source color is available', () => {
-    const result = resolveSuperChatRgb(
-      { tier: 'yellow' },
-      makeColors()
-    );
+    const result = resolveSuperChatRgb({ tier: 'yellow' }, makeColors());
     expect(result).toEqual({ r: 255, g: 255, b: 0 });
   });
 
   it('falls back to blue tier color when tier key is missing from colors', () => {
     const colors = makeColors();
     delete (colors as Partial<typeof colors>).orange;
-    const result = resolveSuperChatRgb(
-      { tier: 'orange' },
-      colors
-    );
+    const result = resolveSuperChatRgb({ tier: 'orange' }, colors);
     expect(result).toEqual(colors.blue!);
   });
 
@@ -260,10 +250,7 @@ describe('resolveSuperChatRgb', () => {
   });
 
   it('handles empty string colors (falls back to tier)', () => {
-    const result = resolveSuperChatRgb(
-      { headerBackgroundColor: '', tier: 'green' },
-      makeColors()
-    );
+    const result = resolveSuperChatRgb({ headerBackgroundColor: '', tier: 'green' }, makeColors());
     expect(result).toEqual({ r: 0, g: 255, b: 0 });
   });
 });

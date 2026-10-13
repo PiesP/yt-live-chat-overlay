@@ -1,8 +1,5 @@
+import { parseSettingsControlName, type SettingsControlTarget } from '@settings/ui/control-codec';
 import { describe, expect, it } from 'vitest';
-import {
-  parseSettingsControlName,
-  type SettingsControlTarget,
-} from '@settings/ui/control-codec';
 
 describe('settings control name codec', () => {
   it.each<[string, SettingsControlTarget]>([

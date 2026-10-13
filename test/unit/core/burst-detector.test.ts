@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { BurstDetector } from '@renderer/layout/burst-detector';
-import type { BurstLevelObserver } from '@renderer/layout/burst-detector';
+import { BurstDetector, type BurstLevelObserver } from '@renderer/layout/burst-detector';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

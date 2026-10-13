@@ -99,7 +99,9 @@ describe('release preparation artifact versions', () => {
       encoding: 'utf8',
     }).trim();
     expect(metadata).toMatchObject({ commit: sourceCommit, version: '1.2.3' });
-    expect(readFileSync(join(releaseDirectory, 'checksums.txt'), 'utf8').trim().split('\n')).toHaveLength(4);
+    expect(
+      readFileSync(join(releaseDirectory, 'checksums.txt'), 'utf8').trim().split('\n')
+    ).toHaveLength(4);
     const notes = readFileSync(join(releaseDirectory, 'RELEASE_NOTES.md'), 'utf8');
     expect(notes).toContain(sourceCommit);
     expect(notes).toContain('/releases/download/v1.2.3/yt-live-chat-overlay.user.js');
@@ -117,25 +119,30 @@ describe('release preparation artifact versions', () => {
     expect(existsSync(join(fixtureRoot, 'release-bundle'))).toBe(false);
   });
 
-  it.each([undefined, '0.0.0'])('records the executing Node.js runtime when NODE_VERSION is %s', (advertised) => {
-    const fixtureRoot = createReleaseFixture();
-    const result = runPrepare(fixtureRoot, { NODE_VERSION: advertised });
-    expect(result.status).toBe(0);
-    const releaseDirectory = join(fixtureRoot, 'release-bundle', 'release');
-    const metadata = JSON.parse(readFileSync(join(releaseDirectory, 'metadata.json'), 'utf8')) as {
-      node_version: string;
-      commit: string;
-      version: string;
-      runner_os: string;
-    };
-    expect(metadata.node_version).toBe(process.versions.node);
-    expect(metadata.version).toBe('1.2.3');
-    expect(metadata.commit).toMatch(/^[0-9a-f]{40}$/);
-    expect(metadata.runner_os).toBeTruthy();
-    expect(readFileSync(join(releaseDirectory, 'RELEASE_NOTES.md'), 'utf8')).toContain(
-      `- **Node.js**: \`${process.versions.node}\``
-    );
-  });
+  it.each([undefined, '0.0.0'])(
+    'records the executing Node.js runtime when NODE_VERSION is %s',
+    (advertised) => {
+      const fixtureRoot = createReleaseFixture();
+      const result = runPrepare(fixtureRoot, { NODE_VERSION: advertised });
+      expect(result.status).toBe(0);
+      const releaseDirectory = join(fixtureRoot, 'release-bundle', 'release');
+      const metadata = JSON.parse(
+        readFileSync(join(releaseDirectory, 'metadata.json'), 'utf8')
+      ) as {
+        node_version: string;
+        commit: string;
+        version: string;
+        runner_os: string;
+      };
+      expect(metadata.node_version).toBe(process.versions.node);
+      expect(metadata.version).toBe('1.2.3');
+      expect(metadata.commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(metadata.runner_os).toBeTruthy();
+      expect(readFileSync(join(releaseDirectory, 'RELEASE_NOTES.md'), 'utf8')).toContain(
+        `- **Node.js**: \`${process.versions.node}\``
+      );
+    }
+  );
 
   it.each([
     ['dist/yt-live-chat-overlay.user.js', 'userscript'],

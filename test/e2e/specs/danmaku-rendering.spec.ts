@@ -9,27 +9,27 @@
  * handle exposes settings correctly.
  */
 
-import { test, expect, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { expect, type Page, test } from '@playwright/test';
 import { rendererLayout } from '@util/design-tokens';
-import {
-  DEFAULT_SETTINGS,
-  injectUserscript,
-  installYTMock,
-  MOCK_WATCH_URL,
-  OVERLAY_ID,
-  USERSCRIPT_PATH,
-  applySettings,
-  getSettings,
-  setupMockPageRoute,
-  setupOverlayPage,
-} from '../fixtures/test-utils';
 import {
   installPlaybackWorkerObserver,
   PLAYBACK_WORKER_URL,
   routePlaybackWorker,
 } from '../fixtures/playback-worker';
+import {
+  applySettings,
+  DEFAULT_SETTINGS,
+  getSettings,
+  injectUserscript,
+  installYTMock,
+  MOCK_WATCH_URL,
+  OVERLAY_ID,
+  setupMockPageRoute,
+  setupOverlayPage,
+  USERSCRIPT_PATH,
+} from '../fixtures/test-utils';
 
 const BIDI_EMOJI_URL = 'https://yt3.ggpht.com/e2e-bidi-emoji=s32';
 const BIDI_EMOJI_PATH = resolve(process.cwd(), 'extension/icons/icon128.png');
@@ -122,9 +122,7 @@ async function emitRichBidiMessage(page: Page, requestKey: string): Promise<void
                                 accessibility: {
                                   accessibilityData: { label: 'bidi emoji' },
                                 },
-                                thumbnails: [
-                                  { url: BIDI_EMOJI_URL, width: 32, height: 32 },
-                                ],
+                                thumbnails: [{ url: BIDI_EMOJI_URL, width: 32, height: 32 }],
                               },
                             },
                           },
@@ -142,9 +140,10 @@ async function emitRichBidiMessage(page: Page, requestKey: string): Promise<void
       },
     })
   );
-  await page.evaluate((key) =>
-    fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${key}`)
-  , requestKey);
+  await page.evaluate(
+    (key) => fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${key}`),
+    requestKey
+  );
 }
 
 function findBidiSequence(events: readonly BidiCanvasEvent[]): {
@@ -173,12 +172,11 @@ function findBidiSequence(events: readonly BidiCanvasEvent[]): {
   return null;
 }
 
-
 test.describe('Danmaku Rendering', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`,
+        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build:dev' first.`
       );
     }
   });
@@ -207,7 +205,7 @@ test.describe('Danmaku Rendering', () => {
     await setupOverlayPage(page);
 
     const hasHandle = await page.evaluate(() => {
-      const w = (window as unknown) as Record<string, unknown>;
+      const w = window as unknown as Record<string, unknown>;
       const handle = w.__ytChatOverlay;
       return typeof handle === 'object' && handle !== null;
     });
@@ -384,9 +382,7 @@ test.describe('Danmaku Rendering', () => {
 
     expect(glyphHeights).not.toBeNull();
     expect(glyphHeights!.rendered).toBeGreaterThanOrEqual(glyphHeights!.reference - 1);
-    expect(glyphHeights!.renderedAlpha / glyphHeights!.referenceAlpha).toBeGreaterThanOrEqual(
-      0.95
-    );
+    expect(glyphHeights!.renderedAlpha / glyphHeights!.referenceAlpha).toBeGreaterThanOrEqual(0.95);
   });
 
   test('keeps letter-spaced text and a missing emoji fallback from overlapping neighbors', async ({
@@ -526,8 +522,7 @@ test.describe('Danmaku Rendering', () => {
           const measureLayoutWidth = (value: string): number => {
             const metrics = context.measureText(value);
             const inkWidth =
-              Math.abs(metrics.actualBoundingBoxLeft) +
-              Math.abs(metrics.actualBoundingBoxRight);
+              Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
             return Math.ceil(Math.max(metrics.width, inkWidth));
           };
 
@@ -554,9 +549,7 @@ test.describe('Danmaku Rendering', () => {
     expect(layout!.fallbackAdvance).toBeGreaterThanOrEqual(layout!.minimumFallbackAdvance);
   });
 
-  test('renders rich RTL text-object-text through the main Canvas path', async ({
-    page,
-  }) => {
+  test('renders rich RTL text-object-text through the main Canvas path', async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
         configurable: true,
@@ -628,9 +621,12 @@ test.describe('Danmaku Rendering', () => {
       'Rcvd: 1 | Rndr: 1'
     );
     const readSequence = () =>
-      page.evaluate(() =>
-        (window as unknown as Record<string, unknown>).__rtlCanvasEvents as BidiCanvasEvent[]
-      ).then(findBidiSequence);
+      page
+        .evaluate(
+          () =>
+            (window as unknown as Record<string, unknown>).__rtlCanvasEvents as BidiCanvasEvent[]
+        )
+        .then(findBidiSequence);
     await expect.poll(readSequence, { timeout: 5000 }).not.toBeNull();
     const sequence = await readSequence();
 
@@ -694,9 +690,7 @@ test.describe('Danmaku Rendering', () => {
       .toBe(1);
     const workerState = {
       telemetry: await page.evaluate(() =>
-        structuredClone(
-          (window as unknown as Record<string, unknown>).__playbackWorkerTelemetry
-        )
+        structuredClone((window as unknown as Record<string, unknown>).__playbackWorkerTelemetry)
       ),
       urls: page.workers().map((worker) => worker.url()),
     };
@@ -709,12 +703,7 @@ test.describe('Danmaku Rendering', () => {
       let sequence = 0;
       const prototype = OffscreenCanvasRenderingContext2D.prototype;
       const originalFillText = prototype.fillText;
-      prototype.fillText = function (
-        text: string,
-        x: number,
-        y: number,
-        maxWidth?: number
-      ): void {
+      prototype.fillText = function (text: string, x: number, y: number, maxWidth?: number): void {
         if (events.length < 512) {
           events.push({
             kind: 'text',
@@ -767,8 +756,10 @@ test.describe('Danmaku Rendering', () => {
     );
     const readSequence = () =>
       rendererWorker
-        .evaluate(() =>
-          (self as unknown as Record<string, unknown>).__rtlCanvasWorkerEvents as BidiCanvasEvent[]
+        .evaluate(
+          () =>
+            (self as unknown as Record<string, unknown>)
+              .__rtlCanvasWorkerEvents as BidiCanvasEvent[]
         )
         .then(findBidiSequence);
     await expect.poll(readSequence, { timeout: 5000 }).not.toBeNull();
@@ -902,69 +893,74 @@ test.describe('Danmaku Rendering', () => {
 
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
     const readContainment = (expectedDpr: number, minimumDrawCount: number) =>
-      canvas.evaluate((element: HTMLCanvasElement, expected) => {
-        const probe = (window as unknown as Record<string, unknown>).__paidCardInkProbe as
-          | {
-              latestRect: {
-                left: number;
-                top: number;
-                right: number;
-                bottom: number;
-                dpr: number;
-              } | null;
-              cachedDrawsByDpr: Record<
-                string,
-                { count: number; destinationWidth: number; destinationHeight: number }
-              >;
-            }
-          | undefined;
-        const rect = probe?.latestRect;
-        const cachedDraw = probe?.cachedDrawsByDpr[String(expected.dpr)];
-        const context = element.getContext('2d');
-        if (
-          !probe ||
-          !rect ||
-          !cachedDraw ||
-          cachedDraw.count <= expected.minimumDrawCount ||
-          !context ||
-          Math.abs(rect.dpr - expected.dpr) > 0.01 ||
-          Math.abs(context.getTransform().a - expected.dpr) > 0.01
-        ) {
-          return null;
-        }
+      canvas.evaluate(
+        (element: HTMLCanvasElement, expected) => {
+          const probe = (window as unknown as Record<string, unknown>).__paidCardInkProbe as
+            | {
+                latestRect: {
+                  left: number;
+                  top: number;
+                  right: number;
+                  bottom: number;
+                  dpr: number;
+                } | null;
+                cachedDrawsByDpr: Record<
+                  string,
+                  { count: number; destinationWidth: number; destinationHeight: number }
+                >;
+              }
+            | undefined;
+          const rect = probe?.latestRect;
+          const cachedDraw = probe?.cachedDrawsByDpr[String(expected.dpr)];
+          const context = element.getContext('2d');
+          if (
+            !probe ||
+            !rect ||
+            !cachedDraw ||
+            cachedDraw.count <= expected.minimumDrawCount ||
+            !context ||
+            Math.abs(rect.dpr - expected.dpr) > 0.01 ||
+            Math.abs(context.getTransform().a - expected.dpr) > 0.01
+          ) {
+            return null;
+          }
 
-        const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
-        const startY = Math.max(0, Math.floor(rect.top));
-        const endY = Math.min(element.height, Math.ceil(rect.bottom));
-        if (startX >= element.width || startY >= endY) return null;
-        const outsidePixels = context.getImageData(
-          startX,
-          startY,
-          element.width - startX,
-          endY - startY
-        ).data;
-        const insidePixels = context.getImageData(
-          Math.max(0, Math.floor(rect.left)),
-          startY,
-          Math.max(1, Math.ceil(rect.right) - Math.max(0, Math.floor(rect.left))),
-          endY - startY
-        ).data;
-        let outsideAlphaPixels = 0;
-        let insideAlphaPixels = 0;
-        for (let index = 3; index < outsidePixels.length; index += 4) {
-          if (outsidePixels[index]! > 8) outsideAlphaPixels++;
-        }
-        for (let index = 3; index < insidePixels.length; index += 4) {
-          if (insidePixels[index]! > 8) insideAlphaPixels++;
-        }
-        return { ...cachedDraw, insideAlphaPixels, outsideAlphaPixels };
-      }, { dpr: expectedDpr, minimumDrawCount });
+          const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
+          const startY = Math.max(0, Math.floor(rect.top));
+          const endY = Math.min(element.height, Math.ceil(rect.bottom));
+          if (startX >= element.width || startY >= endY) return null;
+          const outsidePixels = context.getImageData(
+            startX,
+            startY,
+            element.width - startX,
+            endY - startY
+          ).data;
+          const insidePixels = context.getImageData(
+            Math.max(0, Math.floor(rect.left)),
+            startY,
+            Math.max(1, Math.ceil(rect.right) - Math.max(0, Math.floor(rect.left))),
+            endY - startY
+          ).data;
+          let outsideAlphaPixels = 0;
+          let insideAlphaPixels = 0;
+          for (let index = 3; index < outsidePixels.length; index += 4) {
+            if (outsidePixels[index]! > 8) outsideAlphaPixels++;
+          }
+          for (let index = 3; index < insidePixels.length; index += 4) {
+            if (insidePixels[index]! > 8) insideAlphaPixels++;
+          }
+          return { ...cachedDraw, insideAlphaPixels, outsideAlphaPixels };
+        },
+        { dpr: expectedDpr, minimumDrawCount }
+      );
     const assertFreshDpr = async (
       dpr: number,
       minimumDrawCount: number,
       referenceSize?: { destinationWidth: number; destinationHeight: number }
     ): Promise<{ count: number; destinationWidth: number; destinationHeight: number }> => {
-      await expect.poll(() => readContainment(dpr, minimumDrawCount), { timeout: 5000 }).not.toBeNull();
+      await expect
+        .poll(() => readContainment(dpr, minimumDrawCount), { timeout: 5000 })
+        .not.toBeNull();
       const containment = await readContainment(dpr, minimumDrawCount);
       expect(containment).not.toBeNull();
       expect(containment!.insideAlphaPixels).toBeGreaterThan(0);
@@ -1138,9 +1134,7 @@ test.describe('Danmaku Rendering', () => {
     const containment = await readContainment();
     expect(containment).not.toBeNull();
     expect(containment!.ellipsisRight).toBeLessThanOrEqual(
-      containment!.lineStart +
-        containment!.cardWidth -
-        rendererLayout.superchat.paddingH * 2
+      containment!.lineStart + containment!.cardWidth - rendererLayout.superchat.paddingH * 2
     );
   });
 
@@ -1385,10 +1379,11 @@ test.describe('Danmaku Rendering', () => {
     await setupOverlayPage(page);
 
     // Filter for overlay-related errors only
-    const overlayErrors = errors.filter((e) =>
-      e.toLowerCase().includes('yt-live-chat-overlay')
-      || e.toLowerCase().includes('overlay')
-      || e.toLowerCase().includes('danmaku')
+    const overlayErrors = errors.filter(
+      (e) =>
+        e.toLowerCase().includes('yt-live-chat-overlay') ||
+        e.toLowerCase().includes('overlay') ||
+        e.toLowerCase().includes('danmaku')
     );
 
     expect(overlayErrors).toHaveLength(0);

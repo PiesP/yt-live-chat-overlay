@@ -1,5 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -53,10 +63,13 @@ function classify(cwd: string, event: string, base: string, head: string): Scope
   });
   expect(result.status, result.stderr).toBe(0);
   return Object.fromEntries(
-    result.stdout.trim().split('\n').map((line) => {
-      const [scope, enabled] = line.split('=');
-      return [scope, enabled === 'true'];
-    })
+    result.stdout
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const [scope, enabled] = line.split('=');
+        return [scope, enabled === 'true'];
+      })
   );
 }
 
@@ -68,22 +81,28 @@ it('has no output, Git process, or output-file side effect when imported', () =>
     writeFileSync(outputPath, 'sentinel\n');
     writeFileSync(fakeGit, '#!/bin/sh\nprintf called > "$CLASSIFIER_GIT_MARKER"\n');
     chmodSync(fakeGit, 0o755);
-    const imported = spawnSync(process.execPath, [
-      '--experimental-strip-types', '--input-type=module', '--eval',
-      `await import(${JSON.stringify(pathToFileURL(classifier).href)})`,
-    ], {
-      cwd,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        PATH: cwd,
-        CLASSIFIER_GIT_MARKER: gitMarker,
-        EVENT_NAME: 'push',
-        BASE_SHA: 'a'.repeat(40),
-        HEAD_SHA: 'b'.repeat(40),
-        GITHUB_OUTPUT: outputPath,
-      },
-    });
+    const imported = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--input-type=module',
+        '--eval',
+        `await import(${JSON.stringify(pathToFileURL(classifier).href)})`,
+      ],
+      {
+        cwd,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: cwd,
+          CLASSIFIER_GIT_MARKER: gitMarker,
+          EVENT_NAME: 'push',
+          BASE_SHA: 'a'.repeat(40),
+          HEAD_SHA: 'b'.repeat(40),
+          GITHUB_OUTPUT: outputPath,
+        },
+      }
+    );
     expect(imported.status, imported.stderr).toBe(0);
     expect(imported.stdout).toBe('');
     expect(imported.stderr).toBe('');
@@ -103,9 +122,11 @@ it('keeps calls independent and runs through a symlink with all 13 outputs', () 
     const alias = join(cwd, 'classifier.ts');
     const outputPath = join(cwd, 'outputs.txt');
     symlinkSync(classifier, alias);
-    const result = spawnSync(process.execPath, [
-      '--experimental-strip-types', alias, '--paths', 'README.md',
-    ], { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputPath } });
+    const result = spawnSync(
+      process.execPath,
+      ['--experimental-strip-types', alias, '--paths', 'README.md'],
+      { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputPath } }
+    );
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim().split('\n')).toHaveLength(SCOPES.length);
     expect(result.stdout).toContain('semgrep=true\n');
@@ -120,11 +141,17 @@ it('selects all scopes when the trusted base has no TypeScript classifier', () =
       write(cwd, 'README.md');
       const base = commit(cwd, 'base without classifier');
       const marker = join(cwd, 'candidate-ran');
-      write(cwd, 'scripts/ci/classify-workflow-changes.ts',
-        `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, 'executed');\n`);
+      write(
+        cwd,
+        'scripts/ci/classify-workflow-changes.ts',
+        `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, 'executed');\n`
+      );
       const head = commit(cwd, 'candidate classifier');
-      const workflow = readFileSync(resolve(import.meta.dirname, '../../../.github/workflows', filename), 'utf8');
-      const changes = workflow.match(/^  changes:\n(?:(?!^  [a-z][\w-]*:\n)[\s\S])*/m)?.[0];
+      const workflow = readFileSync(
+        resolve(import.meta.dirname, '../../../.github/workflows', filename),
+        'utf8'
+      );
+      const changes = workflow.match(/^ {2}changes:\n(?:(?!^ {2}[a-z][\w-]*:\n)[\s\S])*/m)?.[0];
       const script = changes?.split('        run: |\n')[1]?.replace(/^ {10}/gm, '');
       expect(script, filename).toBeDefined();
       if (!script) return;
@@ -283,7 +310,13 @@ it('enables every scope for unknown paths, invalid revisions, Git errors, and em
     const base = commit(cwd, 'base');
     write(cwd, 'new-config.unknown');
     const unknown = commit(cwd, 'unknown path');
-    const unrelated = git(cwd, 'commit-tree', git(cwd, 'rev-parse', 'HEAD^{tree}'), '-m', 'unrelated');
+    const unrelated = git(
+      cwd,
+      'commit-tree',
+      git(cwd, 'rev-parse', 'HEAD^{tree}'),
+      '-m',
+      'unrelated'
+    );
     for (const scopes of [
       classify(cwd, 'push', base, unknown),
       classify(cwd, 'push', '0'.repeat(40), unknown),

@@ -2,10 +2,10 @@
  * Tests for ReplayBuffer — time-indexed sorted buffer for replay chat.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { ReplayBuffer } from '@chat/replay-buffer';
 import type { ChatMessage } from '@app-types';
 import type { ChatEvent } from '@chat/message-parser';
+import { ReplayBuffer } from '@chat/replay-buffer';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 function makeMsg(id: string, offsetMs: number): ChatMessage {
   return {
@@ -128,9 +128,7 @@ describe('ReplayBuffer', () => {
       expect(buf.flushUpTo(10_000, 10).map((message) => message.id)).toEqual(['late', 'due']);
       expect(buf.messageCount).toBe(2);
       expect(buf.flushUpTo(10_000, 10)).toEqual([]);
-      expect(buf.flushUpTo(10_001, 10).map((message) => message.id)).toEqual([
-        'just-future',
-      ]);
+      expect(buf.flushUpTo(10_001, 10).map((message) => message.id)).toEqual(['just-future']);
       expect(buf.flushUpTo(11_500, 10).map((message) => message.id)).toEqual(['future']);
     });
 

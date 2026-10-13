@@ -32,9 +32,7 @@ export function createExtensionIifeConfig(
             formats: ['iife'],
             fileName: () => options.fileName,
           },
-          ...(options.banner
-            ? { rollupOptions: { output: { banner: options.banner } } }
-            : {}),
+          ...(options.banner ? { rollupOptions: { output: { banner: options.banner } } } : {}),
         },
         define: {
           __VERSION__: JSON.stringify(process.env.BUILD_VERSION ?? pkg.version),

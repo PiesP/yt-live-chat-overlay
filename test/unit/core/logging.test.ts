@@ -5,7 +5,7 @@
  * These tests override that mock with vi.mock to test the real implementation.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════════════════
 // We explicitly NOT import from @util/logging here because test/setup.ts
@@ -69,7 +69,12 @@ describe('logging — level emission logic', () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe('logging — createLogger (real module)', () => {
-  let createLogger: (moduleName: string) => { debug: (...args: unknown[]) => void; info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
+  let createLogger: (moduleName: string) => {
+    debug: (...args: unknown[]) => void;
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+  };
   let setOverlayLogLevel: (level: LogLevel) => void;
 
   beforeEach(async () => {

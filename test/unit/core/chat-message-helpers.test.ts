@@ -1,16 +1,16 @@
-import { describe, it, expect } from 'vitest';
 import {
-  stripControlCharacters,
-  normalizeInlineText,
-  truncateForKind,
-  hasEmojiContent,
-  getTranslatableText,
+  AUTHOR_TYPE_PRIORITY,
   colorIntToCss,
   determineSuperChatTier,
-  extractUserColor,
   extractAccessibilityLabel,
-  AUTHOR_TYPE_PRIORITY,
+  extractUserColor,
+  getTranslatableText,
+  hasEmojiContent,
+  normalizeInlineText,
+  stripControlCharacters,
+  truncateForKind,
 } from '@chat/message-helpers';
+import { describe, expect, it } from 'vitest';
 
 // ── stripControlCharacters ────────────────────────────────────────────
 
@@ -121,7 +121,9 @@ describe('truncateForKind', () => {
 describe('hasEmojiContent', () => {
   it('returns true when a segment is type emoji', () => {
     expect(
-      hasEmojiContent([{ type: 'emoji' as const, emoji: { url: 'https://example.com/emoji.png', alt: '😀' } }])
+      hasEmojiContent([
+        { type: 'emoji' as const, emoji: { url: 'https://example.com/emoji.png', alt: '😀' } },
+      ])
     ).toBe(true);
   });
 
@@ -151,16 +153,19 @@ describe('hasEmojiContent', () => {
 // ── getTranslatableText ──────────────────────────────────────────────
 
 describe('getTranslatableText', () => {
-  const makeMsg = (content: Array<{ type: 'text'; content: string } | { type: 'emoji'; emoji: { url: string; alt: string } }>) =>
-    ({
-      id: 'test',
-      text: '',
-      content,
-      kind: 'text' as const,
-      timestamp: 0,
-      author: 'tester',
-      authorType: 'normal' as const,
-    });
+  const makeMsg = (
+    content: Array<
+      { type: 'text'; content: string } | { type: 'emoji'; emoji: { url: string; alt: string } }
+    >
+  ) => ({
+    id: 'test',
+    text: '',
+    content,
+    kind: 'text' as const,
+    timestamp: 0,
+    author: 'tester',
+    authorType: 'normal' as const,
+  });
 
   it('joins text segments only', () => {
     const msg = makeMsg([
@@ -180,7 +185,9 @@ describe('getTranslatableText', () => {
   });
 
   it('returns empty string for no text segments', () => {
-    const msg = makeMsg([{ type: 'emoji', emoji: { url: 'https://example.com/e.png', alt: '😀' } }]);
+    const msg = makeMsg([
+      { type: 'emoji', emoji: { url: 'https://example.com/e.png', alt: '😀' } },
+    ]);
     expect(getTranslatableText(msg)).toBe('');
   });
 

@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { expect, test, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-  DEFAULT_SETTINGS,
-  injectUserscript,
-  MOCK_WATCH_URL,
-  OVERLAY_ID,
-  setupMockPageRoute,
-  USERSCRIPT_PATH,
-  installYTMock,
-} from '../fixtures/test-utils';
+import { expect, type Page, test } from '@playwright/test';
 import {
   installPlaybackWorkerObserver,
   PLAYBACK_WORKER_URL,
   type PlaybackWorkerTelemetry,
   routePlaybackWorker,
 } from '../fixtures/playback-worker';
+import {
+  DEFAULT_SETTINGS,
+  injectUserscript,
+  installYTMock,
+  MOCK_WATCH_URL,
+  OVERLAY_ID,
+  setupMockPageRoute,
+  USERSCRIPT_PATH,
+} from '../fixtures/test-utils';
 
 const installPlaybackMock = (options: {
   forceMainThread: boolean;
@@ -234,8 +234,10 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   }
 
   await page.evaluate(() => {
-    const setPlaybackState = (window as unknown as Record<string, unknown>)
-      .__setPlaybackState as (currentTime: number, paused: boolean) => void;
+    const setPlaybackState = (window as unknown as Record<string, unknown>).__setPlaybackState as (
+      currentTime: number,
+      paused: boolean
+    ) => void;
     setPlaybackState(0, false);
   });
 
@@ -245,7 +247,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-start']);
     await expect(counters).toHaveText('Rcvd: 1 | Rndr: 1');
     await expect(page.locator('#yt-chat-overlay-debug > div').nth(5)).toHaveText(
-      'Render: n/a | Drain: n/a',
+      'Render: n/a | Drain: n/a'
     );
   } else {
     await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
@@ -255,8 +257,10 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   expect(requestedOffsets.filter((offset) => offset === 0)).toHaveLength(1);
 
   await page.evaluate(() => {
-    const setPlaybackState = (window as unknown as Record<string, unknown>)
-      .__setPlaybackState as (currentTime: number, paused: boolean) => void;
+    const setPlaybackState = (window as unknown as Record<string, unknown>).__setPlaybackState as (
+      currentTime: number,
+      paused: boolean
+    ) => void;
     setPlaybackState(0, true);
   });
   await page.waitForTimeout(100);
@@ -269,8 +273,10 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   }
 
   await page.evaluate(() => {
-    const setPlaybackState = (window as unknown as Record<string, unknown>)
-      .__setPlaybackState as (currentTime: number, paused: boolean) => void;
+    const setPlaybackState = (window as unknown as Record<string, unknown>).__setPlaybackState as (
+      currentTime: number,
+      paused: boolean
+    ) => void;
     setPlaybackState(10, false);
     document.querySelector('video')?.dispatchEvent(new Event('seeked'));
   });
@@ -297,7 +303,9 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
 
     const telemetryBeforeDestroy = await readWorkerTelemetry();
     expect(telemetryBeforeDestroy.pausedStates).toEqual([true, false]);
-    expect(telemetryBeforeDestroy.sentTypes.filter((type) => type === 'clearState')).toHaveLength(2);
+    expect(telemetryBeforeDestroy.sentTypes.filter((type) => type === 'clearState')).toHaveLength(
+      2
+    );
 
     await page.evaluate(async () => {
       const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
@@ -324,7 +332,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
 
 async function runSustainedViewingScenario(
   page: Page,
-  renderPath: 'main' | 'worker',
+  renderPath: 'main' | 'worker'
 ): Promise<void> {
   const useWorker = renderPath === 'worker';
   const pageErrors: string[] = [];
@@ -343,7 +351,7 @@ async function runSustainedViewingScenario(
     [
       'burst',
       Array.from({ length: 8 }, (_, index) =>
-        liveAction(`sustained-burst-${index + 1}`, `burst message ${index + 1}`),
+        liveAction(`sustained-burst-${index + 1}`, `burst message ${index + 1}`)
       ),
     ],
     [
@@ -380,10 +388,7 @@ async function runSustainedViewingScenario(
     global.__sustainedInterceptorBatches = 0;
     const nativeDebug = console.debug.bind(console);
     console.debug = (...args: unknown[]): void => {
-      if (
-        args[0] === '[FetchInterceptor]' &&
-        args[1] === 'chat.interceptor.messages-received'
-      ) {
+      if (args[0] === '[FetchInterceptor]' && args[1] === 'chat.interceptor.messages-received') {
         global.__sustainedInterceptorBatches =
           Number(global.__sustainedInterceptorBatches ?? 0) + 1;
       }
@@ -429,7 +434,7 @@ async function runSustainedViewingScenario(
       .evaluateAll((elements) => elements.map((element) => element.dataset.messageId ?? null));
   const expectAccessibleMessageSet = async (
     expectedIds: string[],
-    phaseIds: string[] = expectedIds,
+    phaseIds: string[] = expectedIds
   ): Promise<void> => {
     const expected = {
       length: expectedIds.length,
@@ -451,22 +456,19 @@ async function runSustainedViewingScenario(
   };
   const requestPhase = async (phase: string): Promise<void> => {
     const previousBatches = await page.evaluate(() =>
-      Number(
-        (window as unknown as Record<string, unknown>).__sustainedInterceptorBatches ?? 0,
-      ),
+      Number((window as unknown as Record<string, unknown>).__sustainedInterceptorBatches ?? 0)
     );
     await page.evaluate(async (name) => {
       const response = await fetch(
-        `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?phase=${name}`,
+        `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?phase=${name}`
       );
       await response.json();
     }, phase);
     await page.waitForFunction(
       (previous) =>
-        Number(
-          (window as unknown as Record<string, unknown>).__sustainedInterceptorBatches ?? 0,
-        ) > previous,
-      previousBatches,
+        Number((window as unknown as Record<string, unknown>).__sustainedInterceptorBatches ?? 0) >
+        previous,
+      previousBatches
     );
   };
   const setPlaybackState = async (currentTime: number, paused: boolean): Promise<void> => {
@@ -474,11 +476,11 @@ async function runSustainedViewingScenario(
       ({ time, isPaused }) => {
         const setter = (window as unknown as Record<string, unknown>).__setPlaybackState as (
           currentTime: number,
-          paused: boolean,
+          paused: boolean
         ) => void;
         setter(time, isPaused);
       },
-      { time: currentTime, isPaused: paused },
+      { time: currentTime, isPaused: paused }
     );
   };
   const setVisibility = async (visibility: 'hidden' | 'visible'): Promise<void> => {
@@ -522,7 +524,9 @@ async function runSustainedViewingScenario(
   const initialIds = [...lowRateIds, ...burstIds];
   await requestPhase('burst');
   await expect
-    .poll(async () => (await page.locator('#yt-chat-overlay-debug > div').nth(2).textContent()) ?? '')
+    .poll(
+      async () => (await page.locator('#yt-chat-overlay-debug > div').nth(2).textContent()) ?? ''
+    )
     .toMatch(/Burst: (?:elevated|high|extreme)$/u);
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(initialIds);
@@ -559,10 +563,10 @@ async function runSustainedViewingScenario(
   await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
   if (useWorker) {
-    await expect.poll(async () => (await readWorkerTelemetry()).pausedStates).toEqual([true, false]);
     await expect
-      .poll(async () => (await readWorkerTelemetry()).stats.at(-1)?.totalDrops)
-      .toBe(0);
+      .poll(async () => (await readWorkerTelemetry()).pausedStates)
+      .toEqual([true, false]);
+    await expect.poll(async () => (await readWorkerTelemetry()).stats.at(-1)?.totalDrops).toBe(0);
   }
 
   await setVisibility('hidden');
@@ -653,7 +657,7 @@ async function runSustainedViewingScenario(
       page.evaluate(() => {
         const oldCanvas = (window as unknown as Record<string, unknown>).__sustainedOldCanvas;
         return oldCanvas instanceof HTMLCanvasElement && !oldCanvas.isConnected;
-      }),
+      })
     )
     .toBe(true);
   if (useWorker) {
@@ -681,7 +685,7 @@ test.describe('Playback controls', () => {
     const workerPath = resolve(process.cwd(), 'dist-extension/workers/renderer.js');
     if (!existsSync(workerPath)) {
       throw new Error(
-        `Extension renderer worker not found at ${workerPath}. Run 'pnpm build:extension' first.`,
+        `Extension renderer worker not found at ${workerPath}. Run 'pnpm build:extension' first.`
       );
     }
   });
@@ -774,11 +778,15 @@ test.describe('Playback controls', () => {
         });
         if (renderer === 'worker') {
           await expect
-            .poll(() => page.evaluate(() => {
-              const telemetry = (window as unknown as Record<string, unknown>)
-                .__playbackWorkerTelemetry as PlaybackWorkerTelemetry;
-              return telemetry.stats.at(-1)?.activeMessageIds ?? [];
-            }), { timeout: 3000 })
+            .poll(
+              () =>
+                page.evaluate(() => {
+                  const telemetry = (window as unknown as Record<string, unknown>)
+                    .__playbackWorkerTelemetry as PlaybackWorkerTelemetry;
+                  return telemetry.stats.at(-1)?.activeMessageIds ?? [];
+                }),
+              { timeout: 3000 }
+            )
             .toContain('delay-future');
         } else {
           await expect(messages).toContainText('buffered message independent of network', {

@@ -96,8 +96,7 @@ import {
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
 import { getRowSlotCount, rowsNeedVerticalClearance } from '@renderer/layout/row-geometry';
-import type { ConnectionStatus } from '@renderer/renderer-base';
-import { RendererBase } from '@renderer/renderer-base';
+import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -110,8 +109,7 @@ import {
   getFontString,
   measureTextWidth,
 } from '@renderer/text-measure';
-import type { WorkerRecoveryMessage } from '@renderer/worker/manager';
-import { RenderWorkerManager } from '@renderer/worker/manager';
+import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';

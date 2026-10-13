@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CrossTabSyncAdapter } from '@platform/types';
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
+import type { CrossTabSyncAdapter } from '@platform/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ChromeChangeListener = (changes: Record<string, unknown>, areaName: string) => void;
 type GmChangeListener = (
@@ -111,7 +111,11 @@ describe('cross-tab sync adapters', () => {
       'https://other.example'
     );
     dispatchStorageChanged({ source: 'other-source', key: storageKey, newValue: 'wrong-source' });
-    dispatchStorageChanged({ source: 'yt-storage-changed', key: 'other-key', newValue: 'wrong-key' });
+    dispatchStorageChanged({
+      source: 'yt-storage-changed',
+      key: 'other-key',
+      newValue: 'wrong-key',
+    });
 
     expect(callback).not.toHaveBeenCalled();
 

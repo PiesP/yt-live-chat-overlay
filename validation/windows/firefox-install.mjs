@@ -2,10 +2,15 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { countUnexpectedLiveErrors, isYouTubeHostError, redactDiagnosticText, validateLiveRenderer } from './live-rendering.mjs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
 import { launchFirefoxBidi } from './firefox-bidi.mjs';
+import {
+  countUnexpectedLiveErrors,
+  isYouTubeHostError,
+  redactDiagnosticText,
+  validateLiveRenderer,
+} from './live-rendering.mjs';
 
 const EXTENSION_ID = 'yt-live-chat-overlay@piesp.github.io';
 const OVERLAY_ID = 'yt-live-chat-overlay';
@@ -127,7 +132,11 @@ export function normalizeLiveUrls(liveUrls = []) {
   }
   return liveUrls.map((value, index) => {
     if (typeof value !== 'string') throw new TypeError(`liveUrls[${index}] must be a string`);
-    if (!value.startsWith('https://www.youtube.com/') || /\s/u.test(value) || value.includes('\\')) {
+    if (
+      !value.startsWith('https://www.youtube.com/') ||
+      /\s/u.test(value) ||
+      value.includes('\\')
+    ) {
       throw new Error(`liveUrls[${index}] must be a public https://www.youtube.com URL`);
     }
     const url = new URL(value);
@@ -403,14 +412,17 @@ async function runLivePhase(session, liveEntries, output) {
         video.muted = true;
         return { paused: video.paused, readyState: video.readyState };
       })()`);
-      await session.waitFor(`(() => {
+      await session.waitFor(
+        `(() => {
         const video = document.querySelector('video');
         if (video && !video.paused && video.readyState >= 2) return true;
         const button = document.querySelector('.ytp-large-play-button');
         const rect = button?.getBoundingClientRect();
         return Boolean(rect && rect.width > 0 && rect.height > 0 &&
           button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)));
-      })()`, 'public playback or a clickable YouTube play button');
+      })()`,
+        'public playback or a clickable YouTube play button'
+      );
       const playPoint = await session.evaluateJson(`(() => {
         const video = document.querySelector('video');
         if (video && !video.paused && video.readyState >= 2) return null;
@@ -423,20 +435,30 @@ async function runLivePhase(session, liveEntries, output) {
       if (playPoint) {
         player.inputMethod = 'native-pointer';
         try {
-          await session.command('input.performActions', { context: session.context, actions: [{
-            type: 'pointer', id: 'acceptance-player', parameters: { pointerType: 'mouse' },
+          await session.command('input.performActions', {
+            context: session.context,
             actions: [
-              { type: 'pointerMove', origin: 'viewport', x: playPoint.x, y: playPoint.y },
-              { type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 },
+              {
+                type: 'pointer',
+                id: 'acceptance-player',
+                parameters: { pointerType: 'mouse' },
+                actions: [
+                  { type: 'pointerMove', origin: 'viewport', x: playPoint.x, y: playPoint.y },
+                  { type: 'pointerDown', button: 0 },
+                  { type: 'pointerUp', button: 0 },
+                ],
+              },
             ],
-          }] });
+          });
         } finally {
           await session.command('input.releaseActions', { context: session.context });
         }
       }
-      await session.waitFor(`Boolean(document.querySelector('video') &&
+      await session.waitFor(
+        `Boolean(document.querySelector('video') &&
         !document.querySelector('video').paused && document.querySelector('video').readyState >= 2)`,
-        'public video playback to start');
+        'public video playback to start'
+      );
       player.playbackStarted = true;
       await session.waitFor(
         `Boolean(
@@ -463,8 +485,8 @@ async function runLivePhase(session, liveEntries, output) {
         workerBridgeReady: Boolean(window.__ytExtensionBridge?.workerSupported &&
           (window.__ytExtensionBridge?.workerUrl ?? '').startsWith('blob:' + location.origin + '/'))
       }))()`);
-      workerReady = session.pageLogs.some(
-        ({ text }) => text.includes('[RenderWorkerManager] renderer.worker.started')
+      workerReady = session.pageLogs.some(({ text }) =>
+        text.includes('[RenderWorkerManager] renderer.worker.started')
       );
       if (
         state.overlayCount !== 1 ||
@@ -473,16 +495,25 @@ async function runLivePhase(session, liveEntries, output) {
         state.pageScriptCount !== 1 ||
         state.workerBridgeReady !== true ||
         state.renderedMessageCount < 1 ||
-        state.videoPaused !== false || state.videoReadyState < 2 ||
+        state.videoPaused !== false ||
+        state.videoReadyState < 2 ||
         (state.renderer === 'worker' && !workerReady)
       ) {
         throw new Error('The public YouTube page did not prove installed rendering');
       }
-      const rendererResult = validateLiveRenderer(state.renderer, 'extension', session.pageLogs, state.workerBridgeReady);
+      const rendererResult = validateLiveRenderer(
+        state.renderer,
+        'extension',
+        session.pageLogs,
+        state.workerBridgeReady
+      );
       const screenshot = `firefox-live-${String(index + 1).padStart(2, '0')}.png`;
       await writeFile(join(output, screenshot), await session.captureScreenshot());
-      assert.equal(countUnexpectedLiveErrors(session.pageLogs, rendererResult.workerPolicyFallback), 0,
-        'The public page logged unexpected errors');
+      assert.equal(
+        countUnexpectedLiveErrors(session.pageLogs, rendererResult.workerPolicyFallback),
+        0,
+        'The public page logged unexpected errors'
+      );
       observations.push({
         index,
         kind: entry.kind,
@@ -500,7 +531,8 @@ async function runLivePhase(session, liveEntries, output) {
       });
     } catch (error) {
       if (loaded && player) {
-        player.finalState = await session.evaluateJson(`(() => {
+        player.finalState = await session
+          .evaluateJson(`(() => {
           const video = document.querySelector('video');
           return {
             paused: video?.paused ?? null,
@@ -510,7 +542,8 @@ async function runLivePhase(session, liveEntries, output) {
             playability: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
             playerError: document.querySelector('.ytp-error-content-wrap')?.textContent?.slice(0, 300) ?? null
           };
-        })()`).catch(() => null);
+        })()`)
+          .catch(() => null);
       }
       await writeFailureScreenshot(
         session,
@@ -533,8 +566,9 @@ async function runLivePhase(session, liveEntries, output) {
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
         failure: describeFailure(error),
-        diagnostics: session.pageLogs.filter(({ level, text }) =>
-          level === 'error' || /worker/i.test(text)).slice(0, 20)
+        diagnostics: session.pageLogs
+          .filter(({ level, text }) => level === 'error' || /worker/i.test(text))
+          .slice(0, 20)
           .map(({ level, text }) => ({ level, text: redactDiagnosticText(text) })),
       });
     }
@@ -602,7 +636,8 @@ export async function runFirefoxInstallation(
     await stopMock();
     stopMock = undefined;
     live = await runLivePhase(session, liveEntries, output);
-    checks.livePagesLoaded = live.length === liveEntries.length && live.every(({ loaded }) => loaded);
+    checks.livePagesLoaded =
+      live.length === liveEntries.length && live.every(({ loaded }) => loaded);
     checks.liveRenderingPassed =
       live.length === liveEntries.length && live.every(({ status }) => status === 'passed');
     assert.equal(
@@ -612,9 +647,11 @@ export async function runFirefoxInstallation(
     );
   } catch (error) {
     primaryError = error;
-    if (!checks.deterministicErrorsAbsent && session) diagnostics.errorLogs = session.pageLogs
-      .filter((entry) => entry.level === 'error' || /worker/i.test(entry.text))
-      .slice(0, 20).map((entry) => ({ level: entry.level, text: entry.text.slice(0, 1000) }));
+    if (!checks.deterministicErrorsAbsent && session)
+      diagnostics.errorLogs = session.pageLogs
+        .filter((entry) => entry.level === 'error' || /worker/i.test(entry.text))
+        .slice(0, 20)
+        .map((entry) => ({ level: entry.level, text: entry.text.slice(0, 1000) }));
     if (session) {
       await writeFailureScreenshot(session, output, 'firefox-extension-failure.png');
     }
@@ -675,7 +712,9 @@ export async function runFirefoxInstallation(
       JSON.stringify(result, null, 2)
     );
   } catch (error) {
-    cleanupErrors.push(new Error(`Failed to persist Firefox installation result: ${errorMessage(error)}`));
+    cleanupErrors.push(
+      new Error(`Failed to persist Firefox installation result: ${errorMessage(error)}`)
+    );
   }
   if (primaryError && cleanupErrors.length > 0) {
     throw new AggregateError(

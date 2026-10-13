@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi } from 'vitest';
+import type { OverlaySettings } from '@app-types';
 import {
   buildPartialWorkerConfig,
-  sendUpdateConfigToWorker,
-  sendSetPausedToWorker,
   sendClearStateToWorker,
+  sendSetPausedToWorker,
+  sendUpdateConfigToWorker,
 } from '@renderer/worker/common';
-import type { OverlaySettings } from '@app-types';
+import { describe, expect, it, vi } from 'vitest';
 
 // Minimal settings shape for testing — all fields the worker config picks from
 const mockSettings = {
@@ -78,7 +78,10 @@ describe('buildPartialWorkerConfig', () => {
   });
 
   it('copies boolean values correctly', () => {
-    const config = buildPartialWorkerConfig(mockSettings, ['depthLayersEnabled', 'showDebugOverlay']);
+    const config = buildPartialWorkerConfig(mockSettings, [
+      'depthLayersEnabled',
+      'showDebugOverlay',
+    ]);
     expect(config.depthLayersEnabled).toBe(true);
     expect(config.showDebugOverlay).toBe(false);
   });

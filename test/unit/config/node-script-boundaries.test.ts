@@ -45,7 +45,8 @@ function runCli(
 }
 
 afterEach(() => {
-  for (const directory of fixtureRoots.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of fixtureRoots.splice(0))
+    rmSync(directory, { recursive: true, force: true });
 });
 
 describe('Node script boundaries', () => {
@@ -75,7 +76,9 @@ describe('Node script boundaries', () => {
     expect(scriptsConfig.compilerOptions.lib).toEqual(['ES2022']);
     expect(scriptsConfig.include).toContain('scripts/**/*.ts');
     expect(scriptsConfig.include).toContain('test/unit/config/fixtures/devtools-endpoint.ts');
-    expect(browserConfig.match(/"include":\s*\[([^\]]*)\]/)?.[1]).not.toContain('"scripts/**/*.ts"');
+    expect(browserConfig.match(/"include":\s*\[([^\]]*)\]/)?.[1]).not.toContain(
+      '"scripts/**/*.ts"'
+    );
     expect(browserConfig.match(/"exclude":\s*\[([^\]]*)\]/)?.[1]).toContain('"scripts/**/*.ts"');
   });
 
@@ -152,7 +155,10 @@ describe('Node script boundaries', () => {
     const directory = fixtureRoot();
     mkdirSync(join(directory, 'scripts/release'), { recursive: true });
     mkdirSync(join(directory, 'extension'));
-    copyFileSync(join(root, 'scripts/release/version.ts'), join(directory, 'scripts/release/version.ts'));
+    copyFileSync(
+      join(root, 'scripts/release/version.ts'),
+      join(directory, 'scripts/release/version.ts')
+    );
     writeFileSync(join(directory, 'package.json'), '{"version":"1.2.3"}\n');
     writeFileSync(join(directory, 'extension/manifest.json'), '{"version":"1.2.2"}\n');
     writeFileSync(join(directory, 'extension/manifest.firefox.json'), '{"version":"1.2.3"}\n');
@@ -164,7 +170,9 @@ describe('Node script boundaries', () => {
     expect(defaultCheck.stderr).toContain('Version mismatch detected. Run: pnpm sync:versions');
     const sync = runCli(script, ['sync'], directory, env);
     expect(sync.status).toBe(0);
-    expect(JSON.parse(readFileSync(join(directory, 'extension/manifest.json'), 'utf8'))).toMatchObject({
+    expect(
+      JSON.parse(readFileSync(join(directory, 'extension/manifest.json'), 'utf8'))
+    ).toMatchObject({
       version: '1.2.3',
     });
     const check = runCli(script, ['check'], directory, env);
@@ -185,7 +193,10 @@ describe('Node script boundaries', () => {
 
     const directory = fixtureRoot();
     mkdirSync(join(directory, 'scripts/check'), { recursive: true });
-    copyFileSync(join(root, 'scripts/check/artifacts.ts'), join(directory, 'scripts/check/artifacts.ts'));
+    copyFileSync(
+      join(root, 'scripts/check/artifacts.ts'),
+      join(directory, 'scripts/check/artifacts.ts')
+    );
     const artifacts = runCli(join(directory, 'scripts/check/artifacts.ts'), ['--e2e'], directory);
     expect(artifacts.status).not.toBe(0);
     expect(artifacts.stderr).toContain('Missing artifact:');
@@ -195,7 +206,10 @@ describe('Node script boundaries', () => {
   it('rejects an invalid direct release request before creating a bundle', () => {
     const directory = fixtureRoot();
     mkdirSync(join(directory, 'scripts/release'), { recursive: true });
-    copyFileSync(join(root, 'scripts/release/prepare.ts'), join(directory, 'scripts/release/prepare.ts'));
+    copyFileSync(
+      join(root, 'scripts/release/prepare.ts'),
+      join(directory, 'scripts/release/prepare.ts')
+    );
     const result = runCli(join(directory, 'scripts/release/prepare.ts'), [], directory, {
       ...process.env,
       RELEASE_VERSION: 'invalid',
