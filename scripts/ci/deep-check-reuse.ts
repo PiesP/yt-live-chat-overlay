@@ -6,7 +6,7 @@ import { appendFileSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } 
 import { dirname } from 'node:path';
 
 export const SCHEMA = 3;
-export const GATES = ['duplication', 'mutation-fast', 'mutation-renderer'] as const;
+export const GATES = ['mutation-fast', 'mutation-renderer'] as const;
 type Gate = (typeof GATES)[number];
 type RunnerEnv = Record<string, string | undefined>;
 type Marker = {
@@ -51,7 +51,7 @@ type Manifest = {
 };
 
 function assertGate(gate: string | undefined): asserts gate is Gate {
-  if (gate !== 'duplication' && gate !== 'mutation-fast' && gate !== 'mutation-renderer')
+  if (gate !== 'mutation-fast' && gate !== 'mutation-renderer')
     throw new Error(`Unknown deep gate: ${gate}`);
 }
 
@@ -204,12 +204,10 @@ const MAX_PAGES = 10;
 const PAGE_SIZE = 100;
 const API_BUDGET_MS = 20_000;
 const JOB_NAMES: Record<Gate, string> = {
-  duplication: '🔍 Duplication',
   'mutation-fast': '🧬 Fast mutation',
   'mutation-renderer': '🎨 Renderer mutation',
 };
 const ANALYSIS_STEP_NAMES: Record<Gate, string> = {
-  duplication: '🔎 Check for new duplication',
   'mutation-fast': '🧬 Run fast mutation gate',
   'mutation-renderer': '🎨 Run renderer mutation gate',
 };

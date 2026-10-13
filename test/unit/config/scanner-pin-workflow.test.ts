@@ -3,14 +3,18 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
-const reviewedSha = '9f040ccfd72528f683f898a4b31e94a21f5913b7';
+const reviewedSha = '83364ae1027cf6b1761a91dcb855ea9a95c8886c';
 const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
-const reviewedFiles = 'pinned-tools.json pinned-tools.ts check-pinned-tools.ts install-nose.ts';
+const reviewedFiles = 'pinned-tools.json pinned-tools.ts check-pinned-tools.ts';
 
-// The deployed workflows still use an older immutable revision until the
-// scanner-only helpers land and consumers can repin the reviewed source.
+function jobSection(workflow: string, job: string): string {
+  const section = workflow.match(new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`))?.[0];
+  if (!section) throw new Error(`Missing workflow job: ${job}`);
+  return section;
+}
+
 describe('reviewed scanner helper boundary', () => {
-  it('keeps current source scanner-only while preserving image integrity checks', () => {
+  it('retains scanner image and freshness validation in the reviewed source', () => {
     const pins = JSON.parse(read('scripts/ci/pinned-tools.json')) as Record<string, unknown>;
     expect(Object.keys(pins).sort()).toEqual(['osv', 'semgrep']);
     expect(read('scripts/ci/pinned-tools.ts')).toContain('OSV_SCANNER_IMAGE=');
@@ -19,21 +23,35 @@ describe('reviewed scanner helper boundary', () => {
     expect(read('scripts/ci/check-pinned-tools.ts')).toContain("checkRelease('semgrep'");
   });
 
-  it('binds each still active helper copy to the same full immutable revision', () => {
+  it('binds both active security helper copies to the published immutable revision', () => {
     expect(reviewedSha).toMatch(/^[0-9a-f]{40}$/u);
     const security = read('.github/workflows/security.yaml');
-    const deep = read('.github/workflows/deep-checks.yaml');
-    const release = read('.github/workflows/release.yaml');
     expect(security.match(new RegExp(`ref: ${reviewedSha}`, 'gu'))).toHaveLength(2);
-    expect(deep).toContain(`trusted_sha=${reviewedSha}`);
-    expect(release).toContain(`trusted_sha=${reviewedSha}`);
     expect(security.split(`for name in ${reviewedFiles}; do`)).toHaveLength(3);
-    for (const workflow of [deep, release]) {
-      expect(workflow).toContain(`for name in ${reviewedFiles}; do`);
-      expect(workflow).toContain('git cat-file -e "$trusted_sha^{commit}"');
-      expect(workflow).toContain('git show "$trusted_sha:scripts/ci/$name"');
-    }
     expect(security).toContain('pinned-tools.ts" env');
     expect(security).toContain('"$pinned_dir/check-pinned-tools.ts"');
+    expect(security).not.toContain('install-nose.ts');
+  });
+
+  it('keeps protected workflow authority and tagged validation separate without a duplication gate', () => {
+    const release = read('.github/workflows/release.yaml');
+    const provenance = jobSection(release, 'provenance');
+    const quality = jobSection(release, 'quality');
+    const unit = jobSection(release, 'unit');
+    const publish = jobSection(release, 'publish');
+    expect(provenance).toContain("if: ${{ github.ref == 'refs/heads/master' }}");
+    expect(provenance).toContain('name: 📥 Checkout protected workflow source');
+    for (const job of [quality, unit]) {
+      expect(job).toContain('ref: ${{ github.sha }}');
+      expect(job).toContain('git -c advice.detachedHead=false checkout --detach "$RELEASE_SHA"');
+      expect(job).toContain('git submodule update --init --recursive');
+    }
+    expect(publish).toContain('needs: [provenance, quality, unit, e2e, mutation, build]');
+    expect(publish).toContain('name: 📥 Checkout protected publication guard');
+    expect(publish).toContain(
+      'run: node --experimental-strip-types scripts/release/verify-publication.ts'
+    );
+    expect(publish).toContain("if: ${{ steps.guard.outputs.publish == 'true' }}");
+    expect(release).not.toContain('\n  duplication:\n');
   });
 });

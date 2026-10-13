@@ -5,7 +5,6 @@ name: 🏗️ CI
 # - Run unit tests with coverage thresholds
 # - Run browser E2E tests
 # - Build all distribution targets
-# - Strict duplication runs in Deep Verification and the release gate
 #
 # Expensive mutation testing lives in deep-checks.yaml so PR feedback is not
 # blocked by a long-running, resource-heavy analysis.
@@ -41,7 +40,6 @@ jobs:
       core: ${{ steps.scope.outputs.core }}
       e2e: ${{ steps.scope.outputs.e2e }}
       build: ${{ steps.scope.outputs.build }}
-      duplication: ${{ steps.scope.outputs.duplication }}
     steps:
       - name: 📥 Checkout change history
         id: checkout
@@ -88,7 +86,7 @@ jobs:
           fi
 
           echo "Change classification failed; enabling every CI scope." >&2
-          for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
+          for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
             echo "$scope=true" >> "$GITHUB_OUTPUT"
           done
 
@@ -144,8 +142,8 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.core != 'true' }}
         run: echo "browser-core inputs are unchanged; the shared-core contract check is skipped."
 
-      - name: 🧪 Run deep-check regression tests
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+      - name: 🧪 Run focused CI regression tests
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.unit == 'true' && needs.changes.outputs.quality != 'true' }}
         run: pnpm test:ci
 
       - name: 🧪 Run unit tests and coverage thresholds

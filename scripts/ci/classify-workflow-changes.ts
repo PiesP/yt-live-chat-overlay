@@ -11,7 +11,6 @@ export const SCOPES = [
   'core',
   'e2e',
   'build',
-  'duplication',
   'osv',
   'semgrep',
   'codeql_actions',
@@ -99,7 +98,7 @@ export function classifyWorkflowChanges(
         'deep_fast'
       );
     } else if (path.startsWith('src/')) {
-      mark('quality', 'unit', 'e2e', 'build', 'duplication', 'semgrep', 'codeql_javascript');
+      mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript');
       if (isFastMutationSource(path)) mark('deep_fast');
     } else if (path.startsWith('extension/icons/')) {
       mark('e2e', 'build');
@@ -125,8 +124,6 @@ export function classifyWorkflowChanges(
       mark('quality', 'unit', 'semgrep', 'codeql_javascript', 'deep_fast');
     } else if (path.startsWith('test/visual/')) {
       mark('semgrep', 'codeql_javascript');
-    } else if (path === 'nose.toml' || path === '.nose-baseline.json') {
-      mark('quality', 'duplication', 'semgrep');
     } else if (
       ['biome.json', 'knip.json', 'vitest.config.ts'].includes(path) ||
       /^tsconfig.*\.json$/.test(path) ||
@@ -137,47 +134,18 @@ export function classifyWorkflowChanges(
       mark('quality', 'unit', 'build', 'semgrep', 'codeql_javascript');
       if (path.startsWith('scripts/ci/')) {
         mark('pinned_tools');
-        if (
-          [
-            'scripts/ci/install-nose.ts',
-            'scripts/ci/install-nose.sh',
-            'scripts/ci/pinned-tools.json',
-            'scripts/ci/pinned-tools.ts',
-          ].includes(path)
-        ) {
-          mark('duplication');
-        }
         if (path === 'scripts/ci/pinned-tools.json' || path === 'scripts/ci/pinned-tools.ts') {
           mark('osv');
         }
       }
     } else if (path === '.github/workflows/ci.yaml') {
-      mark(
-        'quality',
-        'unit',
-        'core',
-        'e2e',
-        'build',
-        'duplication',
-        'semgrep',
-        'codeql_actions',
-        'pinned_tools'
-      );
+      mark('quality', 'unit', 'core', 'e2e', 'build', 'semgrep', 'codeql_actions', 'pinned_tools');
     } else if (path === '.github/workflows/security.yaml') {
       mark('quality', 'unit', 'osv', 'semgrep', 'codeql_actions', 'pinned_tools');
     } else if (path === '.github/workflows/deep-checks.yaml') {
       mark('quality', 'unit', 'semgrep', 'codeql_actions', 'pinned_tools', 'deep_fast');
     } else if (path === '.github/workflows/release.yaml') {
-      mark(
-        'quality',
-        'unit',
-        'e2e',
-        'build',
-        'duplication',
-        'semgrep',
-        'codeql_actions',
-        'pinned_tools'
-      );
+      mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_actions', 'pinned_tools');
     } else if (path.startsWith('.github/workflows/')) {
       mark('quality', 'unit', 'semgrep', 'codeql_actions', 'pinned_tools');
     } else if (path.startsWith('.github/actions/')) {

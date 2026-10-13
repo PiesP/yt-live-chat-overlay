@@ -101,8 +101,8 @@ and unpacked loading.
 The [rendering timing contract](./docs/rendering-timing.md) describes reservation
 safety, entry ordering, reflow capacity, and Worker recovery.
 
-The weekly Deep Verification workflow may reuse a previous successful duplication,
-fast mutation, or renderer mutation result when that gate's tracked inputs and
+The weekly Deep Verification workflow may reuse a previous successful fast
+mutation or renderer mutation result when that gate's tracked inputs and
 runner platform match, its origin run is verified, and no later selected gate
 failed or remains incomplete. Missing Actions history triggers a fresh check.
 Manual runs execute fresh checks by default. The runner image version is

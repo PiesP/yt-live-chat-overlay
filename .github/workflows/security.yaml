@@ -45,7 +45,7 @@ jobs:
       - name: 📥 Checkout reviewed pin source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 9f040ccfd72528f683f898a4b31e94a21f5913b7
+          ref: 83364ae1027cf6b1761a91dcb855ea9a95c8886c
           persist-credentials: false
           submodules: false
 
@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           pinned_dir="$(mktemp -d "$RUNNER_TEMP/pinned-tools.XXXXXXXX")"
-          for name in pinned-tools.json pinned-tools.ts check-pinned-tools.ts install-nose.ts; do
+          for name in pinned-tools.json pinned-tools.ts check-pinned-tools.ts; do
             install -m 0600 "scripts/ci/$name" "$pinned_dir/$name"
           done
           GITHUB_ENV="$GITHUB_OUTPUT" node --experimental-strip-types "$pinned_dir/pinned-tools.ts" env
@@ -120,7 +120,7 @@ jobs:
           fi
 
           echo "Change classification failed; enabling every security scope." >&2
-          for scope in all quality unit core e2e build duplication osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
+          for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
             echo "$scope=true" >> "$GITHUB_OUTPUT"
           done
 
@@ -137,7 +137,7 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 9f040ccfd72528f683f898a4b31e94a21f5913b7
+          ref: 83364ae1027cf6b1761a91dcb855ea9a95c8886c
           persist-credentials: false
           submodules: false
 
@@ -154,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           pinned_dir="$(mktemp -d "$RUNNER_TEMP/pinned-tools.XXXXXXXX")"
-          for name in pinned-tools.json pinned-tools.ts check-pinned-tools.ts install-nose.ts; do
+          for name in pinned-tools.json pinned-tools.ts check-pinned-tools.ts; do
             install -m 0600 "scripts/ci/$name" "$pinned_dir/$name"
           done
           node --experimental-strip-types "$pinned_dir/check-pinned-tools.ts"

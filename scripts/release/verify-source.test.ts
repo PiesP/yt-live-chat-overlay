@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
@@ -35,10 +35,14 @@ function fixture() {
     source,
     checkout,
     output,
-    commit(pin: unknown, version: unknown = '1.2.3'): string {
+    commit(
+      pin: unknown,
+      version: unknown = '1.2.3',
+      scripts: unknown = { quality: 'pnpm -s check' }
+    ): string {
       writeFileSync(
         join(source, 'package.json'),
-        JSON.stringify({ version, volta: { node: pin } })
+        JSON.stringify({ version, volta: { node: pin }, scripts })
       );
       git(source, 'add', 'package.json');
       git(source, 'commit', '-qm', `manifest ${String(pin)}`);
@@ -84,6 +88,72 @@ test('annotated tag resolves to its commit and reads the tagged historical Node 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.values(), `node-version=24.15.0\nrelease-sha=${releaseSha}\nversion=1.2.3\n`);
   assert.equal(git(f.checkout, 'tag', '--list', 'v1.2.3'), 'v1.2.3');
+});
+
+test('a protected workflow can validate an older tag with inactive historical config', () => {
+  const f = fixture();
+  f.commit('24.15.0');
+  writeFileSync(join(f.source, 'nose.toml'), 'legacy tag fixture\n');
+  git(f.source, 'add', 'nose.toml');
+  git(f.source, 'commit', '-qm', 'legacy tagged tool');
+  const releaseSha = git(f.source, 'rev-parse', 'HEAD');
+  f.tag('v1.2.3');
+  git(f.source, 'rm', '-q', 'nose.toml');
+  const protectedSha = f.commit('26.9.0');
+  f.clone();
+
+  assert.equal(existsSync(join(f.checkout, 'nose.toml')), false);
+  const result = f.run('v1.2.3', protectedSha);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.values(), `node-version=24.15.0\nrelease-sha=${releaseSha}\nversion=1.2.3\n`);
+  assert.equal(git(f.checkout, 'show', 'v1.2.3:nose.toml'), 'legacy tag fixture');
+  assert.equal(existsSync(join(f.checkout, 'nose.toml')), false);
+});
+
+test('tagged quality that could invoke retired Nose is rejected before output or command execution', () => {
+  for (const mode of ['named', 'direct']) {
+    const f = fixture();
+    const sentinel = join(f.root, 'retired-command-ran');
+    const marker = `node -e "require('fs').writeFileSync(${JSON.stringify(sentinel)}, '')"`;
+    const dangerous =
+      mode === 'named'
+        ? { quality: 'pnpm -s quality:nose', 'quality:nose': marker }
+        : { quality: `nose query src && ${marker}` };
+    f.commit('24.15.0', '1.2.3', dangerous);
+    f.tag('v1.2.3');
+    const protectedSha = f.commit('26.9.0');
+    f.clone();
+
+    const result = f.run('v1.2.3', protectedSha);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Tagged release source uses retired Nose quality tooling/);
+    assert.equal(f.values(), '');
+    assert.equal(existsSync(sentinel), false);
+  }
+});
+
+test('malformed tagged package scripts fail before release output', () => {
+  for (const scripts of ['missing', null, [], {}, { quality: '' }, { quality: 1 }]) {
+    const f = fixture();
+    let head = f.commit('26.9.0', '1.2.3', scripts);
+    if (scripts === 'missing') {
+      const manifest = JSON.parse(readFileSync(join(f.source, 'package.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      delete manifest.scripts;
+      writeFileSync(join(f.source, 'package.json'), JSON.stringify(manifest));
+      git(f.source, 'add', 'package.json');
+      git(f.source, 'commit', '-qm', 'missing release scripts');
+      head = git(f.source, 'rev-parse', 'HEAD');
+    }
+    f.tag('v1.2.3');
+    f.clone();
+    const result = f.run('v1.2.3', head);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Release source must declare (package scripts|a quality script)/);
+    assert.equal(f.values(), '');
+  }
 });
 
 test('lightweight tag resolves to the same commit and emits only three fixed output keys', () => {
