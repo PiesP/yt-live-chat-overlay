@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import fs, { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -778,7 +778,7 @@ test('CLI requires a nonempty marker path before writing outputs or markers', ()
   for (const command of ['verify', 'mark']) {
     for (const path of [[], ['']]) {
       writeFileSync(output, '');
-      const result = spawnSync(
+      const result: SpawnSyncReturns<string> = spawnSync(
         process.execPath,
         [script, command, 'duplication', baseline, ...path],
         {
