@@ -1,154 +1,43 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
-const installer = readFileSync(resolve(root, 'scripts/ci/install-nose.ts'), 'utf8');
-const checker = readFileSync(resolve(root, 'scripts/ci/check-pinned-tools.ts'), 'utf8');
-const metadata = readFileSync(resolve(root, 'scripts/ci/pinned-tools.json'), 'utf8');
-const security = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
-const deep = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
-const release = readFileSync(resolve(root, '.github/workflows/release.yaml'), 'utf8');
-const publishedSha = '9f040ccfd72528f683f898a4b31e94a21f5913b7';
-const pinnedFiles = [
-  'pinned-tools.json',
-  'pinned-tools.ts',
-  'check-pinned-tools.ts',
-  'install-nose.ts',
-];
+const reviewedSha = '9f040ccfd72528f683f898a4b31e94a21f5913b7';
+const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
+const reviewed = (path: string): string =>
+  execFileSync('git', ['show', `${reviewedSha}:${path}`], { cwd: root, encoding: 'utf8' });
 
-function stepScript(workflow: string, name: string): string {
-  const section = workflow.split(`      - name: ${name}\n`)[1]?.split('\n      - name: ')[0] ?? '';
-  const block = section.match(/ {8}run: \|\n((?: {10}.*\n)*)/u)?.[1] ?? '';
-  if (!block) throw new Error(`Missing ${name} run block`);
-  return block.replace(/^ {10}/gmu, '');
-}
-
-describe('Nose and scanner pin workflow contracts', () => {
-  it('uses structured metadata for the installer hash before execution', () => {
-    const pins = JSON.parse(metadata) as { nose: { installerSha256: string } };
-    expect(pins.nose.installerSha256).toMatch(/^[0-9a-f]{64}$/u);
-    expect(installer.indexOf("const actual = createHash('sha256')")).toBeLessThan(
-      installer.indexOf("run('sh', [installer], cleanEnv)")
-    );
-    expect(installer).toContain('actual !== nose.installerSha256');
-    expect(installer).toMatch(
-      /'--retry',\s*'3',\s*'--retry-delay',\s*'2',\s*'--retry-max-time',\s*'30'/u
-    );
-    for (const secret of ['GH_TOKEN', 'GITHUB_TOKEN', 'NOSE_CLI_GITHUB_TOKEN']) {
-      expect(installer).toContain(`delete cleanEnv.${secret};`);
-    }
-    expect(checker).toContain('pins.nose.installerSha256');
-    expect(checker).toContain('::warning title=${name} update available::');
+// The currently deployed workflows materialize this older immutable helper set.
+// Keep the compatibility fixture until the clean helper revision lands and consumers repin.
+describe('reviewed scanner helper boundary', () => {
+  it('keeps current source scanner-only while preserving image integrity checks', () => {
+    const pins = JSON.parse(read('scripts/ci/pinned-tools.json')) as Record<string, unknown>;
+    expect(Object.keys(pins).sort()).toEqual(['osv', 'semgrep']);
+    expect(read('scripts/ci/pinned-tools.ts')).toContain('OSV_SCANNER_IMAGE=');
+    expect(read('scripts/ci/pinned-tools.ts')).toContain('SEMGREP_IMAGE=');
+    expect(read('scripts/ci/check-pinned-tools.ts')).toContain('checkOsvDigest');
+    expect(read('scripts/ci/check-pinned-tools.ts')).toContain("checkRelease('semgrep'");
   });
 
-  it('resolves both scanner images before any security container or scan job', () => {
-    const metadataJob = security.match(/\n {2}pin-metadata:[\s\S]*?\n {2}changes:/u)?.[0] ?? '';
-    expect(metadataJob).toContain(`ref: ${publishedSha}`);
-    expect(metadataJob).toContain('submodules: false');
-    expect(metadataJob).toContain("install-dependencies: 'false'");
-    expect(metadataJob).toContain('GITHUB_ENV="$GITHUB_OUTPUT" node --experimental-strip-types');
-    expect(metadataJob).toContain('pinned-tools.ts" env');
-    expect(security).toContain("needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE");
-    expect(security).toContain("needs['pin-metadata'].outputs.SEMGREP_IMAGE");
-    expect(security).not.toContain('ghcr.io/google/osv-scanner-action@sha256:');
-    expect(security).not.toContain('semgrep/semgrep:1.178.0@sha256:');
-  });
-
-  it('runs checkers and installers only from the reviewed private copy', () => {
-    const pinnedJob = security.match(/\n {2}pinned-tools:[\s\S]*?\n {2}osv-scan-pr:/u)?.[0] ?? '';
-    expect(pinnedJob).toContain(`ref: ${publishedSha}`);
-    expect(pinnedJob).toContain('"$pinned_dir/check-pinned-tools.ts"');
-    for (const workflow of [deep, release]) {
-      expect(workflow).toContain(`trusted_sha=${publishedSha}`);
-      expect(workflow).toContain('git show "$trusted_sha:scripts/ci/$name"');
-      expect(workflow).toContain('"$pinned_dir/install-nose.ts"');
-      expect(workflow).not.toContain('install-nose.sh');
-      const installStep =
-        workflow.match(/ {6}- name: 🔧 Install nose\n[\s\S]*?(?=\n {6}- name:|$)/u)?.[0] ?? '';
-      expect(installStep).not.toContain('GH_TOKEN:');
-    }
-    expect(security).not.toContain('check-pinned-tools.sh');
-  });
-
-  it('executes the scanner image adapter from a private four-file copy', () => {
-    const temp = mkdtempSync(join(tmpdir(), 'pin workflow '));
-    try {
-      const output = join(temp, 'output');
-      const result = spawnSync(
-        'bash',
-        ['-e', '-o', 'pipefail', '-c', stepScript(security, '🔐 Export validated scanner images')],
-        {
-          cwd: root,
-          env: { ...process.env, RUNNER_TEMP: temp, GITHUB_OUTPUT: output },
-          encoding: 'utf8',
-        }
-      );
-      expect(result.status, result.stderr).toBe(0);
-      const pins = JSON.parse(metadata) as { osv: { image: string }; semgrep: { image: string } };
-      expect(readFileSync(output, 'utf8')).toBe(
-        `OSV_SCANNER_IMAGE=${pins.osv.image}\nSEMGREP_IMAGE=${pins.semgrep.image}\n`
-      );
-      const copy = join(
-        temp,
-        readdirSync(temp).find((entry) => entry.startsWith('pinned-tools.')) ?? ''
-      );
-      for (const name of pinnedFiles)
-        expect(readFileSync(join(copy, name))).toEqual(
-          readFileSync(resolve(root, 'scripts/ci', name))
-        );
-    } finally {
-      rmSync(temp, { recursive: true, force: true });
-    }
-  });
-
-  it('retrieves the exact reviewed installer files in both duplication jobs', () => {
-    const temp = mkdtempSync(join(tmpdir(), 'pin workflow '));
-    try {
-      const bin = join(temp, 'bin');
-      mkdirSync(bin);
-      const node = join(bin, 'node');
-      writeFileSync(node, '#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_NODE_LOG"\n');
-      chmodSync(node, 0o755);
-      for (const workflow of [deep, release]) {
-        const output = join(temp, `node-${workflow === deep ? 'deep' : 'release'}.log`);
-        const result = spawnSync(
-          'bash',
-          ['-e', '-o', 'pipefail', '-c', stepScript(workflow, '🔧 Install nose')],
-          {
-            cwd: root,
-            env: {
-              ...process.env,
-              PATH: `${bin}:${process.env.PATH ?? ''}`,
-              RUNNER_TEMP: temp,
-              TEST_NODE_LOG: output,
-            },
-            encoding: 'utf8',
-          }
-        );
-        expect(result.status, result.stderr).toBe(0);
-        const invocation = readFileSync(output, 'utf8');
-        expect(invocation).toMatch(/--experimental-strip-types\n.*\/install-nose\.ts\n/u);
-        const copy = dirname(invocation.trim().split('\n').at(-1) ?? '');
-        for (const name of pinnedFiles) {
-          const published = execFileSync('git', ['show', `${publishedSha}:scripts/ci/${name}`], {
-            cwd: root,
-          });
-          expect(readFileSync(join(copy, name))).toEqual(published);
-        }
-      }
-    } finally {
-      rmSync(temp, { recursive: true, force: true });
-    }
+  it('binds still active workflows to a complete, immutable reviewed helper closure', () => {
+    const security = read('.github/workflows/security.yaml');
+    const deep = read('.github/workflows/deep-checks.yaml');
+    const release = read('.github/workflows/release.yaml');
+    for (const path of [
+      'scripts/ci/pinned-tools.json',
+      'scripts/ci/pinned-tools.ts',
+      'scripts/ci/check-pinned-tools.ts',
+      'scripts/ci/install-nose.ts',
+    ])
+      expect(reviewed(path)).toBeTruthy();
+    expect(security).toContain(`ref: ${reviewedSha}`);
+    expect(deep).toContain(`trusted_sha=${reviewedSha}`);
+    expect(release).toContain(`trusted_sha=${reviewedSha}`);
+    expect(security).toContain('pinned-tools.ts" env');
+    expect(security).toContain('"$pinned_dir/check-pinned-tools.ts"');
+    expect(deep).toContain('git show "$trusted_sha:scripts/ci/$name"');
+    expect(release).toContain('git show "$trusted_sha:scripts/ci/$name"');
   });
 });

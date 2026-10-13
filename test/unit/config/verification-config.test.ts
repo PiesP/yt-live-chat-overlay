@@ -209,7 +209,6 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'check:i18n',
         'circular',
         'knip',
-        'quality:nose',
       ]);
       const rejected = run('quality', 'biome check .');
       expect(rejected.status).toBe(17);
