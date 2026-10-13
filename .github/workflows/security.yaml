@@ -408,33 +408,110 @@ jobs:
           persist-credentials: false
 
       - name: 🔍 Run Semgrep scan
+        id: semgrep-report
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true' }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "schedule" || "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            semgrep scan \
-              --config=p/typescript \
-              --config=p/javascript \
-              --config=p/security-audit \
-              --config=p/secrets \
-              --error \
-              --sarif \
-              --output=semgrep.sarif \
-              .
-          else
-            semgrep scan \
-              --config=p/secrets \
-              --error \
-              --sarif \
-              --output=semgrep.sarif \
-              .
+          case "$GITHUB_EVENT_NAME" in
+            schedule|workflow_dispatch)
+              category=semgrep/full
+              configs=(--config=p/typescript --config=p/javascript --config=p/security-audit --config=p/secrets)
+              ;;
+            push|pull_request|merge_group)
+              category=semgrep/secrets
+              configs=(--config=p/secrets)
+              ;;
+            *)
+              echo "Unsupported Semgrep event: $GITHUB_EVENT_NAME" >&2
+              exit 2
+              ;;
+          esac
+
+          rm -f semgrep.sarif
+          set +e
+          semgrep scan "${configs[@]}" --error --sarif --output=semgrep.sarif .
+          scan_status=$?
+          set -e
+          if (( scan_status > 1 )); then
+            echo "Semgrep failed operationally with exit $scan_status" >&2
+            exit "$scan_status"
           fi
 
+          python3 - "$category" "$scan_status" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          category, scan_status = sys.argv[1], int(sys.argv[2])
+          path = pathlib.Path('semgrep.sarif')
+          try:
+              report = json.loads(path.read_text(encoding='utf-8'))
+              if not isinstance(report, dict) or report.get('version') != '2.1.0':
+                  raise ValueError('expected SARIF 2.1.0')
+              runs = report.get('runs')
+              if not isinstance(runs, list) or not runs:
+                  raise ValueError('expected at least one SARIF run')
+              result_count = 0
+              for run in runs:
+                  if not isinstance(run, dict):
+                      raise ValueError('invalid SARIF run')
+                  tool = run.get('tool')
+                  if not isinstance(tool, dict):
+                      raise ValueError('missing SARIF tool')
+                  driver = tool.get('driver')
+                  if not isinstance(driver, dict) or not isinstance(driver.get('name'), str) or not driver['name']:
+                      raise ValueError('missing SARIF tool name')
+                  rules = driver.get('rules')
+                  if driver['name'] != 'Semgrep OSS' or not isinstance(rules, list) or not rules:
+                      raise ValueError('unexpected Semgrep SARIF tool or rules')
+                  rule_ids = {rule.get('id') for rule in rules if isinstance(rule, dict)}
+                  if len(rule_ids) != len(rules) or any(not isinstance(rule_id, str) or not rule_id for rule_id in rule_ids):
+                      raise ValueError('invalid SARIF rules')
+                  results = run.get('results')
+                  if not isinstance(results, list) or any(
+                      not isinstance(result, dict)
+                      or result.get('ruleId') not in rule_ids
+                      or not isinstance(result.get('message'), dict)
+                      or not isinstance(result['message'].get('text'), str)
+                      for result in results
+                  ):
+                      raise ValueError('invalid SARIF results')
+                  invocations = run.get('invocations')
+                  if not isinstance(invocations, list) or not invocations:
+                      raise ValueError('missing SARIF invocation')
+                  for invocation in invocations:
+                      if not isinstance(invocation, dict) or invocation.get('executionSuccessful') is not True:
+                          raise ValueError('unsuccessful SARIF invocation')
+                      notifications = invocation.get('toolExecutionNotifications', [])
+                      if not isinstance(notifications, list) or any(
+                          not isinstance(notification, dict) or notification.get('level') == 'error'
+                          for notification in notifications
+                      ):
+                          raise ValueError('SARIF tool execution error')
+                  result_count += len(results)
+                  details = run.get('automationDetails')
+                  if details is not None and not isinstance(details, dict):
+                      raise ValueError('invalid SARIF automation details')
+                  run['automationDetails'] = {**(details or {}), 'id': f'{category}/'}
+              if scan_status == 1 and result_count == 0:
+                  raise ValueError('findings exit without SARIF results')
+              if scan_status == 0 and result_count != 0:
+                  raise ValueError('clean exit with SARIF results under --error')
+              path.write_text(json.dumps(report), encoding='utf-8')
+          except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+              print(f'Invalid Semgrep SARIF: {error}', file=sys.stderr)
+              sys.exit(2)
+          PY
+
+          printf 'sarif-upload=true\ncategory=%s\n' "$category" >> "$GITHUB_OUTPUT"
+          exit "$scan_status"
+
       - name: 📊 Upload SARIF to GitHub Security
-        if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') && !cancelled() && hashFiles('semgrep.sarif') != '' }}
+        if: ${{ !cancelled() && steps.semgrep-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') }}
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: semgrep.sarif
+          category: ${{ steps.semgrep-report.outputs.category }}
 
       - name: No relevant changes
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.semgrep != 'true' }}
