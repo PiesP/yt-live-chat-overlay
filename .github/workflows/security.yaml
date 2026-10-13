@@ -410,16 +410,17 @@ jobs:
       - name: 🔍 Run Semgrep scan
         id: semgrep-report
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true' }}
+        shell: sh
         run: |
-          set -euo pipefail
+          set -eu
           case "$GITHUB_EVENT_NAME" in
             schedule|workflow_dispatch)
               category=semgrep/full
-              configs=(--config=p/typescript --config=p/javascript --config=p/security-audit --config=p/secrets)
+              set -- --config=p/typescript --config=p/javascript --config=p/security-audit --config=p/secrets
               ;;
             push|pull_request|merge_group)
               category=semgrep/secrets
-              configs=(--config=p/secrets)
+              set -- --config=p/secrets
               ;;
             *)
               echo "Unsupported Semgrep event: $GITHUB_EVENT_NAME" >&2
@@ -429,10 +430,10 @@ jobs:
 
           rm -f semgrep.sarif
           set +e
-          semgrep scan "${configs[@]}" --error --sarif --output=semgrep.sarif .
+          semgrep scan "$@" --error --sarif --output=semgrep.sarif .
           scan_status=$?
           set -e
-          if (( scan_status > 1 )); then
+          if [ "$scan_status" -gt 1 ]; then
             echo "Semgrep failed operationally with exit $scan_status" >&2
             exit "$scan_status"
           fi

@@ -28,6 +28,12 @@ function step(name: string): string {
 
 const scanStep = step('🔍 Run Semgrep scan');
 const uploadStep = step('📊 Upload SARIF to GitHub Security');
+function configuredScanShell(): 'sh' {
+  const shell = scanStep.match(/^\s+shell: (\w+)$/m)?.[1];
+  if (shell !== 'sh') throw new Error('Semgrep must use its declared container shell');
+  return shell;
+}
+const scanShell = configuredScanShell();
 const script =
   scanStep
     .split('        run: |\n')[1]
@@ -72,7 +78,7 @@ function runScan(event: string, scanStatus = 0, report?: string) {
     );
     writeFileSync(output, '');
     if (report !== undefined) writeFileSync(fixture, report);
-    const result = spawnSync('bash', ['-c', script], {
+    const result = spawnSync(scanShell, ['-c', script], {
       cwd: directory,
       encoding: 'utf8',
       env: {
@@ -114,7 +120,7 @@ function runActualScan(event: string, scanner: string) {
     );
     const output = join(directory, 'github-output');
     writeFileSync(output, '');
-    const result = spawnSync('bash', ['-c', script], {
+    const result = spawnSync(scanShell, ['-c', script], {
       cwd: source,
       encoding: 'utf8',
       timeout: 120_000,
