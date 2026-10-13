@@ -275,7 +275,7 @@ describe('installed Chrome acceptance outcomes', () => {
       'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
     const host = {
       level: 'error',
-      text: prefix + 'https://rr1.googlevideo.com/videoplayback?sig=private',
+      text: `${prefix}https://rr1.googlevideo.com/videoplayback?sig=private`,
     };
     expect(isYouTubeHostError(host)).toBe(true);
     expect(
@@ -308,13 +308,13 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(
       isYouTubeHostError({
         ...host,
-        text: prefix + 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat',
+        text: `${prefix}https://www.youtube.com/youtubei/v1/live_chat/get_live_chat`,
       })
     ).toBe(false);
     expect(
       isYouTubeHostError({
         ...host,
-        text: prefix + 'https://googlevideo.com.attacker.example/videoplayback',
+        text: `${prefix}https://googlevideo.com.attacker.example/videoplayback`,
       })
     ).toBe(false);
     expect(

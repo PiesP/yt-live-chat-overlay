@@ -153,9 +153,11 @@ export function installYTMock(init: {
           return { name: name!.trim(), value: rest.join('=').trim() };
         }),
     set: (cookie: { name: string; value: string }) => {
+      // biome-ignore lint/suspicious/noDocumentCookie: GM_cookie fixture deliberately uses the browser cookie jar.
       document.cookie = `${cookie.name}=${cookie.value}`;
     },
     delete: (name: string) => {
+      // biome-ignore lint/suspicious/noDocumentCookie: Expiring a browser cookie models GM_cookie.delete.
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
     },
   };

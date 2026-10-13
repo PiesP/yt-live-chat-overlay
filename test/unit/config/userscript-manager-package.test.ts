@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const modulePath = resolve('validation/windows/prepare-userscript-manager.py');
-const setup = String.raw`
+const setup = `
 import hashlib, importlib.util, io, json, struct, sys, tempfile, zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -46,7 +46,7 @@ function runPython(body: string): void {
 
 describe('pinned userscript manager preparation', () => {
   it('pins the reviewed Tampermonkey 5.5.1 package bytes', () => {
-    runPython(String.raw`
+    runPython(`
 assert manager.VERSION == '5.5.1'
 assert manager.SHA256 == 'b5167937817e636adeba462ed9bf9b32ff01c2888f78a9afc6aa4f8e655fe872'
 assert manager.EXTENSION_ID == 'dhdgffkkebhmkfjojejmpbldmpobfkfo'
@@ -54,7 +54,7 @@ assert manager.EXTENSION_ID == 'dhdgffkkebhmkfjojejmpbldmpobfkfo'
   });
 
   it('rejects a changed Store package before creating output', () => {
-    runPython(String.raw`
+    runPython(`
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory) / 'manager'
     response = Response(b'unreviewed')
@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory() as directory:
   });
 
   it('preserves an existing destination without accessing the network', () => {
-    runPython(String.raw`
+    runPython(`
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory)
     sentinel = output / 'keep'
@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory() as directory:
   });
 
   it('extracts only reviewed application files and records package provenance', () => {
-    runPython(String.raw`
+    runPython(`
 body = package()
 manager.SHA256 = hashlib.sha256(body).hexdigest()
 with tempfile.TemporaryDirectory() as directory:
@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as directory:
   });
 
   it('rejects archive traversal and removes only its incomplete staging directory', () => {
-    runPython(String.raw`
+    runPython(`
 body = package('../escaped')
 manager.SHA256 = hashlib.sha256(body).hexdigest()
 with tempfile.TemporaryDirectory() as directory:
@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory() as directory:
   });
 
   it('rejects a pinned package with the wrong manager or manifest version', () => {
-    runPython(String.raw`
+    runPython(`
 for manifest in [
     {'version': '0.0.0', 'manifest_version': 3},
     {'version': manager.VERSION, 'manifest_version': 2},
@@ -157,7 +157,7 @@ for manifest in [
   });
 
   it('rejects invalid CRX headers and corrupt or truncated ZIP payloads', () => {
-    runPython(String.raw`
+    runPython(`
 good = package()
 cases = [
     (b'Bad!' + good[4:], ValueError, 'Expected a Chrome CRX'),
@@ -219,7 +219,7 @@ for body, expected_message in [
   });
 
   it('cleans staged files after extraction, provenance write, or final rename failures', () => {
-    runPython(String.raw`
+    runPython(`
 body = package()
 manager.SHA256 = hashlib.sha256(body).hexdigest()
 original_extract = zipfile.ZipFile.extract
@@ -251,7 +251,7 @@ for message, failure in failures:
   });
 
   it('follows approved HTTPS and relative redirects without reading redirect bodies', () => {
-    runPython(String.raw`
+    runPython(`
 responses = [
     Response(b'ignored redirect body', 302, 'https://clients2.googleusercontent.com/package'),
     Response(b'ignored redirect body', 307, '/reviewed.crx?version=5.5.1'),
@@ -310,7 +310,7 @@ for url in unsafe_urls + [None, '']:
   });
 
   it('bounds redirects and closes every response without consuming their bodies', () => {
-    runPython(String.raw`
+    runPython(`
 responses = [Response(b'not consumed', 302, '/loop') for _ in range(manager.MAX_REDIRECTS + 1)]
 with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', side_effect=responses) as request:
     try:
@@ -325,7 +325,7 @@ for response in responses:
   });
 
   it('rejects failed HTTP responses and oversized packages before creating output', () => {
-    runPython(String.raw`
+    runPython(`
 responses = [Response(b'error', 404), Response(b'x' * (manager.MAX_ARCHIVE_BYTES + 2))]
 for response in responses:
     with tempfile.TemporaryDirectory() as directory:
@@ -343,7 +343,7 @@ for response in responses:
   });
 
   it('preserves output state after a transport failure', () => {
-    runPython(String.raw`
+    runPython(`
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory) / 'manager'
     with patch.object(manager.urllib.request.HTTPSHandler, 'https_open', side_effect=OSError('connection lost')):

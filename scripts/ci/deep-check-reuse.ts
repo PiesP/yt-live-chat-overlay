@@ -57,11 +57,10 @@ function assertGate(gate: string | undefined): asserts gate is Gate {
 
 export function runnerIdentity(env: RunnerEnv = process.env) {
   const { RUNNER_OS, RUNNER_ARCH, ImageOS, ImageVersion, DEEP_RUNNER_LABEL } = env;
-  if (![RUNNER_OS, RUNNER_ARCH, ImageOS, ImageVersion, DEEP_RUNNER_LABEL].every(Boolean))
-    return null;
+  if (!RUNNER_OS || !RUNNER_ARCH || !ImageOS || !ImageVersion || !DEEP_RUNNER_LABEL) return null;
   // Record ImageVersion in the marker while allowing pinned source-based checks
   // to reuse success across weekly runner image refreshes.
-  return { os: RUNNER_OS!, arch: RUNNER_ARCH!, image: ImageOS!, label: DEEP_RUNNER_LABEL! };
+  return { os: RUNNER_OS, arch: RUNNER_ARCH, image: ImageOS, label: DEEP_RUNNER_LABEL };
 }
 
 export function fingerprint(gate: string, cwd = process.cwd(), env: RunnerEnv = process.env) {
@@ -94,10 +93,10 @@ export function fingerprint(gate: string, cwd = process.cwd(), env: RunnerEnv = 
   for (const entry of entries) {
     if (!entry) continue;
     const match = /^(\d{6}) ([0-9a-f]{40,64}) 0\t(.+)$/.exec(entry);
-    if (!match) throw new Error(`Invalid or unmerged Git index entry: ${entry}`);
-    const mode = match[1]!;
-    const object = match[2]!;
-    const path = match[3]!;
+    const mode = match?.[1];
+    const object = match?.[2];
+    const path = match?.[3];
+    if (!mode || !object || !path) throw new Error(`Invalid or unmerged Git index entry: ${entry}`);
     hash.update(`\0${mode}\0${path}\0`);
     if (mode === '160000') {
       hash.update(object);
@@ -261,14 +260,23 @@ export async function evaluateReuse(
   apiFetch: ApiFetch = fetch
 ): Promise<Decision> {
   assertGate(gate);
+  return evaluateMarkerReuse(
+    readMarker(markerPath, gate, expectedFingerprint),
+    gate,
+    env,
+    apiFetch
+  );
+}
+
+async function evaluateMarkerReuse(
+  marker: Marker | null,
+  gate: Gate,
+  env: RunnerEnv,
+  apiFetch: ApiFetch
+): Promise<Decision> {
   if (
-    !shouldReuse(
-      validMarker(markerPath, gate, expectedFingerprint),
-      env.CACHE_HIT,
-      env.RESTORE_OUTCOME,
-      env.GITHUB_EVENT_NAME,
-      env.REUSE_SUCCESS
-    )
+    !marker ||
+    !shouldReuse(true, env.CACHE_HIT, env.RESTORE_OUTCOME, env.GITHUB_EVENT_NAME, env.REUSE_SUCCESS)
   ) {
     const reason =
       env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.REUSE_SUCCESS !== 'true'
@@ -278,7 +286,6 @@ export async function evaluateReuse(
           : 'marker-or-policy-invalid';
     return { reuse: false, reason };
   }
-  const marker = readMarker(markerPath, gate, expectedFingerprint)!;
   const runId = Number(env.GITHUB_RUN_ID);
   const runAttempt = Number(env.GITHUB_RUN_ATTEMPT);
   const repository = env.GITHUB_REPOSITORY;
@@ -382,8 +389,8 @@ export async function evaluateReuse(
         'jobs'
       );
       const selected = jobs.filter((job) => job.name === JOB_NAMES[gate]);
-      if (selected.length !== 1) return { reuse: false, reason: 'gate-history-incomplete' };
-      const job = selected[0]!;
+      const job = selected[0];
+      if (selected.length !== 1 || !job) return { reuse: false, reason: 'gate-history-incomplete' };
       if (run.id !== marker.runId && job.status === 'completed' && job.conclusion === 'skipped')
         continue;
       if (job.status !== 'completed' || job.conclusion !== 'success')
@@ -423,11 +430,13 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     output(`cacheable=${Boolean(value)}`);
     output(`fingerprint=${value ?? 'unavailable'}`);
   } else if (command === 'verify') {
-    const decision = await evaluateReuse(markerPath!, gate, value);
+    if (!markerPath) throw new Error('Marker path is required');
+    // Keep the decision and its reported provenance bound to one validated read.
+    const marker = readMarker(markerPath, gate, value);
+    const decision = await evaluateMarkerReuse(marker, gate, process.env, fetch);
     output(`reuse=${decision.reuse}`);
     output(`reason=${decision.reason}`);
     if (decision.savedSeconds !== undefined) output(`saved_seconds=${decision.savedSeconds}`);
-    const marker = readMarker(markerPath!, gate, value);
     if (marker) {
       output(`origin_run_id=${marker.runId}`);
       output(`origin_run_attempt=${marker.runAttempt}`);
@@ -435,7 +444,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       output(`origin_analyzed_at=${marker.analyzedAt}`);
     }
   } else if (command === 'mark') {
-    writeMarker(markerPath!, gate, value);
+    if (!markerPath) throw new Error('Marker path is required');
+    writeMarker(markerPath, gate, value);
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
