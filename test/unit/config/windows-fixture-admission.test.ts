@@ -54,6 +54,7 @@ describe('installed Windows fixture admission', () => {
     ];
     class FixtureWorker {
       listeners = new Map<string, (event: { data: unknown }) => void>();
+      // biome-ignore lint/complexity/noUselessConstructor: The instrumented Worker subclass forwards its URL to this fixture.
       constructor(_url: string) {}
       postMessage(_message: unknown) {}
       terminate() {}

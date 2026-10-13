@@ -79,7 +79,7 @@ describe('sampleExponential', () => {
     const result = sampleExponential(100);
     // -100 * ln(EPSILON) ≈ very large but finite
     expect(result).toBeGreaterThan(0);
-    expect(isNaN(result)).toBe(false);
+    expect(Number.isNaN(result)).toBe(false);
     expect(result !== Infinity).toBe(true);
   });
 

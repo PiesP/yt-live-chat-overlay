@@ -6,10 +6,7 @@ import { describe, expect, it } from 'vitest';
 describe('ChatPanelObserver state reset', () => {
   it('stop() resets isPaused so next start() → pause() works', () => {
     const observer = new ChatPanelObserver();
-    let callCount = 0;
-    observer.start(() => {
-      callCount++;
-    });
+    observer.start(() => {});
 
     // Simulate: start → pause → stop → start → pause
     observer.pause();
@@ -33,10 +30,7 @@ describe('ChatPanelObserver state reset', () => {
 
   it('resume() after stop()+start() works correctly', () => {
     const observer = new ChatPanelObserver();
-    let callCount = 0;
-    observer.start(() => {
-      callCount++;
-    });
+    observer.start(() => {});
 
     // Simulate pause → stop → start → resume cycle
     observer.pause();

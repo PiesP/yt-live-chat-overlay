@@ -33,8 +33,8 @@ describe('emoji-parser', () => {
     it('extracts best thumbnail from thumbnails array', () => {
       const result = extractBestThumbnail({
         thumbnails: [
-          { url: YT_THUMB + '=w24-h24', width: 24, height: 24 },
-          { url: YT_THUMB2 + '=w64-h64', width: 64, height: 64 },
+          { url: `${YT_THUMB}=w24-h24`, width: 24, height: 24 },
+          { url: `${YT_THUMB2}=w64-h64`, width: 64, height: 64 },
         ],
       });
       expect(result).not.toBeNull();
@@ -43,7 +43,7 @@ describe('emoji-parser', () => {
 
     it('extracts from sources array as fallback', () => {
       const result = extractBestThumbnail({
-        sources: [{ url: YT_THUMB + '=w48-h48', width: 48, height: 48 }],
+        sources: [{ url: `${YT_THUMB}=w48-h48`, width: 48, height: 48 }],
       });
       expect(result).not.toBeNull();
     });
@@ -58,9 +58,9 @@ describe('emoji-parser', () => {
     it('returns highest-width thumbnail', () => {
       const result = extractBestThumbnail({
         thumbnails: [
-          { url: YT_THUMB + '=w48-h48', width: 48 },
-          { url: YT_THUMB2 + '=w96-h96', width: 96 },
-          { url: YT_THUMB + '=w24-h24', width: 24 },
+          { url: `${YT_THUMB}=w48-h48`, width: 48 },
+          { url: `${YT_THUMB2}=w96-h96`, width: 96 },
+          { url: `${YT_THUMB}=w24-h24`, width: 24 },
         ],
       });
       expect(result?.url).toContain('=w96');

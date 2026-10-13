@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import fs, { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   evaluateReuse,
   fingerprint,
+  runnerIdentity,
   shouldReuse,
   validMarker,
   writeMarker,
@@ -188,6 +189,37 @@ test('gitlink, runner platform and label, and gate identity invalidate success',
   assert.equal(fingerprint('duplication', fixture, { ...runner, DEEP_RUNNER_LABEL: '' }), null);
 });
 
+test('every missing or empty runner identity field prevents caching', () => {
+  for (const key of ['RUNNER_OS', 'RUNNER_ARCH', 'ImageOS', 'ImageVersion', 'DEEP_RUNNER_LABEL']) {
+    for (const value of [undefined, '']) {
+      const env = { ...runner, [key]: value };
+      assert.equal(runnerIdentity(env), null, key);
+      assert.equal(fingerprint('duplication', fixture, env), null, key);
+    }
+  }
+});
+
+test('an unmerged Git index cannot produce a reusable fingerprint', () => {
+  const cwd = join(fixture, 'unmerged');
+  mkdirSync(cwd);
+  execFileSync('git', ['init', '-q'], { cwd });
+  writeFileSync(join(cwd, 'package.json'), readFileSync(join(fixture, 'package.json')));
+  const object = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd,
+    input: 'conflicted\n',
+  })
+    .toString()
+    .trim();
+  execFileSync('git', ['update-index', '--index-info'], {
+    cwd,
+    input: `100644 ${object} 1\tconflicted.ts\n100644 ${object} 2\tconflicted.ts\n`,
+  });
+  assert.throws(
+    () => fingerprint('duplication', cwd, runner),
+    /Invalid or unmerged Git index entry/
+  );
+});
+
 test('only a valid successful marker can be reused', () => {
   const marker = join(fixture, 'marker.json');
   assert.equal(validMarker(marker, 'duplication', baseline), false);
@@ -341,6 +373,63 @@ function historyApi(
   };
   return { api, requests };
 }
+
+test('missing or invalid markers run fresh without requesting history', async () => {
+  const marker = join(fixture, 'invalid-history-marker.json');
+  for (const content of [undefined, '{broken', 'null', '{}']) {
+    rmSync(marker, { force: true });
+    if (content !== undefined) writeFileSync(marker, content);
+    const { api, requests } = historyApi();
+    assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+      reuse: false,
+      reason: 'marker-or-policy-invalid',
+    });
+    assert.equal(requests.length, 0);
+  }
+});
+
+test('reuse evaluates one validated snapshot even if the marker changes after reading', async (t) => {
+  const marker = join(fixture, 'snapshot-marker.json');
+  const read = fs.readFileSync;
+  try {
+    for (const replacement of [undefined, '{broken']) {
+      markerWithTime(marker);
+      let reads = 0;
+      t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
+        const value = read(...args);
+        if (args[0] === marker) {
+          reads++;
+          if (replacement === undefined) rmSync(marker);
+          else writeFileSync(marker, replacement);
+        }
+        return value;
+      });
+      syncBuiltinESMExports();
+      const { api } = historyApi();
+      assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+        reuse: true,
+        reason: 'validated-history',
+        savedSeconds: 20,
+      });
+      assert.equal(reads, 1);
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
+
+test('duplicate selected history jobs cannot authorize reuse', async () => {
+  const marker = join(fixture, 'ambiguous-marker.json');
+  markerWithTime(marker);
+  const { api } = historyApi([oldRun], { 100: [oldJob, oldJob] });
+  assert.deepEqual(await evaluateReuse(marker, 'duplication', baseline, verifyEnv, api), {
+    reuse: false,
+    reason: 'gate-history-incomplete',
+  });
+});
 
 test('verified origin reports only the completed analysis step duration', async () => {
   const marker = join(fixture, 'history-marker.json');
@@ -681,6 +770,72 @@ test('CLI fails closed when Actions history cannot be authenticated', () => {
     }),
     /reuse=false/
   );
+});
+
+test('CLI requires a nonempty marker path before writing outputs or markers', () => {
+  const script = fileURLToPath(new URL('./deep-check-reuse.ts', import.meta.url));
+  const output = join(fixture, 'missing-path-output.txt');
+  for (const command of ['verify', 'mark']) {
+    for (const path of [[], ['']]) {
+      writeFileSync(output, '');
+      const result: SpawnSyncReturns<string> = spawnSync(
+        process.execPath,
+        [script, command, 'duplication', baseline, ...path],
+        {
+          cwd: fixture,
+          env: { ...process.env, ...runner, GITHUB_OUTPUT: output },
+          encoding: 'utf8',
+        }
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Marker path is required/);
+      assert.equal(readFileSync(output, 'utf8'), '');
+    }
+  }
+});
+
+test('CLI reports provenance from the same snapshot when the marker disappears', () => {
+  const script = fileURLToPath(new URL('./deep-check-reuse.ts', import.meta.url));
+  const marker = join(fixture, 'cli-snapshot-marker.json');
+  const output = join(fixture, 'snapshot-output.txt');
+  const preload = join(fixture, 'remove-marker-after-read.mjs');
+  markerWithTime(marker);
+  writeFileSync(output, '');
+  writeFileSync(
+    preload,
+    `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const read = fs.readFileSync;
+fs.readFileSync = (path, ...args) => {
+  const value = read(path, ...args);
+  if (path === process.env.TEST_MARKER_PATH) fs.rmSync(path);
+  return value;
+};
+syncBuiltinESMExports();
+`
+  );
+  execFileSync(
+    process.execPath,
+    ['--import', preload, script, 'verify', 'duplication', baseline, marker],
+    {
+      cwd: fixture,
+      env: {
+        ...process.env,
+        ...runner,
+        CACHE_HIT: 'true',
+        RESTORE_OUTCOME: 'success',
+        GITHUB_EVENT_NAME: 'schedule',
+        GH_TOKEN: '',
+        GITHUB_OUTPUT: output,
+        TEST_MARKER_PATH: marker,
+      },
+    }
+  );
+  const result = readFileSync(output, 'utf8');
+  assert.match(result, /reuse=false\nreason=provenance-unavailable/);
+  assert.match(result, /origin_run_id=100/);
+  assert.match(result, new RegExp(`origin_sha=${runner.GITHUB_SHA}`));
+  assert.equal(fs.existsSync(marker), false);
 });
 
 test('mutation gates use independent job history', async () => {

@@ -92,6 +92,13 @@ request and `pnpm verify:full` for publication-level or browser behavior
 changes. A fixture run does not establish live YouTube, Windows, hosted-CI or
 public-release evidence.
 
+Report each validation stage as executed/passed, executed/failed, intentionally
+skipped, blocked/unavailable, or not required, with its command and tested source
+revision. A successful quality run that skips optional Nose is not a duplication
+analysis pass; the deep-check lane requires its pinned installation. Bind retained
+results to the source/core revisions and tool version, and distinguish fresh
+checks from reuse or previously reported evidence that has not been rechecked.
+
 ## Project constraints
 
 - Bundle runtime dependencies; do not add remotely loaded runtime code.

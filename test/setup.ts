@@ -112,6 +112,7 @@ if (typeof globalThis.ResizeObserver !== 'function') {
 // IntersectionObserver
 if (typeof globalThis.IntersectionObserver !== 'function') {
   class IntersectionObserverMock {
+    // biome-ignore lint/complexity/noUselessConstructor: Preserve the callback-taking browser constructor signature.
     constructor(_cb: IntersectionObserverCallback) {}
     observe() {}
     unobserve() {}
