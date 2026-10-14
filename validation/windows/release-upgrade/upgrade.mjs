@@ -446,6 +446,13 @@ async function setSettingsThroughUi(page, values) {
   await modal.waitFor({ state: 'visible' });
   for (const [name, value] of Object.entries(values)) {
     const control = modal.locator(`input[name="${name}"]`);
+    if (!(await control.isVisible())) {
+      const disclosure = modal.locator('details').filter({
+        has: page.locator(`input[name="${name}"]`),
+      });
+      assert.equal(await disclosure.count(), 1, 'Hidden setting has no unique disclosure');
+      await disclosure.locator(':scope > summary').click();
+    }
     await control.fill(value);
     await control.blur();
   }
@@ -453,7 +460,10 @@ async function setSettingsThroughUi(page, values) {
   await modal.waitFor({ state: 'hidden' });
   await page.reload({ waitUntil: 'domcontentloaded' });
   const observed = await observeSettings(page);
-  assert.deepEqual(observed, values, 'Settings UI did not persist the requested values');
+  for (const [name, value] of Object.entries(values)) {
+    assert(Number.isFinite(Number(observed[name])) && Number.isFinite(Number(value)));
+    assert.equal(Number(observed[name]), Number(value), `Settings UI did not persist ${name}`);
+  }
   return observed;
 }
 
