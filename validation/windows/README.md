@@ -268,6 +268,11 @@ URLs in an Edge extension run must cover both live and replay plus cross-watch
 navigation; blocked chat, login/consent, unavailable playback, missing seek
 range, and unknown chat mode remain `unverified` rather than a pass. Without
 public URLs, this real-site tier is untested even if the synthetic fixture passes.
+The native Firefox extension run also requires live and replay pages plus a
+cross-watch transition. It changes a font-size setting through the public
+overlay UI, reloads to check persistence, and records pause, resume, seek,
+chat mode, renderer, and prior-canvas retirement for each page. A missing
+observation keeps that public-page run unverified.
 
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
