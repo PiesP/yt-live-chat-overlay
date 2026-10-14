@@ -426,6 +426,7 @@ async function importThroughManager(
 async function observeSettings(page) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('#movie_player').hover();
   await button.click();
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await modal.waitFor({ state: 'visible' });
@@ -441,6 +442,7 @@ async function observeSettings(page) {
 
 async function setSettingsThroughUi(page, values) {
   await page.locator('#yt-chat-overlay-settings-button').waitFor({ state: 'visible' });
+  await page.locator('#movie_player').hover();
   await page.locator('#yt-chat-overlay-settings-button').click();
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await modal.waitFor({ state: 'visible' });
