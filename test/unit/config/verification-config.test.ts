@@ -9,7 +9,218 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
 
+function createVerificationFixture(): {
+  directory: string;
+  log: string;
+  run: (
+    name: string,
+    runId: string,
+    failure?: string,
+    args?: string[]
+  ) => { status: number | null; output: string; calls: string[][] };
+} {
+  const directory = mkdtempSync(join(tmpdir(), 'yt-verification-contract-'));
+  const bin = join(directory, 'bin');
+  const log = join(directory, 'calls.jsonl');
+  mkdirSync(bin);
+  const scripts = (
+    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    }
+  ).scripts;
+  const fixtureScripts = {
+    ...scripts,
+    quality: 'node record.mjs quality',
+    'check:versions': 'node record.mjs check:versions',
+    'check:artifacts': 'node record.mjs check:artifacts',
+    'test:core': 'node record.mjs test:core',
+    'test:cov': 'node record.mjs test:cov',
+  };
+  writeFileSync(
+    join(directory, 'package.json'),
+    JSON.stringify({ private: true, scripts: fixtureScripts })
+  );
+  const record = join(directory, 'record.mjs');
+  writeFileSync(
+    record,
+    `import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const [command, ...args] = process.argv.slice(2);
+appendFileSync(process.env.CALL_LOG, JSON.stringify([command, ...args]) + '\\n');
+if ([command, ...args].join(' ') === process.env.FAIL_COMMAND) {
+  console.error('Deliberate fixture failure: ' + command);
+  process.exit(17);
+}
+const target = command === 'vite'
+  ? args.includes('--mode') ? 'dev' : args.includes('--config')
+    ? args[args.indexOf('--config') + 1] : 'production'
+  : undefined;
+if (target) {
+  mkdirSync('outputs', { recursive: true });
+  writeFileSync(join('outputs', target), process.env.RUN_ID);
+}
+if (command === 'check:artifacts') {
+  const targets = args.includes('--e2e') ? ['dev'] : ['production'];
+  targets.push('vite.config.extension.ts', 'vite.config.extension.cs.ts', 'vite.config.extension.page.ts',
+    'vite.config.extension.firefox.ts', 'vite.config.extension.cs.firefox.ts', 'vite.config.extension.page.firefox.ts');
+  for (const required of targets) {
+    const path = join('outputs', required);
+    if (!existsSync(path) || readFileSync(path, 'utf8') !== process.env.RUN_ID) {
+      console.error('Missing current-run artifact: ' + required);
+      process.exit(18);
+    }
+  }
+}
+`
+  );
+  for (const tool of ['vite', 'playwright']) {
+    const shim = join(bin, tool);
+    writeFileSync(shim, `#!/bin/sh\nexec '${process.execPath}' '${record}' ${tool} "$@"\n`);
+    chmodSync(shim, 0o755);
+  }
+  return {
+    directory,
+    log,
+    run(name, runId, failure = '', args = []) {
+      writeFileSync(log, '');
+      const result = spawnSync('pnpm', ['run', name, ...args], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}${delimiter}${process.env.PATH}`,
+          CALL_LOG: log,
+          RUN_ID: runId,
+          FAIL_COMMAND: failure,
+        },
+      });
+      expect(result.error).toBeUndefined();
+      const calls = readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as string[]);
+      return { status: result.status, output: `${result.stdout}${result.stderr}`, calls };
+    },
+  };
+}
+
 describe('Verification configuration', () => {
+  it('builds both complete extension targets once in full verification and keeps standalone E2E fresh', () => {
+    const fixture = createVerificationFixture();
+    try {
+      const full = fixture.run('verify:full', 'full');
+      expect(full.status, full.output).toBe(0);
+      const names = full.calls.map(([name]) => name);
+      expect(names).toEqual([
+        'quality',
+        'check:versions',
+        'vite',
+        'vite',
+        'vite',
+        'vite',
+        'vite',
+        'vite',
+        'vite',
+        'check:artifacts',
+        'test:core',
+        'test:cov',
+        'vite',
+        'check:artifacts',
+        'playwright',
+      ]);
+      expect(
+        full.calls.filter(([name, ...args]) => name === 'vite' && args.includes('--config'))
+      ).toHaveLength(6);
+      expect(full.calls.filter(([name]) => name === 'check:artifacts')).toEqual([
+        ['check:artifacts'],
+        ['check:artifacts', '--e2e'],
+      ]);
+
+      rmSync(join(fixture.directory, 'outputs'), { recursive: true, force: true });
+      const missing = fixture.run('test:e2e', 'missing');
+      expect(missing.status, missing.output).toBe(0);
+      expect(missing.calls.filter(([name]) => name === 'vite')).toHaveLength(7);
+      expect(missing.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
+      expect(missing.calls.at(-1)?.[0]).toBe('playwright');
+
+      const stale = fixture.run('test:e2e:headed', 'fresh', '', ['--', '--project=chromium']);
+      expect(stale.status, stale.output).toBe(0);
+      expect(stale.calls.filter(([name]) => name === 'vite')).toHaveLength(7);
+      expect(stale.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
+      expect(stale.calls.at(-1)?.join(' ')).toContain('--headed');
+      expect(stale.calls.at(-1)?.join(' ')).toContain('--project=chromium');
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it.each([
+    ['verify:full', 'vite build --config vite.config.extension.cs.firefox.ts'],
+    ['verify:full', 'check:artifacts'],
+    ['verify:full', 'vite build --mode development'],
+    ['verify:full', 'check:artifacts --e2e'],
+    ['test:e2e', 'vite build --config vite.config.extension.page.ts'],
+    ['test:e2e', 'check:artifacts --e2e'],
+  ])(
+    'stops %s after %s fails',
+    (name, failure) => {
+      const fixture = createVerificationFixture();
+      try {
+        const result = fixture.run(name, 'failure', failure);
+        expect(result.status).not.toBe(0);
+        expect(result.output).toContain('Deliberate fixture failure');
+        expect(result.calls.at(-1)?.join(' ')).toBe(failure);
+        expect(result.calls.some(([command]) => command === 'playwright')).toBe(false);
+      } finally {
+        rmSync(fixture.directory, { recursive: true, force: true });
+      }
+    },
+    30_000
+  );
+
+  it('preserves Playwright failure and forwarded public options', () => {
+    const fixture = createVerificationFixture();
+    try {
+      const result = fixture.run(
+        'test:e2e',
+        'browser-failure',
+        'playwright test --config test/e2e/playwright.config.ts --grep=fixture --reporter=line',
+        ['--grep=fixture', '--reporter=line']
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.output).toContain('Deliberate fixture failure: playwright');
+      expect(result.calls.at(-1)).toEqual([
+        'playwright',
+        'test',
+        '--config',
+        'test/e2e/playwright.config.ts',
+        '--grep=fixture',
+        '--reporter=line',
+      ]);
+      expect(result.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('propagates an integrated Playwright failure after its checked preparation', () => {
+    const fixture = createVerificationFixture();
+    try {
+      const result = fixture.run(
+        'verify:full',
+        'browser-failure',
+        'playwright test --config test/e2e/playwright.config.ts'
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.output).toContain('Deliberate fixture failure: playwright');
+      expect(result.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
+      expect(result.calls.at(-1)?.[0]).toBe('playwright');
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('targets complete fitting, outline, and shape functions and detects an omitted target', () => {
     const config = JSON.parse(
       readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
