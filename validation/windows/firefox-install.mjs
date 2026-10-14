@@ -233,8 +233,7 @@ async function readPublicPageState(session) {
     const hostname = location.hostname;
     return {
       finalUrl: location.href,
-      chatMode: renderer?.isReplay === true ? 'replay' :
-        renderer?.isReplay === false ? 'live' : 'unknown',
+      chatMode: renderer ? (renderer.isReplay === true ? 'replay' : 'live') : 'unknown',
       chatRendererFound: Boolean(renderer),
       playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
       loginRedirect: hostname === 'accounts.google.com',
