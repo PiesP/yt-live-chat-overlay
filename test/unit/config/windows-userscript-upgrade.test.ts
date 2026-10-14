@@ -130,6 +130,9 @@ describe('installed manager upgrade inputs', () => {
     expect(() => upgrade.requireInstalledScriptRow([row], baselineVersion)).toThrow();
     const before = { fontSize: '36', opacity: '65', safeTop: '20' };
     expect(upgrade.requireRetainedSettings(before, { ...before })).toEqual(before);
+    const displayed = { ...before, safeTop: '20.0' };
+    expect(upgrade.requireRetainedSettings(displayed, before)).toEqual(before);
+    expect(() => upgrade.requireRetainedSettings(before, { ...before, safeTop: '20.1' })).toThrow();
     expect(() => upgrade.requireRetainedSettings(before, { ...before, opacity: '100' })).toThrow();
   });
 

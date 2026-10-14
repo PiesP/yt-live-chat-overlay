@@ -133,8 +133,10 @@ export async function loadUpgradeInputs(root) {
 export function requireInstalledScriptRow(rows, version) {
   assert.equal(rows.length, 1, 'Manager must show one installation for the script identity');
   const words = rows[0].replace(/\s+/gu, ' ').trim();
-  const versionPattern = new RegExp(`(?:^|\\s)${version.replace(/\./gu, '\\.')}(?=\\s|$)`, 'u');
-  assert(versionPattern.test(words), `Manager did not show installed version ${version}`);
+  assert(
+    words.split(/\s+/u).includes(version),
+    `Manager did not show installed version ${version}`
+  );
   return { scriptName: SCRIPT_NAME, version, rowText: words.slice(0, 200) };
 }
 
@@ -143,8 +145,19 @@ export function requireInstalledScriptRow(rows, version) {
 export const INSTALLED_SCRIPT_ROW_SELECTOR = 'tr.scripttr';
 
 export function requireRetainedSettings(before, after) {
-  assert.deepEqual(before, { fontSize: '36', opacity: '65', safeTop: '20' });
-  assert.deepEqual(after, before, 'Preferences changed on upgrade');
+  const numericValues = (values) => {
+    assert.deepEqual(Object.keys(values).sort(), ['fontSize', 'opacity', 'safeTop']);
+    return Object.fromEntries(
+      Object.entries(values).map(([key, value]) => {
+        const numeric = Number(value);
+        assert(Number.isFinite(numeric), `Invalid numeric setting ${key}`);
+        return [key, numeric];
+      })
+    );
+  };
+  const expected = numericValues(before);
+  assert.deepEqual(expected, { fontSize: 36, opacity: 65, safeTop: 20 });
+  assert.deepEqual(numericValues(after), expected, 'Preferences changed on upgrade');
   return after;
 }
 
