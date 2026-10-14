@@ -54,6 +54,9 @@ function createSession(
     secondChatMode?: 'live' | 'replay' | 'unknown';
     settingsPersisted?: boolean;
     postReloadPlaybackUnavailable?: boolean;
+    adAtSeek?: boolean;
+    missingContentIdentity?: boolean;
+    durationConflict?: boolean;
   } = {}
 ) {
   const calls: string[] = [];
@@ -61,6 +64,7 @@ function createSession(
   const pageErrors: Array<{ level: string; text: string; type: string }> = [];
   let evaluateIndex = 0;
   let publicPage = -1;
+  let contentReads = 0;
   const session = {
     context: 'owned-context',
     command: vi.fn(async (_method: string, _params?: unknown) => ({})),
@@ -90,6 +94,34 @@ function createSession(
           loginRedirect: false,
           consentRedirect: false,
         };
+      if (
+        expression.includes('const expectedVideoId =') &&
+        !expression.includes('const completed = new Promise')
+      ) {
+        contentReads++;
+        const expectedVideoId = JSON.parse(
+          /const expectedVideoId = ("[^"]*"|null);/u.exec(expression)?.[1] ?? 'null'
+        );
+        const adShowing = options.adAtSeek === true && contentReads === 2;
+        const missingIdentity = options.missingContentIdentity === true;
+        const durationConflict = options.durationConflict === true && publicPage > 0;
+        return {
+          status: adShowing || missingIdentity || durationConflict ? 'unverified' : 'passed',
+          reason: adShowing
+            ? 'ad-showing'
+            : missingIdentity
+              ? 'content-identity-unavailable'
+              : durationConflict
+                ? 'content-duration-mismatch'
+                : null,
+          adShowing,
+          expectedVideoId,
+          responseVideoId: missingIdentity ? null : expectedVideoId,
+          playerVideoId: null,
+          videoDuration: durationConflict ? 30 : 120,
+          metadataDuration: 120,
+        };
+      }
       if (expression.includes('videoPaused: document.querySelector'))
         return (
           options.liveState ?? {
@@ -117,6 +149,9 @@ function createSession(
       if (expression.includes('video?.seekable.length'))
         return options.seekRangeUnavailable ? null : { currentTime: 30, start: 0, end: 120 };
       if (expression.includes('const completed = new Promise')) {
+        expect(expression.indexOf('const content =')).toBeLessThan(
+          expression.indexOf('video.currentTime =')
+        );
         const target = /video\.currentTime = (\d+(?:\.\d+)?);/u.exec(expression)?.[1];
         if (target === undefined) throw new Error('Seek expression has no numeric target');
         return {
@@ -155,6 +190,7 @@ function createSession(
       calls.push(url.includes('windowsFirefoxExtension') ? 'navigate-fixture' : 'navigate-live');
       if (!url.includes('windowsFirefoxExtension')) {
         publicPage++;
+        contentReads = 0;
         pageLogs.push({
           level: 'info',
           text: '[RenderWorkerManager] renderer.worker.started',
@@ -635,9 +671,32 @@ describe('Windows Firefox installation profile', () => {
       .map(([expression]) => expression)
       .find((expression) => expression.includes('const completed = new Promise'));
     if (!liveSeekExpression) throw new Error('Live seek expression was not evaluated');
+    const seekContext = (
+      video: object,
+      videoId: string,
+      adShowing = false,
+      metadataLength = '120'
+    ) => {
+      const player = {
+        querySelector: () => video,
+        classList: { contains: () => adShowing },
+        getVideoData: () => ({ video_id: videoId }),
+      };
+      return {
+        document: {
+          querySelector: (selector: string) => (selector === '#movie_player' ? player : video),
+        },
+        window: {
+          ytInitialPlayerResponse: { videoDetails: { videoId, lengthSeconds: metadataLength } },
+        },
+      };
+    };
     let seekedListener: (() => void) | undefined;
     let currentTime = 30;
     const video = {
+      paused: false,
+      readyState: 4,
+      duration: 120,
       seekable: { length: 1, start: () => 0, end: () => 120 },
       get currentTime() {
         return currentTime;
@@ -651,7 +710,7 @@ describe('Windows Firefox installation profile', () => {
       },
     };
     const mismatchedSeek = await new Script(liveSeekExpression).runInNewContext({
-      document: { querySelector: () => video },
+      ...seekContext(video, 'public-live'),
       setTimeout,
       clearTimeout,
     });
@@ -665,12 +724,15 @@ describe('Windows Firefox installation profile', () => {
       seekedEvent: true,
     });
     const timedOutVideo = {
+      paused: false,
+      readyState: 4,
+      duration: 120,
       currentTime: 30,
       seekable: { length: 1, start: () => 0, end: () => 120 },
       addEventListener: () => {},
     };
     const timedOutSeek = await new Script(liveSeekExpression).runInNewContext({
-      document: { querySelector: () => timedOutVideo },
+      ...seekContext(timedOutVideo, 'public-live'),
       setTimeout: (callback: () => void) => {
         callback();
         return 1;
@@ -686,12 +748,16 @@ describe('Windows Firefox installation profile', () => {
       seekedEvent: false,
     });
     const movedRangeSeek = await new Script(liveSeekExpression).runInNewContext({
-      document: {
-        querySelector: () => ({
+      ...seekContext(
+        {
+          paused: false,
+          readyState: 4,
+          duration: 120,
           currentTime: 30,
           seekable: { length: 1, start: () => 0, end: () => 20 },
-        }),
-      },
+        },
+        'public-live'
+      ),
     });
     expect(movedRangeSeek).toMatchObject({
       status: 'unverified',
@@ -707,6 +773,9 @@ describe('Windows Firefox installation profile', () => {
     if (!replaySeekExpression) throw new Error('Replay seek expression was not evaluated');
     let assignmentCount = 0;
     const staleVideo = {
+      paused: false,
+      readyState: 4,
+      duration: 120,
       seekable: { length: 1, start: () => 0, end: () => 120 },
       get currentTime() {
         return 32.5;
@@ -716,7 +785,7 @@ describe('Windows Firefox installation profile', () => {
       },
     };
     const staleSeek = await new Script(replaySeekExpression).runInNewContext({
-      document: { querySelector: () => staleVideo },
+      ...seekContext(staleVideo, 'public-replay'),
     });
     expect(staleSeek).toMatchObject({
       status: 'unverified',
@@ -728,9 +797,31 @@ describe('Windows Firefox installation profile', () => {
       seekedEvent: false,
     });
     expect(assignmentCount).toBe(0);
+    const adSeek = await new Script(replaySeekExpression).runInNewContext({
+      ...seekContext(
+        {
+          paused: false,
+          readyState: 4,
+          duration: 30,
+          seekable: { length: 1, start: () => 0, end: () => 30 },
+          get currentTime() {
+            return 13;
+          },
+          set currentTime(_target: number) {
+            throw new Error('ad must not be seeked');
+          },
+        },
+        'public-replay',
+        true
+      ),
+    });
+    expect(adSeek).toMatchObject({ status: 'unverified', reason: 'ad-showing' });
     let boundaryTime = 32;
     let boundaryListener: (() => void) | undefined;
     const boundaryVideo = {
+      paused: false,
+      readyState: 4,
+      duration: 120,
       seekable: { length: 1, start: () => 0, end: () => 120 },
       get currentTime() {
         return boundaryTime;
@@ -744,7 +835,7 @@ describe('Windows Firefox installation profile', () => {
       },
     };
     const boundarySeek = await new Script(replaySeekExpression).runInNewContext({
-      document: { querySelector: () => boundaryVideo },
+      ...seekContext(boundaryVideo, 'public-replay'),
       setTimeout,
       clearTimeout,
     });
@@ -755,6 +846,34 @@ describe('Windows Firefox installation profile', () => {
       afterTime: 33,
       seekedEvent: true,
     });
+    let partialRangeTime = 32;
+    let partialRangeListener: (() => void) | undefined;
+    const partialRangeSeek = await new Script(replaySeekExpression).runInNewContext({
+      ...seekContext(
+        {
+          paused: false,
+          readyState: 4,
+          duration: 5168.121,
+          seekable: { length: 1, start: () => 0, end: () => 35 },
+          get currentTime() {
+            return partialRangeTime;
+          },
+          set currentTime(target: number) {
+            partialRangeTime = target;
+            partialRangeListener?.();
+          },
+          addEventListener: (_event: string, listener: () => void) => {
+            partialRangeListener = listener;
+          },
+        },
+        'public-replay',
+        false,
+        '5168'
+      ),
+      setTimeout,
+      clearTimeout,
+    });
+    expect(partialRangeSeek).toMatchObject({ status: 'passed', target: 33, afterTime: 33 });
     expect(session.waitFor).toHaveBeenCalledWith(
       expect.stringContaining('730002'),
       'the public UI font size to persist in extension storage'
@@ -825,6 +944,16 @@ describe('Windows Firefox installation profile', () => {
       {
         provider: { chatMode: 'replay' },
         workflow: {
+          seek: {
+            content: {
+              status: 'passed',
+              adShowing: false,
+              expectedVideoId: 'public-replay',
+              responseVideoId: 'public-replay',
+              videoDuration: 120,
+              metadataDuration: 120,
+            },
+          },
           settings: { postReloadPlayback: { status: 'passed', playbackStarted: true } },
           navigation: {
             status: 'passed',
@@ -855,6 +984,13 @@ describe('Windows Firefox installation profile', () => {
     expect(
       session.command.mock.calls.filter(([method]) => method === 'input.performActions')
     ).toHaveLength(4);
+    const renderPredicate = session.waitFor.mock.calls.find(
+      ([, description]) =>
+        description === 'the installed Firefox extension to render public live chat'
+    )?.[0];
+    expect(renderPredicate).toContain("classList.contains('ad-showing')");
+    expect(renderPredicate).toContain('identityMatches');
+    expect(renderPredicate).toContain('durationMatches');
     expect(JSON.stringify(result)).not.toContain(root);
     expect(JSON.stringify(result)).not.toContain('/test/firefox.exe');
     expect(calls.indexOf('stop-mock')).toBeLessThan(calls.indexOf('navigate-live'));
@@ -909,6 +1045,71 @@ describe('Windows Firefox installation profile', () => {
         ([, description]) => description === 'the public overlay to reload with settings'
       )
     ).toBe(false);
+  });
+
+  it('does not seek if an ad starts after public content admission', async () => {
+    const { output, root } = await createBundle();
+    const { session } = createSession({ adAtSeek: true });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: ['https://www.youtube.com/watch?v=public-live'],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live[0]).toMatchObject({
+      phase: 'seek',
+      workflow: {
+        seek: { status: 'unverified', reason: 'ad-showing', content: { adShowing: true } },
+      },
+    });
+    expect(
+      session.evaluateJson.mock.calls.some(([expression]) =>
+        expression.includes('video.currentTime =')
+      )
+    ).toBe(false);
+  });
+
+  it.each([
+    [{ missingContentIdentity: true }, 'content-identity-unavailable', 0],
+    [{ durationConflict: true }, 'content-duration-mismatch', 1],
+  ])('keeps uncertain public content unverified before seeking', async (options, reason, page) => {
+    const { output, root } = await createBundle();
+    const { session } = createSession(options);
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public-live',
+            ...(page === 1 ? ['https://www.youtube.com/watch?v=public-replay'] : []),
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live[page]).toMatchObject({
+      phase: 'render',
+      player: { content: { status: 'unverified', reason } },
+      workflow: { seek: { status: 'not-run' } },
+    });
+    expect(
+      session.evaluateJson.mock.calls.filter(([expression]) =>
+        expression.includes('video.currentTime =')
+      )
+    ).toHaveLength(page);
   });
 
   it.each([
