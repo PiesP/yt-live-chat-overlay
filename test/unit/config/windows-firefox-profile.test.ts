@@ -267,6 +267,68 @@ describe('Windows Firefox installation profile', () => {
     ).toEqual([]);
   });
 
+  it('includes the spawned Firefox launcher when it owns the task profile', async () => {
+    const spawnedAt = Date.now();
+    const profileDir = 'C:\\task\\.firefox-install-profile-test';
+    const executablePath = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+    const createdUtc = new Date(spawnedAt + 10).toISOString();
+    const makeProcess = (pid: number, parentPid: number, commandLine: string) => ({
+      pid,
+      parentPid,
+      createdUtc,
+      startTicks: `1330000000000000${pid}`,
+      executablePath,
+      commandLine,
+    });
+    const launcher = makeProcess(10, 9, `"${executablePath}" --profile "${profileDir}"`);
+    const browser = makeProcess(20, 10, `"${executablePath}" --profile "${profileDir}"`);
+    const content = makeProcess(21, 20, `"${executablePath}" -contentproc`);
+    const processes = [launcher, browser, content];
+    const ownership: {
+      executablePath: string;
+      profileDir: string;
+      spawnedAt: number;
+      expectedProcesses?: typeof processes;
+    } = { executablePath, profileDir, spawnedAt };
+    const child = Object.assign(new EventEmitter(), { pid: 10, exitCode: 0, signalCode: null });
+    expect(
+      selectOwnedFirefoxProcesses(processes, { ...ownership, childPid: child.pid }).map(
+        (entry: { pid: number }) => entry.pid
+      )
+    ).toEqual([10, 20, 21]);
+    await expect(
+      waitForWindowsEndpoint(child, ownership, {
+        readEndpoint: async () => ({ host: '127.0.0.1', port: 50947 }),
+        inspect: async () => ({ processes, listenerPids: [20] }),
+      })
+    ).resolves.toBe('ws://127.0.0.1:50947/session');
+    expect(ownership.expectedProcesses).toEqual(processes);
+
+    const stop = vi.fn(async (_entry: { pid: number }) => {});
+    const inspect = vi
+      .fn()
+      .mockResolvedValueOnce({ processes })
+      .mockResolvedValueOnce({ processes: [] });
+    await terminateOwnedProcessTree(child, ownership, { platform: 'win32', inspect, stop });
+    expect(stop.mock.calls.map(([entry]) => entry.pid)).toEqual([21, 20, 10]);
+
+    const reusedLauncher = { ...launcher, startTicks: '133000000000099999' };
+    const reusedProcesses = [reusedLauncher, browser, content];
+    expect(
+      selectOwnedFirefoxProcesses(reusedProcesses, { ...ownership, childPid: child.pid }).map(
+        (entry: { pid: number }) => entry.pid
+      )
+    ).not.toContain(child.pid);
+    await expect(
+      terminateOwnedProcessTree(child, ownership, {
+        platform: 'win32',
+        inspect: async () => ({ processes: reusedProcesses }),
+        stop,
+      })
+    ).rejects.toThrow(/Unverified Firefox process/u);
+    expect(stop.mock.calls.map(([entry]) => entry.pid)).toEqual([21, 20, 10]);
+  });
+
   it('finds the profile endpoint after the Firefox launcher exits successfully', async () => {
     const spawnedAt = Date.now();
     const profileDir = 'C:\\task\\.firefox-install-profile-test';

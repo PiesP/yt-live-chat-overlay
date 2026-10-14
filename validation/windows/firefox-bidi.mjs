@@ -151,6 +151,10 @@ export function selectOwnedFirefoxProcesses(
       selected.set(entry.pid, entry);
       continue;
     }
+    if (entry.pid === childPid) {
+      if (ownsProfileCommand(entry.commandLine, profileDir)) selected.set(entry.pid, entry);
+      continue;
+    }
     if (!ownsProfileCommand(entry.commandLine, profileDir)) continue;
     const lineage = [entry];
     const seen = new Set([entry.pid]);
