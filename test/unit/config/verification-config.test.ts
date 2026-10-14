@@ -197,7 +197,7 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
       }
       const quality = run('quality');
       expect(quality.status).toBe(0);
-      expect(quality.calls[0]).toEqual(['biome', 'check', '.']);
+      expect(quality.calls[0]).toEqual(['biome', 'check', '--error-on-warnings', '.']);
       expect(quality.calls.filter(([tool]) => tool === 'biome')).toHaveLength(1);
       expect(quality.calls.slice(1).map((call) => call.at(-1))).toEqual([
         'check',
@@ -210,7 +210,7 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'circular',
         'knip',
       ]);
-      const rejected = run('quality', 'biome check .');
+      const rejected = run('quality', 'biome check --error-on-warnings .');
       expect(rejected.status).toBe(17);
       expect(rejected.calls).toHaveLength(1);
       const typeFailure = run('quality', 'pnpm -s check:extension');
@@ -221,7 +221,7 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'check:extension',
       ]);
       expect(run('quality:fix').calls).toEqual([
-        ['biome', 'check', '--write', '.'],
+        ['biome', 'check', '--write', '--error-on-warnings', '.'],
         ['pnpm', '-s', 'quality'],
       ]);
       const targets = [

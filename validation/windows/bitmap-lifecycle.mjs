@@ -85,7 +85,7 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
   );
   const instrumented = source.replace(
     marker,
-    '\n\twindow.__ytBitmapCacheClass = ResizableByteLimitedCache;' + marker
+    `\n\twindow.__ytBitmapCacheClass = ResizableByteLimitedCache;${marker}`
   );
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   const html = preview
