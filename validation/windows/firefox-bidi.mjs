@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { constants } from 'node:fs';
+import { lstat, mkdir, mkdtemp, open, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, win32 } from 'node:path';
+import { promisify } from 'node:util';
 
 const STARTUP_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 20_000;
@@ -13,6 +15,10 @@ const POLL_INTERVAL_MS = 75;
 const PROFILE_PREFIX = '.firefox-install-profile-';
 const PROFILE_REMOVE_MAX_RETRIES = 5;
 const PROFILE_REMOVE_RETRY_DELAY_MS = 200;
+const ENDPOINT_FILE = 'WebDriverBiDiServer.json';
+const ENDPOINT_FILE_MAX_BYTES = 1024;
+const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 5_000;
+const execFileAsync = promisify(execFile);
 
 function errorMessage(reason) {
   return reason instanceof Error ? reason.message : String(reason);
@@ -58,42 +64,350 @@ export async function removeOwnedProfile(root, profileDir, rmProfile = rm) {
   });
 }
 
-function runTaskkillTree(pid) {
-  return new Promise((resolveTaskkill, rejectTaskkill) => {
-    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
-    if (!win32.isAbsolute(systemRoot)) {
-      rejectTaskkill(new Error('Windows did not expose an absolute SystemRoot directory'));
-      return;
-    }
-    const taskkill = spawn(
-      win32.join(systemRoot, 'System32', 'taskkill.exe'),
-      ['/PID', String(pid), '/T', '/F'],
-      { stdio: 'ignore', windowsHide: true }
-    );
-    taskkill.once('error', rejectTaskkill);
-    taskkill.once('exit', (code) => {
-      if (code === 0) resolveTaskkill();
-      else rejectTaskkill(new Error(`taskkill failed for the task-owned Firefox tree (${code})`));
-    });
-  });
+function windowsPowerShellPath() {
+  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+  if (!win32.isAbsolute(systemRoot)) {
+    throw new Error('Windows did not expose an absolute SystemRoot directory');
+  }
+  return win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-async function terminateOwnedProcessTree(child) {
+async function inspectWindowsFirefox(port = 0) {
+  const script = `$ErrorActionPreference = 'Stop'
+$processes = @(Get-CimInstance Win32_Process -Filter "Name = 'firefox.exe'" | ForEach-Object {
+  $handle = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $handle) { return }
+  try {
+    $cimTicks = $_.CreationDate.ToUniversalTime().Ticks
+    $handleTicks = $handle.StartTime.ToUniversalTime().Ticks
+    if ([Math]::Abs($cimTicks - $handleTicks) -gt [TimeSpan]::TicksPerMillisecond) { return }
+    [pscustomobject]@{
+      pid = [int]$_.ProcessId
+      parentPid = [int]$_.ParentProcessId
+      commandLine = [string]$_.CommandLine
+      executablePath = [string]$_.ExecutablePath
+      createdUtc = $_.CreationDate.ToUniversalTime().ToString('o')
+      startTicks = [string]$handleTicks
+    }
+  } catch {
+    return
+  }
+})
+$listeners = @()
+if (${port} -gt 0) {
+  $listeners = @(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Where-Object {
+    $_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '::1'
+  } | ForEach-Object { [int]$_.OwningProcess })
+}
+ConvertTo-Json -Compress -Depth 3 -InputObject ([pscustomobject]@{ processes = $processes; listenerPids = $listeners })`;
+  const { stdout } = await execFileAsync(
+    windowsPowerShellPath(),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { timeout: WINDOWS_PROCESS_QUERY_TIMEOUT_MS, maxBuffer: 65_536, windowsHide: true }
+  );
+  const result = JSON.parse(stdout);
+  if (!Array.isArray(result?.processes) || !Array.isArray(result?.listenerPids)) {
+    throw new Error('Firefox process inspection returned invalid data');
+  }
+  return result;
+}
+
+function ownsProfileCommand(commandLine, profileDir) {
+  if (typeof commandLine !== 'string') return false;
+  const argument = /(?:^|\s)-{1,2}profile\s+(?:"([^"]+)"|(\S+))/iu.exec(commandLine);
+  const actual = argument?.[1] ?? argument?.[2];
+  return (
+    typeof actual === 'string' &&
+    win32.normalize(actual).toLowerCase() === win32.normalize(profileDir).toLowerCase()
+  );
+}
+
+export function selectOwnedFirefoxProcesses(
+  processes,
+  { childPid, executablePath, expectedProcesses, profileDir, spawnedAt }
+) {
+  if (!Array.isArray(processes) || !Number.isSafeInteger(childPid) || childPid <= 0) return [];
+  const expectedByPid = new Map((expectedProcesses ?? []).map((entry) => [entry.pid, entry]));
+  const candidates = processes.filter(
+    (entry) =>
+      Number.isSafeInteger(entry?.pid) &&
+      entry.pid > 0 &&
+      Number.isSafeInteger(entry?.parentPid) &&
+      typeof entry?.executablePath === 'string' &&
+      win32.normalize(entry.executablePath).toLowerCase() ===
+        win32.normalize(executablePath).toLowerCase() &&
+      Number.isFinite(Date.parse(entry.createdUtc)) &&
+      Date.parse(entry.createdUtc) >= spawnedAt - 1000 &&
+      typeof entry.startTicks === 'string' &&
+      /^\d+$/u.test(entry.startTicks) &&
+      (!expectedByPid.has(entry.pid) ||
+        (expectedByPid.get(entry.pid).createdUtc === entry.createdUtc &&
+          expectedByPid.get(entry.pid).startTicks === entry.startTicks))
+  );
+  const byPid = new Map(candidates.map((entry) => [entry.pid, entry]));
+  const selected = new Map();
+  for (const entry of candidates) {
+    if (expectedByPid.has(entry.pid)) {
+      selected.set(entry.pid, entry);
+      continue;
+    }
+    if (entry.pid === childPid) {
+      if (ownsProfileCommand(entry.commandLine, profileDir)) selected.set(entry.pid, entry);
+      continue;
+    }
+    if (!ownsProfileCommand(entry.commandLine, profileDir)) continue;
+    const lineage = [entry];
+    const seen = new Set([entry.pid]);
+    let parentPid = entry.parentPid;
+    while (parentPid !== childPid && !seen.has(parentPid)) {
+      seen.add(parentPid);
+      const parent = byPid.get(parentPid);
+      if (!parent) break;
+      lineage.push(parent);
+      parentPid = parent.parentPid;
+    }
+    if (parentPid !== childPid) continue;
+    for (const ancestor of lineage) selected.set(ancestor.pid, ancestor);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entry of candidates) {
+      if (selected.has(entry.pid) || !selected.has(entry.parentPid)) continue;
+      selected.set(entry.pid, entry);
+      changed = true;
+    }
+  }
+  return [...selected.values()];
+}
+
+export function parseFirefoxProfileEndpoint(data) {
+  if (typeof data !== 'string' || Buffer.byteLength(data) > ENDPOINT_FILE_MAX_BYTES) {
+    throw new Error('Firefox BiDi endpoint metadata is oversized or invalid');
+  }
+  const parsed = JSON.parse(data);
+  if (parsed?.ws_host !== '127.0.0.1' && parsed?.ws_host !== '::1') {
+    throw new Error('Firefox BiDi endpoint is not loopback');
+  }
+  if (!Number.isSafeInteger(parsed.ws_port) || parsed.ws_port < 1 || parsed.ws_port > 65_535) {
+    throw new Error('Firefox BiDi endpoint port is invalid');
+  }
+  return { host: parsed.ws_host, port: parsed.ws_port };
+}
+
+export async function readOwnedFirefoxEndpoint(profileDir, spawnedAt) {
+  const path = join(profileDir, ENDPOINT_FILE);
+  let file;
+  try {
+    file = await open(
+      path,
+      constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW)
+    );
+  } catch (error) {
+    if (error?.code === 'ELOOP') {
+      throw new Error('Firefox BiDi endpoint metadata is not a fresh ordinary file');
+    }
+    if (error?.code === 'ENOENT') {
+      try {
+        await lstat(path);
+      } catch (pathError) {
+        if (pathError?.code === 'ENOENT') return null;
+        throw pathError;
+      }
+      throw new Error('Firefox BiDi endpoint metadata path is not readable');
+    }
+    throw error;
+  }
+  try {
+    const opened = await file.stat();
+    const pathStat = await lstat(path);
+    if (
+      !opened.isFile() ||
+      !pathStat.isFile() ||
+      pathStat.isSymbolicLink() ||
+      opened.dev !== pathStat.dev ||
+      opened.ino !== pathStat.ino ||
+      opened.size !== pathStat.size ||
+      opened.mtimeMs !== pathStat.mtimeMs ||
+      opened.size > ENDPOINT_FILE_MAX_BYTES ||
+      opened.mtimeMs < spawnedAt - 1000
+    ) {
+      throw new Error('Firefox BiDi endpoint metadata is not a fresh ordinary file');
+    }
+    if (opened.size === 0) return null;
+    const buffer = Buffer.alloc(ENDPOINT_FILE_MAX_BYTES + 1);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const after = await file.stat();
+    if (
+      bytesRead !== opened.size ||
+      after.dev !== opened.dev ||
+      after.ino !== opened.ino ||
+      after.size !== opened.size ||
+      after.mtimeMs !== opened.mtimeMs
+    )
+      throw new Error('Firefox BiDi endpoint metadata changed during read');
+    return parseFirefoxProfileEndpoint(buffer.subarray(0, bytesRead).toString('utf8'));
+  } finally {
+    await file.close();
+  }
+}
+
+export function selectOwnedFirefoxListener(inspected, ownership, port) {
+  const owned = selectOwnedFirefoxProcesses(inspected.processes, ownership);
+  const listeners = [
+    ...new Set(inspected.listenerPids.filter((pid) => Number.isSafeInteger(pid) && pid > 0)),
+  ];
+  const owner = owned.find((entry) => listeners.includes(entry.pid));
+  if (!owner || listeners.length !== 1 || listeners[0] !== owner.pid) {
+    throw new Error(`Firefox BiDi port ${port} has no verified task-owned listener`);
+  }
+  return owner;
+}
+
+async function rememberOwnedWindowsFirefox(child, ownership) {
+  const processes = (await inspectWindowsFirefox()).processes;
+  const owned = selectOwnedFirefoxProcesses(processes, { ...ownership, childPid: child.pid });
+  if (
+    processes.some(
+      (entry) =>
+        ownsProfileCommand(entry.commandLine, ownership.profileDir) &&
+        !owned.some((candidate) => candidate.pid === entry.pid)
+    )
+  ) {
+    throw new Error('Unverified Firefox process uses the task profile');
+  }
+  ownership.expectedProcesses = [
+    ...(ownership.expectedProcesses ?? []),
+    ...owned.filter(
+      (entry) => !ownership.expectedProcesses?.some((expected) => expected.pid === entry.pid)
+    ),
+  ];
+}
+
+async function stopVerifiedWindowsFirefox(entry, ownership) {
+  const script = `$ErrorActionPreference = 'Stop'
+$item = Get-CimInstance Win32_Process -Filter 'ProcessId = ${entry.pid}'
+if ($null -eq $item) { return }
+$process = Get-Process -Id ${entry.pid} -ErrorAction SilentlyContinue
+if ($null -eq $process) { return }
+if ($item.ExecutablePath -ine '${ownership.executablePath.replaceAll("'", "''")}' -or
+    $item.CreationDate.ToUniversalTime().ToString('o') -ne '${entry.createdUtc}' -or
+    [int]$item.ParentProcessId -ne ${entry.parentPid} -or
+    [string]($process.StartTime.ToUniversalTime().Ticks) -ne '${entry.startTicks}') {
+  throw 'Firefox process identity changed before cleanup'
+}
+$process.Kill()
+if (-not $process.WaitForExit(${CLOSE_TIMEOUT_MS})) { throw 'Firefox process did not exit' }`;
+  await execFileAsync(
+    windowsPowerShellPath(),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      timeout: CLOSE_TIMEOUT_MS + WINDOWS_PROCESS_QUERY_TIMEOUT_MS,
+      maxBuffer: 4096,
+      windowsHide: true,
+    }
+  );
+}
+
+export async function terminateOwnedProcessTree(
+  child,
+  ownership,
+  {
+    platform = process.platform,
+    inspect = inspectWindowsFirefox,
+    stop = stopVerifiedWindowsFirefox,
+  } = {}
+) {
+  if (platform === 'win32') {
+    if (!ownership || !Number.isSafeInteger(child.pid) || child.pid <= 0) {
+      throw new Error('Task-owned Firefox process identity is unavailable');
+    }
+    if (ownership.snapshotFailed) {
+      throw new Error('Firefox process ownership snapshot failed before session shutdown');
+    }
+    const bound = { ...ownership, childPid: child.pid };
+    const first = (await inspect()).processes;
+    const processes = selectOwnedFirefoxProcesses(first, bound);
+    if (
+      first.some(
+        (entry) =>
+          ownsProfileCommand(entry.commandLine, ownership.profileDir) &&
+          !processes.some((owned) => owned.pid === entry.pid)
+      )
+    ) {
+      throw new Error('Unverified Firefox process uses the task profile');
+    }
+    bound.expectedProcesses = [
+      ...(ownership.expectedProcesses ?? []),
+      ...processes.filter(
+        (entry) => !ownership.expectedProcesses?.some((expected) => expected.pid === entry.pid)
+      ),
+    ];
+    const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
+    const depth = (entry) => {
+      let count = 0;
+      let parentPid = entry.parentPid;
+      const seen = new Set([entry.pid]);
+      while (byPid.has(parentPid) && !seen.has(parentPid)) {
+        seen.add(parentPid);
+        parentPid = byPid.get(parentPid).parentPid;
+        count++;
+      }
+      return count;
+    };
+    for (const entry of processes.sort((a, b) => depth(b) - depth(a))) await stop(entry, bound);
+    const last = (await inspect()).processes;
+    const remaining = selectOwnedFirefoxProcesses(last, bound);
+    if (
+      last.some(
+        (entry) =>
+          ownsProfileCommand(entry.commandLine, ownership.profileDir) &&
+          !remaining.some((owned) => owned.pid === entry.pid)
+      )
+    ) {
+      throw new Error('Unverified Firefox process uses the task profile');
+    }
+    const remembered = new Map(bound.expectedProcesses.map((entry) => [entry.pid, entry]));
+    const liveByPid = new Map(last.map((entry) => [entry.pid, entry]));
+    const remainingPids = new Set(remaining.map((entry) => entry.pid));
+    const unverifiedDescendant = last.some((entry) => {
+      if (
+        remainingPids.has(entry.pid) ||
+        typeof entry.executablePath !== 'string' ||
+        win32.normalize(entry.executablePath).toLowerCase() !==
+          win32.normalize(ownership.executablePath).toLowerCase() ||
+        (Number.isFinite(Date.parse(entry.createdUtc)) &&
+          Date.parse(entry.createdUtc) < ownership.spawnedAt - 1000)
+      ) {
+        return false;
+      }
+      let parentPid = entry.parentPid;
+      const seen = new Set([entry.pid]);
+      while (Number.isSafeInteger(parentPid) && !seen.has(parentPid)) {
+        if (remembered.has(parentPid)) return true;
+        seen.add(parentPid);
+        parentPid = liveByPid.get(parentPid)?.parentPid;
+      }
+      return false;
+    });
+    if (unverifiedDescendant) {
+      throw new Error('Unverified Firefox descendant remains after task-owned cleanup');
+    }
+    if (remaining.length > 0) throw new Error('Task-owned Firefox browser remains alive');
+    if (
+      child.exitCode === null &&
+      child.signalCode === null &&
+      !(await waitForProcessExit(child, GRACEFUL_EXIT_TIMEOUT_MS))
+    ) {
+      child.kill('SIGTERM');
+      if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
+        throw new Error('Task-owned Firefox launcher did not terminate');
+      }
+    }
+    return;
+  }
   if (child.exitCode !== null || child.signalCode !== null) return;
   if (await waitForProcessExit(child, GRACEFUL_EXIT_TIMEOUT_MS)) return;
-  if (process.platform === 'win32') {
-    if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
-      throw new Error('Task-owned Firefox process id is unavailable');
-    }
-    let taskkillError;
-    try {
-      await runTaskkillTree(child.pid);
-    } catch (error) {
-      taskkillError = error;
-    }
-    if (await waitForProcessExit(child, CLOSE_TIMEOUT_MS)) return;
-    throw taskkillError ?? new Error('Task-owned Firefox process tree did not terminate');
-  }
   child.kill('SIGTERM');
   if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
     child.kill('SIGKILL');
@@ -105,7 +419,7 @@ async function terminateOwnedProcessTree(child) {
 
 /** Run every cleanup phase and remove the profile only after process termination. */
 export async function cleanupFirefoxResources(
-  { child, detachSocket = () => {}, profileDir, root, socket },
+  { child, detachSocket = () => {}, ownership, profileDir, root, socket },
   { removeProfile = removeOwnedProfile, terminateProcessTree = terminateOwnedProcessTree } = {}
 ) {
   const errors = [];
@@ -123,7 +437,7 @@ export async function cleanupFirefoxResources(
   }
   let processTerminated = false;
   try {
-    await terminateProcessTree(child);
+    await terminateProcessTree(child, ownership);
     processTerminated = true;
   } catch (error) {
     errors.push(
@@ -140,6 +454,16 @@ export async function cleanupFirefoxResources(
     }
   }
   if (errors.length > 0) throw new AggregateError(errors, 'Firefox resource cleanup failed');
+}
+
+export function combineFirefoxCloseFailures(shutdownError, cleanupError) {
+  if (shutdownError && cleanupError) {
+    return new AggregateError(
+      [shutdownError, cleanupError],
+      'Firefox session shutdown and cleanup failed'
+    );
+  }
+  return shutdownError ?? cleanupError;
 }
 
 export function buildFirefoxLaunchArguments({
@@ -222,6 +546,61 @@ function waitForEndpoint(child, readOutput) {
   });
 }
 
+export async function waitForWindowsEndpoint(
+  child,
+  ownership,
+  { inspect = inspectWindowsFirefox, readEndpoint = readOwnedFirefoxEndpoint } = {}
+) {
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  let spawnError = null;
+  let lastMetadataError = null;
+  const onError = (error) => {
+    spawnError = error;
+  };
+  child.on('error', onError);
+  try {
+    while (Date.now() < deadline) {
+      if (spawnError) throw spawnError;
+      let metadata;
+      try {
+        metadata = await readEndpoint(ownership.profileDir, ownership.spawnedAt);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        lastMetadataError = error;
+      }
+      if (metadata) {
+        const inspected = await inspect(metadata.port);
+        let owner;
+        try {
+          owner = selectOwnedFirefoxListener(
+            inspected,
+            { ...ownership, childPid: child.pid },
+            metadata.port
+          );
+        } catch (error) {
+          if (inspected.listenerPids.length > 0) throw error;
+          await delay(POLL_INTERVAL_MS);
+          continue;
+        }
+        ownership.expectedProcesses = selectOwnedFirefoxProcesses(inspected.processes, {
+          ...ownership,
+          childPid: child.pid,
+        });
+        ownership.browserPid = owner.pid;
+        return `ws://${metadata.host === '::1' ? '[::1]' : metadata.host}:${metadata.port}/session`;
+      }
+      await delay(POLL_INTERVAL_MS);
+    }
+    throw new Error(
+      lastMetadataError
+        ? 'Timed out waiting for complete Firefox BiDi endpoint metadata'
+        : 'Timed out waiting for a verified task-owned Firefox BiDi endpoint'
+    );
+  } finally {
+    child.removeListener('error', onError);
+  }
+}
+
 function connectWebSocket(endpoint) {
   return new Promise((resolveSocket, rejectSocket) => {
     const socket = new WebSocket(endpoint);
@@ -263,14 +642,16 @@ class FirefoxBidiSession {
   #logSubscribed = false;
   #pendingCommands = new Map();
   #profileDir;
+  #ownership;
   #root;
   #socket;
 
-  constructor({ child, socket, root, profileDir }) {
+  constructor({ child, socket, root, profileDir, ownership }) {
     this.#child = child;
     this.#socket = socket;
     this.#root = root;
     this.#profileDir = profileDir;
+    this.#ownership = ownership;
     socket.addEventListener('message', this.#handleMessage);
     socket.addEventListener('close', this.#handleClose);
   }
@@ -545,27 +926,46 @@ class FirefoxBidiSession {
 
   async close() {
     if (this.#closed) return;
+    let shutdownError;
+    let cleanupError;
     try {
+      if (process.platform === 'win32') {
+        try {
+          await rememberOwnedWindowsFirefox(this.#child, this.#ownership);
+        } catch (error) {
+          this.#ownership.snapshotFailed = true;
+          throw error;
+        }
+      }
       if (this.#socket.readyState === WebSocket.OPEN) {
         await Promise.race([
           this.command('session.end', {}, CLOSE_TIMEOUT_MS).catch(() => undefined),
           delay(CLOSE_TIMEOUT_MS),
         ]);
       }
+    } catch (error) {
+      shutdownError = error;
     } finally {
       this.#closed = true;
       this.#handleClose();
-      await cleanupFirefoxResources({
-        child: this.#child,
-        detachSocket: () => {
-          this.#socket.removeEventListener('message', this.#handleMessage);
-          this.#socket.removeEventListener('close', this.#handleClose);
-        },
-        profileDir: this.#profileDir,
-        root: this.#root,
-        socket: this.#socket,
-      });
+      try {
+        await cleanupFirefoxResources({
+          child: this.#child,
+          detachSocket: () => {
+            this.#socket.removeEventListener('message', this.#handleMessage);
+            this.#socket.removeEventListener('close', this.#handleClose);
+          },
+          profileDir: this.#profileDir,
+          ownership: this.#ownership,
+          root: this.#root,
+          socket: this.#socket,
+        });
+      } catch (error) {
+        cleanupError = error;
+      }
     }
+    const failure = combineFirefoxCloseFailures(shutdownError, cleanupError);
+    if (failure) throw failure;
   }
 }
 
@@ -583,6 +983,7 @@ export async function launchFirefoxBidi({ root, executablePath, headless = false
   await mkdir(taskRoot, { recursive: true });
   const profileDir = await mkdtemp(join(taskRoot, PROFILE_PREFIX));
   assertOwnedProfile(taskRoot, profileDir);
+  const ownership = { executablePath, profileDir, spawnedAt: Date.now() };
   const child = spawn(executablePath, buildFirefoxLaunchArguments({ profileDir, headless }), {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: headless,
@@ -596,9 +997,12 @@ export async function launchFirefoxBidi({ root, executablePath, headless = false
 
   let session = null;
   try {
-    const endpoint = await waitForEndpoint(child, () => output);
+    const endpoint =
+      process.platform === 'win32'
+        ? await waitForWindowsEndpoint(child, ownership)
+        : await waitForEndpoint(child, () => output);
     const socket = await connectWebSocket(endpoint);
-    session = new FirefoxBidiSession({ child, socket, root: taskRoot, profileDir });
+    session = new FirefoxBidiSession({ child, socket, root: taskRoot, profileDir, ownership });
     const created = await session.command('session.new', { capabilities: {} });
     const capabilities = created?.capabilities ?? {};
     session.browserName = String(capabilities.browserName ?? 'Firefox');
@@ -622,7 +1026,7 @@ export async function launchFirefoxBidi({ root, executablePath, headless = false
     if (session) {
       await session.close();
     } else {
-      await cleanupFirefoxResources({ child, profileDir, root: taskRoot, socket: null });
+      await cleanupFirefoxResources({ child, ownership, profileDir, root: taskRoot, socket: null });
     }
     throw error;
   }

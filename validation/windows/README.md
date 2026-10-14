@@ -268,6 +268,21 @@ URLs in an Edge extension run must cover both live and replay plus cross-watch
 navigation; blocked chat, login/consent, unavailable playback, missing seek
 range, and unknown chat mode remain `unverified` rather than a pass. Without
 public URLs, this real-site tier is untested even if the synthetic fixture passes.
+The native Firefox extension run also requires live and replay pages plus a
+cross-watch transition. It changes a font-size setting through the public
+overlay UI, reloads to check persistence, and records pause, resume, seek,
+chat mode and renderer for each page, plus fresh-document Canvas isolation on
+each subsequent page transition. Before seeking, it requires the requested
+main video without an active YouTube ad and records the player ad flag, video
+identity, and available duration evidence; an unknown identity remains
+unverified. After the reload, it uses native player input when needed and
+requires observed playback before waiting for chat; the receipt records this as
+`workflow.settings.postReloadPlayback`.
+Firefox uses `browsingContext.navigate` for public URL changes, so the absent
+prior-document Canvas marker does not establish same-document SPA teardown;
+the receipt marks that property unverified. The deterministic fixture checks
+its separate simulated SPA lifecycle. A missing required public observation
+keeps that public-page run unverified.
 
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
@@ -378,6 +393,55 @@ not the Chrome Web Store installation confirmation. It enables Developer Mode
 and Allow User Scripts through Chrome's UI in the isolated profile and imports
 the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
+
+For issue #227's public-v0.45.5-to-candidate upgrade check, place the downloaded
+public `yt-live-chat-overlay.user.js` at
+`validation/windows/release-upgrade/public-v0.45.5.user.js` after independently
+verifying it against the published release checksum. Place an ignored
+`validation/windows/release-upgrade/input.json` beside it with exactly:
+
+```json
+{
+  "schemaVersion": 1,
+  "baselineSha256": "<64 lowercase hexadecimal characters from the published checksum>",
+  "candidateVersion": "0.45.6",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.5/yt-live-chat-overlay.user.js"
+}
+```
+
+The existing `--installation userscript` invocation then uses the same fresh,
+owned Tampermonkey profile for both versions. It verifies fixed paths, public
+bytes, metadata identity and the candidate's `unsafeWindow` grant before launch;
+imports the public script through Tampermonkey's file picker; sets font size,
+opacity and safe-top through the installed script's settings UI; observes the
+manager's update confirmation, dismisses it once to verify that the prior
+version and settings remain active, then approves a second import. It checks one
+displayed installation, version, editor source bytes and retained settings.
+The original settings are restored through the UI after retention is proven so
+the ordinary seven-phase installed fixture can run on the candidate from its
+normal initial state, including actual page fetch ingress. The candidate digest
+is computed from the production file bundled
+by the Windows controller, whose build can embed a current timestamp. The input
+and public bytes are local-only and ignored by Git. Remove those two files from
+the checkout when the campaign is complete; retain their verified digest and
+the VM receipt outside Git. With no `input.json`, the existing fresh-install
+path runs unchanged. A supplied but invalid input fails closed.
+
+The receipt retains separate observed, deferred and approved update events.
+It scans the pinned manager's visible confirmation summary for a permission or
+grant row that specifically shows `unsafeWindow`, and captures bounded UI text
+plus screenshots. If the manager does not display such a row, the permission
+display is recorded as `not-observed`; the generic update confirmation is not
+called a grant prompt. The effective page-window behavior is inferred only after
+the installed candidate passes all seven page-world fetch phases and their
+production interceptor callback assertions. The initial six polling messages
+alone do not satisfy that check.
+
+This locally imported candidate proves manager replacement, byte identity and
+settings compatibility in that owned profile. If the installed manager does not
+show an identifiable update confirmation, the upgrade check fails and records
+the prompt as unobserved. It does not prove an automatic public update or
+publication.
 
 After committing a clean named checkout and running the repository gates, use
 the configured controller in the prepared Windows validation environment. Run

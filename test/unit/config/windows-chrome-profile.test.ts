@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -21,6 +23,10 @@ const {
   requireLiveSuccess,
   requireManagerUiLabels,
   selectPublicSeekTarget,
+  ownedExtensionResourcePath,
+  compareOwnedExtensionResourceBody,
+  beginOwnedExtensionResourceCapture,
+  readBoundedPackagedResource,
 } = chromeInstallModule;
 
 const roots: string[] = [];
@@ -40,6 +46,140 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('reads a packaged file at the size cap and rejects empty or oversized files', async () => {
+    const { root } = await fixture();
+    const file = join(root, 'resource.js');
+    await writeFile(file, '1234');
+    expect(await readBoundedPackagedResource(file, 'resource.js', 4)).toEqual(Buffer.from('1234'));
+    await writeFile(file, '12345');
+    await expect(readBoundedPackagedResource(file, 'resource.js', 4)).rejects.toThrow(
+      'exceeds diagnostic body limit'
+    );
+    await writeFile(file, '');
+    await expect(readBoundedPackagedResource(file, 'resource.js', 4)).rejects.toThrow(
+      'or is empty'
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a packaged symlink and a file replaced after opening',
+    async () => {
+      const { root } = await fixture();
+      const file = join(root, 'resource.js');
+      const replacement = join(root, 'replacement.js');
+      const link = join(root, 'link.js');
+      await writeFile(file, 'old!');
+      await symlink(file, link);
+      await expect(readBoundedPackagedResource(link, 'resource.js', 4)).rejects.toThrow();
+      await writeFile(replacement, 'new!');
+      await expect(
+        readBoundedPackagedResource(file, 'resource.js', 4, {
+          onOpened: () => rename(replacement, file),
+        })
+      ).rejects.toThrow('changed during inspection');
+    }
+  );
+
+  it('accepts only two exact paths at the installed extension ID', () => {
+    const id = 'a'.repeat(32);
+    for (const path of ['workers/renderer.js', 'page-script.js']) {
+      expect(ownedExtensionResourcePath(`chrome-extension://${id}/${path}`, id)).toBe(path);
+      expect(
+        ownedExtensionResourcePath(`chrome-extension://${id}/${path}?private=1`, id)
+      ).toBeNull();
+      expect(
+        ownedExtensionResourcePath(`chrome-extension://${id}/${path}#fragment`, id)
+      ).toBeNull();
+      expect(
+        ownedExtensionResourcePath(`chrome-extension://${'b'.repeat(32)}/${path}`, id)
+      ).toBeNull();
+    }
+    expect(ownedExtensionResourcePath(`chrome-extension://${id}/workers/other.js`, id)).toBeNull();
+    expect(ownedExtensionResourcePath(`https://${id}/page-script.js`, id)).toBeNull();
+    expect(ownedExtensionResourcePath('not-a-url', id)).toBeNull();
+  });
+
+  it('bounds and hashes only the exact packaged resource body', () => {
+    const body = Buffer.from('owned resource');
+    const expected = {
+      maxBytes: body.length,
+      bytes: body.length,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    };
+    expect(compareOwnedExtensionResourceBody(body, expected)).toMatchObject({
+      status: 'matched',
+      bytes: body.length,
+      sha256: expected.sha256,
+    });
+    expect(
+      compareOwnedExtensionResourceBody(Buffer.from('other resource'), expected)
+    ).toMatchObject({
+      status: 'unverified',
+      reason: 'body-mismatch',
+    });
+    expect(compareOwnedExtensionResourceBody(Buffer.alloc(body.length + 1), expected)).toEqual({
+      status: 'unverified',
+      reason: 'body-overflow',
+    });
+  });
+
+  it('records completed owned requests and removes its page listeners', async () => {
+    const page = new EventEmitter();
+    const id = 'a'.repeat(32);
+    const expected: Record<string, { maxBytes: number; bytes: number; sha256: string }> = {};
+    const resources = ['workers/renderer.js', 'page-script.js'];
+    for (const path of resources) {
+      const body = Buffer.from(path);
+      expected[path] = {
+        maxBytes: 100,
+        bytes: body.length,
+        sha256: createHash('sha256').update(body).digest('hex'),
+      };
+    }
+    let navigation = 'initial-watch';
+    const finish = beginOwnedExtensionResourceCapture(page, id, expected, () => ({
+      sourcePhase: 'navigation',
+      navigation,
+    }));
+    for (navigation of ['initial-watch', 'next-watch']) {
+      for (const path of resources) {
+        const body = Buffer.from(path);
+        const request = {
+          url: () => `chrome-extension://${id}/${path}`,
+          frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+          sizes: async () => ({ responseBodySize: body.length }),
+          response: async () => response,
+        };
+        const response = {
+          request: () => request,
+          status: () => 200,
+          headers: () => ({ 'content-type': 'application/javascript' }),
+          body: async () => body,
+        };
+        page.emit('request', request);
+        page.emit('requestfinished', request);
+      }
+    }
+    const result = await finish();
+    expect(result).toMatchObject({
+      status: 'observed',
+      missing: [],
+      missingByNavigation: { 'initial-watch': [], 'next-watch': [] },
+      overflow: 0,
+    });
+    expect(result.requests).toHaveLength(4);
+    expect(result.requests[0]).toMatchObject({
+      documentUrl: 'https://www.youtube.com/watch',
+      sourcePhase: 'navigation',
+      status: 'matched',
+      responseStatus: 200,
+    });
+    expect(JSON.stringify(result)).not.toContain('private');
+    for (const event of ['request', 'response', 'requestfinished', 'requestfailed']) {
+      expect(page.listenerCount(event)).toBe(0);
+    }
+  });
+
   it.each([
     ['https://accounts.google.com/ServiceLogin', true, false],
     ['https://consent.youtube.com/', false, true],
@@ -66,6 +206,16 @@ describe('installed Chrome acceptance outcomes', () => {
   it('selects a real seek movement only from a usable public media range', () => {
     expect(selectPublicSeekTarget({ currentTime: 10, start: 0, end: 100 })).toBe(13);
     expect(selectPublicSeekTarget({ currentTime: 99, start: 0, end: 100 })).toBe(96);
+    expect(
+      selectPublicSeekTarget({ currentTime: 97, start: 0, end: 100 }, { preferBackward: true })
+    ).toBe(94);
+    expect(selectPublicSeekTarget({ currentTime: 97, start: 0, end: 100 })).toBe(99);
+    expect(
+      selectPublicSeekTarget({ currentTime: 1.5, start: 0, end: 100 }, { preferBackward: true })
+    ).toBe(4.5);
+    expect(
+      selectPublicSeekTarget({ currentTime: 10, start: 8, end: 11 }, { preferBackward: true })
+    ).toBeNull();
     expect(selectPublicSeekTarget({ currentTime: 10, start: 8, end: 11 })).toBeNull();
     expect(selectPublicSeekTarget({ currentTime: NaN, start: 0, end: 100 })).toBeNull();
   });

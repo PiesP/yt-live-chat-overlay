@@ -25,8 +25,10 @@ Install [Tampermonkey](https://www.tampermonkey.net/) or
 [Violentmonkey](https://violentmonkey.github.io/), then install the
 [latest userscript](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js).
 
-The userscript manager checks the metadata URL embedded in the script for
-updates.
+The userscript manager can check the metadata URL embedded in the script for
+updates. Review an offered update in the manager. The script requests
+`unsafeWindow` to observe YouTube's own chat fetches; review any permission
+confirmation before approving the update.
 
 ### Chrome, Edge, or Brave extension
 
@@ -38,6 +40,9 @@ browser store and does not update automatically.
 2. Extract the archive to a permanent directory.
 3. Open `chrome://extensions` and enable **Developer mode**.
 4. Select **Load unpacked** and choose the extracted directory.
+
+To update, replace the files in the same directory and reload the extension from
+`chrome://extensions`. Check your saved settings after updating.
 
 ### Firefox extension
 
