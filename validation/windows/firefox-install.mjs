@@ -202,7 +202,11 @@ export function requireFirefoxPublicCoverage(observations) {
     observations.length >= 2 &&
       modes.has('live') &&
       modes.has('replay') &&
-      observations.some((item) => item.workflow?.navigation?.status === 'passed') &&
+      observations.some(
+        (item) =>
+          item.workflow?.navigation?.kind === 'full-document-cross-watch' &&
+          item.workflow?.navigation?.status === 'passed'
+      ) &&
       observations.every(
         (item) =>
           item.status === 'passed' &&
@@ -622,21 +626,24 @@ async function runLivePhase(session, liveEntries, output) {
         renderedMessages: state.renderedMessageCount,
       };
       if (previousMarker !== null) {
-        phase = 'navigation-retirement';
-        const priorCanvasRetired = await session.evaluateJson(`(() => {
+        phase = 'fresh-document-canvas-isolation';
+        const freshDocumentCanvasIsolated = await session.evaluateJson(`(() => {
           const canvas = document.querySelector('#${OVERLAY_ID} canvas');
           return Boolean(canvas && canvas.getAttribute('data-firefox-live-session') !== '${previousMarker}' &&
             !document.querySelector('#${OVERLAY_ID} canvas[data-firefox-live-session="${previousMarker}"]'));
         })()`);
         const crossWatch = previousUrl !== entry.url;
         workflow.navigation = {
-          status: priorCanvasRetired && crossWatch ? 'passed' : 'unverified',
+          status: freshDocumentCanvasIsolated && crossWatch ? 'passed' : 'unverified',
           reason: !crossWatch
             ? 'same-public-url'
-            : priorCanvasRetired
+            : freshDocumentCanvasIsolated
               ? null
-              : 'prior-canvas-not-retired',
-          kind: crossWatch ? 'cross-watch' : 'reload',
+              : 'prior-document-canvas-marker-present',
+          kind: crossWatch ? 'full-document-cross-watch' : 'full-document-reload',
+          documentNavigation: 'browsingContext.navigate',
+          freshDocumentCanvasIsolation: freshDocumentCanvasIsolated ? 'passed' : 'unverified',
+          spaRetirement: { status: 'unverified', reason: 'full-document-navigation' },
         };
       }
 

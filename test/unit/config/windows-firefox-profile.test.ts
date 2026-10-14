@@ -747,9 +747,21 @@ describe('Windows Firefox installation profile', () => {
       },
       {
         provider: { chatMode: 'replay' },
-        workflow: { navigation: { status: 'passed' } },
+        workflow: {
+          navigation: {
+            status: 'passed',
+            kind: 'full-document-cross-watch',
+            documentNavigation: 'browsingContext.navigate',
+            freshDocumentCanvasIsolation: 'passed',
+            spaRetirement: { status: 'unverified', reason: 'full-document-navigation' },
+          },
+        },
         status: 'passed',
       },
+    ]);
+    expect(session.navigate.mock.calls.slice(-2).map(([url]) => url)).toEqual([
+      'https://www.youtube.com/watch?v=public-live',
+      'https://www.youtube.com/watch?v=public-replay',
     ]);
     expect(JSON.stringify(result)).not.toContain(root);
     expect(JSON.stringify(result)).not.toContain('/test/firefox.exe');
@@ -856,6 +868,10 @@ describe('Windows Firefox installation profile', () => {
     expect(receipt.observations.live[1].workflow.navigation).toMatchObject({
       status: 'unverified',
       reason: 'same-public-url',
+      kind: 'full-document-reload',
+      documentNavigation: 'browsingContext.navigate',
+      freshDocumentCanvasIsolation: 'passed',
+      spaRetirement: { status: 'unverified', reason: 'full-document-navigation' },
     });
   });
 
