@@ -3,7 +3,8 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstat, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const DIRECTORY = 'validation/windows/release-upgrade';
@@ -88,13 +89,47 @@ export function requireUpgradeMetadata(baseline, candidate, candidateVersion) {
 
 async function readBoundedFile(root, relativePath) {
   const file = join(root, relativePath);
-  const entry = await lstat(file);
+  const entry = await lstat(file, { bigint: true });
   assert(entry.isFile() && !entry.isSymbolicLink(), `Invalid upgrade file: ${relativePath}`);
   assert(
-    entry.size > 0 && entry.size <= MAX_SCRIPT_BYTES,
+    entry.size > 0n && entry.size <= BigInt(MAX_SCRIPT_BYTES),
     `Upgrade file size rejected: ${relativePath}`
   );
-  return readFile(file);
+  const flags =
+    process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
+  const handle = await open(file, flags);
+  try {
+    const opened = await handle.stat({ bigint: true });
+    assert(
+      opened.isFile() &&
+        opened.dev === entry.dev &&
+        opened.ino === entry.ino &&
+        opened.mtimeNs === entry.mtimeNs &&
+        opened.size === entry.size,
+      `Upgrade file changed since inspection: ${relativePath}`
+    );
+    const expectedBytes = Number(entry.size);
+    const bounded = Buffer.alloc(expectedBytes + 1);
+    let offset = 0;
+    while (offset < bounded.length) {
+      const { bytesRead } = await handle.read(bounded, offset, bounded.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    assert.equal(offset, expectedBytes, `Upgrade file changed size while reading: ${relativePath}`);
+    const after = await handle.stat({ bigint: true });
+    assert(
+      after.isFile() &&
+        after.dev === opened.dev &&
+        after.ino === opened.ino &&
+        after.mtimeNs === opened.mtimeNs &&
+        after.size === opened.size,
+      `Upgrade file changed while reading: ${relativePath}`
+    );
+    return bounded.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** No input means the existing fresh installation path. A supplied input is all-or-nothing. */
