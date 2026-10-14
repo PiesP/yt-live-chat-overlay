@@ -86,6 +86,7 @@ if (command === 'check:artifacts') {
       const result = spawnSync('pnpm', ['run', name, ...args], {
         cwd: directory,
         encoding: 'utf8',
+        timeout: 25_000,
         env: {
           ...process.env,
           PATH: `${bin}${delimiter}${process.env.PATH}`,
@@ -94,7 +95,11 @@ if (command === 'check:artifacts') {
           FAIL_COMMAND: failure,
         },
       });
-      expect(result.error).toBeUndefined();
+      if (result.error) {
+        throw new Error(
+          `Could not finish the ${name} fixture command: ${result.error.message}\n${result.stdout}${result.stderr}`
+        );
+      }
       const calls = readFileSync(log, 'utf8')
         .trim()
         .split('\n')
