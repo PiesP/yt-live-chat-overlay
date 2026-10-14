@@ -184,12 +184,16 @@ export function categorizeErrors(logs) {
   );
 }
 
-export function selectPublicSeekTarget({ currentTime, start, end }) {
+export function selectPublicSeekTarget(
+  { currentTime, start, end },
+  { preferBackward = false } = {}
+) {
   if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
+  const backward = Math.max(start + 1, currentTime - 3);
+  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
   const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
   if (Math.abs(forward - currentTime) >= 1) return forward;
-  const backward = Math.max(start + 1, currentTime - 3);
-  return Math.abs(backward - currentTime) >= 1 ? backward : null;
+  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
 export function requireFirefoxPublicCoverage(observations) {
@@ -664,23 +668,38 @@ async function runLivePhase(session, liveEntries, output) {
         return { currentTime: video.currentTime, start: video.seekable.start(last),
           end: video.seekable.end(last) };
       })()`);
-      const seekTarget = seekRange && selectPublicSeekTarget(seekRange);
+      const seekTarget =
+        seekRange &&
+        selectPublicSeekTarget(seekRange, { preferBackward: provider.chatMode === 'live' });
       workflow.seek =
         seekTarget === null
           ? { status: 'unverified', reason: 'seek-range-unavailable', range: seekRange }
           : await session.evaluateJson(`(async () => {
               const video = document.querySelector('video');
               if (!video) return { status: 'unverified', reason: 'video-unavailable' };
+              const preSeekTime = video.currentTime;
+              const last = video.seekable.length - 1;
+              const range = last >= 0
+                ? { start: video.seekable.start(last), end: video.seekable.end(last) } : null;
+              if (!range || ${seekTarget} < range.start || ${seekTarget} > range.end) {
+                return { status: 'unverified', reason: 'seek-target-out-of-range',
+                  target: ${seekTarget}, range, preSeekTime, afterTime: preSeekTime,
+                  seekedEvent: false };
+              }
               const completed = new Promise((resolve) => {
                 const timeout = setTimeout(() => resolve(false), 8000);
                 video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(true); }, { once: true });
               });
               video.currentTime = ${seekTarget};
               const seeked = await completed;
-              return { status: seeked && Math.abs(video.currentTime - ${seekTarget}) < 2
-                  ? 'passed' : 'unverified', reason: seeked ? null : 'seeked-event-timeout',
-                target: ${seekTarget}, currentTime: video.currentTime };
+              const afterTime = video.currentTime;
+              const positionMatched = Math.abs(afterTime - ${seekTarget}) < 2;
+              return { status: seeked && positionMatched ? 'passed' : 'unverified',
+                reason: !seeked ? 'seeked-event-timeout' : positionMatched
+                  ? null : 'seek-position-mismatch', target: ${seekTarget}, range,
+                preSeekTime, afterTime, seekedEvent: seeked, currentTime: afterTime };
             })()`);
+      workflow.seek.selectionRange = seekRange;
       phase = 'settings';
       const changed = await session.evaluateJson(`(() => {
         const button = document.querySelector('#yt-chat-overlay-settings-button');

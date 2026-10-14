@@ -107,8 +107,16 @@ function createSession(
         return { status: 'passed', paused: false };
       if (expression.includes('video?.seekable.length'))
         return options.seekRangeUnavailable ? null : { currentTime: 30, start: 0, end: 120 };
-      if (expression.includes('const completed = new Promise'))
-        return { status: 'passed', reason: null, target: 33, currentTime: 33 };
+      if (expression.includes('const completed = new Promise')) {
+        const target = /video\.currentTime = (\d+(?:\.\d+)?);/u.exec(expression)?.[1];
+        if (target === undefined) throw new Error('Seek expression has no numeric target');
+        return {
+          status: 'passed',
+          reason: null,
+          target: Number(target),
+          currentTime: Number(target),
+        };
+      }
       evaluateIndex++;
       if (options.failStartup && evaluateIndex === 1) throw new Error('fixture startup failed');
       switch (evaluateIndex) {
@@ -279,6 +287,15 @@ describe('Windows Firefox installation profile', () => {
       ])
     ).toEqual({ 'content-security-policy': 1, worker: 1 });
     expect(selectPublicSeekTarget({ currentTime: 30, start: 0, end: 120 })).toBe(33);
+    expect(
+      selectPublicSeekTarget({ currentTime: 30, start: 0, end: 120 }, { preferBackward: true })
+    ).toBe(27);
+    expect(
+      selectPublicSeekTarget({ currentTime: 1.5, start: 0, end: 120 }, { preferBackward: true })
+    ).toBe(4.5);
+    expect(
+      selectPublicSeekTarget({ currentTime: 30, start: 30, end: 32 }, { preferBackward: true })
+    ).toBeNull();
     expect(selectPublicSeekTarget({ currentTime: 30, start: 30, end: 32 })).toBeNull();
     expect(() => requireFirefoxPublicCoverage([{ provider: { chatMode: 'live' } }])).toThrow(
       'live/replay workflow coverage'
@@ -313,6 +330,81 @@ describe('Windows Firefox installation profile', () => {
       Object.fromEntries(Object.keys(result.checks).map((key) => [key, true]))
     );
     expect(result.status).toBe('passed');
+    expect(
+      result.observations.live.map(
+        (item: { workflow: { seek: { target: number } } }) => item.workflow.seek.target
+      )
+    ).toEqual([27, 33]);
+    const liveSeekExpression = session.evaluateJson.mock.calls
+      .map(([expression]) => expression)
+      .find((expression) => expression.includes('const completed = new Promise'));
+    if (!liveSeekExpression) throw new Error('Live seek expression was not evaluated');
+    let seekedListener: (() => void) | undefined;
+    let currentTime = 30;
+    const video = {
+      seekable: { length: 1, start: () => 0, end: () => 120 },
+      get currentTime() {
+        return currentTime;
+      },
+      set currentTime(target: number) {
+        currentTime = target - 2.5;
+        seekedListener?.();
+      },
+      addEventListener: (_event: string, listener: () => void) => {
+        seekedListener = listener;
+      },
+    };
+    const mismatchedSeek = await new Script(liveSeekExpression).runInNewContext({
+      document: { querySelector: () => video },
+      setTimeout,
+      clearTimeout,
+    });
+    expect(mismatchedSeek).toMatchObject({
+      status: 'unverified',
+      reason: 'seek-position-mismatch',
+      target: 27,
+      range: { start: 0, end: 120 },
+      preSeekTime: 30,
+      afterTime: 24.5,
+      seekedEvent: true,
+    });
+    const timedOutVideo = {
+      currentTime: 30,
+      seekable: { length: 1, start: () => 0, end: () => 120 },
+      addEventListener: () => {},
+    };
+    const timedOutSeek = await new Script(liveSeekExpression).runInNewContext({
+      document: { querySelector: () => timedOutVideo },
+      setTimeout: (callback: () => void) => {
+        callback();
+        return 1;
+      },
+      clearTimeout: () => {},
+    });
+    expect(timedOutSeek).toMatchObject({
+      status: 'unverified',
+      reason: 'seeked-event-timeout',
+      target: 27,
+      preSeekTime: 30,
+      afterTime: 27,
+      seekedEvent: false,
+    });
+    const movedRangeSeek = await new Script(liveSeekExpression).runInNewContext({
+      document: {
+        querySelector: () => ({
+          currentTime: 30,
+          seekable: { length: 1, start: () => 0, end: () => 20 },
+        }),
+      },
+    });
+    expect(movedRangeSeek).toMatchObject({
+      status: 'unverified',
+      reason: 'seek-target-out-of-range',
+      target: 27,
+      range: { start: 0, end: 20 },
+      preSeekTime: 30,
+      seekedEvent: false,
+    });
     expect(session.waitFor).toHaveBeenCalledWith(
       expect.stringContaining('730002'),
       'the public UI font size to persist in extension storage'
