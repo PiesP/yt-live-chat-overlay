@@ -106,6 +106,15 @@ describe('installed manager upgrade inputs', () => {
     await expect(upgrade.loadUpgradeInputs(linked.root)).rejects.toThrow('Invalid upgrade file');
   });
 
+  it('rejects a dangling input symlink instead of treating it as absent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'yt-dangling-input-test-'));
+    roots.push(root);
+    const directory = join(root, 'validation/windows/release-upgrade');
+    await mkdir(directory, { recursive: true });
+    await symlink(join(root, 'missing-input.json'), join(directory, 'input.json'));
+    await expect(upgrade.loadUpgradeInputs(root)).rejects.toThrow('Invalid upgrade file');
+  });
+
   it('rejects oversized input and candidate files before reading them', async () => {
     const oversizedInput = await fixture();
     await truncate(join(oversizedInput.directory, 'input.json'), 16 * 1024 * 1024 + 1);

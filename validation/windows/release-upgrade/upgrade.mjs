@@ -89,19 +89,43 @@ export function requireUpgradeMetadata(baseline, candidate, candidateVersion) {
 
 async function readBoundedFile(root, relativePath) {
   const file = join(root, relativePath);
-  const entry = await lstat(file, { bigint: true });
-  assert(entry.isFile() && !entry.isSymbolicLink(), `Invalid upgrade file: ${relativePath}`);
-  assert(
-    entry.size > 0n && entry.size <= BigInt(MAX_SCRIPT_BYTES),
-    `Upgrade file size rejected: ${relativePath}`
-  );
   const flags =
     process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
-  const handle = await open(file, flags);
+  let handle;
+  try {
+    handle = await open(file, flags);
+  } catch (error) {
+    if (error?.code === 'ELOOP') assert.fail(`Invalid upgrade file: ${relativePath}`);
+    if (error?.code === 'ENOENT') {
+      try {
+        // A dangling symlink is an invalid supplied file, not absent input.
+        await lstat(file);
+      } catch (inspectionError) {
+        if (inspectionError?.code === 'ENOENT') throw error;
+        throw inspectionError;
+      }
+      assert.fail(`Invalid upgrade file: ${relativePath}`);
+    }
+    throw error;
+  }
   try {
     const opened = await handle.stat({ bigint: true });
+    assert(opened.isFile(), `Invalid upgrade file: ${relativePath}`);
     assert(
-      opened.isFile() &&
+      opened.size > 0n && opened.size <= BigInt(MAX_SCRIPT_BYTES),
+      `Upgrade file size rejected: ${relativePath}`
+    );
+    let entry;
+    try {
+      entry = await lstat(file, { bigint: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT')
+        assert.fail(`Upgrade file changed since inspection: ${relativePath}`);
+      throw error;
+    }
+    assert(
+      entry.isFile() &&
+        !entry.isSymbolicLink() &&
         opened.dev === entry.dev &&
         opened.ino === entry.ino &&
         opened.mtimeNs === entry.mtimeNs &&
@@ -495,17 +519,17 @@ async function observeSettings(page) {
 }
 
 export function matchesStoredSettings(stored, values) {
-  return (
+  return Boolean(
     stored &&
-    ['fontSize', 'opacity', 'safeTop'].every((key) => {
-      const actual = stored[key];
-      return (
-        typeof actual === 'string' &&
-        actual.trim() !== '' &&
-        Number.isFinite(Number(actual)) &&
-        Number(actual) === Number(values[key])
-      );
-    })
+      ['fontSize', 'opacity', 'safeTop'].every((key) => {
+        const actual = stored[key];
+        return (
+          typeof actual === 'string' &&
+          actual.trim() !== '' &&
+          Number.isFinite(Number(actual)) &&
+          Number(actual) === Number(values[key])
+        );
+      })
   );
 }
 
