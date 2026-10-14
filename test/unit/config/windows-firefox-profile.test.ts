@@ -23,6 +23,7 @@ const {
 const {
   buildFirefoxLaunchArguments,
   cleanupFirefoxResources,
+  combineFirefoxCloseFailures,
   extensionInstallParameters,
   extensionUninstallParameters,
   parseFirefoxProfileEndpoint,
@@ -52,6 +53,7 @@ function createSession(
     seekRangeUnavailable?: boolean;
     secondChatMode?: 'live' | 'replay' | 'unknown';
     settingsPersisted?: boolean;
+    postReloadPlaybackUnavailable?: boolean;
   } = {}
 ) {
   const calls: string[] = [];
@@ -61,7 +63,7 @@ function createSession(
   let publicPage = -1;
   const session = {
     context: 'owned-context',
-    command: vi.fn(async () => ({})),
+    command: vi.fn(async (_method: string, _params?: unknown) => ({})),
     browserName: 'Firefox',
     browserVersion: '155.0.1',
     platformName: 'windows',
@@ -177,9 +179,15 @@ function createSession(
     uninstallExtension: vi.fn(async () => {
       calls.push('uninstall');
     }),
-    waitFor: vi.fn(async (expression: string) => {
+    waitFor: vi.fn(async (expression: string, description?: string) => {
       new Script(expression);
       calls.push('wait');
+      if (
+        options.postReloadPlaybackUnavailable &&
+        description === 'public video playback after settings reload'
+      ) {
+        throw new Error('post-reload video stayed paused');
+      }
     }),
   };
   return { calls, session };
@@ -737,7 +745,14 @@ describe('Windows Firefox installation profile', () => {
         provider: { chatMode: 'live' },
         workflow: {
           startup: { status: 'passed' },
-          settings: { status: 'passed' },
+          settings: {
+            status: 'passed',
+            postReloadPlayback: {
+              status: 'passed',
+              inputMethod: 'native-pointer',
+              playbackStarted: true,
+            },
+          },
           pause: { status: 'passed' },
           resume: { status: 'passed' },
           seek: { status: 'passed' },
@@ -748,6 +763,7 @@ describe('Windows Firefox installation profile', () => {
       {
         provider: { chatMode: 'replay' },
         workflow: {
+          settings: { postReloadPlayback: { status: 'passed', playbackStarted: true } },
           navigation: {
             status: 'passed',
             kind: 'full-document-cross-watch',
@@ -763,6 +779,20 @@ describe('Windows Firefox installation profile', () => {
       'https://www.youtube.com/watch?v=public-live',
       'https://www.youtube.com/watch?v=public-replay',
     ]);
+    const playbackWaits = session.waitFor.mock.calls
+      .map(([, description], index) => ({ description, index }))
+      .filter(({ description }) => description === 'public video playback after settings reload');
+    const chatWaits = session.waitFor.mock.calls
+      .map(([, description], index) => ({ description, index }))
+      .filter(({ description }) => description === 'the public overlay to reload with settings');
+    expect(playbackWaits).toHaveLength(2);
+    expect(chatWaits).toHaveLength(2);
+    expect(playbackWaits.every(({ index }, page) => index < (chatWaits[page]?.index ?? -1))).toBe(
+      true
+    );
+    expect(
+      session.command.mock.calls.filter(([method]) => method === 'input.performActions')
+    ).toHaveLength(4);
     expect(JSON.stringify(result)).not.toContain(root);
     expect(JSON.stringify(result)).not.toContain('/test/firefox.exe');
     expect(calls.indexOf('stop-mock')).toBeLessThan(calls.indexOf('navigate-live'));
@@ -784,6 +814,39 @@ describe('Windows Firefox installation profile', () => {
     expect(result.checks.liveRenderingPassed).toBeNull();
     expect(result.checks.liveWorkflowCoverage).toBeNull();
     expect(result.observations.live).toEqual([]);
+  });
+
+  it('does not wait for post-reload chat when public video playback remains unobserved', async () => {
+    const { output, root } = await createBundle();
+    const { session } = createSession({ postReloadPlaybackUnavailable: true });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: ['https://www.youtube.com/watch?v=public-live'],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live[0]).toMatchObject({
+      failureCategory: 'settings-reload-playback-error',
+      workflow: {
+        settings: {
+          status: 'not-run',
+          postReloadPlayback: { status: 'unverified', reason: 'playback-not-observed' },
+        },
+      },
+    });
+    expect(
+      session.waitFor.mock.calls.some(
+        ([, description]) => description === 'the public overlay to reload with settings'
+      )
+    ).toBe(false);
   });
 
   it.each([
@@ -988,6 +1051,45 @@ describe('Windows Firefox installation profile', () => {
       )
     ).rejects.toThrow('Firefox resource cleanup failed');
     expect(removeProfile).not.toHaveBeenCalled();
+  });
+
+  it('retains both the Windows ownership snapshot error and cleanup error in the receipt', async () => {
+    const snapshotError = new Error('Windows Firefox ownership snapshot failed');
+    const cleanupError = new AggregateError(
+      [new Error('Firefox process ownership snapshot failed before session shutdown')],
+      'Firefox resource cleanup failed'
+    );
+    const failure = combineFirefoxCloseFailures(snapshotError, cleanupError);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors).toEqual([snapshotError, cleanupError]);
+    expect(combineFirefoxCloseFailures(snapshotError, undefined)).toBe(snapshotError);
+    expect(combineFirefoxCloseFailures(undefined, cleanupError)).toBe(cleanupError);
+
+    const { output, root } = await createBundle();
+    const { session } = createSession();
+    session.close.mockRejectedValueOnce(failure);
+    await expect(
+      runFirefoxInstallation(
+        { executablePath: '/test/firefox.exe', output, root },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('Firefox installation cleanup failed');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.errors[0].cause.errors).toEqual([
+      { name: 'Error', message: 'Windows Firefox ownership snapshot failed' },
+      {
+        name: 'AggregateError',
+        message: 'Firefox resource cleanup failed',
+        errors: [
+          {
+            name: 'Error',
+            message: 'Firefox process ownership snapshot failed before session shutdown',
+          },
+        ],
+      },
+    ]);
   });
 
   it('passes a bounded Windows lock retry policy only for a task-owned profile', async () => {
