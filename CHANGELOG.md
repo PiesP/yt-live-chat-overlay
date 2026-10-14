@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.6] - 2026-10-14 (prepared; unpublished)
+
+### Fixed
+
+- **Userscript chat acquisition** — Observe YouTube's own live-chat fetches in the page context, including native Request and URL objects from another realm. Preserve the original fetch call and promise, bounded response reads, polling fallback and navigation cleanup. The userscript now requests `unsafeWindow`; review the manager's update confirmation before approving it.
+
+### Changed
+
+- **Paid-card caches** — Use the shared bounded gradient cache in Canvas and Worker rendering, releasing context-owned entries on reset or context replacement while preserving existing display settings.
+- **Maintenance and verification** — Update the shared-core pin and internal type contracts, strengthen installed-browser validation, and retain separate mutation and security checks. These changes do not establish a measured chat-latency or rendering-speed improvement.
+
 ## [0.45.5] - 2026-10-11
 
 ### Fixed
