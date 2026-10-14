@@ -202,7 +202,11 @@ export function requireFirefoxPublicCoverage(observations) {
     observations.length >= 2 &&
       modes.has('live') &&
       modes.has('replay') &&
-      observations.some((item) => item.workflow?.navigation?.status === 'passed') &&
+      observations.some(
+        (item) =>
+          item.workflow?.navigation?.kind === 'full-document-cross-watch' &&
+          item.workflow?.navigation?.status === 'passed'
+      ) &&
       observations.every(
         (item) =>
           item.status === 'passed' &&
@@ -486,6 +490,68 @@ async function runDeterministicPhase(session, checks, diagnostics) {
   };
 }
 
+async function admitPublicPlayback(session, observation, description) {
+  await session.waitFor('Boolean(document.querySelector("video"))', 'the public video element');
+  Object.assign(
+    observation,
+    await session.evaluateJson(`(() => {
+      const video = document.querySelector('video');
+      video.muted = true;
+      return { paused: video.paused, readyState: video.readyState };
+    })()`)
+  );
+  await session.waitFor(
+    `(() => {
+      const video = document.querySelector('video');
+      if (video && !video.paused && video.readyState >= 2) return true;
+      const button = document.querySelector('.ytp-large-play-button');
+      const rect = button?.getBoundingClientRect();
+      return Boolean(rect && rect.width > 0 && rect.height > 0 &&
+        button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)));
+    })()`,
+    `${description} or a clickable YouTube play button`
+  );
+  const playPoint = await session.evaluateJson(`(() => {
+    const video = document.querySelector('video');
+    if (video && !video.paused && video.readyState >= 2) return null;
+    const button = document.querySelector('.ytp-large-play-button');
+    const rect = button?.getBoundingClientRect();
+    return rect && rect.width > 0 && rect.height > 0
+      ? { x: Math.floor(rect.x + rect.width / 2), y: Math.floor(rect.y + rect.height / 2) }
+      : null;
+  })()`);
+  if (playPoint) {
+    observation.inputMethod = 'native-pointer';
+    try {
+      await session.command('input.performActions', {
+        context: session.context,
+        actions: [
+          {
+            type: 'pointer',
+            id: 'acceptance-player',
+            parameters: { pointerType: 'mouse' },
+            actions: [
+              { type: 'pointerMove', origin: 'viewport', x: playPoint.x, y: playPoint.y },
+              { type: 'pointerDown', button: 0 },
+              { type: 'pointerUp', button: 0 },
+            ],
+          },
+        ],
+      });
+    } finally {
+      await session.command('input.releaseActions', { context: session.context });
+    }
+  }
+  await session.waitFor(
+    `Boolean(document.querySelector('video') &&
+      !document.querySelector('video').paused && document.querySelector('video').readyState >= 2)`,
+    description
+  );
+  observation.playbackStarted = true;
+  observation.status = 'passed';
+  observation.reason = null;
+}
+
 async function runLivePhase(session, liveEntries, output) {
   const observations = [];
   let previousMarker = null;
@@ -512,60 +578,8 @@ async function runLivePhase(session, liveEntries, output) {
       phase = 'provider';
       provider = await readPublicPageState(session);
       phase = 'playback';
-      await session.waitFor('Boolean(document.querySelector("video"))', 'the public video element');
-      player = await session.evaluateJson(`(() => {
-        const video = document.querySelector('video');
-        video.muted = true;
-        return { paused: video.paused, readyState: video.readyState };
-      })()`);
-      await session.waitFor(
-        `(() => {
-        const video = document.querySelector('video');
-        if (video && !video.paused && video.readyState >= 2) return true;
-        const button = document.querySelector('.ytp-large-play-button');
-        const rect = button?.getBoundingClientRect();
-        return Boolean(rect && rect.width > 0 && rect.height > 0 &&
-          button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)));
-      })()`,
-        'public playback or a clickable YouTube play button'
-      );
-      const playPoint = await session.evaluateJson(`(() => {
-        const video = document.querySelector('video');
-        if (video && !video.paused && video.readyState >= 2) return null;
-        const button = document.querySelector('.ytp-large-play-button');
-        const rect = button?.getBoundingClientRect();
-        return rect && rect.width > 0 && rect.height > 0
-          ? { x: Math.floor(rect.x + rect.width / 2), y: Math.floor(rect.y + rect.height / 2) }
-          : null;
-      })()`);
-      if (playPoint) {
-        player.inputMethod = 'native-pointer';
-        try {
-          await session.command('input.performActions', {
-            context: session.context,
-            actions: [
-              {
-                type: 'pointer',
-                id: 'acceptance-player',
-                parameters: { pointerType: 'mouse' },
-                actions: [
-                  { type: 'pointerMove', origin: 'viewport', x: playPoint.x, y: playPoint.y },
-                  { type: 'pointerDown', button: 0 },
-                  { type: 'pointerUp', button: 0 },
-                ],
-              },
-            ],
-          });
-        } finally {
-          await session.command('input.releaseActions', { context: session.context });
-        }
-      }
-      await session.waitFor(
-        `Boolean(document.querySelector('video') &&
-        !document.querySelector('video').paused && document.querySelector('video').readyState >= 2)`,
-        'public video playback to start'
-      );
-      player.playbackStarted = true;
+      player = { status: 'unverified', reason: 'playback-not-observed' };
+      await admitPublicPlayback(session, player, 'public video playback to start');
       phase = 'render';
       await session.waitFor(
         `Boolean(
@@ -622,21 +636,24 @@ async function runLivePhase(session, liveEntries, output) {
         renderedMessages: state.renderedMessageCount,
       };
       if (previousMarker !== null) {
-        phase = 'navigation-retirement';
-        const priorCanvasRetired = await session.evaluateJson(`(() => {
+        phase = 'fresh-document-canvas-isolation';
+        const freshDocumentCanvasIsolated = await session.evaluateJson(`(() => {
           const canvas = document.querySelector('#${OVERLAY_ID} canvas');
           return Boolean(canvas && canvas.getAttribute('data-firefox-live-session') !== '${previousMarker}' &&
             !document.querySelector('#${OVERLAY_ID} canvas[data-firefox-live-session="${previousMarker}"]'));
         })()`);
         const crossWatch = previousUrl !== entry.url;
         workflow.navigation = {
-          status: priorCanvasRetired && crossWatch ? 'passed' : 'unverified',
+          status: freshDocumentCanvasIsolated && crossWatch ? 'passed' : 'unverified',
           reason: !crossWatch
             ? 'same-public-url'
-            : priorCanvasRetired
+            : freshDocumentCanvasIsolated
               ? null
-              : 'prior-canvas-not-retired',
-          kind: crossWatch ? 'cross-watch' : 'reload',
+              : 'prior-document-canvas-marker-present',
+          kind: crossWatch ? 'full-document-cross-watch' : 'full-document-reload',
+          documentNavigation: 'browsingContext.navigate',
+          freshDocumentCanvasIsolation: freshDocumentCanvasIsolated ? 'passed' : 'unverified',
+          spaRetirement: { status: 'unverified', reason: 'full-document-navigation' },
         };
       }
 
@@ -734,7 +751,16 @@ async function runLivePhase(session, liveEntries, output) {
         'public UI font size to apply'
       );
       await waitForStoredPublicFontSize(session, Number(changed.target));
+      const postReloadPlayback = { status: 'unverified', reason: 'playback-not-observed' };
+      workflow.settings.postReloadPlayback = postReloadPlayback;
       await session.reload();
+      phase = 'settings-reload-playback';
+      await admitPublicPlayback(
+        session,
+        postReloadPlayback,
+        'public video playback after settings reload'
+      );
+      phase = 'settings';
       await session.waitFor(
         `Boolean(window.__ytChatOverlay && document.querySelector('#${OVERLAY_ID} canvas') &&
           document.querySelector('#yt-chat-overlay-settings-button') &&
@@ -763,6 +789,7 @@ async function runLivePhase(session, liveEntries, output) {
         before: changed.before,
         target: changed.target,
         persisted,
+        postReloadPlayback,
       };
       phase = 'capture';
       const marker = String(index + 1);

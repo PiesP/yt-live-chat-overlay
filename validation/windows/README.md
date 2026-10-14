@@ -271,8 +271,15 @@ public URLs, this real-site tier is untested even if the synthetic fixture passe
 The native Firefox extension run also requires live and replay pages plus a
 cross-watch transition. It changes a font-size setting through the public
 overlay UI, reloads to check persistence, and records pause, resume, seek,
-chat mode, renderer, and prior-canvas retirement for each page. A missing
-observation keeps that public-page run unverified.
+chat mode and renderer for each page, plus fresh-document Canvas isolation on
+each subsequent page transition. After the reload, it uses native player input
+when needed and requires observed playback before waiting for chat; the receipt
+records this as `workflow.settings.postReloadPlayback`.
+Firefox uses `browsingContext.navigate` for public URL changes, so the absent
+prior-document Canvas marker does not establish same-document SPA teardown;
+the receipt marks that property unverified. The deterministic fixture checks
+its separate simulated SPA lifecycle. A missing required public observation
+keeps that public-page run unverified.
 
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing

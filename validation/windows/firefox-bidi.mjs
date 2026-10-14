@@ -452,6 +452,16 @@ export async function cleanupFirefoxResources(
   if (errors.length > 0) throw new AggregateError(errors, 'Firefox resource cleanup failed');
 }
 
+export function combineFirefoxCloseFailures(shutdownError, cleanupError) {
+  if (shutdownError && cleanupError) {
+    return new AggregateError(
+      [shutdownError, cleanupError],
+      'Firefox session shutdown and cleanup failed'
+    );
+  }
+  return shutdownError ?? cleanupError;
+}
+
 export function buildFirefoxLaunchArguments({
   profileDir,
   headless = false,
@@ -912,6 +922,8 @@ class FirefoxBidiSession {
 
   async close() {
     if (this.#closed) return;
+    let shutdownError;
+    let cleanupError;
     try {
       if (process.platform === 'win32') {
         try {
@@ -927,21 +939,29 @@ class FirefoxBidiSession {
           delay(CLOSE_TIMEOUT_MS),
         ]);
       }
+    } catch (error) {
+      shutdownError = error;
     } finally {
       this.#closed = true;
       this.#handleClose();
-      await cleanupFirefoxResources({
-        child: this.#child,
-        detachSocket: () => {
-          this.#socket.removeEventListener('message', this.#handleMessage);
-          this.#socket.removeEventListener('close', this.#handleClose);
-        },
-        profileDir: this.#profileDir,
-        ownership: this.#ownership,
-        root: this.#root,
-        socket: this.#socket,
-      });
+      try {
+        await cleanupFirefoxResources({
+          child: this.#child,
+          detachSocket: () => {
+            this.#socket.removeEventListener('message', this.#handleMessage);
+            this.#socket.removeEventListener('close', this.#handleClose);
+          },
+          profileDir: this.#profileDir,
+          ownership: this.#ownership,
+          root: this.#root,
+          socket: this.#socket,
+        });
+      } catch (error) {
+        cleanupError = error;
+      }
     }
+    const failure = combineFirefoxCloseFailures(shutdownError, cleanupError);
+    if (failure) throw failure;
   }
 }
 
