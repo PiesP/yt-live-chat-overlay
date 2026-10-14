@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -104,6 +104,23 @@ describe('installed manager upgrade inputs', () => {
       join(linked.directory, 'public-v0.45.5.user.js')
     );
     await expect(upgrade.loadUpgradeInputs(linked.root)).rejects.toThrow('Invalid upgrade file');
+  });
+
+  it('rejects oversized input and candidate files before reading them', async () => {
+    const oversizedInput = await fixture();
+    await truncate(join(oversizedInput.directory, 'input.json'), 16 * 1024 * 1024 + 1);
+    await expect(upgrade.loadUpgradeInputs(oversizedInput.root)).rejects.toThrow(
+      'Upgrade file size rejected'
+    );
+
+    const oversizedCandidate = await fixture();
+    await truncate(
+      join(oversizedCandidate.root, 'dist/yt-live-chat-overlay.user.js'),
+      16 * 1024 * 1024 + 1
+    );
+    await expect(upgrade.loadUpgradeInputs(oversizedCandidate.root)).rejects.toThrow(
+      'Upgrade file size rejected'
+    );
   });
 
   it('rejects an old candidate version, missing grant and changed script identity', async () => {
