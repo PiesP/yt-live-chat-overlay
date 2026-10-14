@@ -21,8 +21,9 @@ function createVerificationFixture(): {
 } {
   const directory = mkdtempSync(join(tmpdir(), 'yt-verification-contract-'));
   const bin = join(directory, 'bin');
-  const log = join(directory, 'calls.jsonl');
+  const log = join(directory, 'calls.bin');
   mkdirSync(bin);
+  mkdirSync(join(directory, 'outputs'));
   const scripts = (
     JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
@@ -30,52 +31,63 @@ function createVerificationFixture(): {
   ).scripts;
   const fixtureScripts = {
     ...scripts,
-    quality: 'node record.mjs quality',
-    'check:versions': 'node record.mjs check:versions',
-    'check:artifacts': 'node record.mjs check:artifacts',
-    'test:core': 'node record.mjs test:core',
-    'test:cov': 'node record.mjs test:cov',
+    quality: 'sh ./record.sh quality',
+    'check:versions': 'sh ./record.sh check:versions',
+    'check:artifacts': 'sh ./record.sh check:artifacts',
+    'test:core': 'sh ./record.sh test:core',
+    'test:cov': 'sh ./record.sh test:cov',
   };
   writeFileSync(
     join(directory, 'package.json'),
     JSON.stringify({ private: true, scripts: fixtureScripts })
   );
-  const record = join(directory, 'record.mjs');
+  const record = join(directory, 'record.sh');
   writeFileSync(
     record,
-    `import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-const [command, ...args] = process.argv.slice(2);
-appendFileSync(process.env.CALL_LOG, JSON.stringify([command, ...args]) + '\\n');
-if ([command, ...args].join(' ') === process.env.FAIL_COMMAND) {
-  console.error('Deliberate fixture failure: ' + command);
-  process.exit(17);
-}
-const target = command === 'vite'
-  ? args.includes('--mode') ? 'dev' : args.includes('--config')
-    ? args[args.indexOf('--config') + 1] : 'production'
-  : undefined;
-if (target) {
-  mkdirSync('outputs', { recursive: true });
-  writeFileSync(join('outputs', target), process.env.RUN_ID);
-}
-if (command === 'check:artifacts') {
-  const targets = args.includes('--e2e') ? ['dev'] : ['production'];
-  targets.push('vite.config.extension.ts', 'vite.config.extension.cs.ts', 'vite.config.extension.page.ts',
-    'vite.config.extension.firefox.ts', 'vite.config.extension.cs.firefox.ts', 'vite.config.extension.page.firefox.ts');
-  for (const required of targets) {
-    const path = join('outputs', required);
-    if (!existsSync(path) || readFileSync(path, 'utf8') !== process.env.RUN_ID) {
-      console.error('Missing current-run artifact: ' + required);
-      process.exit(18);
-    }
-  }
-}
+    String.raw`#!/bin/sh
+command=$1
+shift
+printf '%s\0' "$(($# + 1))" "$command" "$@" >> "$CALL_LOG"
+joined=$command
+for arg do joined="$joined $arg"; done
+if [ "$joined" = "$FAIL_COMMAND" ]; then
+  printf 'Deliberate fixture failure: %s\n' "$command" >&2
+  exit 17
+fi
+if [ "$command" = vite ]; then
+  target=production
+  previous=
+  for arg do
+    if [ "$arg" = --mode ]; then target=dev; break; fi
+    if [ "$previous" = --config ]; then target=$arg; fi
+    previous=$arg
+  done
+  [ -d outputs ] || mkdir outputs
+  printf '%s\n' "$RUN_ID" > "outputs/$target"
+fi
+if [ "$command" = check:artifacts ]; then
+  case " $* " in
+    *' --e2e '*) targets=dev ;;
+    *) targets=production ;;
+  esac
+  targets="$targets vite.config.extension.ts vite.config.extension.cs.ts vite.config.extension.page.ts
+vite.config.extension.firefox.ts vite.config.extension.cs.firefox.ts vite.config.extension.page.firefox.ts"
+  for required in $targets; do
+    current=
+    if [ -f "outputs/$required" ]; then
+      IFS= read -r current < "outputs/$required"
+    fi
+    if [ "$current" != "$RUN_ID" ]; then
+      printf 'Missing current-run artifact: %s\n' "$required" >&2
+      exit 18
+    fi
+  done
+fi
 `
   );
   for (const tool of ['vite', 'playwright']) {
     const shim = join(bin, tool);
-    writeFileSync(shim, `#!/bin/sh\nexec '${process.execPath}' '${record}' ${tool} "$@"\n`);
+    writeFileSync(shim, `#!/bin/sh\nexec sh '${record}' ${tool} "$@"\n`);
     chmodSync(shim, 0o755);
   }
   return {
@@ -100,11 +112,14 @@ if (command === 'check:artifacts') {
           `Could not finish the ${name} fixture command: ${result.error.message}\n${result.stdout}${result.stderr}`
         );
       }
-      const calls = readFileSync(log, 'utf8')
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as string[]);
+      const fields = readFileSync(log, 'utf8').split('\0');
+      fields.pop();
+      const calls: string[][] = [];
+      for (let index = 0; index < fields.length; ) {
+        const count = Number(fields[index++]);
+        calls.push(fields.slice(index, index + count));
+        index += count;
+      }
       return { status: result.status, output: `${result.stdout}${result.stderr}`, calls };
     },
   };
