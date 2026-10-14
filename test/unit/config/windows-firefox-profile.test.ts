@@ -405,6 +405,60 @@ describe('Windows Firefox installation profile', () => {
       preSeekTime: 30,
       seekedEvent: false,
     });
+    const replaySeekExpression = session.evaluateJson.mock.calls
+      .map(([expression]) => expression)
+      .filter((expression) => expression.includes('const completed = new Promise'))[1];
+    if (!replaySeekExpression) throw new Error('Replay seek expression was not evaluated');
+    let assignmentCount = 0;
+    const staleVideo = {
+      seekable: { length: 1, start: () => 0, end: () => 120 },
+      get currentTime() {
+        return 32.5;
+      },
+      set currentTime(_target: number) {
+        assignmentCount++;
+      },
+    };
+    const staleSeek = await new Script(replaySeekExpression).runInNewContext({
+      document: { querySelector: () => staleVideo },
+    });
+    expect(staleSeek).toMatchObject({
+      status: 'unverified',
+      reason: 'seek-target-no-longer-distinct',
+      target: 33,
+      range: { start: 0, end: 120 },
+      preSeekTime: 32.5,
+      afterTime: 32.5,
+      seekedEvent: false,
+    });
+    expect(assignmentCount).toBe(0);
+    let boundaryTime = 32;
+    let boundaryListener: (() => void) | undefined;
+    const boundaryVideo = {
+      seekable: { length: 1, start: () => 0, end: () => 120 },
+      get currentTime() {
+        return boundaryTime;
+      },
+      set currentTime(target: number) {
+        boundaryTime = target;
+        boundaryListener?.();
+      },
+      addEventListener: (_event: string, listener: () => void) => {
+        boundaryListener = listener;
+      },
+    };
+    const boundarySeek = await new Script(replaySeekExpression).runInNewContext({
+      document: { querySelector: () => boundaryVideo },
+      setTimeout,
+      clearTimeout,
+    });
+    expect(boundarySeek).toMatchObject({
+      status: 'passed',
+      target: 33,
+      preSeekTime: 32,
+      afterTime: 33,
+      seekedEvent: true,
+    });
     expect(session.waitFor).toHaveBeenCalledWith(
       expect.stringContaining('730002'),
       'the public UI font size to persist in extension storage'
