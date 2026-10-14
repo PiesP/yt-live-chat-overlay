@@ -106,6 +106,15 @@ describe('installed manager upgrade inputs', () => {
     await expect(upgrade.loadUpgradeInputs(linked.root)).rejects.toThrow('Invalid upgrade file');
   });
 
+  it('rejects a dangling input symlink instead of treating it as absent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'yt-dangling-input-test-'));
+    roots.push(root);
+    const directory = join(root, 'validation/windows/release-upgrade');
+    await mkdir(directory, { recursive: true });
+    await symlink(join(root, 'missing-input.json'), join(directory, 'input.json'));
+    await expect(upgrade.loadUpgradeInputs(root)).rejects.toThrow('Invalid upgrade file');
+  });
+
   it('rejects oversized input and candidate files before reading them', async () => {
     const oversizedInput = await fixture();
     await truncate(join(oversizedInput.directory, 'input.json'), 16 * 1024 * 1024 + 1);
@@ -151,6 +160,14 @@ describe('installed manager upgrade inputs', () => {
     expect(upgrade.requireRetainedSettings(displayed, before)).toEqual(before);
     expect(() => upgrade.requireRetainedSettings(before, { ...before, safeTop: '20.1' })).toThrow();
     expect(() => upgrade.requireRetainedSettings(before, { ...before, opacity: '100' })).toThrow();
+  });
+
+  it('requires all three persisted settings in a fresh UI readback', () => {
+    const expected = { fontSize: '36', opacity: '65', safeTop: '20' };
+    expect(upgrade.matchesStoredSettings({ ...expected, safeTop: '20.0' }, expected)).toBe(true);
+    expect(upgrade.matchesStoredSettings({ ...expected, fontSize: '32' }, expected)).toBe(false);
+    expect(upgrade.matchesStoredSettings({ ...expected, opacity: '' }, expected)).toBe(false);
+    expect(upgrade.matchesStoredSettings({ ...expected, safeTop: 'NaN' }, expected)).toBe(false);
   });
 
   it('keeps the deferred update receipt after the later approval', () => {
