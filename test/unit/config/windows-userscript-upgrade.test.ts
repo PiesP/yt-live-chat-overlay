@@ -153,6 +153,14 @@ describe('installed manager upgrade inputs', () => {
     expect(() => upgrade.requireRetainedSettings(before, { ...before, opacity: '100' })).toThrow();
   });
 
+  it('requires all three persisted settings in a fresh UI readback', () => {
+    const expected = { fontSize: '36', opacity: '65', safeTop: '20' };
+    expect(upgrade.matchesStoredSettings({ ...expected, safeTop: '20.0' }, expected)).toBe(true);
+    expect(upgrade.matchesStoredSettings({ ...expected, fontSize: '32' }, expected)).toBe(false);
+    expect(upgrade.matchesStoredSettings({ ...expected, opacity: '' }, expected)).toBe(false);
+    expect(upgrade.matchesStoredSettings({ ...expected, safeTop: 'NaN' }, expected)).toBe(false);
+  });
+
   it('keeps the deferred update receipt after the later approval', () => {
     let prompt = { status: 'unobserved', deferred: false, approved: false, events: [] };
     expect(() =>

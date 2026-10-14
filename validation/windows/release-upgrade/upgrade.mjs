@@ -471,24 +471,70 @@ async function importThroughManager(
   }
 }
 
-async function observeSettings(page) {
+async function openSettingsAndRead(page, timeout = 15_000) {
   const button = page.locator('#yt-chat-overlay-settings-button');
-  await button.waitFor({ state: 'visible', timeout: 15_000 });
-  await page.locator('#movie_player').hover();
-  await button.click();
+  await button.waitFor({ state: 'visible', timeout });
+  await page.locator('#movie_player').hover({ timeout });
+  await button.click({ timeout });
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
-  await modal.waitFor({ state: 'visible' });
+  await modal.waitFor({ state: 'visible', timeout });
   const values = {
-    fontSize: await modal.locator('input[name="fontSize"]').inputValue(),
-    opacity: await modal.locator('input[name="opacity"]').inputValue(),
-    safeTop: await modal.locator('input[name="safeTop"]').inputValue(),
+    fontSize: await modal.locator('input[name="fontSize"]').inputValue({ timeout }),
+    opacity: await modal.locator('input[name="opacity"]').inputValue({ timeout }),
+    safeTop: await modal.locator('input[name="safeTop"]').inputValue({ timeout }),
   };
+  return values;
+}
+
+async function observeSettings(page) {
+  const values = await openSettingsAndRead(page);
+  const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden' });
   return values;
 }
 
-async function setSettingsThroughUi(page, values) {
+export function matchesStoredSettings(stored, values) {
+  return (
+    stored &&
+    ['fontSize', 'opacity', 'safeTop'].every((key) => {
+      const actual = stored[key];
+      return (
+        typeof actual === 'string' &&
+        actual.trim() !== '' &&
+        Number.isFinite(Number(actual)) &&
+        Number(actual) === Number(values[key])
+      );
+    })
+  );
+}
+
+async function waitForStoredSettings(page, managerId, root, values) {
+  // A fresh userscript instance reads the manager's persisted settings into
+  // its UI. Keep the original tab alive so its idle save can run; never close
+  // the readback dialog through the UI because a stale copy would be saved.
+  const readback = await openOwnedWatchFixture(page.context(), managerId, root);
+  try {
+    await page.bringToFront();
+    const deadline = Date.now() + 10_000;
+    let consecutiveReads = 0;
+    let lastStored;
+    while (Date.now() < deadline) {
+      lastStored = await openSettingsAndRead(readback, Math.max(1, deadline - Date.now()));
+      consecutiveReads = matchesStoredSettings(lastStored, values) ? consecutiveReads + 1 : 0;
+      if (consecutiveReads === 2) return;
+      await readback.reload({
+        waitUntil: 'domcontentloaded',
+        timeout: Math.max(1, deadline - Date.now()),
+      });
+    }
+    assert.fail(`Settings did not reach manager storage: ${JSON.stringify(lastStored)}`);
+  } finally {
+    await readback.close();
+  }
+}
+
+async function setSettingsThroughUi(page, values, managerId, root) {
   await page.locator('#yt-chat-overlay-settings-button').waitFor({ state: 'visible' });
   await page.locator('#movie_player').hover();
   await page.locator('#yt-chat-overlay-settings-button').click();
@@ -508,6 +554,7 @@ async function setSettingsThroughUi(page, values) {
   }
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden' });
+  await waitForStoredSettings(page, managerId, root, values);
   await page.reload({ waitUntil: 'domcontentloaded' });
   const observed = await observeSettings(page);
   for (const [name, value] of Object.entries(values)) {
@@ -649,11 +696,16 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
     );
     fixture = await openOwnedWatchFixture(context, managerId, root);
     result.settingsOriginal = await observeSettings(fixture);
-    result.settingsBefore = await setSettingsThroughUi(fixture, {
-      fontSize: '36',
-      opacity: '65',
-      safeTop: '20',
-    });
+    result.settingsBefore = await setSettingsThroughUi(
+      fixture,
+      {
+        fontSize: '36',
+        opacity: '65',
+        safeTop: '20',
+      },
+      managerId,
+      root
+    );
     requireRetainedSettings(result.settingsBefore, result.settingsBefore);
     result.activeStage = 'defer-update';
     result.stages.push(
@@ -707,7 +759,9 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
     requireRetainedSettings(result.settingsBefore, result.settingsAfter);
     result.settingsRestoredForFixture = await setSettingsThroughUi(
       fixture,
-      result.settingsOriginal
+      result.settingsOriginal,
+      managerId,
+      root
     );
     result.activeStage = 'complete';
     result.status = 'passed';
