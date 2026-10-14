@@ -445,6 +445,17 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
               seekedEvent: false,
             };
           }
+          if (Math.abs(seekTo - preSeekTime) < 1) {
+            return {
+              status: 'unverified',
+              reason: 'seek-target-no-longer-distinct',
+              target: seekTo,
+              range,
+              preSeekTime,
+              afterTime: preSeekTime,
+              seekedEvent: false,
+            };
+          }
           const completed = new Promise((resolve) => {
             const timeout = setTimeout(() => resolve(false), 8000);
             video.addEventListener(

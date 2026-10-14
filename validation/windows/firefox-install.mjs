@@ -686,6 +686,11 @@ async function runLivePhase(session, liveEntries, output) {
                   target: ${seekTarget}, range, preSeekTime, afterTime: preSeekTime,
                   seekedEvent: false };
               }
+              if (Math.abs(${seekTarget} - preSeekTime) < 1) {
+                return { status: 'unverified', reason: 'seek-target-no-longer-distinct',
+                  target: ${seekTarget}, range, preSeekTime, afterTime: preSeekTime,
+                  seekedEvent: false };
+              }
               const completed = new Promise((resolve) => {
                 const timeout = setTimeout(() => resolve(false), 8000);
                 video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(true); }, { once: true });
