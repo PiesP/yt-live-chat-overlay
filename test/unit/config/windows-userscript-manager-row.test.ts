@@ -4,10 +4,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import {
-  INSTALLED_SCRIPT_ROW_SELECTOR,
-  requireInstalledScriptRow,
-} from '../../../validation/windows/release-upgrade/upgrade.mjs';
+import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.mjs';
 
 const scriptName = 'YouTube Live Chat Overlay';
 const entry = (version: string) => `<tr class="scripttr">
@@ -15,7 +12,7 @@ const entry = (version: string) => `<tr class="scripttr">
 </tr>`;
 
 function matchingRows() {
-  return [...document.querySelectorAll(INSTALLED_SCRIPT_ROW_SELECTOR)].filter((row) =>
+  return [...document.querySelectorAll(upgrade.INSTALLED_SCRIPT_ROW_SELECTOR)].filter((row) =>
     [...row.querySelectorAll('span.nameNname16')].some(
       (name) => name.textContent?.trim() === scriptName
     )
@@ -35,7 +32,7 @@ describe('Tampermonkey dashboard installed entry', () => {
     const rows = matchingRows();
     expect(rows).toHaveLength(1);
     expect(
-      requireInstalledScriptRow(
+      upgrade.requireInstalledScriptRow(
         rows.map((row) => row.textContent ?? ''),
         '0.45.5'
       )
@@ -51,7 +48,7 @@ describe('Tampermonkey dashboard installed entry', () => {
     const rows = matchingRows();
     expect(rows).toHaveLength(2);
     expect(() =>
-      requireInstalledScriptRow(
+      upgrade.requireInstalledScriptRow(
         rows.map((row) => row.textContent ?? ''),
         '0.45.5'
       )
