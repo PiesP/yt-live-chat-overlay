@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +23,9 @@ const {
   requireLiveSuccess,
   requireManagerUiLabels,
   selectPublicSeekTarget,
+  ownedExtensionResourcePath,
+  compareOwnedExtensionResourceBody,
+  beginOwnedExtensionResourceCapture,
 } = chromeInstallModule;
 
 const roots: string[] = [];
@@ -40,6 +45,106 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('accepts only two exact paths at the installed extension ID', () => {
+    const id = 'a'.repeat(32);
+    for (const path of ['workers/renderer.js', 'page-script.js']) {
+      expect(ownedExtensionResourcePath(`chrome-extension://${id}/${path}`, id)).toBe(path);
+      expect(
+        ownedExtensionResourcePath(`chrome-extension://${id}/${path}?private=1`, id)
+      ).toBeNull();
+      expect(
+        ownedExtensionResourcePath(`chrome-extension://${id}/${path}#fragment`, id)
+      ).toBeNull();
+      expect(
+        ownedExtensionResourcePath(`chrome-extension://${'b'.repeat(32)}/${path}`, id)
+      ).toBeNull();
+    }
+    expect(ownedExtensionResourcePath(`chrome-extension://${id}/workers/other.js`, id)).toBeNull();
+    expect(ownedExtensionResourcePath(`https://${id}/page-script.js`, id)).toBeNull();
+    expect(ownedExtensionResourcePath('not-a-url', id)).toBeNull();
+  });
+
+  it('bounds and hashes only the exact packaged resource body', () => {
+    const body = Buffer.from('owned resource');
+    const expected = {
+      maxBytes: body.length,
+      bytes: body.length,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    };
+    expect(compareOwnedExtensionResourceBody(body, expected)).toMatchObject({
+      status: 'matched',
+      bytes: body.length,
+      sha256: expected.sha256,
+    });
+    expect(
+      compareOwnedExtensionResourceBody(Buffer.from('other resource'), expected)
+    ).toMatchObject({
+      status: 'unverified',
+      reason: 'body-mismatch',
+    });
+    expect(compareOwnedExtensionResourceBody(Buffer.alloc(body.length + 1), expected)).toEqual({
+      status: 'unverified',
+      reason: 'body-overflow',
+    });
+  });
+
+  it('records completed owned requests and removes its page listeners', async () => {
+    const page = new EventEmitter();
+    const id = 'a'.repeat(32);
+    const expected: Record<string, { maxBytes: number; bytes: number; sha256: string }> = {};
+    const resources = ['workers/renderer.js', 'page-script.js'];
+    for (const path of resources) {
+      const body = Buffer.from(path);
+      expected[path] = {
+        maxBytes: 100,
+        bytes: body.length,
+        sha256: createHash('sha256').update(body).digest('hex'),
+      };
+    }
+    let navigation = 'initial-watch';
+    const finish = beginOwnedExtensionResourceCapture(page, id, expected, () => ({
+      sourcePhase: 'navigation',
+      navigation,
+    }));
+    for (navigation of ['initial-watch', 'next-watch']) {
+      for (const path of resources) {
+        const body = Buffer.from(path);
+        const request = {
+          url: () => `chrome-extension://${id}/${path}`,
+          frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+          sizes: async () => ({ responseBodySize: body.length }),
+          response: async () => response,
+        };
+        const response = {
+          request: () => request,
+          status: () => 200,
+          headers: () => ({ 'content-type': 'application/javascript' }),
+          body: async () => body,
+        };
+        page.emit('request', request);
+        page.emit('requestfinished', request);
+      }
+    }
+    const result = await finish();
+    expect(result).toMatchObject({
+      status: 'observed',
+      missing: [],
+      missingByNavigation: { 'initial-watch': [], 'next-watch': [] },
+      overflow: 0,
+    });
+    expect(result.requests).toHaveLength(4);
+    expect(result.requests[0]).toMatchObject({
+      documentUrl: 'https://www.youtube.com/watch',
+      sourcePhase: 'navigation',
+      status: 'matched',
+      responseStatus: 200,
+    });
+    expect(JSON.stringify(result)).not.toContain('private');
+    for (const event of ['request', 'response', 'requestfinished', 'requestfailed']) {
+      expect(page.listenerCount(event)).toBe(0);
+    }
+  });
+
   it.each([
     ['https://accounts.google.com/ServiceLogin', true, false],
     ['https://consent.youtube.com/', false, true],
