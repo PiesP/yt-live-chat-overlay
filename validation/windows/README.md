@@ -412,6 +412,16 @@ the checkout when the campaign is complete; retain their verified digest and
 the VM receipt outside Git. With no `input.json`, the existing fresh-install
 path runs unchanged. A supplied but invalid input fails closed.
 
+The receipt retains separate observed, deferred and approved update events.
+It scans the pinned manager's visible confirmation summary for a permission or
+grant row that specifically shows `unsafeWindow`, and captures bounded UI text
+plus screenshots. If the manager does not display such a row, the permission
+display is recorded as `not-observed`; the generic update confirmation is not
+called a grant prompt. The effective page-window behavior is inferred only after
+the installed candidate passes all seven page-world fetch phases and their
+production interceptor callback assertions. The initial six polling messages
+alone do not satisfy that check.
+
 This locally imported candidate proves manager replacement, byte identity and
 settings compatibility in that owned profile. If the installed manager does not
 show an identifiable update confirmation, the upgrade check fails and records

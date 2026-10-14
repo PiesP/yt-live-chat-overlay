@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
+import * as chromeInstall from '../../../validation/windows/chrome-install.mjs';
+// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.mjs';
 
 const roots: string[] = [];
@@ -129,5 +131,86 @@ describe('installed manager upgrade inputs', () => {
     const before = { fontSize: '36', opacity: '65', safeTop: '20' };
     expect(upgrade.requireRetainedSettings(before, { ...before })).toEqual(before);
     expect(() => upgrade.requireRetainedSettings(before, { ...before, opacity: '100' })).toThrow();
+  });
+
+  it('keeps the deferred update receipt after the later approval', () => {
+    let prompt = { status: 'unobserved', deferred: false, approved: false, events: [] };
+    expect(() =>
+      upgrade.appendPromptEvent(prompt, { kind: 'approved', decision: 'approve' })
+    ).toThrow('observed prompt');
+    for (const event of [
+      { kind: 'observed', decision: 'defer' },
+      { kind: 'deferred', decision: 'defer' },
+      { kind: 'observed', decision: 'approve' },
+      { kind: 'approved', decision: 'approve' },
+    ]) {
+      prompt = upgrade.appendPromptEvent(prompt, event);
+    }
+    expect(prompt).toMatchObject({ status: 'observed', deferred: true, approved: true });
+    expect(prompt.events).toHaveLength(4);
+    expect(prompt.events[1]).toEqual({ kind: 'deferred', decision: 'defer' });
+  });
+
+  it('does not mistake source code or a generic update prompt for a grant display', () => {
+    const row = { index: 0, visible: true, inSourceEditor: false, className: '', text: '' };
+    expect(upgrade.classifyManagerGrantRows([{ ...row, text: 'Userscript update' }]).status).toBe(
+      'not-observed'
+    );
+    expect(
+      upgrade.classifyManagerGrantRows([
+        { ...row, text: '// @grant unsafeWindow', inSourceEditor: true },
+      ]).status
+    ).toBe('not-observed');
+    expect(
+      upgrade.classifyManagerGrantRows([{ ...row, text: '// @grant unsafeWindow' }]).status
+    ).toBe('not-observed');
+    expect(
+      upgrade.classifyManagerGrantRows([{ ...row, text: 'Grant: unsafeWindow', visible: false }])
+        .status
+    ).toBe('not-observed');
+    expect(upgrade.classifyManagerGrantRows([{ ...row, text: 'Grant: unsafeWindow' }])).toEqual({
+      status: 'observed',
+      rowIndex: 0,
+      visibleText: 'Grant: unsafeWindow',
+    });
+  });
+
+  it('requires sustained page-fetch callbacks rather than only six initial polling messages', () => {
+    const pollingOnly = {
+      checks: { installedApplicationDelivery: true, sustainedViewingLifecycle: true },
+      observations: { initialAdmission: { accessibility: { count: 6 } } },
+    };
+    expect(() => chromeInstall.requireInstalledPageFetchEvidence(pollingOnly)).toThrow();
+    const ingress = [
+      'windows-sustained-low-1',
+      'windows-sustained-low-2',
+      ...Array.from({ length: 8 }, (_, index) => `windows-sustained-burst-${index + 1}`),
+      'windows-sustained-paused-1',
+      'windows-sustained-paused-2',
+      'windows-sustained-visible',
+    ];
+    const fixtureEvidence = {
+      checks: { sustainedViewingLifecycle: true },
+      observations: {
+        sustainedViewing: {
+          firstSessionIngressIds: ingress,
+          firstSessionAccessibleIds: ingress,
+          secondSessionIds: ['windows-sustained-second-video'],
+          hiddenMessageSuppressed: true,
+          oldCanvasDetached: true,
+          videoPauseDropDelta: 2,
+        },
+      },
+    };
+    expect(chromeInstall.requireInstalledPageFetchEvidence(fixtureEvidence)).toMatchObject({
+      callbackAssertionsCompleted: true,
+      callbackPhases: ['low-1', 'low-2', 'burst', 'paused', 'hidden', 'visible', 'second-video'],
+    });
+    expect(() =>
+      chromeInstall.requireInstalledPageFetchEvidence({
+        ...fixtureEvidence,
+        checks: { sustainedViewingLifecycle: false },
+      })
+    ).toThrow();
   });
 });

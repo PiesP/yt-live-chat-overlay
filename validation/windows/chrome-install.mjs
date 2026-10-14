@@ -564,6 +564,52 @@ export function requireLiveSuccess(observations) {
   );
 }
 
+/** The installed fixture returns only after seven page-fetch callback assertions. */
+export function requireInstalledPageFetchEvidence(fixture) {
+  assert.equal(
+    fixture?.checks?.sustainedViewingLifecycle,
+    true,
+    'Installed page-fetch lifecycle was not verified'
+  );
+  const sustained = fixture?.observations?.sustainedViewing;
+  const expectedFirstSession = [
+    'windows-sustained-low-1',
+    'windows-sustained-low-2',
+    ...Array.from({ length: 8 }, (_, index) => `windows-sustained-burst-${index + 1}`),
+    'windows-sustained-paused-1',
+    'windows-sustained-paused-2',
+    'windows-sustained-visible',
+  ];
+  assert.deepEqual(
+    sustained?.firstSessionIngressIds,
+    expectedFirstSession,
+    'Installed page-fetch ingress IDs are incomplete'
+  );
+  assert.deepEqual(sustained.secondSessionIds, ['windows-sustained-second-video']);
+  assert.equal(sustained.hiddenMessageSuppressed, true);
+  assert.equal(sustained.oldCanvasDetached, true);
+  assert.equal(sustained.videoPauseDropDelta, 2);
+  assert(
+    Array.isArray(sustained.firstSessionAccessibleIds) &&
+      expectedFirstSession.every((id) => sustained.firstSessionAccessibleIds.includes(id)),
+    'Installed page-fetch messages were not accessible after the lifecycle phases'
+  );
+  return {
+    callbackAssertionsCompleted: true,
+    callbackPhases: ['low-1', 'low-2', 'burst', 'paused', 'hidden', 'visible', 'second-video'],
+    callbackCountsAsserted: {
+      'low-1': 1,
+      'low-2': 1,
+      burst: 8,
+      paused: 2,
+      hidden: 1,
+      visible: 1,
+      'second-video': 1,
+    },
+    source: 'profile.mjs verifySustainedViewingLifecycle page-world fetch and product callbacks',
+  };
+}
+
 /** Attempt every owned cleanup stage even when an earlier operation fails. */
 export async function cleanupChromeInstallation(
   {
@@ -755,7 +801,8 @@ export async function runChromeInstallation({
             context,
             extensionId,
             root,
-            upgradeInputs
+            upgradeInputs,
+            output
           );
         } catch (error) {
           result.userscriptUpgrade = error.upgradeObservation ?? { status: 'failed' };
@@ -777,13 +824,13 @@ export async function runChromeInstallation({
     });
     if (result.userscriptUpgrade) {
       assert.equal(result.fixture.checks.installedApplicationDelivery, true);
-      assert.equal(result.fixture.observations.initialAdmission.accessibility.count, 6);
+      const pageFetch = requireInstalledPageFetchEvidence(result.fixture);
       result.userscriptUpgrade.effectiveGrantEvidence = {
         candidateMetadata: result.userscriptUpgrade.candidateUnsafeWindowGrant,
         exactManagerEditorBytes:
           result.userscriptUpgrade.after.editorSha256 === upgradeInputs.candidateSha256,
-        actualPageFetchIngress:
-          result.fixture.observations.initialAdmission.accessibility.count === 6,
+        actualPageFetchIngress: pageFetch.callbackAssertionsCompleted,
+        pageFetch,
       };
     }
     if (browserName === 'msedge' && installation === 'extension') {
