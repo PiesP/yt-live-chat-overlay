@@ -209,11 +209,12 @@ async function importThroughManager(
   try {
     await confirmation.waitForURL(`chrome-extension://${managerId}/ask.html*`);
     if (expectedKind === 'update') {
-      assert(
-        (await confirmation.getByText(labels.updateHeading, { exact: true }).first().isVisible()) ||
-          (await confirmation.title()) === labels.updateHeading,
-        'Manager did not identify the second import as an update'
-      );
+      if ((await confirmation.title()) !== labels.updateHeading) {
+        await confirmation
+          .getByText(labels.updateHeading, { exact: true })
+          .first()
+          .waitFor({ state: 'visible', timeout: 10_000 });
+      }
       if (observation)
         observation.prompt = { status: 'observed', deferred: false, approved: false };
     }
