@@ -351,7 +351,7 @@ export async function terminateOwnedProcessTree(
       }
       return count;
     };
-    for (const entry of processes.sort((a, b) => depth(a) - depth(b))) await stop(entry, bound);
+    for (const entry of processes.sort((a, b) => depth(b) - depth(a))) await stop(entry, bound);
     const last = (await inspect()).processes;
     const remaining = selectOwnedFirefoxProcesses(last, bound);
     if (
@@ -362,6 +362,32 @@ export async function terminateOwnedProcessTree(
       )
     ) {
       throw new Error('Unverified Firefox process uses the task profile');
+    }
+    const remembered = new Map(bound.expectedProcesses.map((entry) => [entry.pid, entry]));
+    const liveByPid = new Map(last.map((entry) => [entry.pid, entry]));
+    const remainingPids = new Set(remaining.map((entry) => entry.pid));
+    const unverifiedDescendant = last.some((entry) => {
+      if (
+        remainingPids.has(entry.pid) ||
+        typeof entry.executablePath !== 'string' ||
+        win32.normalize(entry.executablePath).toLowerCase() !==
+          win32.normalize(ownership.executablePath).toLowerCase() ||
+        (Number.isFinite(Date.parse(entry.createdUtc)) &&
+          Date.parse(entry.createdUtc) < ownership.spawnedAt - 1000)
+      ) {
+        return false;
+      }
+      let parentPid = entry.parentPid;
+      const seen = new Set([entry.pid]);
+      while (Number.isSafeInteger(parentPid) && !seen.has(parentPid)) {
+        if (remembered.has(parentPid)) return true;
+        seen.add(parentPid);
+        parentPid = liveByPid.get(parentPid)?.parentPid;
+      }
+      return false;
+    });
+    if (unverifiedDescendant) {
+      throw new Error('Unverified Firefox descendant remains after task-owned cleanup');
     }
     if (remaining.length > 0) throw new Error('Task-owned Firefox browser remains alive');
     if (
