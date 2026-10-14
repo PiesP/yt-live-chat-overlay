@@ -138,6 +138,10 @@ export function requireInstalledScriptRow(rows, version) {
   return { scriptName: SCRIPT_NAME, version, rowText: words.slice(0, 200) };
 }
 
+// Tampermonkey's dashboard renders each installed script as tr.scripttr.
+// Its separate action-menu renderer also uses tr.script, so that is not a list entry.
+export const INSTALLED_SCRIPT_ROW_SELECTOR = 'tr.scripttr';
+
 export function requireRetainedSettings(before, after) {
   assert.deepEqual(before, { fontSize: '36', opacity: '65', safeTop: '20' });
   assert.deepEqual(after, before, 'Preferences changed on upgrade');
@@ -222,20 +226,61 @@ async function observeManagerGrantDisplay(page, output, attempt) {
   };
 }
 
-async function installedRow(page, labels, version) {
+async function installedRow(page, labels, version, observation, output, stage) {
   await page.getByText(labels.installedUserscripts, { exact: true }).first().click();
-  const row = page.locator('tr:visible').filter({
-    has: page.getByText(SCRIPT_NAME, { exact: true }),
+  const scriptName = page.locator('span.nameNname16:visible').filter({
+    hasText: /^YouTube Live Chat Overlay$/u,
   });
-  await row.first().waitFor({ state: 'visible' });
+  await scriptName
+    .first()
+    .waitFor({
+      state: 'visible',
+      timeout: 10_000,
+    })
+    .catch(() => {});
+  const row = page.locator(`${INSTALLED_SCRIPT_ROW_SELECTOR}:visible`).filter({
+    has: scriptName,
+  });
   const count = await row.count();
+  if (count !== 1) {
+    const candidates = page.locator('tr:visible').filter({
+      has: scriptName,
+    });
+    const totalCandidates = await candidates.count();
+    const rows = await candidates.evaluateAll((elements) =>
+      elements.slice(0, 12).map((element) => ({
+        className: typeof element.className === 'string' ? element.className.slice(0, 120) : '',
+        installedEntryDescendants: element.querySelectorAll('tr.scripttr').length,
+        text: (element.innerText ?? '').replace(/\s+/gu, ' ').trim().slice(0, 240),
+      }))
+    );
+    const screenshot = `userscript-installed-rows-${stage}.png`;
+    const captured = await page
+      .screenshot({ path: join(output, screenshot), timeout: 10_000 })
+      .then(
+        () => true,
+        () => false
+      );
+    observation.installedRowDiagnostics ??= [];
+    observation.installedRowDiagnostics.push({
+      stage,
+      selector: `${INSTALLED_SCRIPT_ROW_SELECTOR}:visible`,
+      count,
+      totalCandidateRows: totalCandidates,
+      candidateRows: rows,
+      screenshot: captured ? screenshot : null,
+    });
+  }
   const rows = count === 1 ? [await row.innerText()] : Array.from({ length: count }, () => '');
   requireInstalledScriptRow(rows, version);
   return row;
 }
 
 async function readInstalledEditorSource(page, row) {
-  await row.getByText(SCRIPT_NAME, { exact: true }).click();
+  await row
+    .locator('span.nameNname16')
+    .filter({ hasText: /^YouTube Live Chat Overlay$/u })
+    .click();
   const editor = page.locator('.CodeMirror:visible').first();
   await editor.waitFor({ state: 'visible' });
   const source = await editor.evaluate((element) => element.CodeMirror?.getValue());
@@ -243,7 +288,15 @@ async function readInstalledEditorSource(page, row) {
   return source;
 }
 
-async function observeInstalledScript(page, managerId, version, expectedSha256) {
+async function observeInstalledScript(
+  page,
+  managerId,
+  version,
+  expectedSha256,
+  observation,
+  output,
+  stage
+) {
   const optionsUrl = `chrome-extension://${managerId}/options.html`;
   await page.goto(optionsUrl);
   assert.equal(page.url(), optionsUrl, 'Manager options page navigated away');
@@ -252,7 +305,7 @@ async function observeInstalledScript(page, managerId, version, expectedSha256) 
   }));
   assert.equal(page.url(), optionsUrl, 'Manager options page navigated during label lookup');
   assert(typeof labels.installedUserscripts === 'string' && labels.installedUserscripts.length > 0);
-  const row = await installedRow(page, labels, version);
+  const row = await installedRow(page, labels, version, observation, output, stage);
   const rowObservation = requireInstalledScriptRow([await row.innerText()], version);
   const source = await readInstalledEditorSource(page, row);
   const editorSha256 = sha256(Buffer.from(source, 'utf8'));
@@ -492,7 +545,10 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
       manager,
       managerId,
       inputs.baseline.version,
-      inputs.baselineSha256
+      inputs.baselineSha256,
+      result,
+      output,
+      'before'
     );
     fixture = await openOwnedWatchFixture(context, managerId, root);
     result.settingsOriginal = await observeSettings(fixture);
@@ -519,7 +575,10 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
       manager,
       managerId,
       inputs.baseline.version,
-      inputs.baselineSha256
+      inputs.baselineSha256,
+      result,
+      output,
+      'after-deferral'
     );
     await fixture.reload({ waitUntil: 'domcontentloaded' });
     result.settingsAfterDeferral = await observeSettings(fixture);
@@ -541,7 +600,10 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
       manager,
       managerId,
       inputs.candidate.version,
-      inputs.candidateSha256
+      inputs.candidateSha256,
+      result,
+      output,
+      'after-update'
     );
     await fixture.reload({ waitUntil: 'domcontentloaded' });
     result.settingsAfter = await observeSettings(fixture);
