@@ -218,12 +218,16 @@ async function installUserscript(context, id, root, output) {
 }
 
 /** Select an in-range move that differs materially from current playback. */
-export function selectPublicSeekTarget({ currentTime, start, end }) {
+export function selectPublicSeekTarget(
+  { currentTime, start, end },
+  { preferBackward = false } = {}
+) {
   if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
+  const backward = Math.max(start + 1, currentTime - 3);
+  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
   const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
   if (Math.abs(forward - currentTime) >= 1) return forward;
-  const backward = Math.max(start + 1, currentTime - 3);
-  return Math.abs(backward - currentTime) >= 1 ? backward : null;
+  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
 export async function readPublicPageState(page) {
@@ -412,7 +416,9 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
           end: video.seekable.end(last),
         };
       });
-    const target = seekRange && selectPublicSeekTarget(seekRange);
+    const target =
+      seekRange &&
+      selectPublicSeekTarget(seekRange, { preferBackward: pageState.chatMode === 'live' });
     if (target === null) {
       observation.workflow.seek = {
         status: 'unverified',
@@ -424,6 +430,21 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
         .locator('video')
         .first()
         .evaluate(async (video, seekTo) => {
+          const preSeekTime = video.currentTime;
+          const last = video.seekable.length - 1;
+          const range =
+            last >= 0 ? { start: video.seekable.start(last), end: video.seekable.end(last) } : null;
+          if (!range || seekTo < range.start || seekTo > range.end) {
+            return {
+              status: 'unverified',
+              reason: 'seek-target-out-of-range',
+              target: seekTo,
+              range,
+              preSeekTime,
+              afterTime: preSeekTime,
+              seekedEvent: false,
+            };
+          }
           const completed = new Promise((resolve) => {
             const timeout = setTimeout(() => resolve(false), 8000);
             video.addEventListener(
@@ -437,13 +458,24 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
           });
           video.currentTime = seekTo;
           const seeked = await completed;
+          const afterTime = video.currentTime;
+          const positionMatched = Math.abs(afterTime - seekTo) < 2;
           return {
-            status: seeked && Math.abs(video.currentTime - seekTo) < 2 ? 'passed' : 'unverified',
-            reason: seeked ? null : 'seeked-event-timeout',
+            status: seeked && positionMatched ? 'passed' : 'unverified',
+            reason: !seeked
+              ? 'seeked-event-timeout'
+              : positionMatched
+                ? null
+                : 'seek-position-mismatch',
             target: seekTo,
-            currentTime: video.currentTime,
+            range,
+            preSeekTime,
+            afterTime,
+            seekedEvent: seeked,
+            currentTime: afterTime,
           };
         }, target);
+      observation.workflow.seek.selectionRange = seekRange;
     }
     observation.phase = 'navigation-transition';
     const diagnosticStart = workerDiagnostics.length;
