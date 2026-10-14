@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Script } from 'node:vm';
@@ -24,7 +25,13 @@ const {
   cleanupFirefoxResources,
   extensionInstallParameters,
   extensionUninstallParameters,
+  parseFirefoxProfileEndpoint,
+  readOwnedFirefoxEndpoint,
   removeOwnedProfile,
+  selectOwnedFirefoxListener,
+  selectOwnedFirefoxProcesses,
+  terminateOwnedProcessTree,
+  waitForWindowsEndpoint,
 } = firefoxBidiModule;
 
 const temporaryDirectories: string[] = [];
@@ -187,6 +194,124 @@ afterEach(async () => {
 });
 
 describe('Windows Firefox installation profile', () => {
+  it('accepts only a fresh ordinary profile endpoint with a loopback port', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'yt-firefox-endpoint-test-'));
+    temporaryDirectories.push(root);
+    const endpoint = join(root, 'WebDriverBiDiServer.json');
+    const spawnedAt = Date.now();
+    await writeFile(endpoint, JSON.stringify({ ws_host: '127.0.0.1', ws_port: 50947 }));
+    expect(await readOwnedFirefoxEndpoint(root, spawnedAt)).toEqual({
+      host: '127.0.0.1',
+      port: 50947,
+    });
+    expect(() => parseFirefoxProfileEndpoint('{"ws_host":"0.0.0.0","ws_port":50947}')).toThrow(
+      /loopback/u
+    );
+    expect(() => parseFirefoxProfileEndpoint('{"ws_host":"127.0.0.1","ws_port":0}')).toThrow(
+      /port/u
+    );
+    expect(() => parseFirefoxProfileEndpoint('x'.repeat(1025))).toThrow(/oversized/u);
+    await rm(endpoint);
+    const foreign = join(root, 'foreign.json');
+    await writeFile(foreign, '{"ws_host":"127.0.0.1","ws_port":50947}');
+    await symlink(foreign, endpoint);
+    await expect(readOwnedFirefoxEndpoint(root, spawnedAt)).rejects.toThrow(/ordinary file/u);
+  });
+
+  it('binds the BiDi listener to the launched Firefox tree and rejects a foreign port', () => {
+    const spawnedAt = Date.now();
+    const createdUtc = new Date(spawnedAt + 10).toISOString();
+    const profileDir = 'C:\\task\\.firefox-install-profile-test';
+    const executablePath = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+    const ownership = { childPid: 10, executablePath, profileDir, spawnedAt };
+    const process = (pid: number, parentPid: number) => ({
+      pid,
+      parentPid,
+      createdUtc,
+      executablePath,
+      commandLine: `"${executablePath}" --profile "${profileDir}"`,
+    });
+    const processes = [process(20, 10), process(21, 20)];
+    expect(
+      selectOwnedFirefoxProcesses(processes, ownership).map((entry: { pid: number }) => entry.pid)
+    ).toEqual([20, 21]);
+    expect(
+      selectOwnedFirefoxProcesses(
+        [{ ...process(20, 10), commandLine: `"${executablePath}" -profile "${profileDir}"` }],
+        ownership
+      )
+    ).toHaveLength(1);
+    expect(
+      selectOwnedFirefoxListener({ processes, listenerPids: [21] }, ownership, 50947).pid
+    ).toBe(21);
+    expect(() =>
+      selectOwnedFirefoxListener({ processes, listenerPids: [999] }, ownership, 50947)
+    ).toThrow(/verified task-owned listener/u);
+    expect(() =>
+      selectOwnedFirefoxListener({ processes, listenerPids: [21, 999] }, ownership, 50947)
+    ).toThrow(/verified task-owned listener/u);
+    expect(
+      selectOwnedFirefoxProcesses(
+        [{ ...process(21, 20), createdUtc: new Date(spawnedAt - 5000).toISOString() }],
+        ownership
+      )
+    ).toEqual([]);
+  });
+
+  it('finds the profile endpoint after the Firefox launcher exits successfully', async () => {
+    const spawnedAt = Date.now();
+    const profileDir = 'C:\\task\\.firefox-install-profile-test';
+    const executablePath = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+    const browser = {
+      pid: 21,
+      parentPid: 10,
+      createdUtc: new Date(spawnedAt + 10).toISOString(),
+      executablePath,
+      commandLine: `"${executablePath}" --profile "${profileDir}"`,
+    };
+    const child = Object.assign(new EventEmitter(), { pid: 10, exitCode: 0, signalCode: null });
+    const ownership = { executablePath, profileDir, spawnedAt };
+    const endpoint = await waitForWindowsEndpoint(child, ownership, {
+      readEndpoint: async () => ({ host: '127.0.0.1', port: 50947 }),
+      inspect: async () => ({ processes: [browser], listenerPids: [21] }),
+    });
+    expect(endpoint).toBe('ws://127.0.0.1:50947/session');
+    expect(ownership).toMatchObject({ browserPid: 21, expectedProcesses: [browser] });
+  });
+
+  it('terminates the verified browser after its launcher exits and rejects reused identities', async () => {
+    const spawnedAt = Date.now();
+    const createdUtc = new Date(spawnedAt + 10).toISOString();
+    const profileDir = 'C:\\task\\.firefox-install-profile-test';
+    const executablePath = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+    const owned = {
+      pid: 21,
+      parentPid: 10,
+      createdUtc,
+      executablePath,
+      commandLine: `"${executablePath}" --profile "${profileDir}"`,
+    };
+    const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [owned] };
+    const child = { pid: 10, exitCode: 0, signalCode: null };
+    const stop = vi.fn(async () => {});
+    const inspect = vi
+      .fn()
+      .mockResolvedValueOnce({ processes: [owned] })
+      .mockResolvedValueOnce({ processes: [] });
+    await terminateOwnedProcessTree(child, ownership, { platform: 'win32', inspect, stop });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith(owned, { ...ownership, childPid: 10 });
+    const reused = { ...owned, createdUtc: new Date(spawnedAt + 1000).toISOString() };
+    await expect(
+      terminateOwnedProcessTree(child, ownership, {
+        platform: 'win32',
+        inspect: async () => ({ processes: [reused] }),
+        stop,
+      })
+    ).rejects.toThrow(/Unverified Firefox process/u);
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
   it('serializes native Firefox and extension lifecycle parameters', () => {
     expect(
       buildFirefoxLaunchArguments({
