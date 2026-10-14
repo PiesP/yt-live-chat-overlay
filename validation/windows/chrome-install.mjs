@@ -3,7 +3,8 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.mjs';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
@@ -61,13 +62,68 @@ export function compareOwnedExtensionResourceBody(body, expected) {
   };
 }
 
+export async function readBoundedPackagedResource(file, label, maxBytes, { onOpened } = {}) {
+  const flags =
+    process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
+  let handle;
+  try {
+    handle = await open(file, flags);
+  } catch (error) {
+    if (error?.code === 'ELOOP') assert.fail(`Invalid packaged resource: ${label}`);
+    throw error;
+  }
+  try {
+    const opened = await handle.stat({ bigint: true });
+    assert(opened.isFile(), `Invalid packaged resource: ${label}`);
+    assert(
+      opened.size > 0n && opened.size <= BigInt(maxBytes),
+      `Packaged ${label} exceeds diagnostic body limit or is empty`
+    );
+    await onOpened?.();
+    const matchesOpened = (entry) =>
+      entry.isFile() &&
+      !entry.isSymbolicLink() &&
+      entry.dev === opened.dev &&
+      entry.ino === opened.ino &&
+      entry.size === opened.size &&
+      entry.mtimeNs === opened.mtimeNs;
+    const requirePathIdentity = async () => {
+      let entry;
+      try {
+        entry = await lstat(file, { bigint: true });
+      } catch (error) {
+        if (error?.code === 'ENOENT') assert.fail(`Packaged ${label} changed during inspection`);
+        throw error;
+      }
+      assert(matchesOpened(entry), `Packaged ${label} changed during inspection`);
+    };
+    await requirePathIdentity();
+    const expectedBytes = Number(opened.size);
+    const bounded = Buffer.alloc(expectedBytes + 1);
+    let offset = 0;
+    while (offset < bounded.length) {
+      const { bytesRead } = await handle.read(bounded, offset, bounded.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    assert.equal(offset, expectedBytes, `Packaged ${label} changed size while reading`);
+    const after = await handle.stat({ bigint: true });
+    assert(matchesOpened(after), `Packaged ${label} changed while reading`);
+    await requirePathIdentity();
+    return bounded.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function readExpectedExtensionResources(root) {
   const expected = {};
   for (const [path, maxBytes] of Object.entries(OWNED_EXTENSION_RESOURCES)) {
-    const file = join(root, 'dist-extension', path);
-    const size = (await stat(file)).size;
-    assert(size <= maxBytes, `Packaged ${path} exceeds diagnostic body limit`);
-    const body = await readFile(file);
+    const body = await readBoundedPackagedResource(
+      join(root, 'dist-extension', path),
+      path,
+      maxBytes
+    );
     expected[path] = {
       maxBytes,
       bytes: body.length,

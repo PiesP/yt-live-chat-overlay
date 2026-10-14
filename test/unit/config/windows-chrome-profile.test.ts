@@ -3,7 +3,7 @@
 
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -26,6 +26,7 @@ const {
   ownedExtensionResourcePath,
   compareOwnedExtensionResourceBody,
   beginOwnedExtensionResourceCapture,
+  readBoundedPackagedResource,
 } = chromeInstallModule;
 
 const roots: string[] = [];
@@ -45,6 +46,40 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('reads a packaged file at the size cap and rejects empty or oversized files', async () => {
+    const { root } = await fixture();
+    const file = join(root, 'resource.js');
+    await writeFile(file, '1234');
+    expect(await readBoundedPackagedResource(file, 'resource.js', 4)).toEqual(Buffer.from('1234'));
+    await writeFile(file, '12345');
+    await expect(readBoundedPackagedResource(file, 'resource.js', 4)).rejects.toThrow(
+      'exceeds diagnostic body limit'
+    );
+    await writeFile(file, '');
+    await expect(readBoundedPackagedResource(file, 'resource.js', 4)).rejects.toThrow(
+      'or is empty'
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a packaged symlink and a file replaced after opening',
+    async () => {
+      const { root } = await fixture();
+      const file = join(root, 'resource.js');
+      const replacement = join(root, 'replacement.js');
+      const link = join(root, 'link.js');
+      await writeFile(file, 'old!');
+      await symlink(file, link);
+      await expect(readBoundedPackagedResource(link, 'resource.js', 4)).rejects.toThrow();
+      await writeFile(replacement, 'new!');
+      await expect(
+        readBoundedPackagedResource(file, 'resource.js', 4, {
+          onOpened: () => rename(replacement, file),
+        })
+      ).rejects.toThrow('changed during inspection');
+    }
+  );
+
   it('accepts only two exact paths at the installed extension ID', () => {
     const id = 'a'.repeat(32);
     for (const path of ['workers/renderer.js', 'page-script.js']) {
