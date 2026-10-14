@@ -14,6 +14,7 @@ import {
 } from './live-rendering.mjs';
 import { runPlacementTimingFixture } from './placement-timing.mjs';
 import { run as runFixture } from './profile.mjs';
+import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -159,9 +160,10 @@ export async function readManagerUiLabels(page, managerId) {
   return requireManagerUiLabels(labels);
 }
 
-async function installUserscript(context, id, root, output) {
+async function prepareUserscriptManager(context, id, root) {
   const managerRoot = join(root, 'test-tools/userscript-manager');
   const managerManifest = JSON.parse(await readFile(join(managerRoot, 'manifest.json'), 'utf8'));
+  assert.equal(managerManifest.version, '5.5.1', 'Unexpected userscript manager version');
   const page = await context.newPage();
   try {
     await page.goto(`chrome://extensions/?id=${id}`);
@@ -180,6 +182,16 @@ async function installUserscript(context, id, root, output) {
     });
     await page.locator('extensions-detail-view #dev-reload-button').click();
     await restarted;
+    return { id, managerVersion: managerManifest.version, scriptName: SCRIPT_NAME };
+  } finally {
+    await page.close();
+  }
+}
+
+async function installUserscript(context, id, root, output) {
+  const installed = await prepareUserscriptManager(context, id, root);
+  const page = await context.newPage();
+  try {
     await page.goto(`chrome-extension://${id}/options.html`);
     const labels = await readManagerUiLabels(page, id);
     await page.getByText(labels.utilities, { exact: true }).click();
@@ -196,7 +208,7 @@ async function installUserscript(context, id, root, output) {
     await page.getByText(labels.installedUserscripts, { exact: true }).first().click();
     await page.getByText(SCRIPT_NAME, { exact: true }).first().waitFor({ state: 'visible' });
     await page.screenshot({ path: join(output, 'userscript-installed.png') });
-    return { id, managerVersion: managerManifest.version, scriptName: SCRIPT_NAME };
+    return installed;
   } catch (error) {
     await page.screenshot({ path: join(output, 'userscript-install-error.png') }).catch(() => {});
     throw error;
@@ -693,6 +705,7 @@ export async function runChromeInstallation({
       liveObservation,
     });
   }
+  const upgradeInputs = installation === 'userscript' ? await loadUpgradeInputs(root) : null;
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let context;
   let cdp;
@@ -705,6 +718,7 @@ export async function runChromeInstallation({
     fixture: null,
     placementTiming: null,
     bitmapLifecycle: null,
+    userscriptUpgrade: null,
     live: [],
     liveWorkflowCoverage: null,
     cleanup: {},
@@ -734,9 +748,24 @@ export async function runChromeInstallation({
       ({ id: extensionId } = await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'test-tools/userscript-manager'),
       }));
-      const installed = await installUserscript(context, extensionId, root, output);
-      result.userscriptManager = installed;
-      result.installationMethod = 'real-manager-ui-import';
+      if (upgradeInputs) {
+        result.userscriptManager = await prepareUserscriptManager(context, extensionId, root);
+        try {
+          result.userscriptUpgrade = await runManagerUpgrade(
+            context,
+            extensionId,
+            root,
+            upgradeInputs
+          );
+        } catch (error) {
+          result.userscriptUpgrade = error.upgradeObservation ?? { status: 'failed' };
+          throw error;
+        }
+        result.installationMethod = 'real-manager-ui-upgrade';
+      } else {
+        result.userscriptManager = await installUserscript(context, extensionId, root, output);
+        result.installationMethod = 'real-manager-ui-import';
+      }
     }
     result.fixture = await runFixture({
       browser: context.browser(),
@@ -746,6 +775,17 @@ export async function runChromeInstallation({
       installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main',
     });
+    if (result.userscriptUpgrade) {
+      assert.equal(result.fixture.checks.installedApplicationDelivery, true);
+      assert.equal(result.fixture.observations.initialAdmission.accessibility.count, 6);
+      result.userscriptUpgrade.effectiveGrantEvidence = {
+        candidateMetadata: result.userscriptUpgrade.candidateUnsafeWindowGrant,
+        exactManagerEditorBytes:
+          result.userscriptUpgrade.after.editorSha256 === upgradeInputs.candidateSha256,
+        actualPageFetchIngress:
+          result.fixture.observations.initialAdmission.accessibility.count === 6,
+      };
+    }
     if (browserName === 'msedge' && installation === 'extension') {
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
         context,

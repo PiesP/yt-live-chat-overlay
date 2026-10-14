@@ -379,6 +379,45 @@ and Allow User Scripts through Chrome's UI in the isolated profile and imports
 the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
 
+For issue #227's public-v0.45.5-to-candidate upgrade check, place the downloaded
+public `yt-live-chat-overlay.user.js` at
+`validation/windows/release-upgrade/public-v0.45.5.user.js` after independently
+verifying it against the published release checksum. Place an ignored
+`validation/windows/release-upgrade/input.json` beside it with exactly:
+
+```json
+{
+  "schemaVersion": 1,
+  "baselineSha256": "<64 lowercase hexadecimal characters from the published checksum>",
+  "candidateVersion": "0.45.6",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.5/yt-live-chat-overlay.user.js"
+}
+```
+
+The existing `--installation userscript` invocation then uses the same fresh,
+owned Tampermonkey profile for both versions. It verifies fixed paths, public
+bytes, metadata identity and the candidate's `unsafeWindow` grant before launch;
+imports the public script through Tampermonkey's file picker; sets font size,
+opacity and safe-top through the installed script's settings UI; observes the
+manager's update confirmation, dismisses it once to verify that the prior
+version and settings remain active, then approves a second import. It checks one
+displayed installation, version, editor source bytes and retained settings.
+The original settings are restored through the UI after retention is proven so
+the ordinary seven-phase installed fixture can run on the candidate from its
+normal initial state, including actual page fetch ingress. The candidate digest
+is computed from the production file bundled
+by the Windows controller, whose build can embed a current timestamp. The input
+and public bytes are local-only and ignored by Git. Remove those two files from
+the checkout when the campaign is complete; retain their verified digest and
+the VM receipt outside Git. With no `input.json`, the existing fresh-install
+path runs unchanged. A supplied but invalid input fails closed.
+
+This locally imported candidate proves manager replacement, byte identity and
+settings compatibility in that owned profile. If the installed manager does not
+show an identifiable update confirmation, the upgrade check fails and records
+the prompt as unobserved. It does not prove an automatic public update or
+publication.
+
 After committing a clean named checkout and running the repository gates, use
 the configured controller in the prepared Windows validation environment. Run
 the Chrome or Edge extension, userscript-manager, and Firefox extension profiles
