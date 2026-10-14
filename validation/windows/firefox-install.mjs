@@ -184,6 +184,65 @@ export function categorizeErrors(logs) {
   );
 }
 
+export function selectPublicSeekTarget({ currentTime, start, end }) {
+  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
+  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
+  if (Math.abs(forward - currentTime) >= 1) return forward;
+  const backward = Math.max(start + 1, currentTime - 3);
+  return Math.abs(backward - currentTime) >= 1 ? backward : null;
+}
+
+export function requireFirefoxPublicCoverage(observations) {
+  const modes = new Set(observations.map((item) => item.provider?.chatMode));
+  assert(
+    observations.length >= 2 &&
+      modes.has('live') &&
+      modes.has('replay') &&
+      observations.some((item) => item.workflow?.navigation?.status === 'passed') &&
+      observations.every(
+        (item) =>
+          item.status === 'passed' &&
+          ['startup', 'settings', 'pause', 'resume', 'seek'].every(
+            (stage) => item.workflow?.[stage]?.status === 'passed'
+          )
+      ),
+    'Firefox public live/replay workflow coverage is incomplete'
+  );
+}
+
+async function readPublicPageState(session) {
+  return session.evaluateJson(`(() => {
+    const initialData = window.ytInitialData;
+    let renderer = initialData?.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
+    if (!renderer && initialData && typeof initialData === 'object') {
+      const pending = [initialData];
+      const seen = new Set();
+      for (let visited = 0; pending.length && visited < 1000; visited++) {
+        const value = pending.pop();
+        if (!value || typeof value !== 'object' || seen.has(value)) continue;
+        seen.add(value);
+        if (value.liveChatRenderer?.continuations) {
+          renderer = value.liveChatRenderer;
+          break;
+        }
+        for (const child of Object.values(value)) {
+          if (child && typeof child === 'object') pending.push(child);
+        }
+      }
+    }
+    const hostname = location.hostname;
+    return {
+      finalUrl: location.href,
+      chatMode: renderer?.isReplay === true ? 'replay' :
+        renderer?.isReplay === false ? 'live' : 'unknown',
+      chatRendererFound: Boolean(renderer),
+      playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
+      loginRedirect: hostname === 'accounts.google.com',
+      consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com'
+    };
+  })()`);
+}
+
 async function writeFailureScreenshot(session, output, fileName) {
   try {
     const screenshot = await session.captureScreenshot();
@@ -232,6 +291,35 @@ async function verifyStoredSettings(session) {
       }, location.origin);
     })`,
     'the Firefox extension storage write'
+  );
+}
+
+async function waitForStoredPublicFontSize(session, target) {
+  await session.waitFor(
+    `new Promise((resolve) => {
+      const nonce = window.__ytExtensionBridge?.nonce;
+      if (!nonce) { resolve(false); return; }
+      const requestId = 730002;
+      const timeout = setTimeout(() => { cleanup(); resolve(false); }, 750);
+      const cleanup = () => {
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+      };
+      const onMessage = (event) => {
+        const data = event.data;
+        if (event.source !== window || event.origin !== location.origin ||
+            data?.source !== 'yt-storage-relay-response' || data?.nonce !== nonce ||
+            data?.requestId !== requestId) return;
+        cleanup();
+        try { resolve(JSON.parse(data.value).fontSize === ${target}); }
+        catch { resolve(false); }
+      };
+      window.addEventListener('message', onMessage);
+      window.postMessage({
+        source: 'yt-storage-relay', nonce, requestId, method: 'get', key: '${SETTINGS_KEY}'
+      }, location.origin);
+    })`,
+    'the public UI font size to persist in extension storage'
   );
 }
 
@@ -397,15 +485,30 @@ async function runDeterministicPhase(session, checks, diagnostics) {
 
 async function runLivePhase(session, liveEntries, output) {
   const observations = [];
+  let previousMarker = null;
+  let previousUrl = null;
   for (const [index, entry] of liveEntries.entries()) {
     session.clearPageLogs();
     let loaded = false;
     let state;
     let player;
     let workerReady = false;
+    let provider;
+    let phase = 'navigation';
+    const workflow = {
+      startup: { status: 'not-run' },
+      settings: { status: 'not-run' },
+      pause: { status: 'not-run' },
+      resume: { status: 'not-run' },
+      seek: { status: 'not-run' },
+      navigation: { status: 'not-run' },
+    };
     try {
       await session.navigate(entry.url, { wait: 'interactive', timeoutMs: 45_000 });
       loaded = true;
+      phase = 'provider';
+      provider = await readPublicPageState(session);
+      phase = 'playback';
       await session.waitFor('Boolean(document.querySelector("video"))', 'the public video element');
       player = await session.evaluateJson(`(() => {
         const video = document.querySelector('video');
@@ -460,6 +563,7 @@ async function runLivePhase(session, liveEntries, output) {
         'public video playback to start'
       );
       player.playbackStarted = true;
+      phase = 'render';
       await session.waitFor(
         `Boolean(
           document.querySelectorAll('#${OVERLAY_ID}').length === 1 &&
@@ -507,12 +611,155 @@ async function runLivePhase(session, liveEntries, output) {
         session.pageLogs,
         state.workerBridgeReady
       );
+      provider = await readPublicPageState(session);
+      workflow.startup = {
+        status: provider.chatMode === 'unknown' ? 'unverified' : 'passed',
+        reason: provider.chatMode === 'unknown' ? 'chat-mode-unknown' : null,
+        chatMode: provider.chatMode,
+        renderedMessages: state.renderedMessageCount,
+      };
+      if (previousMarker !== null) {
+        phase = 'navigation-retirement';
+        const priorCanvasRetired = await session.evaluateJson(`(() => {
+          const canvas = document.querySelector('#${OVERLAY_ID} canvas');
+          return Boolean(canvas && canvas.getAttribute('data-firefox-live-session') !== '${previousMarker}' &&
+            !document.querySelector('#${OVERLAY_ID} canvas[data-firefox-live-session="${previousMarker}"]'));
+        })()`);
+        const crossWatch = previousUrl !== entry.url;
+        workflow.navigation = {
+          status: priorCanvasRetired && crossWatch ? 'passed' : 'unverified',
+          reason: !crossWatch
+            ? 'same-public-url'
+            : priorCanvasRetired
+              ? null
+              : 'prior-canvas-not-retired',
+          kind: crossWatch ? 'cross-watch' : 'reload',
+        };
+      }
+
+      phase = 'pause';
+      await session.waitFor(
+        `Boolean(document.querySelector('video') && !document.querySelector('video').paused &&
+          document.querySelector('video').readyState >= 2)`,
+        'public video playback before pausing'
+      );
+      workflow.pause = await session.evaluateJson(`(() => {
+        const video = document.querySelector('video');
+        if (!video) return { status: 'unverified', reason: 'video-unavailable' };
+        video.pause();
+        return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
+      })()`);
+      phase = 'resume';
+      workflow.resume = await session.evaluateJson(`(async () => {
+        const video = document.querySelector('video');
+        if (!video) return { status: 'unverified', reason: 'video-unavailable' };
+        try { await video.play(); }
+        catch { return { status: 'unverified', reason: 'play-rejected' }; }
+        return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
+      })()`);
+      phase = 'seek';
+      const seekRange = await session.evaluateJson(`(() => {
+        const video = document.querySelector('video');
+        if (!video?.seekable.length) return null;
+        const last = video.seekable.length - 1;
+        return { currentTime: video.currentTime, start: video.seekable.start(last),
+          end: video.seekable.end(last) };
+      })()`);
+      const seekTarget = seekRange && selectPublicSeekTarget(seekRange);
+      workflow.seek =
+        seekTarget === null
+          ? { status: 'unverified', reason: 'seek-range-unavailable', range: seekRange }
+          : await session.evaluateJson(`(async () => {
+              const video = document.querySelector('video');
+              if (!video) return { status: 'unverified', reason: 'video-unavailable' };
+              const completed = new Promise((resolve) => {
+                const timeout = setTimeout(() => resolve(false), 8000);
+                video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(true); }, { once: true });
+              });
+              video.currentTime = ${seekTarget};
+              const seeked = await completed;
+              return { status: seeked && Math.abs(video.currentTime - ${seekTarget}) < 2
+                  ? 'passed' : 'unverified', reason: seeked ? null : 'seeked-event-timeout',
+                target: ${seekTarget}, currentTime: video.currentTime };
+            })()`);
+      phase = 'settings';
+      const changed = await session.evaluateJson(`(() => {
+        const button = document.querySelector('#yt-chat-overlay-settings-button');
+        if (!(button instanceof HTMLButtonElement)) throw new Error('Public settings button is missing');
+        button.click();
+        const modal = document.querySelector('#yt-chat-overlay-settings-backdrop');
+        const input = modal?.querySelector('input[name="fontSize"]');
+        const close = modal?.querySelector('button[data-action="close"]');
+        if (!(modal instanceof HTMLDialogElement) || !(input instanceof HTMLInputElement) ||
+            !(close instanceof HTMLButtonElement) || !modal.open) {
+          throw new Error('Public settings dialog is unavailable');
+        }
+        const before = input.value;
+        const target = before === '36' ? '34' : '36';
+        input.value = target;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        close.click();
+        return { before, target, modalClosed: !modal.open };
+      })()`);
+      assert(
+        ['34', '36'].includes(changed.target),
+        'Public settings UI returned an invalid font size'
+      );
+      await session.waitFor(
+        `window.__ytChatOverlay?.getSettings()?.fontSize === Number('${changed.target}')`,
+        'public UI font size to apply'
+      );
+      await waitForStoredPublicFontSize(session, Number(changed.target));
+      await session.reload();
+      await session.waitFor(
+        `Boolean(window.__ytChatOverlay && document.querySelector('#${OVERLAY_ID} canvas') &&
+          document.querySelector('#yt-chat-overlay-settings-button') &&
+          document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p').length > 0)`,
+        'the public overlay to reload with settings'
+      );
+      await session.waitFor(
+        `Boolean(document.querySelector('video')?.readyState >= 2)`,
+        'the public video to be ready after settings reload'
+      );
+      const persisted = await session.evaluateJson(`(() => {
+        const button = document.querySelector('#yt-chat-overlay-settings-button');
+        button?.click();
+        const modal = document.querySelector('#yt-chat-overlay-settings-backdrop');
+        const value = modal?.querySelector('input[name="fontSize"]')?.value ?? null;
+        modal?.querySelector('button[data-action="close"]')?.click();
+        return { value, effective: window.__ytChatOverlay?.getSettings()?.fontSize ?? null };
+      })()`);
+      workflow.settings = {
+        status:
+          changed.modalClosed &&
+          persisted.value === changed.target &&
+          persisted.effective === Number(changed.target)
+            ? 'passed'
+            : 'unverified',
+        before: changed.before,
+        target: changed.target,
+        persisted,
+      };
+      phase = 'capture';
+      const marker = String(index + 1);
+      await session.evaluateJson(`(() => {
+        const canvas = document.querySelector('#${OVERLAY_ID} canvas');
+        if (!canvas) throw new Error('Public overlay canvas is missing after reload');
+        canvas.setAttribute('data-firefox-live-session', '${marker}');
+        return true;
+      })()`);
+      previousMarker = marker;
+      previousUrl = entry.url;
       const screenshot = `firefox-live-${String(index + 1).padStart(2, '0')}.png`;
       await writeFile(join(output, screenshot), await session.captureScreenshot());
       assert.equal(
         countUnexpectedLiveErrors(session.pageLogs, rendererResult.workerPolicyFallback),
         0,
         'The public page logged unexpected errors'
+      );
+      const failedStage = Object.entries(workflow).find(
+        ([stage, value]) => (stage !== 'navigation' || index > 0) && value.status !== 'passed'
       );
       observations.push({
         index,
@@ -523,7 +770,14 @@ async function runLivePhase(session, liveEntries, output) {
         ...rendererResult,
         screenshot,
         workerReady,
-        status: 'passed',
+        provider,
+        workflow,
+        status: failedStage ? 'unverified' : 'passed',
+        ...(failedStage
+          ? {
+              failureCategory: `${failedStage[0]}-${failedStage[1].reason ?? 'state-not-observed'}`,
+            }
+          : {}),
         hostErrorCount: session.pageLogs.filter(isYouTubeHostError).length,
         unexpectedErrorCount: 0,
         errorCategories: categorizeErrors(session.pageLogs),
@@ -557,12 +811,21 @@ async function runLivePhase(session, liveEntries, output) {
         player,
         ...(state ?? {}),
         workerReady,
+        provider,
+        workflow,
+        phase,
         status: 'unverified',
-        failureCategory: /timed out/i.test(errorMessage(error))
-          ? 'readiness-timeout'
-          : loaded
-            ? 'installed-render-readiness'
-            : 'navigation',
+        failureCategory: provider?.loginRedirect
+          ? 'provider-login-redirect'
+          : provider?.consentRedirect
+            ? 'provider-consent-redirect'
+            : provider?.playabilityStatus && provider.playabilityStatus !== 'OK'
+              ? 'provider-playability-unavailable'
+              : provider?.chatRendererFound === false
+                ? 'provider-chat-renderer-unavailable'
+                : /timed out/i.test(errorMessage(error))
+                  ? `${phase}-timeout`
+                  : `${phase}-error`,
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
         failure: describeFailure(error),
@@ -604,8 +867,9 @@ export async function runFirefoxInstallation(
     reloadSucceeded: false,
     spaLifecycle: false,
     deterministicErrorsAbsent: false,
-    livePagesLoaded: liveEntries.length === 0,
-    liveRenderingPassed: liveEntries.length === 0,
+    livePagesLoaded: liveEntries.length === 0 ? null : false,
+    liveRenderingPassed: liveEntries.length === 0 ? null : false,
+    liveWorkflowCoverage: liveEntries.length === 0 ? null : false,
     extensionUninstalled: false,
     browserClosed: false,
   };
@@ -636,15 +900,21 @@ export async function runFirefoxInstallation(
     await stopMock();
     stopMock = undefined;
     live = await runLivePhase(session, liveEntries, output);
-    checks.livePagesLoaded =
-      live.length === liveEntries.length && live.every(({ loaded }) => loaded);
-    checks.liveRenderingPassed =
-      live.length === liveEntries.length && live.every(({ status }) => status === 'passed');
-    assert.equal(
-      checks.liveRenderingPassed,
-      true,
-      'A public YouTube page did not prove installed rendering'
-    );
+    if (liveEntries.length > 0) {
+      checks.livePagesLoaded =
+        live.length === liveEntries.length && live.every(({ loaded }) => loaded);
+      checks.liveRenderingPassed =
+        live.length === liveEntries.length && live.every(({ status }) => status === 'passed');
+      if (checks.liveRenderingPassed) {
+        requireFirefoxPublicCoverage(live);
+        checks.liveWorkflowCoverage = true;
+      }
+      assert.equal(
+        checks.liveRenderingPassed && checks.liveWorkflowCoverage,
+        true,
+        'A public YouTube page did not prove installed rendering and workflow coverage'
+      );
+    }
   } catch (error) {
     primaryError = error;
     if (!checks.deterministicErrorsAbsent && session)

@@ -14,8 +14,10 @@ import * as firefoxInstallModule from '../../../validation/windows/firefox-insta
 const {
   categorizeErrors,
   normalizeLiveUrls,
+  requireFirefoxPublicCoverage,
   resolveSystemFirefoxExecutable,
   runFirefoxInstallation,
+  selectPublicSeekTarget,
 } = firefoxInstallModule;
 const {
   buildFirefoxLaunchArguments,
@@ -37,12 +39,19 @@ async function createBundle(): Promise<{ output: string; root: string }> {
 }
 
 function createSession(
-  options: { failStartup?: boolean; liveState?: Record<string, unknown> } = {}
+  options: {
+    failStartup?: boolean;
+    liveState?: Record<string, unknown>;
+    seekRangeUnavailable?: boolean;
+    secondChatMode?: 'live' | 'replay' | 'unknown';
+    settingsPersisted?: boolean;
+  } = {}
 ) {
   const calls: string[] = [];
   const pageLogs: Array<{ level: string; text: string; type: string }> = [];
   const pageErrors: Array<{ level: string; text: string; type: string }> = [];
   let evaluateIndex = 0;
+  let publicPage = -1;
   const session = {
     context: 'owned-context',
     command: vi.fn(async () => ({})),
@@ -63,6 +72,43 @@ function createSession(
       new Script(expression);
       if (expression.includes('video.muted = true')) return { paused: false, readyState: 4 };
       if (expression.includes('getBoundingClientRect')) return { x: 300, y: 200 };
+      if (expression.includes('const initialData = window.ytInitialData'))
+        return {
+          finalUrl: `https://www.youtube.com/watch?v=public-${publicPage}`,
+          chatMode: publicPage === 0 ? 'live' : (options.secondChatMode ?? 'replay'),
+          chatRendererFound: true,
+          playabilityStatus: 'OK',
+          loginRedirect: false,
+          consentRedirect: false,
+        };
+      if (expression.includes('videoPaused: document.querySelector'))
+        return (
+          options.liveState ?? {
+            renderer: 'worker',
+            videoPaused: false,
+            videoReadyState: 4,
+            canvasCount: 1,
+            overlayCount: 1,
+            pageScriptCount: 1,
+            renderedMessageCount: 1,
+            settingsButtonCount: 1,
+            workerBridgeReady: true,
+            workerReady: true,
+          }
+        );
+      if (expression.includes('const before = input.value;'))
+        return { before: '32', target: '36', modalClosed: true };
+      if (expression.includes('const value = modal?'))
+        return options.settingsPersisted === false
+          ? { value: '32', effective: 32 }
+          : { value: '36', effective: 36 };
+      if (expression.includes('video.pause();')) return { status: 'passed', paused: true };
+      if (expression.includes('try { await video.play(); }'))
+        return { status: 'passed', paused: false };
+      if (expression.includes('video?.seekable.length'))
+        return options.seekRangeUnavailable ? null : { currentTime: 30, start: 0, end: 120 };
+      if (expression.includes('const completed = new Promise'))
+        return { status: 'passed', reason: null, target: 33, currentTime: 33 };
       evaluateIndex++;
       if (options.failStartup && evaluateIndex === 1) throw new Error('fixture startup failed');
       switch (evaluateIndex) {
@@ -80,21 +126,6 @@ function createSession(
           return { accessibleMessageCount: 1, persisted: true };
         case 4:
           return 1;
-        case 7:
-          return (
-            options.liveState ?? {
-              renderer: 'worker',
-              videoPaused: false,
-              videoReadyState: 4,
-              canvasCount: 1,
-              overlayCount: 1,
-              pageScriptCount: 1,
-              renderedMessageCount: 1,
-              settingsButtonCount: 1,
-              workerBridgeReady: true,
-              workerReady: true,
-            }
-          );
         default:
           return true;
       }
@@ -106,6 +137,7 @@ function createSession(
     navigate: vi.fn(async (url: string) => {
       calls.push(url.includes('windowsFirefoxExtension') ? 'navigate-fixture' : 'navigate-live');
       if (!url.includes('windowsFirefoxExtension')) {
+        publicPage++;
         pageLogs.push({
           level: 'info',
           text: '[RenderWorkerManager] renderer.worker.started',
@@ -130,7 +162,8 @@ function createSession(
     uninstallExtension: vi.fn(async () => {
       calls.push('uninstall');
     }),
-    waitFor: vi.fn(async () => {
+    waitFor: vi.fn(async (expression: string) => {
+      new Script(expression);
       calls.push('wait');
     }),
   };
@@ -245,6 +278,11 @@ describe('Windows Firefox installation profile', () => {
         { level: 'info', text: 'private chat text', type: 'console' },
       ])
     ).toEqual({ 'content-security-policy': 1, worker: 1 });
+    expect(selectPublicSeekTarget({ currentTime: 30, start: 0, end: 120 })).toBe(33);
+    expect(selectPublicSeekTarget({ currentTime: 30, start: 30, end: 32 })).toBeNull();
+    expect(() => requireFirefoxPublicCoverage([{ provider: { chatMode: 'live' } }])).toThrow(
+      'live/replay workflow coverage'
+    );
   });
 
   it('runs installation, deterministic behavior, live observation, uninstall, and close in order', async () => {
@@ -256,7 +294,10 @@ describe('Windows Firefox installation profile', () => {
       {
         executablePath: '/test/firefox.exe',
         headless: false,
-        liveUrls: ['https://www.youtube.com/watch?v=public'],
+        liveUrls: [
+          'https://www.youtube.com/watch?v=public-live',
+          'https://www.youtube.com/watch?v=public-replay',
+        ],
         output,
         root,
       },
@@ -272,6 +313,10 @@ describe('Windows Firefox installation profile', () => {
       Object.fromEntries(Object.keys(result.checks).map((key) => [key, true]))
     );
     expect(result.status).toBe('passed');
+    expect(session.waitFor).toHaveBeenCalledWith(
+      expect.stringContaining('730002'),
+      'the public UI font size to persist in extension storage'
+    );
     expect(session.command).toHaveBeenCalledWith('input.performActions', {
       context: 'owned-context',
       actions: [
@@ -290,7 +335,7 @@ describe('Windows Firefox installation profile', () => {
     expect(session.command).toHaveBeenCalledWith('input.releaseActions', {
       context: 'owned-context',
     });
-    expect(result.observations.live).toEqual([
+    expect(result.observations.live).toMatchObject([
       {
         renderer: 'worker',
         workerPolicyFallback: false,
@@ -317,6 +362,20 @@ describe('Windows Firefox installation profile', () => {
         settingsButtonCount: 1,
         workerBridgeReady: true,
         workerReady: true,
+        provider: { chatMode: 'live' },
+        workflow: {
+          startup: { status: 'passed' },
+          settings: { status: 'passed' },
+          pause: { status: 'passed' },
+          resume: { status: 'passed' },
+          seek: { status: 'passed' },
+          navigation: { status: 'not-run' },
+        },
+        status: 'passed',
+      },
+      {
+        provider: { chatMode: 'replay' },
+        workflow: { navigation: { status: 'passed' } },
         status: 'passed',
       },
     ]);
@@ -327,6 +386,105 @@ describe('Windows Firefox installation profile', () => {
     expect(
       JSON.parse(await readFile(join(output, 'firefox-installation-result.json'), 'utf8'))
     ).toEqual(result);
+  });
+
+  it('leaves public-page checks not-run when only the installed fixture was requested', async () => {
+    const { output, root } = await createBundle();
+    const { session } = createSession();
+    const result = await runFirefoxInstallation(
+      { executablePath: '/test/firefox.exe', output, root },
+      { launch: async () => session }
+    );
+    expect(result.status).toBe('passed');
+    expect(result.checks.livePagesLoaded).toBeNull();
+    expect(result.checks.liveRenderingPassed).toBeNull();
+    expect(result.checks.liveWorkflowCoverage).toBeNull();
+    expect(result.observations.live).toEqual([]);
+  });
+
+  it.each([
+    [{ secondChatMode: 'unknown' as const }, 'startup', 'chat-mode-unknown'],
+    [{ settingsPersisted: false }, 'settings', 'state-not-observed'],
+    [{ seekRangeUnavailable: true }, 'seek', 'seek-range-unavailable'],
+  ])('does not pass incomplete public workflow evidence (%s)', async (options, stage, reason) => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession(options);
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public-live',
+            'https://www.youtube.com/watch?v=public-replay',
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.status).toBe('failed');
+    expect(receipt.checks.liveWorkflowCoverage).toBe(false);
+    expect(
+      receipt.observations.live.some(
+        (item: { failureCategory?: string }) => item.failureCategory === `${stage}-${reason}`
+      )
+    ).toBe(true);
+    expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
+  });
+
+  it('rejects two rendered public pages when neither proves replay mode', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({ secondChatMode: 'live' });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public-live',
+            'https://www.youtube.com/watch?v=public-replay',
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('live/replay workflow coverage is incomplete');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.checks.liveRenderingPassed).toBe(true);
+    expect(receipt.checks.liveWorkflowCoverage).toBe(false);
+    expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
+  });
+
+  it('does not count a repeat of the same public URL as cross-watch navigation', async () => {
+    const { output, root } = await createBundle();
+    const { session } = createSession();
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public',
+            'https://www.youtube.com/watch?v=public',
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live[1].workflow.navigation).toMatchObject({
+      status: 'unverified',
+      reason: 'same-public-url',
+    });
   });
 
   it('retains a flat failure screenshot and still uninstalls and closes', async () => {
