@@ -224,14 +224,15 @@ describe('Windows Firefox installation profile', () => {
     const profileDir = 'C:\\task\\.firefox-install-profile-test';
     const executablePath = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
     const ownership = { childPid: 10, executablePath, profileDir, spawnedAt };
-    const process = (pid: number, parentPid: number) => ({
+    const process = (pid: number, parentPid: number, commandLine?: string) => ({
       pid,
       parentPid,
       createdUtc,
+      startTicks: '133000000000000000',
       executablePath,
-      commandLine: `"${executablePath}" --profile "${profileDir}"`,
+      commandLine: commandLine ?? `"${executablePath}" --profile "${profileDir}"`,
     });
-    const processes = [process(20, 10), process(21, 20)];
+    const processes = [process(20, 10), process(21, 20, `"${executablePath}" -contentproc`)];
     expect(
       selectOwnedFirefoxProcesses(processes, ownership).map((entry: { pid: number }) => entry.pid)
     ).toEqual([20, 21]);
@@ -266,6 +267,7 @@ describe('Windows Firefox installation profile', () => {
       pid: 21,
       parentPid: 10,
       createdUtc: new Date(spawnedAt + 10).toISOString(),
+      startTicks: '133000000000000000',
       executablePath,
       commandLine: `"${executablePath}" --profile "${profileDir}"`,
     };
@@ -288,19 +290,26 @@ describe('Windows Firefox installation profile', () => {
       pid: 21,
       parentPid: 10,
       createdUtc,
+      startTicks: '133000000000000000',
       executablePath,
       commandLine: `"${executablePath}" --profile "${profileDir}"`,
     };
     const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [owned] };
     const child = { pid: 10, exitCode: 0, signalCode: null };
-    const stop = vi.fn(async () => {});
+    const stop = vi.fn(
+      async (_entry: { pid: number }, _bound: { expectedProcesses: unknown[] }) => {}
+    );
     const inspect = vi
       .fn()
       .mockResolvedValueOnce({ processes: [owned] })
       .mockResolvedValueOnce({ processes: [] });
     await terminateOwnedProcessTree(child, ownership, { platform: 'win32', inspect, stop });
     expect(stop).toHaveBeenCalledOnce();
-    expect(stop).toHaveBeenCalledWith(owned, { ...ownership, childPid: 10 });
+    expect(stop).toHaveBeenCalledWith(owned, {
+      ...ownership,
+      childPid: 10,
+      expectedProcesses: [owned],
+    });
     const reused = { ...owned, createdUtc: new Date(spawnedAt + 1000).toISOString() };
     await expect(
       terminateOwnedProcessTree(child, ownership, {
@@ -310,6 +319,48 @@ describe('Windows Firefox installation profile', () => {
       })
     ).rejects.toThrow(/Unverified Firefox process/u);
     expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it('snapshots and checks Firefox descendants without profile arguments before removing a profile', async () => {
+    const spawnedAt = Date.now();
+    const profileDir = 'C:\\task\\.firefox-install-profile-test';
+    const executablePath = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
+    const createdUtc = new Date(spawnedAt + 10).toISOString();
+    const makeProcess = (pid: number, parentPid: number, commandLine: string) => ({
+      pid,
+      parentPid,
+      createdUtc,
+      startTicks: `1330000000000000${pid}`,
+      executablePath,
+      commandLine,
+    });
+    const root = makeProcess(20, 10, `"${executablePath}" --profile "${profileDir}"`);
+    const browser = makeProcess(21, 20, `"${executablePath}" -contentproc`);
+    const content = makeProcess(22, 21, `"${executablePath}" -contentproc`);
+    const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [root] };
+    const child = { pid: 10, exitCode: 0, signalCode: null };
+    const stop = vi.fn(
+      async (_entry: { pid: number }, _bound: { expectedProcesses: unknown[] }) => {}
+    );
+    const inspect = vi
+      .fn()
+      .mockResolvedValueOnce({ processes: [root, browser, content] })
+      .mockResolvedValueOnce({ processes: [] });
+    await terminateOwnedProcessTree(child, ownership, { platform: 'win32', inspect, stop });
+    expect(stop.mock.calls.map(([entry]) => entry.pid)).toEqual([20, 21, 22]);
+    expect(stop.mock.calls[2]?.[1].expectedProcesses).toEqual([root, browser, content]);
+
+    const stillAlive = vi
+      .fn()
+      .mockResolvedValueOnce({ processes: [root, browser, content] })
+      .mockResolvedValueOnce({ processes: [content] });
+    await expect(
+      terminateOwnedProcessTree(child, ownership, {
+        platform: 'win32',
+        inspect: stillAlive,
+        stop,
+      })
+    ).rejects.toThrow(/remains alive/u);
   });
 
   it('serializes native Firefox and extension lifecycle parameters', () => {
