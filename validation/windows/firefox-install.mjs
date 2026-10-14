@@ -552,11 +552,51 @@ async function admitPublicPlayback(session, observation, description) {
   observation.reason = null;
 }
 
+function publicContentStateExpression(expectedVideoId, isReplay) {
+  return `(() => {
+    const expectedVideoId = ${JSON.stringify(expectedVideoId)};
+    const player = document.querySelector('#movie_player');
+    const video = player?.querySelector('video.html5-main-video');
+    const response = window.ytInitialPlayerResponse?.videoDetails;
+    const responseVideoId = response?.videoId ?? null;
+    let playerVideoId = null;
+    try { playerVideoId = player?.getVideoData?.()?.video_id ?? null; } catch {}
+    const adShowing = player?.classList.contains('ad-showing') ?? null;
+    const videoDuration = Number.isFinite(video?.duration) ? video.duration : null;
+    const metadataDuration = Number(response?.lengthSeconds) > 0
+      ? Number(response.lengthSeconds) : null;
+    const identityObserved = Boolean(responseVideoId || playerVideoId);
+    const identityMatches = Boolean(expectedVideoId && identityObserved &&
+      (!responseVideoId || responseVideoId === expectedVideoId) &&
+      (!playerVideoId || playerVideoId === expectedVideoId));
+    const durationMatches = !${isReplay} || videoDuration === null || metadataDuration === null ||
+      Math.abs(videoDuration - metadataDuration) <= Math.max(5, metadataDuration * 0.01);
+    const reason = !player || !video ? 'content-player-unavailable'
+      : adShowing ? 'ad-showing'
+      : video.paused !== false || !(video.readyState >= 2) ? 'content-playback-not-ready'
+      : !identityObserved || !expectedVideoId ? 'content-identity-unavailable'
+      : !identityMatches ? 'content-identity-mismatch'
+      : !durationMatches ? 'content-duration-mismatch' : null;
+    return {
+      status: reason ? 'unverified' : 'passed', reason, adShowing,
+      expectedVideoId, responseVideoId, playerVideoId,
+      videoDuration, metadataDuration
+    };
+  })()`;
+}
+
+async function readPublicContentState(session, expectedVideoId, isReplay) {
+  return session.evaluateJson(publicContentStateExpression(expectedVideoId, isReplay));
+}
+
 async function runLivePhase(session, liveEntries, output) {
   const observations = [];
   let previousMarker = null;
   let previousUrl = null;
   for (const [index, entry] of liveEntries.entries()) {
+    const url = new URL(entry.url);
+    const expectedVideoId =
+      entry.kind === 'watch' ? url.searchParams.get('v') : url.pathname.slice(6);
     session.clearPageLogs();
     let loaded = false;
     let state;
@@ -582,7 +622,7 @@ async function runLivePhase(session, liveEntries, output) {
       await admitPublicPlayback(session, player, 'public video playback to start');
       phase = 'render';
       await session.waitFor(
-        `Boolean(
+        `Boolean(${publicContentStateExpression(expectedVideoId, provider.chatMode === 'replay')}.status === 'passed' &&
           document.querySelectorAll('#${OVERLAY_ID}').length === 1 &&
           document.querySelectorAll('#${OVERLAY_ID} canvas').length === 1 &&
           document.querySelectorAll('#yt-chat-overlay-settings-button').length === 1 &&
@@ -593,9 +633,17 @@ async function runLivePhase(session, liveEntries, output) {
         'the installed Firefox extension to render public live chat',
         30_000
       );
+      player.content = await readPublicContentState(
+        session,
+        expectedVideoId,
+        provider.chatMode === 'replay'
+      );
+      if (player.content.status !== 'passed') {
+        throw new Error(`Public content was not ready: ${player.content.reason}`);
+      }
       state = await session.evaluateJson(`(() => ({
-        videoPaused: document.querySelector('video')?.paused ?? true,
-        videoReadyState: document.querySelector('video')?.readyState ?? 0,
+        videoPaused: document.querySelector('#movie_player video.html5-main-video')?.paused ?? true,
+        videoReadyState: document.querySelector('#movie_player video.html5-main-video')?.readyState ?? 0,
         renderer: document.querySelector('#yt-chat-overlay-debug')?.textContent.includes('Render: n/a')
           ? 'worker' : /Render:\\s*\\d/.test(document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '') ? 'main' : 'unknown',
         canvasCount: document.querySelectorAll('#${OVERLAY_ID} canvas').length,
@@ -659,27 +707,37 @@ async function runLivePhase(session, liveEntries, output) {
 
       phase = 'pause';
       await session.waitFor(
-        `Boolean(document.querySelector('video') && !document.querySelector('video').paused &&
-          document.querySelector('video').readyState >= 2)`,
+        `Boolean(document.querySelector('#movie_player video.html5-main-video') &&
+          !document.querySelector('#movie_player video.html5-main-video').paused &&
+          document.querySelector('#movie_player video.html5-main-video').readyState >= 2)`,
         'public video playback before pausing'
       );
       workflow.pause = await session.evaluateJson(`(() => {
-        const video = document.querySelector('video');
+        const video = document.querySelector('#movie_player video.html5-main-video');
         if (!video) return { status: 'unverified', reason: 'video-unavailable' };
         video.pause();
         return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
       })()`);
       phase = 'resume';
       workflow.resume = await session.evaluateJson(`(async () => {
-        const video = document.querySelector('video');
+        const video = document.querySelector('#movie_player video.html5-main-video');
         if (!video) return { status: 'unverified', reason: 'video-unavailable' };
         try { await video.play(); }
         catch { return { status: 'unverified', reason: 'play-rejected' }; }
         return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
       })()`);
       phase = 'seek';
+      const seekContent = await readPublicContentState(
+        session,
+        expectedVideoId,
+        provider.chatMode === 'replay'
+      );
+      if (seekContent.status !== 'passed') {
+        workflow.seek = { status: 'unverified', reason: seekContent.reason, content: seekContent };
+        throw new Error(`Public seek content was not ready: ${seekContent.reason}`);
+      }
       const seekRange = await session.evaluateJson(`(() => {
-        const video = document.querySelector('video');
+        const video = document.querySelector('#movie_player video.html5-main-video');
         if (!video?.seekable.length) return null;
         const last = video.seekable.length - 1;
         return { currentTime: video.currentTime, start: video.seekable.start(last),
@@ -692,7 +750,11 @@ async function runLivePhase(session, liveEntries, output) {
         seekTarget === null
           ? { status: 'unverified', reason: 'seek-range-unavailable', range: seekRange }
           : await session.evaluateJson(`(async () => {
-              const video = document.querySelector('video');
+              const content = ${publicContentStateExpression(expectedVideoId, provider.chatMode === 'replay')};
+              if (content.status !== 'passed') {
+                return { status: 'unverified', reason: content.reason, content, seekedEvent: false };
+              }
+              const video = document.querySelector('#movie_player video.html5-main-video');
               if (!video) return { status: 'unverified', reason: 'video-unavailable' };
               const preSeekTime = video.currentTime;
               const last = video.seekable.length - 1;
@@ -722,6 +784,7 @@ async function runLivePhase(session, liveEntries, output) {
                 preSeekTime, afterTime, seekedEvent: seeked, currentTime: afterTime };
             })()`);
       workflow.seek.selectionRange = seekRange;
+      workflow.seek.content ??= seekContent;
       phase = 'settings';
       const changed = await session.evaluateJson(`(() => {
         const button = document.querySelector('#yt-chat-overlay-settings-button');
@@ -834,6 +897,13 @@ async function runLivePhase(session, liveEntries, output) {
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
       });
     } catch (error) {
+      if (phase === 'render' && player && !player.content) {
+        player.content = await readPublicContentState(
+          session,
+          expectedVideoId,
+          provider?.chatMode === 'replay'
+        ).catch(() => null);
+      }
       if (loaded && player) {
         player.finalState = await session
           .evaluateJson(`(() => {

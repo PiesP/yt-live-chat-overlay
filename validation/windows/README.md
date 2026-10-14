@@ -272,9 +272,12 @@ The native Firefox extension run also requires live and replay pages plus a
 cross-watch transition. It changes a font-size setting through the public
 overlay UI, reloads to check persistence, and records pause, resume, seek,
 chat mode and renderer for each page, plus fresh-document Canvas isolation on
-each subsequent page transition. After the reload, it uses native player input
-when needed and requires observed playback before waiting for chat; the receipt
-records this as `workflow.settings.postReloadPlayback`.
+each subsequent page transition. Before seeking, it requires the requested
+main video without an active YouTube ad and records the player ad flag, video
+identity, and available duration evidence; an unknown identity remains
+unverified. After the reload, it uses native player input when needed and
+requires observed playback before waiting for chat; the receipt records this as
+`workflow.settings.postReloadPlayback`.
 Firefox uses `browsingContext.navigate` for public URL changes, so the absent
 prior-document Canvas marker does not establish same-document SPA teardown;
 the receipt marks that property unverified. The deterministic fixture checks
