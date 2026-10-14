@@ -8,6 +8,40 @@ const root = resolve(import.meta.dirname, '../../..');
 const biome = resolve(root, 'node_modules/.bin/biome');
 
 describe('Effective Biome coverage', () => {
+  it('rejects warning-only input through the configured lint and quality gates', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'yt-biome-warning-'));
+    try {
+      const git = spawnSync('git', ['init', '--quiet', '--initial-branch=master'], {
+        cwd: directory,
+        encoding: 'utf8',
+      });
+      expect(git.status, git.stderr).toBe(0);
+      copyFileSync(join(root, 'biome.json'), join(directory, 'biome.json'));
+      copyFileSync(join(root, '.gitignore'), join(directory, '.gitignore'));
+      mkdirSync(join(directory, 'scripts'));
+      const file = join(directory, 'scripts/control.ts');
+      const source =
+        'export function control(value: number) {\n  value += 1;\n  return value;\n}\n';
+      writeFileSync(file, source);
+      const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+        .scripts as Record<string, string>;
+      const run = (args: string[]) => spawnSync(biome, args, { cwd: directory, encoding: 'utf8' });
+      const advisory = run(['lint', '.']);
+      expect(advisory.status, advisory.stdout + advisory.stderr).toBe(0);
+      expect(advisory.stdout + advisory.stderr).toContain('noParameterAssign');
+      for (const name of ['lint', 'quality']) {
+        const command = scripts[name]?.split(' && ')[0];
+        if (!command) throw new Error(`Missing ${name} command`);
+        const result = run(command.split(' ').slice(1));
+        expect(result.status, result.stdout + result.stderr).toBe(1);
+        expect(result.stdout + result.stderr).toContain('noParameterAssign');
+        expect(readFileSync(file, 'utf8')).toBe(source);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('checks each first-party boundary and excludes external/generated material in both invocation modes', () => {
     const directory = mkdtempSync(join(tmpdir(), 'yt-biome-coverage-'));
     try {
