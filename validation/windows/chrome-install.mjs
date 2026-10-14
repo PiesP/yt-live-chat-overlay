@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.mjs';
@@ -20,6 +21,220 @@ const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
 const GRACEFUL_PROCESS_EXIT_MS = 2_000;
 const PROCESS_EXIT_TIMEOUT_MS = 5_000;
+const RESOURCE_BODY_TIMEOUT_MS = 3_000;
+const RESOURCE_REQUEST_LIMIT = 16;
+const OWNED_EXTENSION_RESOURCES = {
+  'workers/renderer.js': 524_288,
+  'page-script.js': 2_097_152,
+};
+
+export function ownedExtensionResourcePath(value, extensionId) {
+  if (typeof extensionId !== 'string' || !/^[a-p]{32}$/u.test(extensionId)) return null;
+  try {
+    const url = new URL(value);
+    const path = url.pathname.slice(1);
+    return url.protocol === 'chrome-extension:' &&
+      url.hostname === extensionId &&
+      !url.port &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      Object.hasOwn(OWNED_EXTENSION_RESOURCES, path)
+      ? path
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function compareOwnedExtensionResourceBody(body, expected) {
+  if (!Buffer.isBuffer(body) || body.length > expected.maxBytes) {
+    return { status: 'unverified', reason: 'body-overflow' };
+  }
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  return {
+    status: body.length === expected.bytes && sha256 === expected.sha256 ? 'matched' : 'unverified',
+    reason: body.length === expected.bytes && sha256 === expected.sha256 ? null : 'body-mismatch',
+    bytes: body.length,
+    sha256,
+  };
+}
+
+async function readExpectedExtensionResources(root) {
+  const expected = {};
+  for (const [path, maxBytes] of Object.entries(OWNED_EXTENSION_RESOURCES)) {
+    const file = join(root, 'dist-extension', path);
+    const size = (await stat(file)).size;
+    assert(size <= maxBytes, `Packaged ${path} exceeds diagnostic body limit`);
+    const body = await readFile(file);
+    expected[path] = {
+      maxBytes,
+      bytes: body.length,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    };
+  }
+  return expected;
+}
+
+export function beginOwnedExtensionResourceCapture(page, extensionId, expected, sourceContext) {
+  const requests = [];
+  const pending = new Set();
+  const entries = new Map();
+  let overflow = 0;
+  const onRequest = (request) => {
+    const path = ownedExtensionResourcePath(request.url(), extensionId);
+    if (!path) return;
+    if (requests.length >= RESOURCE_REQUEST_LIMIT) {
+      overflow++;
+      return;
+    }
+    let documentUrl;
+    let documentUrlSha256;
+    try {
+      const document = new URL(request.frame().url());
+      documentUrl =
+        document.protocol === 'https:' &&
+        ['www.youtube.com', 'youtube.com'].includes(document.hostname) &&
+        document.pathname === '/watch'
+          ? `${document.origin}/watch`
+          : null;
+      documentUrlSha256 = createHash('sha256').update(document.href).digest('hex');
+    } catch {
+      documentUrl = null;
+      documentUrlSha256 = null;
+    }
+    const entry = {
+      path,
+      ...sourceContext(),
+      documentUrl,
+      documentUrlSha256,
+      status: 'unverified',
+      reason: 'request-incomplete',
+      responseStatus: null,
+      mime: null,
+      expectedBytes: expected[path].bytes,
+      expectedSha256: expected[path].sha256,
+    };
+    requests.push(entry);
+    entries.set(request, entry);
+  };
+  const recordResponse = (entry, response) => {
+    entry.responseStatus = response.status();
+    const mime = response.headers()['content-type']?.split(';', 1)[0]?.trim();
+    entry.mime = mime && /^[\w.+-]+\/[\w.+-]+$/u.test(mime) ? mime : null;
+  };
+  const onResponse = (response) => {
+    const entry = entries.get(response.request());
+    if (entry) recordResponse(entry, response);
+  };
+  const onRequestFailed = (request) => {
+    const entry = entries.get(request);
+    if (!entry) return;
+    entry.reason = /^net::ERR_[A-Z_]+$/u.test(request.failure() ?? '')
+      ? request.failure()
+      : 'request-failed';
+    entries.delete(request);
+  };
+  const onRequestFinished = (request) => {
+    const entry = entries.get(request);
+    if (!entry) return;
+    entries.delete(request);
+    const inspect = (async () => {
+      const response = await request.response();
+      if (!response) {
+        entry.reason = 'response-unavailable';
+        return;
+      }
+      if (entry.responseStatus === null) recordResponse(entry, response);
+      if (entry.responseStatus !== 200) {
+        entry.reason = 'http-status';
+        return;
+      }
+      const size = (await request.sizes()).responseBodySize;
+      if (!Number.isSafeInteger(size) || size < 0) {
+        entry.reason = 'body-size-unavailable';
+        return;
+      }
+      if (size > expected[entry.path].maxBytes) {
+        entry.reason = 'body-overflow';
+        return;
+      }
+      const contentLength = Number(response.headers()['content-length']);
+      if (Number.isFinite(contentLength) && contentLength > expected[entry.path].maxBytes) {
+        entry.reason = 'body-overflow';
+        return;
+      }
+      const body = await response.body();
+      Object.assign(entry, compareOwnedExtensionResourceBody(body, expected[entry.path]));
+    })().catch(() => {
+      entry.reason = 'response-read-failed';
+    });
+    pending.add(inspect);
+    void inspect.finally(() => pending.delete(inspect));
+  };
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
+  page.on('requestfinished', onRequestFinished);
+  return async () => {
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+    page.off('requestfailed', onRequestFailed);
+    page.off('requestfinished', onRequestFinished);
+    if (pending.size) {
+      await Promise.race([Promise.allSettled([...pending]), delay(RESOURCE_BODY_TIMEOUT_MS)]);
+    }
+    const snapshot = requests.map((item) => ({ ...item }));
+    const missing = Object.keys(expected).filter(
+      (path) => !snapshot.some((item) => item.path === path)
+    );
+    const missingByNavigation = Object.fromEntries(
+      ['initial-watch', 'next-watch'].map((navigation) => [
+        navigation,
+        Object.keys(expected).filter(
+          (path) => !snapshot.some((item) => item.navigation === navigation && item.path === path)
+        ),
+      ])
+    );
+    return {
+      status:
+        overflow === 0 &&
+        Object.values(missingByNavigation).every((paths) => paths.length === 0) &&
+        snapshot.every((item) => item.status === 'matched')
+          ? 'observed'
+          : 'unverified',
+      expected,
+      missing,
+      missingByNavigation,
+      overflow,
+      requests: snapshot,
+    };
+  };
+}
+
+async function readExtensionBridgeDiagnostic(page) {
+  return page.evaluate(() => {
+    const bridge = window.__ytExtensionBridge;
+    const workerUrl = bridge?.workerUrl;
+    let workerBlobOrigin = null;
+    try {
+      if (typeof workerUrl === 'string' && workerUrl.startsWith('blob:')) {
+        workerBlobOrigin = new URL(workerUrl).origin;
+      }
+    } catch {
+      // The origin remains unknown when the browser exposes an invalid URL.
+    }
+    return {
+      workerSupported: bridge?.workerSupported === true,
+      storageType: bridge?.storageType ?? null,
+      workerBlobOrigin,
+      documentOrigin: location.origin,
+      workerUrlUsesDocumentOrigin:
+        typeof workerUrl === 'string' && workerUrl.startsWith(`blob:${location.origin}/`),
+    };
+  });
+}
 
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -271,7 +486,15 @@ export async function readPublicPageState(page) {
 }
 
 /** Observe a real watch page without supplying application code or site responses. */
-async function inspectLivePage(context, url, output, index, installation, nextUrl = url) {
+async function inspectLivePage(
+  context,
+  url,
+  output,
+  index,
+  installation,
+  nextUrl = url,
+  extensionResources = null
+) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
   const pageErrors = [];
@@ -299,6 +522,15 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
     }
   });
   const observation = { url, status: 'not-run', mocked: false };
+  let activeNavigation = 'initial-watch';
+  const finishResourceCapture = extensionResources
+    ? beginOwnedExtensionResourceCapture(
+        page,
+        extensionResources.extensionId,
+        extensionResources.expected,
+        () => ({ sourcePhase: observation.phase, navigation: activeNavigation })
+      )
+    : null;
   let deadlineReached = false;
   let deadlineCleanup;
   const screenshot = `live-${index}.png`;
@@ -357,12 +589,12 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
     observation.canvasAttached = (await page.locator('#yt-live-chat-overlay canvas').count()) === 1;
     const renderer = await page.locator('#yt-chat-overlay-debug').innerText();
     observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
-    observation.installedBridgeReady = await page.evaluate(() =>
-      Boolean(
-        window.__ytExtensionBridge?.workerSupported === true &&
-          window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-          window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
-      )
+    const bridge = await readExtensionBridgeDiagnostic(page);
+    observation.extensionBridge = bridge;
+    observation.installedBridgeReady = Boolean(
+      bridge.workerSupported &&
+        bridge.storageType === 'chrome.storage.local' &&
+        bridge.workerUrlUsesDocumentOrigin
     );
     Object.assign(
       observation,
@@ -489,6 +721,7 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
       observation.workflow.seek.selectionRange = seekRange;
     }
     observation.phase = 'navigation-transition';
+    activeNavigation = 'next-watch';
     const diagnosticStart = workerDiagnostics.length;
     await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
@@ -503,12 +736,11 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
     const nextPageState = await readPublicPageState(page);
     const nextRendererText = await page.locator('#yt-chat-overlay-debug').innerText();
     const nextRenderer = nextRendererText.includes('Render: n/a') ? 'worker' : 'main';
-    const nextBridgeReady = await page.evaluate(() =>
-      Boolean(
-        window.__ytExtensionBridge?.workerSupported === true &&
-          window.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-          window.__ytExtensionBridge?.workerUrl?.startsWith('blob:' + location.origin + '/')
-      )
+    const nextBridge = await readExtensionBridgeDiagnostic(page);
+    const nextBridgeReady = Boolean(
+      nextBridge.workerSupported &&
+        nextBridge.storageType === 'chrome.storage.local' &&
+        nextBridge.workerUrlUsesDocumentOrigin
     );
     const nextRendererPolicy = validateLiveRenderer(
       nextRenderer,
@@ -524,6 +756,7 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
       canvasAttached: true,
       renderer: nextRenderer,
       installedBridgeReady: nextBridgeReady,
+      extensionBridge: nextBridge,
       ...nextRendererPolicy,
       renderedMessages: await page.locator('.yt-live-chat-overlay-live-region > p').count(),
     };
@@ -562,6 +795,12 @@ async function inspectLivePage(context, url, output, index, installation, nextUr
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
+    if (finishResourceCapture) {
+      observation.extensionResources = {
+        installedExtensionId: extensionResources.extensionId,
+        ...(await finishResourceCapture()),
+      };
+    }
     observation.workerDiagnostics = workerDiagnostics;
     if (!page.isClosed()) {
       await page.screenshot({ path: join(output, screenshot) }).then(
@@ -902,9 +1141,23 @@ export async function runChromeInstallation({
         'Installed Edge placement or replay fixture did not satisfy its observations'
       );
     }
+    const extensionResources =
+      installation === 'extension' && liveUrls.length > 0
+        ? { extensionId, expected: await readExpectedExtensionResources(root) }
+        : null;
     for (const [index, url] of liveUrls.entries()) {
       const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
-      result.live.push(await inspectLivePage(context, url, output, index, installation, nextUrl));
+      result.live.push(
+        await inspectLivePage(
+          context,
+          url,
+          output,
+          index,
+          installation,
+          nextUrl,
+          extensionResources
+        )
+      );
     }
     if (liveUrls.length > 0) {
       const observedModes = [...new Set(result.live.map((item) => item.chatMode))];
