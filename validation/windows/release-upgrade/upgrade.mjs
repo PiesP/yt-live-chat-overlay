@@ -372,6 +372,11 @@ async function importThroughManager(
     }
     const updateAction = confirmation.getByRole('button', { name: labels.update, exact: true });
     const installAction = confirmation.getByRole('button', { name: labels.install, exact: true });
+    // ask.html navigates before its translated confirmation controls are rendered.
+    await (expectedKind === 'update' ? updateAction.or(installAction) : installAction).waitFor({
+      state: 'visible',
+      timeout: 10_000,
+    });
     const updateVisible = expectedKind === 'update' && (await updateAction.isVisible());
     const installVisible = await installAction.isVisible();
     assert(
@@ -390,6 +395,29 @@ async function importThroughManager(
       prompt: 'approved-through-manager-ui',
       actionLabel: updateVisible ? labels.update : labels.install,
     };
+  } catch (error) {
+    if (observation && output && !confirmation.isClosed()) {
+      const screenshot = `manager-confirmation-${expectedKind}-${decision}-failure.png`;
+      const captured = await confirmation.screenshot({ path: join(output, screenshot) }).then(
+        () => true,
+        () => false
+      );
+      const buttons = await confirmation
+        .getByRole('button')
+        .allTextContents()
+        .then(
+          (values) => values.slice(0, 12).map((value) => value.trim().slice(0, 128)),
+          () => []
+        );
+      observation.confirmationDiagnostics ??= [];
+      observation.confirmationDiagnostics.push({
+        expectedKind,
+        decision,
+        buttons,
+        screenshot: captured ? screenshot : null,
+      });
+    }
+    throw error;
   } finally {
     if (!confirmation.isClosed()) await confirmation.close();
   }
@@ -539,7 +567,16 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
   let cleanupErrors = [];
   try {
     result.stages.push(
-      await importThroughManager(manager, context, managerId, inputs.baselinePath, 'install')
+      await importThroughManager(
+        manager,
+        context,
+        managerId,
+        inputs.baselinePath,
+        'install',
+        'approve',
+        result,
+        output
+      )
     );
     result.before = await observeInstalledScript(
       manager,
