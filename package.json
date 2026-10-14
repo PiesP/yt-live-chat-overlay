@@ -28,7 +28,7 @@
     "quality:fix": "biome check --write --error-on-warnings . && pnpm -s quality",
     "check:artifacts": "node --experimental-strip-types scripts/check/artifacts.ts",
     "verify": "pnpm -s quality && pnpm -s check:versions && pnpm -s build:targets:ci",
-    "verify:full": "pnpm verify && pnpm test:core && pnpm test:cov && pnpm test:e2e",
+    "verify:full": "pnpm verify && pnpm test:core && pnpm test:cov && pnpm test:e2e:prepared",
     "clean": "node --experimental-strip-types scripts/build/clean.ts",
     "validate:consistency": "vitest run test/consistency/",
     "check:versions": "node --experimental-strip-types scripts/release/version.ts check",
@@ -57,7 +57,8 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:e2e": "playwright test --config test/e2e/playwright.config.ts",
-    "test:e2e:headed": "pnpm test:e2e -- --headed",
+    "test:e2e:headed": "pnpm test:e2e --headed",
+    "test:e2e:prepared": "pnpm -s build:dev && pnpm -s check:artifacts --e2e && playwright test --config test/e2e/playwright.config.ts",
     "pretest:e2e": "pnpm build:dev && pnpm build:extension:ci && pnpm build:extension:firefox:ci && pnpm -s check:artifacts --e2e",
     "clean:all": "pnpm -s clean",
     "check:i18n": "node --experimental-strip-types scripts/check/i18n.ts"
