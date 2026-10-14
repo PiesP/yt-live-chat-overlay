@@ -8,6 +8,11 @@ import { API } from 'typescript/unstable/sync';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
+const scripts = (
+  JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+  }
+).scripts;
 
 function createVerificationFixture(): {
   directory: string;
@@ -24,11 +29,6 @@ function createVerificationFixture(): {
   const log = join(directory, 'calls.bin');
   mkdirSync(bin);
   mkdirSync(join(directory, 'outputs'));
-  const scripts = (
-    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
-      scripts: Record<string, string>;
-    }
-  ).scripts;
   const fixtureScripts = {
     ...scripts,
     quality: 'sh ./record.sh quality',
@@ -126,12 +126,29 @@ fi
 }
 
 describe('Verification configuration', () => {
-  it('builds both complete extension targets once in full verification and keeps standalone E2E fresh', () => {
+  it('builds both complete extension targets once across the full verification stages', () => {
     const fixture = createVerificationFixture();
     try {
-      const full = fixture.run('verify:full', 'full');
-      expect(full.status, full.output).toBe(0);
-      const names = full.calls.map(([name]) => name);
+      expect(scripts['verify:full']).toBe(
+        'pnpm verify && pnpm test:core && pnpm test:cov && pnpm test:e2e:prepared'
+      );
+      expect(scripts.verify).toBe(
+        'pnpm -s quality && pnpm -s check:versions && pnpm -s build:targets:ci'
+      );
+      const calls: string[][] = [];
+      for (const stage of [
+        'quality',
+        'check:versions',
+        'build:targets:ci',
+        'test:core',
+        'test:cov',
+        'test:e2e:prepared',
+      ]) {
+        const result = fixture.run(stage, 'full');
+        expect(result.status, `${stage}: ${result.output}`).toBe(0);
+        calls.push(...result.calls);
+      }
+      const names = calls.map(([name]) => name);
       expect(names).toEqual([
         'quality',
         'check:versions',
@@ -150,20 +167,36 @@ describe('Verification configuration', () => {
         'playwright',
       ]);
       expect(
-        full.calls.filter(([name, ...args]) => name === 'vite' && args.includes('--config'))
+        calls.filter(([name, ...args]) => name === 'vite' && args.includes('--config'))
       ).toHaveLength(6);
-      expect(full.calls.filter(([name]) => name === 'check:artifacts')).toEqual([
+      expect(calls.filter(([name]) => name === 'check:artifacts')).toEqual([
         ['check:artifacts'],
         ['check:artifacts', '--e2e'],
       ]);
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 
+  it('builds missing standalone E2E targets before launching Playwright', () => {
+    const fixture = createVerificationFixture();
+    try {
       rmSync(join(fixture.directory, 'outputs'), { recursive: true, force: true });
       const missing = fixture.run('test:e2e', 'missing');
       expect(missing.status, missing.output).toBe(0);
       expect(missing.calls.filter(([name]) => name === 'vite')).toHaveLength(7);
       expect(missing.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
       expect(missing.calls.at(-1)?.[0]).toBe('playwright');
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
+  it('rebuilds stale standalone E2E targets and forwards headed options', () => {
+    const fixture = createVerificationFixture();
+    try {
+      const old = fixture.run('test:e2e', 'old');
+      expect(old.status, old.output).toBe(0);
       const stale = fixture.run('test:e2e:headed', 'fresh', '', ['--', '--project=chromium']);
       expect(stale.status, stale.output).toBe(0);
       expect(stale.calls.filter(([name]) => name === 'vite')).toHaveLength(7);
@@ -173,7 +206,7 @@ describe('Verification configuration', () => {
     } finally {
       rmSync(fixture.directory, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 30_000);
 
   it.each([
     ['verify:full', 'vite build --config vite.config.extension.cs.firefox.ts'],
