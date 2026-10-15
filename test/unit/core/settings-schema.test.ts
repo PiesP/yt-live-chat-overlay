@@ -632,6 +632,34 @@ describe('applySettingsPatch', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('normalizeStoredSettings', () => {
+  it('keeps valid legacy sizing preferences and applies existing invalid-value normalization', () => {
+    const valid = normalizeStoredSettings({
+      fontBaseViewportHeight: 720,
+      fontMinSize: 12,
+      fontMaxSize: 42,
+      fontSize: 30,
+    });
+    expect(valid).toMatchObject({
+      fontBaseViewportHeight: 720,
+      fontMinSize: 12,
+      fontMaxSize: 42,
+      fontSize: 30,
+    });
+
+    const invalid = normalizeStoredSettings({
+      fontBaseViewportHeight: 'invalid',
+      fontMinSize: -1,
+      fontMaxSize: 999,
+      fontSize: 38,
+    });
+    expect(invalid).toMatchObject({
+      fontBaseViewportHeight: DEFAULT_SETTINGS.fontBaseViewportHeight,
+      fontMinSize: 10,
+      fontMaxSize: 72,
+      fontSize: 38,
+    });
+  });
+
   it('returns defaults when stored is null', () => {
     const result = normalizeStoredSettings(null);
     expect(result).toEqual(DEFAULT_SETTINGS);

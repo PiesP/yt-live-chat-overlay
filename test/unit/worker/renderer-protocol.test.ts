@@ -156,9 +156,6 @@ function makeMinimalConfig(): Record<string, unknown> {
     reducedMotion: false,
     preserveUserColor: false,
     isReplayMode: false,
-    fontBaseViewportHeight: 1080,
-    fontMinSize: 10,
-    fontMaxSize: 120,
     fontWeight: 'bold',
   };
 }
@@ -203,6 +200,10 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
     })
   );
   return renderer;
+}
+
+function workerLaneHeight(renderer: WorkerRenderer): number {
+  return (renderer as unknown as { laneHeight: number }).laneHeight;
 }
 
 function prepareGradientPaidCard() {
@@ -606,6 +607,34 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Worker module', () => {
+  it('keeps Worker row geometry tied to fontSize across resize and active changes', () => {
+    mockCtx.measureText.mockImplementation(() => {
+      const size = Number.parseInt(mockCtx.font, 10);
+      return {
+        width: 100,
+        actualBoundingBoxAscent: size * 0.8,
+        actualBoundingBoxDescent: size * 0.2,
+      };
+    });
+    try {
+      const renderer = initializeRenderer({ fontSize: 20 });
+      const initialHeight = workerLaneHeight(renderer);
+      expect(initialHeight).toBeGreaterThan(0);
+
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 1280, height: 720, dpr: 1 }));
+      expect(workerLaneHeight(renderer)).toBe(initialHeight);
+
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { fontSize: 40 } }));
+      expect(workerLaneHeight(renderer)).toBeGreaterThan(initialHeight);
+    } finally {
+      mockCtx.measureText.mockImplementation(() => ({
+        width: 100,
+        actualBoundingBoxAscent: 16,
+        actualBoundingBoxDescent: 4,
+      }));
+    }
+  });
+
   it('sets self.onmessage at import time', () => {
     expect(typeof getHandler()).toBe('function');
   });

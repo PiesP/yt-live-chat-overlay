@@ -478,6 +478,47 @@ describe('Worker renderer state synchronization', () => {
     scheduledAnimationFrames.length = 0;
   });
 
+  it('applies current fontSize through manager dispatch while excluding legacy preferences', () => {
+    const initialSettings = {
+      ...DEFAULT_SETTINGS,
+      fontSize: 30,
+      fontBaseViewportHeight: 720,
+      fontMinSize: 12,
+      fontMaxSize: 42,
+    };
+    const { manager, worker } = initializedManager(initialSettings);
+    const renderer = initializedRenderer(initialSettings);
+    coupleWorker(worker, renderer);
+    const workerFontSize = () =>
+      (renderer as unknown as { config: { fontSize: number } }).config.fontSize;
+
+    try {
+      const legacyChanged = {
+        ...initialSettings,
+        fontBaseViewportHeight: 1440,
+        fontMinSize: 20,
+        fontMaxSize: 60,
+      };
+      manager.updateSettings(legacyChanged);
+      const legacyUpdate = worker.postMessage.mock.calls.at(-1)?.[0] as {
+        type: string;
+        config: Record<string, unknown>;
+      };
+      expect(legacyUpdate.type).toBe('updateConfig');
+      expect(legacyUpdate.config.fontSize).toBe(30);
+      for (const key of ['fontBaseViewportHeight', 'fontMinSize', 'fontMaxSize']) {
+        expect(Object.hasOwn(legacyUpdate.config, key)).toBe(false);
+      }
+      expect(workerFontSize()).toBe(30);
+
+      manager.updateSettings({ ...legacyChanged, fontSize: 40 });
+      expect(workerFontSize()).toBe(40);
+    } finally {
+      manager.destroy();
+      worker.acknowledgeDestroy();
+    }
+  });
+
   it('retains ordinary burst acceleration while Backlog ignores serialized burst', () => {
     const renderer = initializedRenderer({
       ...DEFAULT_SETTINGS,
