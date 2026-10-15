@@ -411,6 +411,20 @@ describe('Verification configuration', () => {
     expect(workflow).toContain('playwright-report/');
   });
 
+  it('keys browser reuse by the installed version and still provisions and tests both browsers', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
+    const e2e = workflow.split('\n  e2e:\n')[1]?.split('\n  build:\n')[0] ?? '';
+    expect(e2e).toContain("require('@playwright/test/package.json').version");
+    expect(e2e).toContain(
+      'key: playwright-${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-chromium-firefox-${{ steps.playwright.outputs.version }}'
+    );
+    expect(e2e).not.toContain('restore-keys:');
+    expect(e2e).toContain('pnpm exec playwright install --with-deps chromium firefox');
+    expect(e2e).toContain(
+      'xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e'
+    );
+  });
+
   it('runs one complete Biome pass, preserves quality order, and propagates failures', () => {
     const scripts = (
       JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {

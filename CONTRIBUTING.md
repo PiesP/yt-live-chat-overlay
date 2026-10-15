@@ -81,6 +81,14 @@ that hides distinct behavior. Automated clone detection is retired.
 | `.githooks/pre-commit`, `.githooks/pre-push` | Minimal Git-invoked Bash guards reject detached/default-branch commits and direct default-branch pushes before pinned Node setup. | `test/unit/config/git-hooks.test.ts`. Retained small pre-runtime Git adapter; revisit only if all Git hook invocations can rely on the pinned Node runtime without weakening the refusal. |
 | Test subprocess callers | `test/unit/config/{workflow-classifier-git,release-prepare,node-script-boundaries,userscript-manager-package,windows-chrome-process,windows-chrome-profile,windows-firefox-profile,windows-live-duration}.test.ts`, `test/unit/tooling/command-adapters.test.ts`, and `scripts/ci/repository-authority.test.ts` exercise Git, CLI, Python and raw `.mjs` contracts in fixtures. Provider tests own OSV parser/scanner behavior. | Keep executable paths and NodeNext configs aligned; isolated fixtures do not prove installed browser or public release behavior. |
 
+CI keys the Chromium/Firefox browser cache to the installed Playwright version,
+runner OS/architecture and Ubuntu 24.04, without cross-version restoration.
+Every run still installs browser and OS dependencies and executes the existing
+Xvfb E2E path. [Issue #232](https://github.com/PiesP/yt-live-chat-overlay/issues/232)
+records the cache comparison. Reconsider this choice if runner provisioning,
+the browser set or cache restore/download costs change. Package-manager and
+mutation-result caches have separate contracts.
+
 ### External Windows bundle and retained languages
 
 `validation/windows/profile.json` lists artifact-only assets, installation entry `install-profile.mjs`, other raw `.mjs` helpers, and the `pnpm` build commands. The external controller supplies portable Windows Node, `playwright-core`, a headed stable browser, and calls `run({ browser, root, output })`. It does not compile TypeScript or load `.ts` from the guest bundle. Keep raw `.mjs` until the controller has a source-bound TS build/loader or checked generated-JS path with stale-output verification, all profile imports/assets are updated together, and focused prepared-VM smoke passes. The Node boundary suite runs `node --check` over every `validation/windows/**/*.mjs` file; existing Windows helper unit tests cover behavior. These do not prove desktop or live-site behavior.
