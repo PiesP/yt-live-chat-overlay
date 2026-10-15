@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.45.6] - 2026-10-14 (prepared; unpublished)
+## [0.45.7] - 2026-10-15 (prepared; unpublished)
+
+### Fixed
+
+- **Userscript update downloads** — Point the emitted `@downloadURL` to the Latest userscript while retaining the Latest metadata URL. Existing installations with a versioned download URL need one manual installation from the new public release; Check for updates alone can fetch the old version again.
+
+## [0.45.6] - 2026-10-15
 
 ### Fixed
 

@@ -9,15 +9,17 @@ import { join } from 'node:path';
 
 const DIRECTORY = 'validation/windows/release-upgrade';
 const INPUT_FILE = `${DIRECTORY}/input.json`;
-const BASELINE_FILE = `${DIRECTORY}/public-v0.45.5.user.js`;
+const BASELINE_FILE = `${DIRECTORY}/public-v0.45.6.user.js`;
 const CANDIDATE_FILE = 'dist/yt-live-chat-overlay.user.js';
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const SCRIPT_NAMESPACE = 'https://github.com/PiesP';
-const BASELINE_VERSION = '0.45.5';
+const BASELINE_VERSION = '0.45.6';
 const PUBLIC_ASSET_URL =
-  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.5/yt-live-chat-overlay.user.js';
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.6/yt-live-chat-overlay.user.js';
 const UPDATE_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js';
+const CANDIDATE_DOWNLOAD_URL =
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js';
 const MAX_SCRIPT_BYTES = 16 * 1024 * 1024;
 
 export function sha256(bytes) {
@@ -33,7 +35,7 @@ export function validateUpgradeInput(value) {
   );
   assert.equal(value.schemaVersion, 1, 'Unsupported upgrade input schema');
   assert.match(value.baselineSha256, /^[a-f0-9]{64}$/u, 'Invalid public baseline SHA-256');
-  assert.equal(value.candidateVersion, '0.45.6', 'Unexpected candidate version');
+  assert.equal(value.candidateVersion, '0.45.7', 'Unexpected candidate version');
   assert.equal(value.publishedAssetUrl, PUBLIC_ASSET_URL, 'Unexpected public asset URL');
   return value;
 }
@@ -73,12 +75,9 @@ export function requireUpgradeMetadata(baseline, candidate, candidateVersion) {
     assert.equal(metadata.namespace, SCRIPT_NAMESPACE, `${label} script namespace changed`);
     assert.equal(metadata.version, version, `${label} script version changed`);
     assert.equal(metadata.updateUrl, UPDATE_URL, `${label} update URL changed`);
-    assert.equal(
-      metadata.downloadUrl,
-      `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${version}/yt-live-chat-overlay.user.js`,
-      `${label} download URL changed`
-    );
   }
+  assert.equal(baseline.downloadUrl, PUBLIC_ASSET_URL, 'baseline download URL changed');
+  assert.equal(candidate.downloadUrl, CANDIDATE_DOWNLOAD_URL, 'candidate download URL changed');
   assert(candidate.grants.includes('unsafeWindow'), 'Candidate lacks unsafeWindow grant');
   assert.equal(
     new Set(candidate.grants).size,

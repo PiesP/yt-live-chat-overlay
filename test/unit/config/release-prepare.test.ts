@@ -105,6 +105,8 @@ describe('release preparation artifact versions', () => {
     const notes = readFileSync(join(releaseDirectory, 'RELEASE_NOTES.md'), 'utf8');
     expect(notes).toContain(sourceCommit);
     expect(notes).toContain('/releases/download/v1.2.3/yt-live-chat-overlay.user.js');
+    expect(notes).toContain('versioned `@downloadURL`');
+    expect(notes).toContain('Check for updates');
     expect(notes).toContain('/compare/v1.2.2...v1.2.3');
     expect(notes).toContain('does not update automatically');
     expect(notes).toContain('removed when Firefox restarts');

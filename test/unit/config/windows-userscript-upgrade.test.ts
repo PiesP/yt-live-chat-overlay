@@ -11,16 +11,18 @@ import * as chromeInstall from '../../../validation/windows/chrome-install.mjs';
 import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.mjs';
 
 const roots: string[] = [];
-const baselineVersion = '0.45.5';
-const candidateVersion = '0.45.6';
+const baselineVersion = '0.45.6';
+const candidateVersion = '0.45.7';
 const assetUrl =
-  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.5/yt-live-chat-overlay.user.js';
-const metadata = (version: string, unsafeWindow: boolean) => `// ==UserScript==
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.6/yt-live-chat-overlay.user.js';
+const candidateDownloadUrl =
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js';
+const metadata = (version: string, unsafeWindow: boolean, downloadUrl: string) => `// ==UserScript==
 // @name         YouTube Live Chat Overlay
 // @namespace    https://github.com/PiesP
 // @version      ${version}
 // @updateURL    https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js
-// @downloadURL  https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${version}/yt-live-chat-overlay.user.js
+// @downloadURL  ${downloadUrl}
 // @grant        GM_getValue
 ${unsafeWindow ? '// @grant        unsafeWindow\n' : ''}// ==/UserScript==
 console.log('fixture');
@@ -34,8 +36,8 @@ async function fixture(
   const directory = join(root, 'validation/windows/release-upgrade');
   await mkdir(directory, { recursive: true });
   await mkdir(join(root, 'dist'));
-  const baseline = overrides.baseline ?? metadata(baselineVersion, false);
-  const candidate = overrides.candidate ?? metadata(candidateVersion, true);
+  const baseline = overrides.baseline ?? metadata(baselineVersion, true, assetUrl);
+  const candidate = overrides.candidate ?? metadata(candidateVersion, true, candidateDownloadUrl);
   const input = overrides.input ?? {
     schemaVersion: 1,
     baselineSha256: upgrade.sha256(Buffer.from(baseline)),
@@ -43,7 +45,7 @@ async function fixture(
     publishedAssetUrl: assetUrl,
   };
   await writeFile(join(directory, 'input.json'), JSON.stringify(input));
-  await writeFile(join(directory, 'public-v0.45.5.user.js'), baseline);
+  await writeFile(join(directory, 'public-v0.45.6.user.js'), baseline);
   await writeFile(join(root, 'dist/yt-live-chat-overlay.user.js'), candidate);
   return { root, directory };
 }
@@ -67,6 +69,25 @@ describe('installed manager upgrade inputs', () => {
     expect(inputs.candidate.grants).toContain('unsafeWindow');
     expect(inputs.baselineSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(inputs.candidateSha256).not.toBe(inputs.baselineSha256);
+    expect(inputs.baseline.downloadUrl).toBe(assetUrl);
+    expect(inputs.candidate.downloadUrl).toBe(candidateDownloadUrl);
+  });
+
+  it('rejects a changed public URL and versioned or unrelated candidate download URLs', async () => {
+    for (const overrides of [
+      { baseline: metadata(baselineVersion, true, candidateDownloadUrl) },
+      {
+        candidate: metadata(
+          candidateVersion,
+          true,
+          `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${candidateVersion}/yt-live-chat-overlay.user.js`
+        ),
+      },
+      { candidate: metadata(candidateVersion, true, 'https://example.com/other.user.js') },
+    ]) {
+      const { root } = await fixture(overrides);
+      await expect(upgrade.loadUpgradeInputs(root)).rejects.toThrow('download URL changed');
+    }
   });
 
   it('rejects an unknown field, wrong public URL, wrong version and missing baseline digest', () => {
@@ -98,10 +119,10 @@ describe('installed manager upgrade inputs', () => {
     });
     await expect(upgrade.loadUpgradeInputs(badDigest.root)).rejects.toThrow('SHA-256 differs');
     const linked = await fixture();
-    await rm(join(linked.directory, 'public-v0.45.5.user.js'));
+    await rm(join(linked.directory, 'public-v0.45.6.user.js'));
     await symlink(
-      join(badDigest.directory, 'public-v0.45.5.user.js'),
-      join(linked.directory, 'public-v0.45.5.user.js')
+      join(badDigest.directory, 'public-v0.45.6.user.js'),
+      join(linked.directory, 'public-v0.45.6.user.js')
     );
     await expect(upgrade.loadUpgradeInputs(linked.root)).rejects.toThrow('Invalid upgrade file');
   });
@@ -134,10 +155,13 @@ describe('installed manager upgrade inputs', () => {
 
   it('rejects an old candidate version, missing grant and changed script identity', async () => {
     for (const candidate of [
-      metadata(baselineVersion, true),
-      metadata(candidateVersion, false),
-      metadata(candidateVersion, true).replace('YouTube Live Chat Overlay', 'Other Script'),
-      metadata(candidateVersion, true).replace(
+      metadata(baselineVersion, true, candidateDownloadUrl),
+      metadata(candidateVersion, false, candidateDownloadUrl),
+      metadata(candidateVersion, true, candidateDownloadUrl).replace(
+        'YouTube Live Chat Overlay',
+        'Other Script'
+      ),
+      metadata(candidateVersion, true, candidateDownloadUrl).replace(
         'https://github.com/PiesP\n',
         'https://example.com\n'
       ),
@@ -148,7 +172,7 @@ describe('installed manager upgrade inputs', () => {
   });
 
   it('requires one displayed version and retained nondefault settings', () => {
-    const row = '1  YouTube Live Chat Overlay  0.45.6  946 KB';
+    const row = '1  YouTube Live Chat Overlay  0.45.7  946 KB';
     expect(upgrade.requireInstalledScriptRow([row], candidateVersion).version).toBe(
       candidateVersion
     );

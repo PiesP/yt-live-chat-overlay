@@ -216,6 +216,11 @@ export function prepareRelease(): void {
 
 Requires [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
 
+If an installed userscript has a versioned \`@downloadURL\`, **Check for updates**
+can fetch that old version again. Once this release is public, open the installation
+link above once and confirm it in the manager to replace the old header. Future
+downloads then use the Latest release URL.
+
 ### Chrome / Edge / Brave Extension
 
 1. Download \`yt-live-chat-overlay-chrome.zip\` from the assets below.

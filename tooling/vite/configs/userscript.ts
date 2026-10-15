@@ -50,7 +50,9 @@ export function createUserscriptConfig({ mode }: ConfigEnv): UserConfig {
           supportURL: `${packageMeta.homepage}/issues`,
           license: packageMeta.license,
           namespace: packageMeta.homepage.replace(/\/[^/]+$/, ''),
-          downloadURL: `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${baseVersion}/yt-live-chat-overlay.user.js`,
+          downloadURL: isDev
+            ? `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${baseVersion}/yt-live-chat-overlay.user.js`
+            : 'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js',
           updateURL:
             'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js',
         },
