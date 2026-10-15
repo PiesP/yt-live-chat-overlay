@@ -394,9 +394,10 @@ and Allow User Scripts through Chrome's UI in the isolated profile and imports
 the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
 
-For issue #227's public-v0.45.5-to-candidate upgrade check, place the downloaded
-public `yt-live-chat-overlay.user.js` at
-`validation/windows/release-upgrade/public-v0.45.5.user.js` after independently
+The historical issue #227 receipt covers public v0.45.5 to v0.45.6 and retains
+those source identities. For the v0.45.6 to v0.45.7 update qualification, place
+the downloaded public `yt-live-chat-overlay.user.js` at
+`validation/windows/release-upgrade/public-v0.45.6.user.js` after independently
 verifying it against the published release checksum. Place an ignored
 `validation/windows/release-upgrade/input.json` beside it with exactly:
 
@@ -404,13 +405,15 @@ verifying it against the published release checksum. Place an ignored
 {
   "schemaVersion": 1,
   "baselineSha256": "<64 lowercase hexadecimal characters from the published checksum>",
-  "candidateVersion": "0.45.6",
-  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.5/yt-live-chat-overlay.user.js"
+  "candidateVersion": "0.45.7",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.6/yt-live-chat-overlay.user.js"
 }
 ```
 
-The existing `--installation userscript` invocation then uses the same fresh,
-owned Tampermonkey profile for both versions. It verifies fixed paths, public
+The public baseline must retain its versioned `@downloadURL`, while the candidate
+must use the Latest userscript download URL. The existing
+`--installation userscript` invocation then uses the same fresh, owned
+Tampermonkey profile for both versions. It verifies fixed paths, public
 bytes, metadata identity and the candidate's `unsafeWindow` grant before launch;
 imports the public script through Tampermonkey's file picker; sets font size,
 opacity and safe-top through the installed script's settings UI; observes the

@@ -25,6 +25,11 @@ Install [Tampermonkey](https://www.tampermonkey.net/) or
 [Violentmonkey](https://violentmonkey.github.io/), then install the
 [latest userscript](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js).
 
+If an existing installation has a versioned `@downloadURL`, **Check for updates**
+can fetch that old version again. After the release with the corrected header is
+public, open the latest userscript link above once and confirm installation in
+your manager. Future downloads then use the Latest release URL.
+
 The userscript manager can check the metadata URL embedded in the script for
 updates. Review an offered update in the manager. The script requests
 `unsafeWindow` to observe YouTube's own chat fetches; review any permission
