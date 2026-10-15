@@ -95,13 +95,10 @@ interface WorkerManagerDeps {
 const log = createLogger('RenderWorkerManager');
 
 export class RenderWorkerManager {
-  /** WorkerConfig keys subset of OverlaySettings for cross-thread transfer. */
+  /** WorkerConfig keys subset of OverlaySettings for cross-thread transfer; legacy font preferences stay in storage. */
   static readonly WORKER_CONFIG_KEYS = [
     'speedPxPerSec',
     'fontSize',
-    'fontBaseViewportHeight',
-    'fontMinSize',
-    'fontMaxSize',
     'fontWeight',
     'fontFamily',
     'opacity',
@@ -157,9 +154,6 @@ export class RenderWorkerManager {
     return {
       speedPxPerSec: settings.speedPxPerSec,
       fontSize: settings.fontSize,
-      fontBaseViewportHeight: settings.fontBaseViewportHeight,
-      fontMinSize: settings.fontMinSize,
-      fontMaxSize: settings.fontMaxSize,
       fontWeight: settings.fontWeight,
       fontFamily: settings.fontFamily,
       opacity: settings.opacity,

@@ -208,6 +208,82 @@ describe('RenderWorkerManager', () => {
       expect(onDimensionsChanged).toHaveBeenCalledOnce();
     });
 
+    it('keeps legacy sizing preferences out of init, mixed updates, and reinitialization', () => {
+      const canvas = {
+        transferControlToOffscreen: vi.fn(() => ({ getContext: vi.fn() })),
+      } as unknown as HTMLCanvasElement;
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged: vi.fn(() => vi.fn()),
+      };
+      const initialSettings = {
+        ...DEFAULT_SETTINGS,
+        fontSize: 30,
+        fontBaseViewportHeight: 720,
+        fontMinSize: 12,
+        fontMaxSize: 42,
+      };
+      deps.settings = initialSettings;
+
+      const postedConfig = (worker: { postMessage: ReturnType<typeof vi.fn> }, type: string) => {
+        const message = worker.postMessage.mock.calls.find(
+          ([value]) => (value as { type?: string }).type === type
+        )?.[0] as { config: Record<string, unknown> } | undefined;
+        expect(message).toBeDefined();
+        return message?.config ?? {};
+      };
+      const expectNoLegacyKeys = (config: Record<string, unknown>) => {
+        for (const key of ['fontBaseViewportHeight', 'fontMinSize', 'fontMaxSize']) {
+          expect(Object.hasOwn(config, key)).toBe(false);
+        }
+      };
+
+      expect(manager.init(canvas, initialSettings, overlay as any, 'worker.js').started).toBe(true);
+      const firstWorker = (
+        manager as unknown as { worker: { postMessage: ReturnType<typeof vi.fn> } }
+      ).worker;
+      const initialConfig = postedConfig(firstWorker, 'init');
+      expectNoLegacyKeys(initialConfig);
+      expect(initialConfig).toMatchObject({
+        fontSize: 30,
+        speedPxPerSec: initialSettings.speedPxPerSec,
+        outlineWidthPx: initialSettings.outline.widthPx,
+        translationGeneration: 0,
+      });
+
+      const updatedSettings = {
+        ...initialSettings,
+        fontSize: 38,
+        fontBaseViewportHeight: 1440,
+        fontMinSize: 20,
+        fontMaxSize: 60,
+        speedPxPerSec: 320,
+      };
+      manager.updateSettings(updatedSettings, 7);
+      const updateConfig = postedConfig(firstWorker, 'updateConfig');
+      expectNoLegacyKeys(updateConfig);
+      expect(updateConfig).toMatchObject({
+        fontSize: 38,
+        speedPxPerSec: 320,
+        translationGeneration: 7,
+      });
+
+      manager.destroy();
+      expect(manager.init(canvas, updatedSettings, overlay as any, 'worker.js').started).toBe(true);
+      const nextWorker = (
+        manager as unknown as { worker: { postMessage: ReturnType<typeof vi.fn> } }
+      ).worker;
+      expect(nextWorker).not.toBe(firstWorker);
+      const recoveredConfig = postedConfig(nextWorker, 'init');
+      expectNoLegacyKeys(recoveredConfig);
+      expect(recoveredConfig).toMatchObject({
+        fontSize: 38,
+        speedPxPerSec: 320,
+        outlineWidthPx: updatedSettings.outline.widthPx,
+        translationGeneration: 0,
+      });
+    });
+
     it('remeasures every worker-owned message after an overlay resize', async () => {
       const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
       const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;

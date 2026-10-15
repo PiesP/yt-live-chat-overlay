@@ -184,6 +184,42 @@ describe('RendererBase', () => {
     }
   );
 
+  it('keeps fallback lane geometry stable across legacy values and updates it for fontSize', () => {
+    const renderer = createRenderer({
+      ...defaultSettings,
+      fontSize: 20,
+      fontBaseViewportHeight: 720,
+      fontMinSize: 10,
+      fontMaxSize: 40,
+    });
+    const initialLanes = renderer.getLaneCount();
+    renderer.updateSettings(
+      {
+        ...defaultSettings,
+        fontSize: 20,
+        fontBaseViewportHeight: 1440,
+        fontMinSize: 22,
+        fontMaxSize: 72,
+      },
+      { resetState: true }
+    );
+    expect(renderer.effectiveFontSize).toBe(20);
+    expect(renderer.getLaneCount()).toBe(initialLanes);
+
+    renderer.updateSettings(
+      {
+        ...defaultSettings,
+        fontSize: 40,
+        fontBaseViewportHeight: 1440,
+        fontMinSize: 22,
+        fontMaxSize: 72,
+      },
+      { resetState: true }
+    );
+    expect(renderer.effectiveFontSize).toBe(40);
+    expect(renderer.getLaneCount()).toBeLessThan(initialLanes);
+  });
+
   // ── Constructor ─────────────────────────────────────────────────────
 
   describe('constructor', () => {
