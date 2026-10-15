@@ -21,6 +21,12 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
+    inputs:
+      cache_trial:
+        description: Temporary issue-232 browser-cache comparison
+        type: choice
+        default: normal
+        options: [normal, cache, no-cache]
 
 permissions:
   contents: read
@@ -172,19 +178,24 @@ jobs:
         uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
 
       - name: 🎭 Cache Playwright browsers
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
+        if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true') && inputs.cache_trial != 'no-cache' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
+          key: ${{ inputs.cache_trial == 'cache' && format('playwright-issue-232-20261015-{0}-{1}-{2}', runner.os, runner.arch, hashFiles('pnpm-lock.yaml')) || format('playwright-{0}-{1}', runner.os, hashFiles('pnpm-lock.yaml')) }}
+          restore-keys: ${{ inputs.cache_trial != 'cache' && format('playwright-{0}-', runner.os) || '' }}
+
+      - name: 🎭 Install browser OS dependencies
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
+        run: pnpm exec playwright install-deps chromium firefox
+
+      - name: 🎭 Install browser binaries
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
+        run: pnpm exec playwright install chromium firefox
 
       - name: 🎭 Run E2E tests
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
-        run: |
-          pnpm exec playwright install --with-deps chromium firefox
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e
 
       - name: 📤 Upload Playwright diagnostics
         if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true') && failure() && !cancelled() }}
