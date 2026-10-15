@@ -4,7 +4,9 @@
     "src/main.ts!",
     "extension/content-script.ts!",
     "extension/page-script.ts!",
-    "scripts/**/*.ts",
+    "scripts/ci/check-pinned-tools.ts",
+    "scripts/ci/classify-workflow-changes.ts",
+    "scripts/ci/pinned-tools.ts",
     "vite.config.*.ts"
   ],
   "project": [

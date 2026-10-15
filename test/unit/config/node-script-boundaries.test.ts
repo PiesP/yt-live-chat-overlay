@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { basename, delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -80,6 +80,46 @@ describe('Node script boundaries', () => {
       '"scripts/**/*.ts"'
     );
     expect(browserConfig.match(/"exclude":\s*\[([^\]]*)\]/)?.[1]).toContain('"scripts/**/*.ts"');
+  });
+
+  it('reports an orphan script in full Knip mode and restores a clean result', () => {
+    const directory = mkdtempSync(join(root, 'scripts/knip-orphan-'));
+    const orphan = `scripts/${basename(directory)}/unused.ts`;
+    const knip = join(root, 'node_modules/.bin/knip');
+    const runKnip = (...args: string[]) =>
+      spawnSync(
+        knip,
+        [
+          ...args,
+          '--files',
+          '--exports',
+          '--dependencies',
+          '--max-show-issues',
+          '50',
+          '--treat-config-hints-as-errors',
+        ],
+        { cwd: root, encoding: 'utf8', timeout: 20_000 }
+      );
+
+    try {
+      writeFileSync(join(directory, 'unused.ts'), 'export const unusedKnipFixture = true;\n');
+      const full = runKnip();
+      expect(full.error).toBeUndefined();
+      expect(full.status, `${full.stdout}${full.stderr}`).toBe(1);
+      expect(full.stdout).toContain('Unused files (1)');
+      expect(full.stdout.split('\n')).toContain(orphan);
+
+      const production = runKnip('--production');
+      expect(production.error).toBeUndefined();
+      expect(production.status, `${production.stdout}${production.stderr}`).toBe(0);
+      expect(production.stdout).not.toContain(orphan);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+
+    const restored = runKnip();
+    expect(restored.error).toBeUndefined();
+    expect(restored.status, `${restored.stdout}${restored.stderr}`).toBe(0);
   });
 
   it.each(nodeScripts)('imports %s without CLI work, output, or writes', (relativePath) => {
