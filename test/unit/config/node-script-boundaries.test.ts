@@ -82,6 +82,7 @@ describe('Node script boundaries', () => {
     expect(browserConfig.match(/"exclude":\s*\[([^\]]*)\]/)?.[1]).toContain('"scripts/**/*.ts"');
   });
 
+  // Three real CLI runs can exceed the default test budget during coverage.
   it('reports an orphan script in full Knip mode and restores a clean result', () => {
     const directory = mkdtempSync(join(root, 'scripts/knip-orphan-'));
     const orphan = `scripts/${basename(directory)}/unused.ts`;
@@ -120,7 +121,7 @@ describe('Node script boundaries', () => {
     const restored = runKnip();
     expect(restored.error).toBeUndefined();
     expect(restored.status, `${restored.stdout}${restored.stderr}`).toBe(0);
-  });
+  }, 65_000);
 
   it.each(nodeScripts)('imports %s without CLI work, output, or writes', (relativePath) => {
     const directory = fixtureRoot();
