@@ -60,8 +60,61 @@ pinned. The table records execution stage, inputs, side effects and checks.
 | `pnpm quality`, `verify`, `verify:full` | Quality runs one read-only `biome check .` for formatting, lint and imports, then all type projects, direct Node CI tests, i18n, circular, Knip without an optional clone detector. Verify adds versions and all production target builds/artifact checks; full adds core verification, coverage and the internal `test:e2e:prepared` path. | `verify` ends with production `dist` and both extensions. `verify:full` validates those outputs first, then rebuilds only the development userscript for E2E; its final `dist` is development-only because Vite clears that directory. Full verification does not leave a prepared release candidate. Reports and browser fixtures are also generated. |
 | `pnpm test`, `test:watch`, `test:cov`, `test:ci`, `test:core`, `validate:consistency` | Vitest and direct Node `scripts/ci/{deep-check-reuse,repository-authority}.test.ts` and `scripts/release/verify-source.test.ts`; `test:core` installs/verifies the pinned core checkout, and consistency selects contract tests. | Watch persists and coverage writes reports; `test:ci` checks reuse, authority and tagged source, not UI. `test:core` changes submodule dependencies and needs a prepared checkout. |
 | `pnpm test:e2e`, `test:e2e:headed`, `pretest:e2e`, internal `test:e2e:prepared` | Public E2E commands run `pretest:e2e`: rebuild development userscript and all three Chromium and Firefox extension contexts, check `--e2e` artifacts, then run the configured Playwright browser projects. `test:e2e:prepared` is called only after the successful production builds, artifact check, core verification and coverage in the same `verify:full` sequence; it rebuilds development userscript, checks `--e2e` artifacts and runs Playwright with the same config. | Public E2E remains self-contained from absent or stale outputs. The internal path consumes the extension bytes built earlier in that invocation; do not run it standalone or after source/input changes. All E2E paths leave development-only `dist` and write profiles/results/screenshots. Pass Playwright options directly to `pnpm run test:e2e`, for example `pnpm run test:e2e --project=chromium --grep=... --reporter=line`, or use `pnpm run test:e2e:headed -- --project=chromium`. Headed local tests are distinct from source-bound Windows installation/live acceptance. |
-| `pnpm mut`, `mut:fast`, `mut:renderer` | Stryker full/fast/renderer mutation profiles. | Writes temp/report files; use actual mutation/deep-check receipts. |
+| `pnpm mut`, `mut:fast`, `mut:renderer` | Stryker full/fast/renderer profiles through `scripts/ci/mutation-workspace.ts`. | Use one prepared independent clone per analysis; reports and diagnostics stay in that clone. |
 | `python3 validation/windows/prepare-userscript-manager.py --output <new-directory>` | Host-side Python standard-library preparation of reviewed Tampermonkey before optional Windows userscript installation; it is not a guest bundle asset. | Direct HTTPS to clients2.google.com or clients2.googleusercontent.com, at most five redirects, 60-second timeout and 16 MiB body; verifies pinned SHA-256, CRX3 bounds and MV3 manifest, limits ZIP to 1,000 entries/64 MiB declared uncompressed size, then writes an installation receipt by atomic rename. Thirteen local fixtures in `test/unit/config/userscript-manager-package.test.ts`; see `validation/windows/README.md` for tested archive/write failures and remaining VM/expanded-byte limits. |
+
+### Mutation runs
+
+All three profiles use Stryker's `inPlace` mode. Run them only in a fresh,
+independent full clone on Linux or WSL. Native Windows execution is refused.
+Direct Stryker invocation bypasses the guard. Select a committed source revision
+explicitly; uncommitted source and core changes are excluded, never copied.
+
+```bash
+source /home/piesp/.config/shell/env.sh
+MUTATION_SOURCE=/absolute/path/to/yt-live-chat-overlay
+MUTATION_COMMIT=$(git -C "$MUTATION_SOURCE" rev-parse HEAD)
+MUTATION_CLONE=/absolute/path/outside/source/ytlc-mutation-1
+git clone --no-local --no-hardlinks --no-checkout "$MUTATION_SOURCE" "$MUTATION_CLONE"
+git -C "$MUTATION_CLONE" -c advice.detachedHead=false checkout --detach "$MUTATION_COMMIT"
+git -C "$MUTATION_CLONE" submodule sync --recursive
+git -C "$MUTATION_CLONE" submodule update --init --recursive
+(
+  cd "$MUTATION_CLONE"
+  pnpm install --frozen-lockfile --config.package-import-method=copy
+  pnpm mut:prepare "$MUTATION_SOURCE" "$MUTATION_COMMIT"
+  pnpm mut:fast # use a separate fresh clone for mut or mut:renderer
+)
+```
+
+Use one owner and one analysis per clone. `pnpm mut`, `pnpm mut:fast`, and
+`pnpm mut:renderer` refuse an ordinary checkout before instrumentation. The
+full profile retains its progress reporter and writes
+`reports/mutation/mutation.json` to verify that mutants were actually tested.
+Fast reports are in
+`reports/mutation/fast.json` and `mutation.html`; renderer writes
+`reports/mutation/renderer.json`. Deep and Release jobs explicitly admit their
+job-owned checkout at the verified source revision.
+
+Local diagnostic arguments are `--dryRunOnly`, `--concurrency`/`-c` (1–32),
+`--logLevel`, `--mutate`/`-m`, and `--testFiles`/`-t`, with paths relative to the
+clone. Other options and hosted overrides are refused. A dry run is diagnostic
+only. Diagnostic `--mutate` patterns must select files under `src/`; diagnostic
+`--testFiles` patterns must select `.test` or `.spec` files under `test/`.
+Diagnostic test-file patterns cannot use exclusions or line ranges. Positive
+and negative mutation patterns are checked conservatively in their given order
+against the clone
+before Stryker starts, so an empty selection is refused; this precheck does not
+replace Stryker's own file selection. The guard records source, core, tool,
+profile, and child identity under `.git/ytlc-mutation/`, with a child log and
+result when shutdown completes.
+After interruption or failure, inspect that directory, reports, Stryker
+backups, and remaining clone processes before deciding whether restoration
+completed. Hosted jobs upload available diagnostics after an ordinary failure.
+SIGKILL or hosted cancellation may leave no final receipt or report upload.
+Preserve available evidence; manually dispose of a proven owned clone
+only after its processes are stopped and evidence has been retained. Never
+reset or clean the maintainer checkout to recover a mutation run.
 
 Verification success, production files present, and release preparation accepted are separate states. After `verify:full` or standalone E2E, run `pnpm build:all:ci` to restore the production userscript and metadata alongside both extension targets, then `pnpm check:artifacts`. Only then run `RELEASE_VERSION=<package version> pnpm release:prepare` for a local candidate; `prepare.ts` checks source/artifact versions and writes `release-bundle/` without publishing it. A development-only `dist` fails its production-file guard. Rebuild after any source or build-input change, even when old output directories exist.
 

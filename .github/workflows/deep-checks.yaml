@@ -110,9 +110,19 @@ jobs:
         if: ${{ steps.marker.outputs.reuse != 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
 
+      - name: 🔒 Admit owned fast mutation checkout
+        if: ${{ steps.marker.outputs.reuse != 'true' }}
+        env:
+          MUTATION_WORKSPACE_CONTRACT: github-job-v1
+          MUTATION_SOURCE_SHA: ${{ github.sha }}
+        run: node --experimental-strip-types scripts/ci/mutation-workspace.ts prepare-hosted
+
       - name: 🧬 Run fast mutation gate
         id: check
         if: ${{ steps.marker.outputs.reuse != 'true' }}
+        env:
+          MUTATION_WORKSPACE_CONTRACT: github-job-v1
+          MUTATION_SOURCE_SHA: ${{ github.sha }}
         run: pnpm mut:fast
 
       - name: 📤 Upload fast mutation report
@@ -125,6 +135,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 9
+
+      - name: 📤 Retain failed fast mutation diagnostics
+        if: ${{ failure() && !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fast-mutation-diagnostics-${{ github.sha }}
+          path: |
+            .git/ytlc-mutation/
+            reports/mutation/
+            .stryker-tmp*/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: ✅ Record fresh fast mutation pass
         if: ${{ steps.check.outcome == 'success' && steps.upload.outcome == 'success' }}
@@ -220,9 +243,19 @@ jobs:
         if: ${{ steps.marker.outputs.reuse != 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
 
+      - name: 🔒 Admit owned renderer mutation checkout
+        if: ${{ steps.marker.outputs.reuse != 'true' }}
+        env:
+          MUTATION_WORKSPACE_CONTRACT: github-job-v1
+          MUTATION_SOURCE_SHA: ${{ github.sha }}
+        run: node --experimental-strip-types scripts/ci/mutation-workspace.ts prepare-hosted
+
       - name: 🎨 Run renderer mutation gate
         id: check
         if: ${{ steps.marker.outputs.reuse != 'true' }}
+        env:
+          MUTATION_WORKSPACE_CONTRACT: github-job-v1
+          MUTATION_SOURCE_SHA: ${{ github.sha }}
         run: pnpm mut:renderer
 
       - name: 📤 Upload renderer mutation report
@@ -233,6 +266,19 @@ jobs:
           name: renderer-mutation-report-${{ github.sha }}
           path: reports/mutation/renderer.json
           if-no-files-found: error
+          retention-days: 7
+
+      - name: 📤 Retain failed renderer mutation diagnostics
+        if: ${{ failure() && !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: renderer-mutation-diagnostics-${{ github.sha }}
+          path: |
+            .git/ytlc-mutation/
+            reports/mutation/
+            .stryker-tmp*/
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 7
 
       - name: ✅ Record fresh renderer mutation pass
