@@ -755,10 +755,6 @@ async function run(profile: Profile, args: string[]): Promise<number> {
       const report = json(
         join(root, `reports/mutation/${profile === 'full' ? 'mutation' : profile}.json`)
       );
-      const mutants = Object.values(object(report.files)).flatMap((value) => {
-        const items = object(value).mutants;
-        return Array.isArray(items) ? items : [];
-      });
       const terminal = new Set([
         'Killed',
         'Survived',
@@ -768,9 +764,20 @@ async function run(profile: Profile, args: string[]): Promise<number> {
         'CompileError',
         'RuntimeError',
       ]);
+      let mutantCount = 0;
+      for (const file of Object.values(object(report.files))) {
+        const mutants = object(file).mutants;
+        if (!Array.isArray(mutants)) fail('Expected a mutants array');
+        for (const mutant of mutants) {
+          const status = object(mutant).status;
+          if (typeof status !== 'string' || !terminal.has(status)) {
+            fail('Expected a terminal string status');
+          }
+          mutantCount++;
+        }
+      }
       reportsComplete =
-        mutants.length > 0 &&
-        mutants.every((value) => terminal.has(String(object(value).status))) &&
+        mutantCount > 0 &&
         (profile !== 'fast' ||
           readFileSync(join(root, 'reports/mutation/mutation.html')).length > 0);
     } catch {
