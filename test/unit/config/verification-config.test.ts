@@ -362,7 +362,7 @@ describe('Verification configuration', () => {
       ['mut', 'full'],
       ['mut:fast', 'fast'],
       ['mut:renderer', 'renderer'],
-    ]) {
+    ] as const) {
       expect(packageJson.scripts?.[script]?.trim().split(/\s+/)).toEqual([
         'node',
         '--experimental-strip-types',
