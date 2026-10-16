@@ -504,7 +504,7 @@ test('full, fast and renderer profiles forward supported arguments and retain on
     '2',
     '--logLevel=debug',
     '--mutate',
-    'src/committed.txt:1-2',
+    'src/committed.txt,!src/committed.txt,src/committed.txt:1-2',
     '--testFiles',
     'test/**/*.test.ts',
   ]);
@@ -519,7 +519,7 @@ test('full, fast and renderer profiles forward supported arguments and retain on
     '--logLevel',
     'debug',
     '--mutate',
-    'src/committed.txt:1-2',
+    'src/committed.txt,!src/committed.txt,src/committed.txt:1-2',
     '--testFiles',
     'test/**/*.test.ts',
   ]);

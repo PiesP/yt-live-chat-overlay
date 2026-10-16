@@ -494,24 +494,23 @@ function requireSelectedFiles(value: string, kind: 'test' | 'mutation'): void {
   if (!patterns.some((pattern) => !pattern.startsWith('!'))) {
     fail(`At least one positive ${kind} pattern is required.`);
   }
-  for (const pattern of patterns.filter((candidate) => !candidate.startsWith('!'))) {
+  for (const pattern of patterns) {
+    const excluded = pattern.startsWith('!');
     const pathname =
-      kind === 'mutation' ? pattern.replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '') : pattern;
+      kind === 'mutation'
+        ? pattern.replace(/^!/, '').replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '')
+        : pattern;
     for (const name of globSync(pathname, { cwd: root })) {
       const expectedRoot = kind === 'test' ? 'test/' : 'src/';
-      if (
+      if (excluded) {
+        selected.delete(name);
+      } else if (
         name.startsWith(expectedRoot) &&
         (kind === 'mutation' || /\.(test|spec)\.[cm]?[jt]sx?$/.test(name)) &&
         lstatSync(join(root, name)).isFile()
       ) {
         selected.add(name);
       }
-    }
-  }
-  for (const pattern of patterns.filter((candidate) => candidate.startsWith('!'))) {
-    const pathname = pattern.slice(1).replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '');
-    for (const name of globSync(pathname, { cwd: root })) {
-      selected.delete(name);
     }
   }
   if (selected.size === 0) {
