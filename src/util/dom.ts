@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { sleep } from '@piesp/browser-core/async';
 import { throwIfAborted } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
@@ -23,6 +22,8 @@ export const SCREEN_READER_CSS =
 
 const DEFAULT_WAIT_ATTEMPTS = 5;
 const DEFAULT_WAIT_INTERVAL_MS = 500;
+const MAX_WAIT_ATTEMPTS = 1000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** Interval (ms) between player element lookup retries in the overlay. */
 export const PLAYER_LOOKUP_INTERVAL_MS = 1000;
@@ -50,37 +51,21 @@ export function findElementMatch<T extends Element>(
   return null;
 }
 
-async function pollForPlayerContainer(
-  attempts: number,
-  intervalMs: number,
-  signal?: AbortSignal
-): Promise<HTMLElement | null> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    throwIfAborted(signal);
-
-    const element = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-      predicate: isVisibleElement,
-    });
-
-    if (element) {
-      log.debug('dom.player.found-polling', { selector: element.selector });
-      return element.element;
-    }
-
-    if (attempt === attempts - 1) break;
-
-    await sleep(intervalMs, signal);
-  }
-
-  log.debug('dom.player.not-found');
-  return null;
-}
-
 export async function findPlayerContainerElement(
   options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
 ): Promise<HTMLElement | null> {
-  const attempts = Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS));
-  const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS);
+  // Invalid or extreme inputs cannot define a practical bounded timer schedule.
+  const requestedAttempts = options.attempts ?? DEFAULT_WAIT_ATTEMPTS;
+  const attempts =
+    Number.isFinite(requestedAttempts) && requestedAttempts <= MAX_WAIT_ATTEMPTS
+      ? Math.max(1, Math.trunc(requestedAttempts))
+      : DEFAULT_WAIT_ATTEMPTS;
+  const requestedInterval = options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS;
+  const intervalMs =
+    Number.isFinite(requestedInterval) &&
+    Math.max(0, requestedInterval) * (2 * attempts - 1) <= MAX_TIMER_DELAY_MS
+      ? Math.max(0, requestedInterval)
+      : DEFAULT_WAIT_INTERVAL_MS;
   const { signal } = options;
 
   // Fast path: try immediate lookup before setting up observer or polling.
@@ -92,61 +77,111 @@ export async function findPlayerContainerElement(
     return immediate.element;
   }
 
-  // Guard against already-aborted signals before setting up the
-  // MutationObserver + fallback timer (which can take up to
-  // intervalMs * attempts before detecting the abort).
   throwIfAborted(signal);
 
-  // Use MutationObserver for instant detection when the player element
-  // appears in the DOM (SPA navigation, slow rendering). Falls back to
-  // polling if MutationObserver is not available or times out.
-  if (typeof MutationObserver !== 'undefined') {
-    let onAbort: (() => void) | undefined;
-    const promise = new Promise<HTMLElement | null>(
-      (resolve: (value: HTMLElement | null) => void, reject: (reason: DOMException) => void) => {
-        let fallbackTimer: ReturnType<typeof setTimeout>;
+  const canObserve = typeof MutationObserver !== 'undefined';
+  // The old observer window and its subsequent polling allowed the last lookup
+  // at (2 * attempts - 1) intervals. Without an observer it was attempts - 1.
+  const lastProbe = canObserve ? 2 * attempts - 1 : attempts - 1;
 
-        const observer = new MutationObserver(() => {
-          const element = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-            predicate: isVisibleElement,
-          });
-          if (element) {
-            observer.disconnect();
-            clearTimeout(fallbackTimer);
-            log.debug('dom.player.found-observer', { selector: element.selector });
-            resolve(element.element);
-          }
+  return new Promise<HTMLElement | null>((resolve, reject) => {
+    let observer: MutationObserver | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    let listening = false;
+    let nextProbe = 1;
+    const startedAt = performance.now();
+
+    const cleanup = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      observer?.disconnect();
+      if (listening) signal?.removeEventListener('abort', onAbort);
+      listening = false;
+    };
+    const settle = (outcome: { element: HTMLElement | null } | { error: unknown }): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if ('error' in outcome) reject(outcome.error);
+      else resolve(outcome.element);
+    };
+    const onAbort = (): void => {
+      // The former observer phase created AbortError; the polling path's sleep
+      // preserved DOMException reasons. Keep that distinction at the boundary.
+      const reason = observer
+        ? new DOMException('Aborted', 'AbortError')
+        : signal?.reason instanceof DOMException
+          ? signal.reason
+          : new DOMException('The operation was aborted.', 'AbortError');
+      settle({ error: reason });
+    };
+    const probe = (): void => {
+      if (settled) return;
+      try {
+        const match = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+          predicate: isVisibleElement,
         });
-
-        observer.observe(document.body, {
-          childList: true,
-          subtree: true,
-        });
-
-        // Fallback polling timer: if the observer doesn't find the element
-        // within the polling window, clean up and switch to polling.
-        fallbackTimer = setTimeout(() => {
-          observer.disconnect();
-          resolve(null); // will trigger polling fallback below
-        }, intervalMs * attempts);
-
-        onAbort = () => {
-          observer.disconnect();
-          clearTimeout(fallbackTimer);
-          reject(new DOMException('Aborted', 'AbortError'));
-        };
-        signal?.addEventListener('abort', onAbort, { once: true });
+        if (match) {
+          log.debug('dom.player.found-waiting', { selector: match.selector });
+          settle({ element: match.element });
+        }
+      } catch (error: unknown) {
+        settle({ error });
       }
-    );
-    return promise.then((found) => {
-      if (onAbort) signal?.removeEventListener('abort', onAbort as EventListener);
-      if (found) return found;
-      // Fall back to polling if observer didn't find anything.
-      return pollForPlayerContainer(attempts, intervalMs, signal);
-    });
-  }
+    };
+    const schedule = (): void => {
+      if (settled) return;
+      if (nextProbe > lastProbe) {
+        log.debug('dom.player.not-found');
+        settle({ element: null });
+        return;
+      }
+      const target = startedAt + nextProbe * intervalMs;
+      timer = setTimeout(
+        () => {
+          timer = undefined;
+          probe();
+          if (settled) return;
+          if (observer && nextProbe >= attempts) {
+            observer.disconnect();
+            observer = undefined;
+          }
+          // Skip missed ticks after throttling, but never skip the final lookup.
+          const elapsed = performance.now() - startedAt;
+          if (nextProbe < lastProbe && intervalMs > 0) {
+            nextProbe = Math.min(
+              lastProbe,
+              Math.max(nextProbe + 1, Math.floor(elapsed / intervalMs) + 1)
+            );
+          } else {
+            nextProbe++;
+          }
+          schedule();
+        },
+        Math.max(0, target - performance.now())
+      );
+    };
 
-  return pollForPlayerContainer(attempts, intervalMs, signal);
+    try {
+      if (canObserve) {
+        observer = new MutationObserver(probe);
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+        listening = true;
+      }
+      if (signal?.aborted) onAbort();
+      if (lastProbe === 0 || intervalMs === 0) {
+        probe();
+        if (!settled) settle({ element: null });
+      } else {
+        schedule();
+      }
+    } catch (error: unknown) {
+      settle({ error });
+    }
+  });
 }
 
 /** Iterate over slot indices for a multi-slot placement. */

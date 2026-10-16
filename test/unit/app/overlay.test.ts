@@ -147,6 +147,31 @@ describe('Overlay', () => {
     expect(overlay.getContainer()).toBeNull();
   });
 
+  it('does not mount after its real player lookup is cancelled', async () => {
+    vi.useFakeTimers();
+    let width = 0;
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    Object.defineProperties(player, {
+      offsetWidth: { get: () => width },
+      offsetHeight: { value: 100 },
+    });
+    document.body.append(player);
+    const overlay = new Overlay();
+    const controller = new AbortController();
+    const creation = overlay.create(makeSettings(), controller.signal);
+    const aborted = expect(creation).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(100);
+    controller.abort();
+    overlay.destroy();
+    await aborted;
+    width = 100;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(overlay.getContainer()).toBeNull();
+    expect(player.querySelector('#yt-live-chat-overlay')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('updateSettings does not throw before overlay is created', () => {
     const overlay = new Overlay();
     expect(() => overlay.updateSettings(makeSettings())).not.toThrow();

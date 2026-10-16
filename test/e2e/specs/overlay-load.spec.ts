@@ -13,7 +13,15 @@
 
 import { existsSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { setupOverlayPage, USERSCRIPT_PATH } from '../fixtures/test-utils';
+import {
+  DEFAULT_SETTINGS,
+  injectUserscript,
+  installYTMock,
+  MOCK_HTML,
+  MOCK_WATCH_URL,
+  setupOverlayPage,
+  USERSCRIPT_PATH,
+} from '../fixtures/test-utils';
 
 test.describe('YT Live Chat Overlay E2E', () => {
   test.beforeAll(() => {
@@ -55,4 +63,104 @@ test.describe('YT Live Chat Overlay E2E', () => {
     );
     expect(overlayErrors).toHaveLength(0);
   });
+
+  for (const mode of ['style-reveal', 'insertion'] as const) {
+    test(`built userscript attaches after delayed player ${mode}`, async ({ page }) => {
+      const html =
+        mode === 'style-reveal'
+          ? MOCK_HTML.replace('style="width:800px', 'style="display:none;width:800px')
+          : MOCK_HTML.replace(/<div id="movie_player"[\s\S]*?<\/div>\s*<\/div>/, '</div>');
+      await page.route('https://www.youtube.com/**', async (route) => {
+        if (route.request().resourceType() === 'document') {
+          await route.fulfill({ status: 200, contentType: 'text/html', body: html });
+        } else {
+          await route.abort('blockedbyclient');
+        }
+      });
+      await page.addInitScript(() => {
+        const NativeObserver = window.MutationObserver;
+        const state = { observed: 0, revealedAt: 0, attachedAt: 0, unrelatedMutations: 0 };
+        (window as unknown as { __playerLookupFixture: typeof state }).__playerLookupFixture =
+          state;
+        window.MutationObserver = class extends NativeObserver {
+          override observe(target: Node, options?: MutationObserverInit): void {
+            if (target === document.body && options?.childList && options.subtree) state.observed++;
+            super.observe(target, options);
+          }
+        };
+      });
+      await page.addInitScript(installYTMock, { defaults: DEFAULT_SETTINGS });
+      await injectUserscript(page);
+      await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const state = (window as unknown as { __playerLookupFixture?: { observed: number } })
+          .__playerLookupFixture;
+        return (state?.observed ?? 0) > 0;
+      });
+      // Let startup-owned DOM writes settle before isolating the reveal window.
+      await page.waitForTimeout(300);
+      await page.evaluate((kind) => {
+        const state = (
+          window as unknown as {
+            __playerLookupFixture: {
+              revealedAt: number;
+              attachedAt: number;
+              unrelatedMutations: number;
+            };
+          }
+        ).__playerLookupFixture;
+        const player =
+          document.querySelector<HTMLElement>('#movie_player') ?? document.createElement('div');
+        const observer = new MutationObserver((records) => {
+          for (const record of records) {
+            const attached = [...record.addedNodes].some(
+              (node) =>
+                node instanceof Element &&
+                (node.id === 'yt-live-chat-overlay' ||
+                  node.id.startsWith('yt-chat-overlay-settings-'))
+            );
+            if (attached) {
+              state.attachedAt = performance.now();
+              observer.disconnect();
+              return;
+            }
+            if (record.type === 'childList') state.unrelatedMutations++;
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        state.revealedAt = performance.now();
+        if (kind === 'style-reveal') player.style.display = 'block';
+        else {
+          player.id = 'movie_player';
+          player.className = 'html5-video-player';
+          player.style.cssText = 'width:800px;height:450px;position:relative';
+          document.querySelector('#player-container')?.append(player);
+        }
+      }, mode);
+      await page.waitForFunction(() => {
+        const state = (window as unknown as { __playerLookupFixture?: { attachedAt: number } })
+          .__playerLookupFixture;
+        return (state?.attachedAt ?? 0) > 0;
+      });
+      const observation = await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __playerLookupFixture: {
+                observed: number;
+                revealedAt: number;
+                attachedAt: number;
+                unrelatedMutations: number;
+              };
+            }
+          ).__playerLookupFixture
+      );
+      expect(observation.observed).toBeGreaterThan(0);
+      expect(observation.attachedAt - observation.revealedAt).toBeLessThan(2000);
+      if (mode === 'style-reveal') expect(observation.unrelatedMutations).toBe(0);
+      await expect(page.locator('#yt-chat-overlay-settings-button')).toBeAttached();
+      await page.goto('https://www.youtube.com/feed/trending', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
+    });
+  }
 });
