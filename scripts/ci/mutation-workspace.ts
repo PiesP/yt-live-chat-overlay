@@ -273,17 +273,59 @@ function checkout(hosted: boolean): {
   ) {
     fail('Active pnpm version does not match the selected packageManager.');
   }
+  const listed = spawnSync('pnpm', ['list', '--lockfile-only', '--json', '--depth', '0'], {
+    cwd: root,
+    env: environment(),
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (listed.status !== 0) {
+    fail(
+      `Cannot resolve pinned mutation tools from the source lock: ${listed.stderr || listed.stdout || listed.error}`
+    );
+  }
+  let rows: unknown;
+  try {
+    rows = JSON.parse(listed.stdout) as unknown;
+  } catch {
+    fail('Pinned mutation tool listing is malformed.');
+  }
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    fail('Pinned mutation tool listing must contain exactly one project.');
+  }
+  const project = object(rows[0]);
+  if (project.path !== root) {
+    fail('Pinned mutation tool listing resolved a different project.');
+  }
+  const dependencies = object(project.devDependencies);
+  const installed = {
+    stryker: String(json(join(root, 'node_modules/@stryker-mutator/core/package.json')).version),
+    vitestRunner: String(
+      json(join(root, 'node_modules/@stryker-mutator/vitest-runner/package.json')).version
+    ),
+    vitest: String(json(join(root, 'node_modules/vitest/package.json')).version),
+  };
+  for (const [name, version] of [
+    ['@stryker-mutator/core', installed.stryker],
+    ['@stryker-mutator/vitest-runner', installed.vitestRunner],
+    ['vitest', installed.vitest],
+  ] as const) {
+    const entry = dependencies[name];
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      fail(`Pinned mutation tool missing from the selected lock: ${name}`);
+    }
+    const expected = object(entry).version;
+    if (typeof expected !== 'string' || !/^\d+\.\d+\.\d+/.test(expected) || version !== expected) {
+      fail(`Installed mutation tool differs from the selected lock: ${name}`);
+    }
+  }
   return {
     commit,
     core,
     snapshot: hash(snapshot(root) + snapshot(join(root, 'packages/core'))),
     lock: hash(sourceLock),
     pnpm: pnpm.stdout.trim(),
-    stryker: String(json(join(root, 'node_modules/@stryker-mutator/core/package.json')).version),
-    vitestRunner: String(
-      json(join(root, 'node_modules/@stryker-mutator/vitest-runner/package.json')).version
-    ),
-    vitest: String(json(join(root, 'node_modules/vitest/package.json')).version),
+    ...installed,
   };
 }
 

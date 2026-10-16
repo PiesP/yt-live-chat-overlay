@@ -65,9 +65,39 @@ git(owner, 'init', '-q', maintainer);
 write(join(maintainer, '.gitignore'), 'node_modules/\nreports/\n.stryker-tmp*/\n');
 write(
   join(maintainer, 'package.json'),
-  '{"name":"yt-live-chat-overlay","private":true,"type":"module","packageManager":"pnpm@11.26.0"}\n'
+  '{"name":"yt-live-chat-overlay","version":"0.0.0","private":true,"type":"module","packageManager":"pnpm@11.26.0","volta":{"node":"26.9.0","pnpm":"11.26.0"},"devDependencies":{"@stryker-mutator/core":"10.0.0","@stryker-mutator/vitest-runner":"10.0.0","vitest":"4.1.11"}}\n'
 );
-write(join(maintainer, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
+write(
+  join(maintainer, 'pnpm-lock.yaml'),
+  `lockfileVersion: '9.0'
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+importers:
+  .:
+    devDependencies:
+      '@stryker-mutator/core':
+        specifier: 10.0.0
+        version: 10.0.0
+      '@stryker-mutator/vitest-runner':
+        specifier: 10.0.0
+        version: 10.0.0
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11
+packages:
+  '@stryker-mutator/core@10.0.0':
+    resolution: {integrity: sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==}
+  '@stryker-mutator/vitest-runner@10.0.0':
+    resolution: {integrity: sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==}
+  'vitest@4.1.11':
+    resolution: {integrity: sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==}
+snapshots:
+  '@stryker-mutator/core@10.0.0': {}
+  '@stryker-mutator/vitest-runner@10.0.0': {}
+  'vitest@4.1.11': {}
+`
+);
 write(join(maintainer, 'stryker.conf.json'), '{"inPlace":true}\n');
 write(join(maintainer, 'stryker.conf.fast.json'), '{"inPlace":true}\n');
 write(
@@ -326,6 +356,17 @@ test('stale installed lock and post-preparation tool swaps refuse before instrum
     /Installed pnpm lock differs/
   );
   assert.equal(existsSync(join(stale, '.git/ytlc-mutation')), false);
+
+  const wrongTool = clone();
+  write(
+    join(wrongTool, 'node_modules/@stryker-mutator/vitest-runner/package.json'),
+    '{"name":"@stryker-mutator/vitest-runner","version":"9.9.9"}\n'
+  );
+  assert.match(
+    invoke(wrongTool, ['prepare', maintainer, selected]).stderr,
+    /Installed mutation tool differs from the selected lock/
+  );
+  assert.equal(existsSync(join(wrongTool, '.git/ytlc-mutation')), false);
 
   for (const path of [
     'node_modules/.pnpm/lock.yaml',
