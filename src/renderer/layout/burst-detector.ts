@@ -17,7 +17,7 @@
  */
 
 import type { BurstLevel } from '@app-types';
-import { clearSafeInterval } from '@util/dom';
+import { clearSafeInterval } from '@piesp/browser-core/async';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('BurstDetector');

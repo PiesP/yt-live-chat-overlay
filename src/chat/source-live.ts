@@ -24,7 +24,8 @@ import {
   extractNextLiveContinuation,
   type InnertubeContinuationData,
 } from '@chat/youtube/continuation';
-import { isAbortError, sleep, throwIfAborted } from '@util/dom';
+import { sleep } from '@piesp/browser-core/async';
+import { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('LiveChatSource');

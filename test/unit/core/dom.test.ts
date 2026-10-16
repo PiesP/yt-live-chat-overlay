@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { findElementMatch, forEachSlot, isAbortError, isVisibleElement } from '@util/dom';
+import { isAbortError } from '@piesp/browser-core/error';
+import { findElementMatch, forEachSlot, isVisibleElement } from '@util/dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── forEachSlot ────────────────────────────────────────────────────

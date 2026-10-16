@@ -13,12 +13,8 @@
  */
 
 import type { Pauseable } from '@app-types';
-import {
-  clearSafeTimeout,
-  findElementMatch,
-  PLAYER_CONTAINER_SELECTORS,
-  VIDEO_SELECTORS,
-} from '@util/dom';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
+import { findElementMatch, PLAYER_CONTAINER_SELECTORS, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('VideoPauseController');

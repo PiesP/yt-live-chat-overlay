@@ -10,14 +10,14 @@
 
 import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { getActiveLanguage, t } from '@i18n/index';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
+import { throwIfAborted } from '@piesp/browser-core/error';
 import { rendererLayout } from '@util/design-tokens';
 import {
-  clearSafeTimeout,
   ensurePlayerPositioning,
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
   SCREEN_READER_CSS,
-  throwIfAborted,
 } from '@util/dom';
 import { createLogger } from '@util/logging';
 

@@ -24,18 +24,13 @@ import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
 import { bootstrapChatSession, type ChatBootstrapResult } from '@chat/youtube/api';
 import { isYouTubeWatch } from '@chat/youtube/url-pattern';
+import { clearSafeInterval, clearSafeTimeout } from '@piesp/browser-core/async';
+import { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import type { ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@settings/schema';
 import { BacklogInjectionController } from '@util/backlog-controller';
-import {
-  clearSafeInterval,
-  clearSafeTimeout,
-  findElementMatch,
-  isAbortError,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@util/dom';
+import { findElementMatch, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { BatchMessageBus } from '@util/message-bus';
 import { createMessageIdRegistry } from '@util/message-id-registry';
