@@ -477,7 +477,7 @@ function argumentsFor(profile: Profile, args: string[], hosted: boolean): string
       : profile === 'renderer'
         ? 'stryker.conf.renderer.json'
         : 'stryker.conf.json',
-    ...(profile === 'full' ? ['--reporters=progress'] : []),
+    ...(profile === 'full' ? ['--reporters=progress,json'] : []),
     ...forwarded,
   ];
 }
@@ -750,10 +750,12 @@ async function run(profile: Profile, args: string[]): Promise<number> {
     /* Preserve uncertain restoration. */
   }
   const dryRun = args.includes('--dryRunOnly');
-  let reportsComplete: boolean | null = profile !== 'full' && !dryRun ? false : null;
+  let reportsComplete: boolean | null = !dryRun ? false : null;
   if (reportsComplete === false && outcome.code === 0) {
     try {
-      const report = json(join(root, `reports/mutation/${profile}.json`));
+      const report = json(
+        join(root, `reports/mutation/${profile === 'full' ? 'mutation' : profile}.json`)
+      );
       const mutants = Object.values(object(report.files)).flatMap((value) => {
         const items = object(value).mutants;
         return Array.isArray(items) ? items : [];

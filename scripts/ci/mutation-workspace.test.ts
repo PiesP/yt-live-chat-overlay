@@ -167,10 +167,10 @@ if (process.env.FAKE_MUTATION_MODE === 'hold') {
   while (!existsSync('fake-release') && Date.now() < deadline) await new Promise((done) => setTimeout(done, 20));
   if (!existsSync('fake-release')) process.exit(8);
 }
-if (['stryker.conf.fast.json', 'stryker.conf.renderer.json'].includes(args[1]) && !args.includes('--dryRunOnly')) {
+if (['stryker.conf.json', 'stryker.conf.fast.json', 'stryker.conf.renderer.json'].includes(args[1]) && !args.includes('--dryRunOnly')) {
   mkdirSync(join('reports', 'mutation'), { recursive: true });
   const mode = process.env.FAKE_MUTATION_MODE;
-  const name = args[1] === 'stryker.conf.fast.json' ? 'fast' : 'renderer';
+  const name = args[1] === 'stryker.conf.json' ? 'mutation' : args[1] === 'stryker.conf.fast.json' ? 'fast' : 'renderer';
   writeFileSync(join('reports', 'mutation', name + '.json'), mode === 'malformed'
     ? '{bad'
     : JSON.stringify({ files: { 'src/committed.txt': { mutants: mode === 'empty' ? [] : [{ status: 'Killed' }] } } }));
@@ -512,7 +512,7 @@ test('full, fast and renderer profiles forward supported arguments and retain on
   assert.deepEqual(JSON.parse(readFileSync(join(full, 'fake-argv.json'), 'utf8')), [
     'run',
     'stryker.conf.json',
-    '--reporters=progress',
+    '--reporters=progress,json',
     '--dryRunOnly',
     '-c',
     '2',
@@ -525,6 +525,11 @@ test('full, fast and renderer profiles forward supported arguments and retain on
   ]);
   assert.equal(runRecord(full).status, 'dry-run-only');
   assert.notEqual(invoke(full, ['run', 'fast']).status, 0);
+
+  const fullAnalysis = prepared();
+  assert.equal(invoke(fullAnalysis, ['run', 'full']).status, 0);
+  assert.equal(runRecord(fullAnalysis).status, 'completed');
+  assert.equal(existsSync(join(fullAnalysis, 'reports/mutation/mutation.json')), true);
 
   const fast = prepared();
   assert.equal(invoke(fast, ['run', 'fast']).status, 0);
@@ -580,6 +585,16 @@ test('child failure and malformed or empty reports never create successful recei
     assert.equal(receipt.exitCode, mode === 'fail' ? 7 : 1);
     assert.equal(existsSync(join(execution, '.git/ytlc-mutation/run/start.json')), true);
     assert.equal(existsSync(join(execution, '.git/ytlc-mutation/run/child.log')), true);
+    maintainerUnchanged();
+  }
+});
+
+test('full profile requires a nonempty terminal JSON report alongside progress', () => {
+  for (const mode of ['malformed', 'empty']) {
+    const execution = prepared();
+    const result = invoke(execution, ['run', 'full'], { FAKE_MUTATION_MODE: mode });
+    assert.notEqual(result.status, 0, mode);
+    assert.equal(runRecord(execution).status, 'reports-incomplete');
     maintainerUnchanged();
   }
 });

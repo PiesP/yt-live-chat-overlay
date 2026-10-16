@@ -89,7 +89,9 @@ git -C "$MUTATION_CLONE" submodule update --init --recursive
 
 Use one owner and one analysis per clone. `pnpm mut`, `pnpm mut:fast`, and
 `pnpm mut:renderer` refuse an ordinary checkout before instrumentation. The
-full profile retains its progress reporter. Fast reports are in
+full profile retains its progress reporter and writes
+`reports/mutation/mutation.json` to verify that mutants were actually tested.
+Fast reports are in
 `reports/mutation/fast.json` and `mutation.html`; renderer writes
 `reports/mutation/renderer.json`. Deep and Release jobs explicitly admit their
 job-owned checkout at the verified source revision.
