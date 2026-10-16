@@ -358,11 +358,19 @@ describe('Verification configuration', () => {
     expect(config.mutator?.excludedMutations).not.toContain('ConditionalExpression');
     expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
     expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
-    expect(packageJson.scripts?.['mut:fast']?.trim().split(/\s+/)).toEqual([
-      'stryker',
-      'run',
-      'stryker.conf.fast.json',
-    ]);
+    for (const [script, profile] of [
+      ['mut', 'full'],
+      ['mut:fast', 'fast'],
+      ['mut:renderer', 'renderer'],
+    ]) {
+      expect(packageJson.scripts?.[script]?.trim().split(/\s+/)).toEqual([
+        'node',
+        '--experimental-strip-types',
+        'scripts/ci/mutation-workspace.ts',
+        'run',
+        profile,
+      ]);
+    }
     expect(workflow).toContain('timeout-minutes: 35');
     expect(workflow).toContain('path: reports/mutation/');
     expect(workflow).toContain('if-no-files-found: error');

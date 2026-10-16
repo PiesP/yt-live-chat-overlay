@@ -178,8 +178,30 @@ jobs:
         with:
           node-version: ${{ needs.provenance.outputs.node-version }}
 
+      - name: 🔒 Admit owned release mutation checkout
+        env:
+          MUTATION_WORKSPACE_CONTRACT: github-job-v1
+          MUTATION_SOURCE_SHA: ${{ needs.provenance.outputs.release-sha }}
+        run: node --experimental-strip-types scripts/ci/mutation-workspace.ts prepare-hosted
+
       - name: 🧬 Run mutation gate
+        env:
+          MUTATION_WORKSPACE_CONTRACT: github-job-v1
+          MUTATION_SOURCE_SHA: ${{ needs.provenance.outputs.release-sha }}
         run: pnpm mut:fast
+
+      - name: 📤 Retain failed mutation diagnostics
+        if: ${{ failure() && !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-mutation-diagnostics-${{ needs.provenance.outputs.release-sha }}
+          path: |
+            .git/ytlc-mutation/
+            reports/mutation/
+            .stryker-tmp*/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
   build:
     name: 🏗️ Build release package
