@@ -64,10 +64,12 @@ test.describe('YT Live Chat Overlay E2E', () => {
     expect(overlayErrors).toHaveLength(0);
   });
 
-  for (const mode of ['style-reveal', 'insertion'] as const) {
+  for (const mode of ['style-reveal', 'style-late', 'insertion'] as const) {
     test(`built userscript attaches after delayed player ${mode}`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
       const html =
-        mode === 'style-reveal'
+        mode !== 'insertion'
           ? MOCK_HTML.replace('style="width:800px', 'style="display:none;width:800px')
           : MOCK_HTML.replace(/<div id="movie_player"[\s\S]*?<\/div>\s*<\/div>/, '</div>');
       await page.route('https://www.youtube.com/**', async (route) => {
@@ -99,6 +101,7 @@ test.describe('YT Live Chat Overlay E2E', () => {
       });
       // Let startup-owned DOM writes settle before isolating the reveal window.
       await page.waitForTimeout(300);
+      if (mode === 'style-late') await page.waitForTimeout(7500);
       await page.evaluate((kind) => {
         const state = (
           window as unknown as {
@@ -129,7 +132,7 @@ test.describe('YT Live Chat Overlay E2E', () => {
         });
         observer.observe(document.body, { childList: true, subtree: true });
         state.revealedAt = performance.now();
-        if (kind === 'style-reveal') player.style.display = 'block';
+        if (kind !== 'insertion') player.style.display = 'block';
         else {
           player.id = 'movie_player';
           player.className = 'html5-video-player';
@@ -155,12 +158,46 @@ test.describe('YT Live Chat Overlay E2E', () => {
             }
           ).__playerLookupFixture
       );
+      await test.info().attach('player-lookup-observation', {
+        body: JSON.stringify({ mode, ...observation }),
+        contentType: 'application/json',
+      });
       expect(observation.observed).toBeGreaterThan(0);
       expect(observation.attachedAt - observation.revealedAt).toBeLessThan(2000);
-      if (mode === 'style-reveal') expect(observation.unrelatedMutations).toBe(0);
+      if (mode !== 'insertion') expect(observation.unrelatedMutations).toBe(0);
       await expect(page.locator('#yt-chat-overlay-settings-button')).toBeAttached();
       await page.goto('https://www.youtube.com/feed/trending', { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
+      expect(pageErrors).toEqual([]);
     });
   }
+
+  test('SPA cancellation prevents attachment from a later style reveal', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    const hidden = MOCK_HTML.replace('style="width:800px', 'style="display:none;width:800px');
+    await page.route('https://www.youtube.com/**', async (route) => {
+      if (route.request().resourceType() === 'document') {
+        await route.fulfill({ status: 200, contentType: 'text/html', body: hidden });
+      } else {
+        await route.abort('blockedbyclient');
+      }
+    });
+    await page.addInitScript(installYTMock, { defaults: DEFAULT_SETTINGS });
+    await injectUserscript(page);
+    await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
+    await page.evaluate(() => {
+      history.pushState({}, '', '/feed/trending');
+      window.dispatchEvent(new Event('yt-navigate-finish'));
+    });
+    await page.waitForTimeout(100);
+    await page.locator('#movie_player').evaluate((player) => {
+      (player as HTMLElement).style.display = 'block';
+    });
+    await page.waitForTimeout(1200);
+    await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
+    await expect(page.locator('#yt-chat-overlay-settings-button')).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
 });

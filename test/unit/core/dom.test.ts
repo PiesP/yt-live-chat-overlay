@@ -342,6 +342,23 @@ describe('findPlayerContainerElement', () => {
     await expect(lookup).resolves.toBeNull();
   });
 
+  it('retains the helper default deadlines with and without observation', async () => {
+    const observed = findPlayerContainerElement();
+    await vi.advanceTimersByTimeAsync(4499);
+    let observedSettled = false;
+    void observed.then(() => {
+      observedSettled = true;
+    });
+    expect(observedSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(observed).resolves.toBeNull();
+
+    vi.stubGlobal('MutationObserver', undefined);
+    const polling = findPlayerContainerElement();
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(polling).resolves.toBeNull();
+  });
+
   it('keeps the shorter no-observer deadline and its final probe', async () => {
     vi.stubGlobal('MutationObserver', undefined);
     const lookup = findPlayerContainerElement({ attempts: 5, intervalMs: 1000 });
