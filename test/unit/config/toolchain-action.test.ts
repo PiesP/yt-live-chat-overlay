@@ -42,7 +42,21 @@ describe('project setup actions', () => {
         filename === 'deep-checks.yaml' ? 5 : jobs.length + 1
       );
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
-      expect(workflow).not.toContain(releaseAction);
+      if (filename === 'ci.yaml') {
+        const unit = workflow.split('\n  unit:\n')[1]?.split('\n  e2e:\n')[0] ?? '';
+        expect(workflow.split(releaseAction)).toHaveLength(2);
+        expect(unit).toContain(`uses: ${releaseAction}`);
+        expect(unit.indexOf(centralAction)).toBeLessThan(unit.indexOf(releaseAction));
+        expect(unit.indexOf('Record release setup inputs')).toBeLessThan(
+          unit.indexOf(releaseAction)
+        );
+        expect(unit.indexOf(releaseAction)).toBeLessThan(unit.indexOf('Verify release setup'));
+        expect(unit).toContain('sha256sum --check "$RUNNER_TEMP/release-setup-inputs.sha256"');
+        expect(unit).toContain('test "$(node --version)" = "v$expected_node"');
+        expect(unit).toContain('test "$(pnpm --version)" = "$expected_pnpm"');
+      } else {
+        expect(workflow).not.toContain(releaseAction);
+      }
       expect(workflow).not.toContain('uses: pnpm/action-setup@');
       expect(workflow).not.toContain('uses: actions/setup-node@');
       expect(workflow).not.toContain('run: pnpm install --frozen-lockfile');
@@ -143,7 +157,7 @@ describe('project setup actions', () => {
 
     expect(existsSync(actionPath)).toBe(true);
     const action = readFileSync(actionPath, 'utf8');
-    expect(action).toContain('uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0');
+    expect(action).toContain('uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1');
     expect(action).toContain('package-json-file: package.json');
     expect(action).toContain('runtime: "node@${{ steps.runtime.outputs.version }}"');
     expect(action).toContain('cache: false');
