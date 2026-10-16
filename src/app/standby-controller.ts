@@ -12,8 +12,9 @@
  */
 
 import { bootstrapChatSession } from '@chat/youtube/api';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
+import { isAbortError } from '@piesp/browser-core/error';
 import type { RendererBase } from '@renderer/renderer-base';
-import { clearSafeTimeout, isAbortError } from '@util/dom';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('Standby');

@@ -22,11 +22,11 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
 import { isPriorityMessage } from '@util/backlog-helpers';
 import { BacklogIndicator } from '@util/backlog-indicator';
 import { BacklogSampler } from '@util/backlog-sampler';
 import { BacklogScheduler } from '@util/backlog-scheduler';
-import { clearSafeTimeout } from '@util/dom';
 import { createLogger } from '@util/logging';
 import type { ObservabilityReporter } from '@util/observability';
 

@@ -4,9 +4,9 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
+import { clearSafeInterval } from '@piesp/browser-core/async';
 import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { resolveRequiredRenderAssets } from '@renderer/render-assets';
-import { clearSafeInterval } from '@util/dom';
 import { createLogger } from '@util/logging';
 
 /** Maximum number of failed emoji fetch entries before eviction triggers. */

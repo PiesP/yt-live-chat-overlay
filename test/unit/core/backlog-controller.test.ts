@@ -5,13 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mocks
 // ═══════════════════════════════════════════════════════════
 
-vi.mock('@util/dom', () => ({
-  clearSafeTimeout: vi.fn((t: unknown) => {
-    if (typeof t === 'number') clearTimeout(t);
-    return null;
-  }),
-}));
-
 // sampleExponential is pure math, use real implementation
 vi.mock('@util/design-tokens', async () => {
   const actual = await vi.importActual<typeof import('@util/design-tokens')>('@util/design-tokens');

@@ -3,6 +3,7 @@
 
 import type { OverlaySettings } from '@app-types';
 import { getActiveLanguage, t } from '@i18n/index';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@settings/schema';
 import {
   type ActionType,
@@ -15,7 +16,6 @@ import {
 import { PANES } from '@settings/ui/panes';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import {
-  clearSafeTimeout,
   ensurePlayerPositioning,
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,

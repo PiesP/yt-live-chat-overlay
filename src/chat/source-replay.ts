@@ -19,13 +19,9 @@ import {
   extractReplayContinuation,
   type InnertubeContinuationData,
 } from '@chat/youtube/continuation';
-import {
-  clearSafeTimeout,
-  findElementMatch,
-  isAbortError,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@util/dom';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
+import { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
+import { findElementMatch, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('ReplayChatSource');

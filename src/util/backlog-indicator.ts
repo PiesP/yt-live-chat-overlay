@@ -16,6 +16,7 @@
  */
 
 import { t } from '@i18n/index';
+import { clearSafeTimeout } from '@piesp/browser-core/async';
 import {
   BACKLOG_INDICATOR_BG,
   DEBUG_OVERLAY_RIGHT,
@@ -23,7 +24,6 @@ import {
   DEFAULT_TEXT_COLOR,
   INDICATOR_Z_INDEX,
 } from '@util/design-tokens';
-import { clearSafeTimeout } from '@util/dom';
 
 export class BacklogIndicator {
   static readonly HIDE_DELAY_MS = 300;

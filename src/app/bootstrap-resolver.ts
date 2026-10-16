@@ -6,7 +6,8 @@ import {
   type ChatBootstrapData,
   type ChatBootstrapResult,
 } from '@chat/youtube/api';
-import { sleep, throwIfAborted } from '@util/dom';
+import { sleep } from '@piesp/browser-core/async';
+import { throwIfAborted } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('BootstrapResolver');
