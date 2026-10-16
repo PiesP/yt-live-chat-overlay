@@ -16,7 +16,8 @@ import {
 } from '@chat/youtube/request';
 import { readBoundedChatResponseText, readBoundedResponseText } from '@chat/youtube/response-text';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
-import { isAbortError, sleep } from '@util/dom';
+import { sleep } from '@piesp/browser-core/async';
+import { isAbortError } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('Youtubei');

@@ -30,6 +30,7 @@ import { getTranslatableText } from '@chat/message-helpers';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
+import { clearSafeAnimationFrame } from '@piesp/browser-core/async';
 import {
   LruMap,
   ResizableByteLimitedCache,
@@ -115,7 +116,7 @@ import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
 import { DensityIndicator } from '@util/density-indicator';
 import { statusBarLayout } from '@util/design-tokens';
-import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
+import { forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { MessageActivator } from '@util/message-activator';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';

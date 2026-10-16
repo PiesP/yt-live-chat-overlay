@@ -16,7 +16,9 @@ import {
   type LiveChatPayload,
 } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
-import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@util/dom';
+import { sleep } from '@piesp/browser-core/async';
+import { isAbortError } from '@piesp/browser-core/error';
+import { findElementMatch, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { createMessageIdRegistry } from '@util/message-id-registry';
 

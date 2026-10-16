@@ -2,21 +2,8 @@
 // Copyright (c) 2026 PiesP
 
 import { sleep } from '@piesp/browser-core/async';
-import { throwIfAborted as throwIfAbortedFn } from '@piesp/browser-core/error';
+import { throwIfAborted } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
-
-/** @deprecated Import from @piesp/browser-core/async instead. */
-export {
-  clearSafeAnimationFrame,
-  clearSafeInterval,
-  clearSafeTimeout,
-  sleep,
-} from '@piesp/browser-core/async';
-/** @deprecated Import from @piesp/browser-core/error instead. */
-export { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
-
-// Re-export for internal module use
-const throwIfAborted = throwIfAbortedFn;
 
 const log = createLogger('Dom');
 
