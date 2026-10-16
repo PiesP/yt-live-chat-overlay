@@ -171,10 +171,17 @@ if (['stryker.conf.json', 'stryker.conf.fast.json', 'stryker.conf.renderer.json'
   mkdirSync(join('reports', 'mutation'), { recursive: true });
   const mode = process.env.FAKE_MUTATION_MODE;
   const name = args[1] === 'stryker.conf.json' ? 'mutation' : args[1] === 'stryker.conf.fast.json' ? 'fast' : 'renderer';
-  writeFileSync(join('reports', 'mutation', name + '.json'), mode === 'malformed'
+  if (mode !== 'json-missing') writeFileSync(join('reports', 'mutation', name + '.json'), process.env.FAKE_MUTATION_REPORT_JSON ?? (mode === 'malformed'
     ? '{bad'
-    : JSON.stringify({ files: { 'src/committed.txt': { mutants: mode === 'empty' ? [] : [mode === 'missing-status' ? {} : { status: mode === 'pending' ? 'Pending' : 'Killed' }] } } }));
-  if (name === 'fast') writeFileSync(join('reports', 'mutation', 'mutation.html'), '<html>fixture</html>');
+    : JSON.stringify({ files: { 'src/committed.txt': { mutants: mode === 'empty' ? [] : [mode === 'missing-status' ? {} : { status: mode === 'pending' ? 'Pending' : 'Killed' }] } } })));
+  if (process.env.FAKE_MUTATION_OTHER_REPORT) {
+    writeFileSync(join('reports', 'mutation', name === 'fast' ? 'renderer.json' : 'fast.json'), process.env.FAKE_MUTATION_OTHER_REPORT);
+  }
+  if (name === 'fast' && mode !== 'html-missing') {
+    if (mode === 'html-read-error') mkdirSync(join('reports', 'mutation', 'mutation.html'));
+    else writeFileSync(join('reports', 'mutation', 'mutation.html'), mode === 'html-empty' ? '' : '<html>fixture</html>');
+  }
+  if (mode === 'dirty-source') writeFileSync('src/committed.txt', 'unrestored mutation');
 }
 `;
 
@@ -237,6 +244,41 @@ function runRecord(execution: string): Record<string, unknown> {
   return JSON.parse(
     readFileSync(join(execution, '.git/ytlc-mutation/run/result.json'), 'utf8')
   ) as Record<string, unknown>;
+}
+
+function snapshotOutcome(label: string, execution: string, exit: number | null): void {
+  const destination = process.env.MUTATION_TEST_EVIDENCE_DIR;
+  if (!destination) return;
+  const reportDir = join(execution, 'reports/mutation');
+  const reports = existsSync(reportDir)
+    ? Object.fromEntries(
+        readdirSync(reportDir)
+          .filter((name) => name.endsWith('.json'))
+          .map((name) => [name, readFileSync(join(reportDir, name), 'utf8')])
+      )
+    : {};
+  const receipt = runRecord(execution);
+  mkdirSync(destination, { recursive: true });
+  writeFileSync(
+    join(destination, `${label}.json`),
+    `${JSON.stringify(
+      {
+        label,
+        exit,
+        receipt: {
+          status: receipt.status,
+          exitCode: receipt.exitCode,
+          child: receipt.child,
+          restored: receipt.restored,
+          reportsComplete: receipt.reportsComplete,
+        },
+        reports,
+        childLog: readFileSync(join(execution, '.git/ytlc-mutation/run/child.log'), 'utf8'),
+      },
+      null,
+      2
+    )}\n`
+  );
 }
 
 test('all ordinary maintainer commands refuse before instrumentation without changing protected state', () => {
@@ -599,6 +641,168 @@ test('full profile requires a nonempty terminal JSON report alongside progress',
   }
 });
 
+test('all profiles reject missing and non-array file mutants and array statuses', () => {
+  const valid = { mutants: [{ status: 'Killed' }] };
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ['missing-last', { 'src/ok.ts': valid, 'src/bad.ts': {} }],
+    ['missing-first', { 'src/bad.ts': {}, 'src/ok.ts': valid }],
+    ['non-array-last', { 'src/ok.ts': valid, 'src/bad.ts': { mutants: {} } }],
+    ['non-array-first', { 'src/bad.ts': { mutants: {} }, 'src/ok.ts': valid }],
+    ['array-status', { 'src/bad.ts': { mutants: [{ status: ['Killed'] }] } }],
+  ];
+  const observed: string[] = [];
+  for (const profile of ['full', 'fast', 'renderer']) {
+    for (const [name, files] of cases) {
+      const execution = prepared();
+      const label = `${profile}-${name}`;
+      const result = invoke(execution, ['run', profile], {
+        FAKE_MUTATION_REPORT_JSON: JSON.stringify({ files }),
+      });
+      snapshotOutcome(label, execution, result.status);
+      const receipt = runRecord(execution);
+      if (
+        result.status !== 1 ||
+        receipt.status !== 'reports-incomplete' ||
+        receipt.reportsComplete !== false ||
+        receipt.exitCode !== 1 ||
+        receipt.restored !== true ||
+        (receipt.child as { code?: number }).code !== 0
+      ) {
+        observed.push(`${label}: exit=${result.status}, status=${receipt.status}`);
+      }
+      maintainerUnchanged();
+    }
+  }
+  assert.deepEqual(observed, []);
+});
+
+test('status and record shapes require every mutant to be a terminal object with a string status', () => {
+  const terminal = { mutants: [{ status: 'Killed' }] };
+  const invalid: Array<[string, unknown]> = [
+    ['status-missing', {}],
+    ['status-null', { status: null }],
+    ['status-object', { status: { value: 'Killed' } }],
+    ['status-number', { status: 1 }],
+    ['status-boolean', { status: true }],
+    ['status-pending', { status: 'Pending' }],
+    ['status-unknown', { status: 'Unknown' }],
+    ['mutant-null', null],
+    ['mutant-array', [{ status: 'Killed' }]],
+  ];
+  for (const [name, mutant] of invalid) {
+    const execution = prepared();
+    const result = invoke(execution, ['run', 'fast'], {
+      FAKE_MUTATION_REPORT_JSON: JSON.stringify({
+        files: { 'src/ok.ts': terminal, 'src/bad.ts': { mutants: [mutant] } },
+      }),
+    });
+    const receipt = runRecord(execution);
+    assert.equal(result.status, 1, name);
+    assert.equal(receipt.status, 'reports-incomplete', name);
+    assert.equal(receipt.reportsComplete, false, name);
+    assert.equal(receipt.exitCode, 1, name);
+    maintainerUnchanged();
+  }
+});
+
+test('empty inventories and malformed file records cannot complete, but terminal statuses and empty files can', () => {
+  const invalid: Array<[string, unknown]> = [
+    ['files-missing', {}],
+    ['files-null', { files: null }],
+    ['files-array', { files: [] }],
+    ['files-empty', { files: {} }],
+    ['all-empty', { files: { 'src/a.ts': { mutants: [] }, 'src/b.ts': { mutants: [] } } }],
+    ['file-null', { files: { 'src/a.ts': { mutants: [{ status: 'Killed' }] }, 'src/b.ts': null } }],
+    ['file-array', { files: { 'src/a.ts': [{ mutants: [] }] } }],
+  ];
+  for (const [name, report] of invalid) {
+    const execution = prepared();
+    const result = invoke(execution, ['run', 'renderer'], {
+      FAKE_MUTATION_REPORT_JSON: JSON.stringify(report),
+    });
+    assert.equal(result.status, 1, name);
+    assert.equal(runRecord(execution).status, 'reports-incomplete', name);
+    maintainerUnchanged();
+  }
+  for (const profile of ['full', 'fast', 'renderer']) {
+    const execution = prepared();
+    const statuses = [
+      'Killed',
+      'Survived',
+      'NoCoverage',
+      'Timeout',
+      'Ignored',
+      'CompileError',
+      'RuntimeError',
+    ];
+    const result = invoke(execution, ['run', profile], {
+      FAKE_MUTATION_REPORT_JSON: JSON.stringify({
+        files: {
+          'src/empty.ts': { mutants: [] },
+          'src/populated.ts': { mutants: statuses.map((status) => ({ status })) },
+        },
+      }),
+    });
+    assert.equal(result.status, 0, `${profile}: ${result.stderr}`);
+    assert.equal(runRecord(execution).status, 'completed', profile);
+    assert.equal(runRecord(execution).reportsComplete, true, profile);
+    maintainerUnchanged();
+  }
+});
+
+test('each profile reads only its selected JSON and fast requires readable nonempty HTML', () => {
+  const valid = JSON.stringify({ files: { 'src/ok.ts': { mutants: [{ status: 'Killed' }] } } });
+  for (const profile of ['full', 'fast', 'renderer']) {
+    for (const mode of ['json-missing', 'malformed']) {
+      const execution = prepared();
+      const result = invoke(execution, ['run', profile], {
+        FAKE_MUTATION_MODE: mode,
+        FAKE_MUTATION_OTHER_REPORT: valid,
+      });
+      assert.equal(result.status, 1, `${profile}/${mode}`);
+      assert.equal(runRecord(execution).status, 'reports-incomplete', `${profile}/${mode}`);
+      assert.equal(runRecord(execution).reportsComplete, false, `${profile}/${mode}`);
+      maintainerUnchanged();
+    }
+  }
+  for (const mode of ['html-missing', 'html-empty', 'html-read-error']) {
+    const execution = prepared();
+    const result = invoke(execution, ['run', 'fast'], { FAKE_MUTATION_MODE: mode });
+    assert.equal(result.status, 1, mode);
+    assert.equal(runRecord(execution).reportsComplete, false, mode);
+    assert.equal(runRecord(execution).status, 'reports-incomplete', mode);
+    maintainerUnchanged();
+  }
+  for (const profile of ['full', 'renderer']) {
+    const execution = prepared();
+    assert.equal(
+      invoke(execution, ['run', profile], { FAKE_MUTATION_MODE: 'html-missing' }).status,
+      0
+    );
+    assert.equal(runRecord(execution).status, 'completed');
+    maintainerUnchanged();
+  }
+});
+
+test('dry run, child failure, and uncertain restoration retain their outcome precedence', () => {
+  const dry = prepared();
+  assert.equal(invoke(dry, ['run', 'fast', '--dryRunOnly']).status, 0);
+  assert.equal(runRecord(dry).status, 'dry-run-only');
+  assert.equal(runRecord(dry).reportsComplete, null);
+  const failed = prepared();
+  assert.equal(invoke(failed, ['run', 'renderer'], { FAKE_MUTATION_MODE: 'fail' }).status, 7);
+  assert.equal(runRecord(failed).status, 'child-failed');
+  assert.equal(runRecord(failed).exitCode, 7);
+  assert.equal(runRecord(failed).reportsComplete, false);
+  const dirty = prepared();
+  assert.equal(invoke(dirty, ['run', 'full'], { FAKE_MUTATION_MODE: 'dirty-source' }).status, 1);
+  assert.equal(runRecord(dirty).status, 'restoration-unverified');
+  assert.equal(runRecord(dirty).exitCode, 1);
+  assert.equal(runRecord(dirty).reportsComplete, true);
+  assert.equal(runRecord(dirty).restored, false);
+  maintainerUnchanged();
+});
+
 test('an active run owns its single-use claim and a second run refuses', async () => {
   const execution = prepared();
   const child = spawn(
@@ -658,6 +862,8 @@ test('whole launcher process-group SIGINT preserves protected state and writes a
   process.kill(-child.pid, 'SIGINT');
   assert.equal(await completion, 130);
   assert.equal(runRecord(execution).status, 'interrupted');
+  assert.equal(runRecord(execution).exitCode, 130);
+  assert.equal(runRecord(execution).reportsComplete, false);
   assert.equal(existsSync(join(execution, '.git/ytlc-mutation/run/child.log')), true);
   maintainerUnchanged();
 });
