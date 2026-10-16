@@ -105,6 +105,7 @@ write(
   '{"inPlace":true,"mutate":["src/committed.txt:1-2"]}\n'
 );
 write(join(maintainer, 'src/committed.txt'), 'committed source\n');
+write(join(maintainer, 'test/example.test.ts'), 'export const fixture = true;\n');
 mkdirSync(join(maintainer, 'scripts/ci'), { recursive: true });
 copyFileSync(sourceLauncher, join(maintainer, 'scripts/ci/mutation-workspace.ts'));
 git(
@@ -550,7 +551,12 @@ test('unsafe output and path arguments refuse before a run claim or fake child',
     ['--mutate', join(maintainer, 'src/committed.txt')],
     ['--mutate', 'src/{private,public}.ts'],
     ['--mutate', 'src/[a-z].ts'],
+    ['--mutate', 'src/missing.ts'],
+    ['--mutate', 'src/*.txt,!src/committed.txt'],
     ['--testFiles', 'test/**/../private.test.ts'],
+    ['--testFiles', 'test/missing.test.ts'],
+    ['--testFiles', 'test/**/*.test.ts,!test/example.test.ts'],
+    ['--testFiles', 'node_modules/.vite/hidden.test.ts'],
   ]) {
     const result = invoke(execution, ['run', 'fast', ...args]);
     assert.notEqual(result.status, 0);

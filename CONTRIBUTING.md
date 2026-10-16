@@ -97,8 +97,13 @@ job-owned checkout at the verified source revision.
 Local diagnostic arguments are `--dryRunOnly`, `--concurrency`/`-c` (1–32),
 `--logLevel`, `--mutate`/`-m`, and `--testFiles`/`-t`, with paths relative to the
 clone. Other options and hosted overrides are refused. A dry run is diagnostic
-only. The guard records source, core, tool, profile, and child identity under
-`.git/ytlc-mutation/`, with a child log and result when shutdown completes.
+only. Diagnostic `--mutate` patterns must select files under `src/`; diagnostic
+`--testFiles` patterns must select `.test` or `.spec` files under `test/`.
+Positive and negative patterns are checked conservatively against the clone
+before Stryker starts, so an empty selection is refused; this precheck does not
+replace Stryker's own file selection. The guard records source, core, tool,
+profile, and child identity under `.git/ytlc-mutation/`, with a child log and
+result when shutdown completes.
 After interruption or failure, inspect that directory, reports, Stryker
 backups, and remaining clone processes before deciding whether restoration
 completed. Hosted jobs upload available diagnostics after an ordinary failure.

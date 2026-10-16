@@ -5,6 +5,7 @@ import {
   constants,
   existsSync,
   fstatSync,
+  globSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -461,6 +462,7 @@ function argumentsFor(profile: Profile, args: string[], hosted: boolean): string
       for (const glob of value.split(',')) {
         safeRelative(glob.replace(/^!/, ''));
       }
+      requireSelectedFiles(value, key === '--testFiles' || key === '-t' ? 'test' : 'mutation');
     } else {
       fail(
         `Unsupported mutation argument: ${arg}. Supported: --dryRunOnly, --concurrency/-c, --logLevel, --mutate/-m, --testFiles/-t. Paths must stay inside the execution checkout.`
@@ -478,6 +480,38 @@ function argumentsFor(profile: Profile, args: string[], hosted: boolean): string
     ...(profile === 'full' ? ['--reporters=progress'] : []),
     ...forwarded,
   ];
+}
+
+function requireSelectedFiles(value: string, kind: 'test' | 'mutation'): void {
+  const selected = new Set<string>();
+  const patterns = value.split(',');
+  if (!patterns.some((pattern) => !pattern.startsWith('!'))) {
+    fail(`At least one positive ${kind} pattern is required.`);
+  }
+  for (const pattern of patterns.filter((candidate) => !candidate.startsWith('!'))) {
+    const pathname = pattern.replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '');
+    for (const name of globSync(pathname, { cwd: root })) {
+      const expectedRoot = kind === 'test' ? 'test/' : 'src/';
+      if (
+        name.startsWith(expectedRoot) &&
+        (kind === 'mutation' || /\.(test|spec)\.[cm]?[jt]sx?$/.test(name)) &&
+        lstatSync(join(root, name)).isFile()
+      ) {
+        selected.add(name);
+      }
+    }
+  }
+  for (const pattern of patterns.filter((candidate) => candidate.startsWith('!'))) {
+    const pathname = pattern.slice(1).replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '');
+    for (const name of globSync(pathname, { cwd: root })) {
+      selected.delete(name);
+    }
+  }
+  if (selected.size === 0) {
+    fail(
+      `Selected --${kind === 'test' ? 'testFiles' : 'mutate'} patterns match no ${kind} files in the execution checkout.`
+    );
+  }
 }
 
 function safeRelative(path: string): void {
