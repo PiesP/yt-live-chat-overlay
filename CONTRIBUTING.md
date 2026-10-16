@@ -251,6 +251,21 @@ hints fatal. Use debug output to confirm that userscript, extension, and worker
 entry points remain analyzed in both modes before running `pnpm quality` and
 `pnpm build:all:ci`.
 
+The GitHub Actions updater watches root workflows and
+`.github/actions/setup-release/action.yaml`, with independent CodeQL,
+`pnpm/setup`, and other Actions groups. For each Action SHA update, verify the
+full commit against the official upstream release and wait at least 24 hours
+from that release. Review changed executable behavior and update independent
+allowed-SHA assertions in `test/unit/config/toolchain-action.test.ts` and any
+affected workflow tests in the same PR. Never derive the trusted expected SHA
+from the workflow or action under test. Preserve the release action's manifest
+runtime, v2-compatible inputs, disabled cache, `install: false`, frozen install,
+and no-publish boundary; review a major action upgrade's compatibility
+explicitly. Run focused toolchain and Dependabot policy tests, `pnpm verify`,
+and exact-head CI before merging. Resolve a stale fixture for its specific
+update without closing all independent Actions updates. Automation-only pin
+maintenance does not change the `packages/core` runtime gitlink.
+
 ## Pull requests
 
 Keep changes focused and describe what changed, why it changed, and how it was
