@@ -556,6 +556,7 @@ test('unsafe output and path arguments refuse before a run claim or fake child',
     ['--testFiles', 'test/**/../private.test.ts'],
     ['--testFiles', 'test/missing.test.ts'],
     ['--testFiles', 'test/**/*.test.ts,!test/example.test.ts'],
+    ['--testFiles', 'test/example.test.ts:1-2'],
     ['--testFiles', 'node_modules/.vite/hidden.test.ts'],
   ]) {
     const result = invoke(execution, ['run', 'fast', ...args]);

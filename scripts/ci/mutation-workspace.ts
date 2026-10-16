@@ -485,11 +485,18 @@ function argumentsFor(profile: Profile, args: string[], hosted: boolean): string
 function requireSelectedFiles(value: string, kind: 'test' | 'mutation'): void {
   const selected = new Set<string>();
   const patterns = value.split(',');
+  if (
+    kind === 'test' &&
+    patterns.some((pattern) => pattern.startsWith('!') || pattern.includes(':'))
+  ) {
+    fail('Diagnostic --testFiles does not support negative patterns or line ranges.');
+  }
   if (!patterns.some((pattern) => !pattern.startsWith('!'))) {
     fail(`At least one positive ${kind} pattern is required.`);
   }
   for (const pattern of patterns.filter((candidate) => !candidate.startsWith('!'))) {
-    const pathname = pattern.replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '');
+    const pathname =
+      kind === 'mutation' ? pattern.replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, '') : pattern;
     for (const name of globSync(pathname, { cwd: root })) {
       const expectedRoot = kind === 'test' ? 'test/' : 'src/';
       if (

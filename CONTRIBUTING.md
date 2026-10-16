@@ -99,7 +99,8 @@ Local diagnostic arguments are `--dryRunOnly`, `--concurrency`/`-c` (1–32),
 clone. Other options and hosted overrides are refused. A dry run is diagnostic
 only. Diagnostic `--mutate` patterns must select files under `src/`; diagnostic
 `--testFiles` patterns must select `.test` or `.spec` files under `test/`.
-Positive and negative patterns are checked conservatively against the clone
+Diagnostic test-file patterns cannot use exclusions or line ranges. Positive
+and negative mutation patterns are checked conservatively against the clone
 before Stryker starts, so an empty selection is refused; this precheck does not
 replace Stryker's own file selection. The guard records source, core, tool,
 profile, and child identity under `.git/ytlc-mutation/`, with a child log and
