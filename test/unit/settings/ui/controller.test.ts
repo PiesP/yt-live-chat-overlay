@@ -317,6 +317,32 @@ describe('SettingsUi', () => {
     c.destroy();
   });
 
+  it('uses the real lookup without attaching UI from an obsolete attach', async () => {
+    vi.useFakeTimers();
+    const actualDom = await vi.importActual<typeof import('@util/dom')>('@util/dom');
+    vi.mocked(mockFinder).mockImplementation(actualDom.findPlayerContainerElement);
+    let width = 0;
+    const playerEl = document.createElement('div');
+    playerEl.id = 'movie_player';
+    Object.defineProperties(playerEl, {
+      offsetWidth: { get: () => width },
+      offsetHeight: { value: 100 },
+    });
+    document.body.append(playerEl);
+    const controller = makeController();
+    const first = controller.attach();
+    const firstAbort = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(100);
+    const second = controller.attach();
+    await firstAbort;
+    width = 100;
+    await vi.advanceTimersByTimeAsync(1000);
+    await second;
+    expect(playerEl.querySelectorAll('#yt-chat-overlay-settings-button')).toHaveLength(1);
+    controller.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('localizes the reset confirmation as one coherent Korean dialog', async () => {
     resolveActiveLanguage('ko');
     const playerEl = document.createElement('div');
