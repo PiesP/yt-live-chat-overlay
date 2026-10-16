@@ -98,8 +98,11 @@ snapshots:
   'vitest@4.1.11': {}
 `
 );
-write(join(maintainer, 'stryker.conf.json'), '{"inPlace":true}\n');
-write(join(maintainer, 'stryker.conf.fast.json'), '{"inPlace":true}\n');
+write(join(maintainer, 'stryker.conf.json'), '{"inPlace":true,"mutate":["src/committed.txt"]}\n');
+write(
+  join(maintainer, 'stryker.conf.fast.json'),
+  '{"inPlace":true,"mutate":["src/committed.txt"]}\n'
+);
 write(
   join(maintainer, 'stryker.conf.renderer.json'),
   '{"inPlace":true,"mutate":["src/committed.txt:1-2"]}\n'

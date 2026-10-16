@@ -558,6 +558,7 @@ function profileConfig(profile: Profile): void {
       for (const path of paths) {
         safeRelative(String(path).replace(/^!/, ''));
       }
+      requireSelectedFiles(paths.map(String).join(','), key === 'testFiles' ? 'test' : 'mutation');
     }
   }
   for (const key of ['tempDirName', 'incrementalFile']) {
