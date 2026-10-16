@@ -173,7 +173,7 @@ if (['stryker.conf.json', 'stryker.conf.fast.json', 'stryker.conf.renderer.json'
   const name = args[1] === 'stryker.conf.json' ? 'mutation' : args[1] === 'stryker.conf.fast.json' ? 'fast' : 'renderer';
   writeFileSync(join('reports', 'mutation', name + '.json'), mode === 'malformed'
     ? '{bad'
-    : JSON.stringify({ files: { 'src/committed.txt': { mutants: mode === 'empty' ? [] : [{ status: 'Killed' }] } } }));
+    : JSON.stringify({ files: { 'src/committed.txt': { mutants: mode === 'empty' ? [] : [mode === 'missing-status' ? {} : { status: mode === 'pending' ? 'Pending' : 'Killed' }] } } }));
   if (name === 'fast') writeFileSync(join('reports', 'mutation', 'mutation.html'), '<html>fixture</html>');
 }
 `;
@@ -590,7 +590,7 @@ test('child failure and malformed or empty reports never create successful recei
 });
 
 test('full profile requires a nonempty terminal JSON report alongside progress', () => {
-  for (const mode of ['malformed', 'empty']) {
+  for (const mode of ['malformed', 'empty', 'pending', 'missing-status']) {
     const execution = prepared();
     const result = invoke(execution, ['run', 'full'], { FAKE_MUTATION_MODE: mode });
     assert.notEqual(result.status, 0, mode);

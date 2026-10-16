@@ -760,9 +760,18 @@ async function run(profile: Profile, args: string[]): Promise<number> {
         const items = object(value).mutants;
         return Array.isArray(items) ? items : [];
       });
+      const terminal = new Set([
+        'Killed',
+        'Survived',
+        'NoCoverage',
+        'Timeout',
+        'Ignored',
+        'CompileError',
+        'RuntimeError',
+      ]);
       reportsComplete =
         mutants.length > 0 &&
-        mutants.every((value) => !['Pending', 'NotRun'].includes(String(object(value).status))) &&
+        mutants.every((value) => terminal.has(String(object(value).status))) &&
         (profile !== 'fast' ||
           readFileSync(join(root, 'reports/mutation/mutation.html')).length > 0);
     } catch {
