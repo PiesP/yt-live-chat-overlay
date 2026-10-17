@@ -4,12 +4,12 @@ import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { Page } from '@playwright/test';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as installProfileModule from '../../../validation/windows/install-profile.mjs';
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as durationModule from '../../../validation/windows/live-duration.mjs';
+import * as durationModule from '../../../validation/windows/live-duration.ts';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as naturalChromeModule from '../../../validation/windows/natural-chrome.mjs';
 
@@ -264,7 +264,7 @@ describe('public duration observation contract', () => {
     const page = { locator: () => ({ first: () => locator }) };
 
     await expect(
-      durationModule.exercisePlayerPausePlay(page, {
+      durationModule.exercisePlayerPausePlay(page as unknown as Page, {
         delay: vi.fn().mockResolvedValue(undefined),
         timeoutMs: 50,
       })

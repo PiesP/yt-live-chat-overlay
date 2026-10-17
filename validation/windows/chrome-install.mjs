@@ -1278,7 +1278,7 @@ async function runChromeDurationInstallation({
 }) {
   const [{ launchOwnedNaturalChrome }, { runLiveDuration }] = await Promise.all([
     import('./natural-chrome.mjs'),
-    import('./live-duration.mjs'),
+    import('./live-duration.ts'),
   ]);
   let ownedChrome;
   let extensionId;

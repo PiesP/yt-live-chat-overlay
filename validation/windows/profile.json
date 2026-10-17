@@ -13,7 +13,7 @@
       "validation/windows/placement-timing.mjs",
       "validation/windows/bitmap-lifecycle.ts",
       "validation/windows/chrome-process.ts",
-      "validation/windows/live-duration.mjs",
+      "validation/windows/live-duration.ts",
       "validation/windows/live-rendering.ts",
       "validation/windows/natural-chrome.mjs",
       "validation/windows/firefox-bidi.mjs",

@@ -195,7 +195,7 @@ describe('workflow change classification', () => {
   });
 
   it('runs portable quality and unit checks for Windows validation helpers', () => {
-    expect(classify(['validation/windows/live-duration.mjs'])).toMatchObject({
+    expect(classify(['validation/windows/live-duration.ts'])).toMatchObject({
       quality: true,
       unit: true,
       e2e: false,
