@@ -1,5 +1,7 @@
 import { resolve } from 'node:path';
+
 import { defineConfig, mergeConfig, type UserConfig } from 'vite';
+
 import pkg from '../../../package.json' with { type: 'json' };
 import { copyExtensionAssetsPlugin } from '../plugins/copy-extension-assets.ts';
 import { prependBidiWorkerLicensePlugin } from '../plugins/prepend-bidi-license.ts';

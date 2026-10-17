@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2026 PiesP
 
 import { resolve } from 'node:path';
+
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({

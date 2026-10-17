@@ -7,6 +7,7 @@ import {
   SUPERCHAT_CARD_CONFIG,
   toWorkerConfig,
 } from '@renderer/card-config';
+
 import type { WorkerContentSegment, WorkerMessage } from './types';
 
 export interface SerializeWorkerMessageInput {

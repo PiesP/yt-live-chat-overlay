@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
+
 import { expect, it } from 'vite-plus/test';
 
 it('enforces the DevTools file boundary with native Node filesystem operations', async () => {

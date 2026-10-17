@@ -2,8 +2,10 @@
 // Copyright (c) 2026 PiesP
 
 import { runInNewContext } from 'node:vm';
+
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vite-plus/test';
+
 import {
   assertBacklogMotion,
   assertBacklogReflow,

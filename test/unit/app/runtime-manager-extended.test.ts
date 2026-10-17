@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
-import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
+import { RuntimeManager } from '@app/runtime-manager';
 import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';

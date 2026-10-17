@@ -139,8 +139,8 @@ import {
   rendererLayout,
   spacing,
 } from '@util/design-tokens';
-import { isValidControlMessage } from './protocol-guards';
 
+import { isValidControlMessage } from './protocol-guards';
 import type {
   ActiveMessage,
   WorkerConfig,

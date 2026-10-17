@@ -7,7 +7,9 @@ import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as chromeInstallModule from '../../../validation/windows/chrome-install.mjs';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.

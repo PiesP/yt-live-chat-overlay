@@ -3,6 +3,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from 'vite-plus/test';
+
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.mjs';
 

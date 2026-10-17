@@ -16,8 +16,8 @@
  *   and message ingress check this flag.
  */
 
-import type { Overlay } from '@app/overlay';
 import type { BurstLevel, ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { Overlay } from '@app/overlay';
 import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';

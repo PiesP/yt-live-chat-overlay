@@ -6,6 +6,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
+
 // The VM harness remains a raw JavaScript asset with a separate runner contract.
 // @ts-expect-error The external Windows harness has no TypeScript declarations.
 import { readDevToolsEndpoint } from '../../../../validation/windows/natural-chrome.mjs';

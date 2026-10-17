@@ -15,6 +15,7 @@ import {
 } from '@chat/render-resource-limits';
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
+
 import {
   WORKER_DROP_REASONS,
   type WorkerActiveMotion,

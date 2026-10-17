@@ -18,7 +18,6 @@
  * the exact plan subsequently drawn, including future starts and entry offsets.
  */
 
-import type { Overlay } from '@app/overlay';
 import type {
   AccessibleChatMessage,
   ChatMessage,
@@ -26,6 +25,7 @@ import type {
   OverlayDimensions,
   OverlaySettings,
 } from '@app-types';
+import type { Overlay } from '@app/overlay';
 import { getTranslatableText } from '@chat/message-helpers';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { t } from '@i18n/index';

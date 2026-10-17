@@ -11,8 +11,10 @@
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import { expect, type Page, test } from '@playwright/test';
 import { rendererLayout } from '@util/design-tokens';
+
 import {
   installPlaybackWorkerObserver,
   PLAYBACK_WORKER_URL,

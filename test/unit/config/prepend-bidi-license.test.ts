@@ -2,7 +2,9 @@
 // Copyright (c) 2026 PiesP
 
 import { SourceMap } from 'node:module';
+
 import { describe, expect, it } from 'vite-plus/test';
+
 import { prependBannerWithSourceMap } from '../../../tooling/vite/plugins/prepend-bidi-license';
 
 describe('prepend bidi Worker license', () => {

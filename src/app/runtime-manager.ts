@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import type { ChatMessage, OverlayDimensions, OverlaySettings, Pauseable } from '@app-types';
 import {
   CHAT_PANEL_SELECTOR,
   type ChatPreflightStateMachine,
@@ -15,7 +16,6 @@ import {
 } from '@app/runtime-watchdog-policy';
 import { StandbyController } from '@app/standby-controller';
 import { VideoPauseController } from '@app/video-pause-controller';
-import type { ChatMessage, OverlayDimensions, OverlaySettings, Pauseable } from '@app-types';
 import { type DomWatcherUnsubscribe, installDomChatWatcher } from '@chat/dom-watcher';
 import { type InterceptorUnsubscribe, installFetchInterceptor } from '@chat/fetch-interceptor';
 import { ChatPanelObserver, type ChatPanelState } from '@chat/panel-observer';

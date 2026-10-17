@@ -1,5 +1,6 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import type { Plugin } from 'vite';
 
 export function copyExtensionAssetsPlugin(options: {

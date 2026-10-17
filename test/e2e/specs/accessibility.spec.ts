@@ -20,6 +20,7 @@
  */
 
 import { existsSync } from 'node:fs';
+
 import AxeBuilder from '@axe-core/playwright';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 

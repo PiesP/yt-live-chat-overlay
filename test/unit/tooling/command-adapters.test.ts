@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
 const projectRoot = resolve(import.meta.dirname, '../../..');

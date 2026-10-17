@@ -3,7 +3,9 @@
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import { expect, test } from '@playwright/test';
+
 import { type FirefoxBidiSession, launchFirefoxBidi } from '../fixtures/firefox-bidi';
 import {
   MOCK_HTML,

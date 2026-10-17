@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { Overlay } from '@app/overlay';
 import { RuntimeManager } from '@app/runtime-manager';
-import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ReplayChatSource } from '@chat/source-replay';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import type { CanvasMessage } from '@renderer/constants';

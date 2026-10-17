@@ -15,7 +15,6 @@
 // adapters are initialized. This is deliberately an external-bundle path;
 // injecting inline JavaScript would violate YouTube's CSP.
 import './page-bridge';
-
 // Side-effect import: triggers application bootstrap in main.ts.
 // Vite bundles this as a self-executing IIFE with no module syntax.
 import '../src/main';

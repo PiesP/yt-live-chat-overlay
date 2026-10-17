@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+
 import {
   createPageWorkerBlobUrl,
   loadPackagedWorkerSource,

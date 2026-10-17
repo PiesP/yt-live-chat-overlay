@@ -353,7 +353,7 @@ function buildVisualPieces<T>(
 ): VisualInlinePiece<T>[] {
   const result: VisualInlinePiece<T>[] = [];
 
-  for (let visualIndex = 0; visualIndex < visualIndices.length; ) {
+  for (let visualIndex = 0; visualIndex < visualIndices.length;) {
     const logicalIndex = visualIndices[visualIndex];
     if (logicalIndex === undefined) {
       visualIndex++;
