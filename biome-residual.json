@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": [
+      "src/**",
+      "scripts/**",
+      "extension/**/*.ts",
+      "test/**",
+      "tooling/**",
+      "validation/windows/**/*.mjs",
+      ".github/actions/**/*.mjs",
+      "*.ts",
+      "!!**/node_modules",
+      "!!packages/core",
+      "!!**/dist*",
+      "!!**/coverage",
+      "!!**/reports",
+      "!!**/test-results",
+      "!!**/playwright-report",
+      "!!**/.cache",
+      "!!**/browser-profiles",
+      "!!**/vendor",
+      "!!test/**/*.html"
+    ],
+    "ignoreUnknown": true
+  },
+  "linter": {
+    "rules": {
+      "recommended": false,
+      "style": {
+        "noUnusedTemplateLiteral": "error"
+      }
+    }
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  }
+}
