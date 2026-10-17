@@ -25,7 +25,6 @@
       "!!**/reports",
       "!!**/test-results",
       "!!**/playwright-report",
-      "!!**/.stryker-tmp*",
       "!!**/.cache",
       "!!**/browser-profiles",
       "!!**/vendor",

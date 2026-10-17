@@ -25,7 +25,6 @@ coverage/
 reports/
 test-results/
 playwright-report/
-.stryker-tmp*/
 .cache/
 
 # IDE

@@ -10,4 +10,3 @@ coverage/
 
 # Test artifacts
 test-results/
-.stryker-tmp/

@@ -17,7 +17,6 @@
     "vite*.ts",
     "test/**/*.ts"
   ],
-  "ignoreBinaries": ["unshare"],
   "paths": {
     "@app/*": ["src/app/*"],
     "@chat/*": ["src/chat/*"],

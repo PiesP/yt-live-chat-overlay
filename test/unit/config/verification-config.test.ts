@@ -3,8 +3,6 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { isFunctionDeclaration } from 'typescript/unstable/ast';
-import { API } from 'typescript/unstable/sync';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -273,108 +271,6 @@ describe('Verification configuration', () => {
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   }, 30_000);
-
-  it('targets complete fitting, outline, and shape functions and detects an omitted target', () => {
-    const config = JSON.parse(
-      readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
-    ) as { mutate: string[] };
-    const api = new API({ cwd: root });
-    try {
-      const path = resolve(root, 'src/renderer/canvas/shared.ts');
-      const snapshot = api.updateSnapshot({ openFiles: [path] });
-      const source = snapshot.getDefaultProjectForFile(path)?.program.getSourceFile(path);
-      if (!source) throw new Error('Mutation source is unavailable');
-      const names = ['fitWrappedLineToWidth', 'strokeTextOutline', 'hasRoundRect', 'drawRoundRect'];
-      const functions = source.statements
-        .filter(isFunctionDeclaration)
-        .filter((node) => names.includes(node.name?.text ?? ''));
-      expect(functions).toHaveLength(names.length);
-      function assertTargets(targets: string[]) {
-        const ranges = targets.flatMap((target) => {
-          const match = /^src\/renderer\/canvas\/shared\.ts(?::(\d+)-(\d+))?$/.exec(target);
-          return match ? [[Number(match[1] ?? 1), Number(match[2] ?? Infinity)]] : [];
-        });
-        for (const fn of functions) {
-          if (!fn.body) throw new Error('Mutation target has no body');
-          const start = source!.getLineAndCharacterOfPosition(fn.body.getStart(source)).line + 1;
-          const end = source!.getLineAndCharacterOfPosition(fn.body.getEnd() - 1).line + 1;
-          if (
-            !ranges.some(
-              ([first, last]) =>
-                first !== undefined && last !== undefined && first <= start && last >= end
-            )
-          ) {
-            throw new Error(`Mutation target omitted: ${fn.name?.text}`);
-          }
-        }
-      }
-      assertTargets(config.mutate);
-      expect(() =>
-        assertTargets(
-          config.mutate.filter((entry) => !entry.startsWith('src/renderer/canvas/shared.ts'))
-        )
-      ).toThrow('Mutation target omitted');
-      expect(() => assertTargets(['src/renderer/canvas/shared.ts:1-1'])).toThrow(
-        'Mutation target omitted'
-      );
-    } finally {
-      api.close();
-    }
-  });
-
-  it('keeps fast mutation semantic, enforceable, and diagnosable', () => {
-    const config = JSON.parse(readFileSync(resolve(root, 'stryker.conf.fast.json'), 'utf8')) as {
-      mutate?: string[];
-      reporters?: string[];
-      jsonReporter?: { fileName?: string };
-      thresholds?: { break?: number | null };
-      mutator?: { excludedMutations?: string[] };
-      vitest?: { related?: boolean };
-    };
-    const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
-    const rendererConfig = JSON.parse(
-      readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
-    ) as { thresholds?: { break?: number | null }; vitest?: { related?: boolean } };
-    const workflow = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
-
-    expect(config.thresholds?.break).toBeGreaterThan(0);
-    expect(config.reporters).toEqual(expect.arrayContaining(['clear-text', 'json', 'html']));
-    expect(config.jsonReporter?.fileName).toBe('reports/mutation/fast.json');
-    expect(config.mutate).toEqual(
-      expect.arrayContaining([
-        '!src/settings/ui/form.ts',
-        '!src/settings/ui/panes.ts',
-        '!src/translation/service.ts',
-        '!src/util/backlog-indicator.ts',
-        '!src/util/observability.ts',
-      ])
-    );
-    expect(config.thresholds?.break).toBe(62);
-    expect(rendererConfig.thresholds?.break).toBe(90);
-    expect(config.vitest?.related).toBe(true);
-    expect(rendererConfig.vitest?.related).toBe(true);
-    expect(config.mutator?.excludedMutations).not.toContain('ConditionalExpression');
-    expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
-    expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
-    for (const [script, profile] of [
-      ['mut', 'full'],
-      ['mut:fast', 'fast'],
-      ['mut:renderer', 'renderer'],
-    ] as const) {
-      expect(packageJson.scripts?.[script]?.trim().split(/\s+/)).toEqual([
-        'node',
-        '--experimental-strip-types',
-        'scripts/ci/mutation-workspace.ts',
-        'run',
-        profile,
-      ]);
-    }
-    expect(workflow).toContain('timeout-minutes: 35');
-    expect(workflow).toContain('path: reports/mutation/');
-    expect(workflow).toContain('if-no-files-found: error');
-  });
 
   it('captures browser failure evidence on the first CI retry', () => {
     const url = pathToFileURL(resolve(root, 'test/e2e/playwright.config.ts')).href;

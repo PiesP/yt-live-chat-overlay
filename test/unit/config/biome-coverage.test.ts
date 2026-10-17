@@ -67,7 +67,6 @@ describe('Effective Biome coverage', () => {
         'vitest.config.ts',
         'vite.config.fixture.ts',
         'tsconfig.fixture.json',
-        'stryker.conf.fixture.json',
         'validation/windows/fixture.json',
       ];
       const excluded = [

@@ -46,7 +46,7 @@ describe('reviewed scanner helper boundary', () => {
       expect(job).toContain('git -c advice.detachedHead=false checkout --detach "$RELEASE_SHA"');
       expect(job).toContain('git submodule update --init --recursive');
     }
-    expect(publish).toContain('needs: [provenance, quality, unit, e2e, mutation, build]');
+    expect(publish).toContain('needs: [provenance, quality, unit, e2e, build]');
     expect(publish).toContain('name: 📥 Checkout protected publication guard');
     expect(publish).toContain(
       'run: node --experimental-strip-types scripts/release/verify-publication.ts'

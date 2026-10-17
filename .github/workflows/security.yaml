@@ -120,7 +120,7 @@ jobs:
           fi
 
           echo "Change classification failed; enabling every security scope." >&2
-          for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
+          for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools; do
             echo "$scope=true" >> "$GITHUB_OUTPUT"
           done
 
