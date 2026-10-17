@@ -147,13 +147,15 @@ Keep the recommended lint preset and explicitly stronger correctness and
 performance severities. Oxlint type-aware lint is disabled because automatic
 project discovery does not cover all five custom TypeScript contexts reliably;
 all five explicit `tsc --noEmit` checks remain mandatory in `pnpm quality`.
-Oxlint 1.88 has no AST-selector rule for no-substitution template literals. The
-pinned Biome 2.5.15 remains only for `noUnusedTemplateLiteral` over the same
-first-party TypeScript/JavaScript scope, through `pnpm lint:template-literals`.
-`pnpm quality` runs it after `vp check`; Biome formatting and all other Biome
-lint rules are disabled. `test/unit/config/vite-plus-quality.test.ts` checks a
-negative fixture. Revisit this residual when Oxlint adds an equivalent rule,
-and remove it only after the fixture and quality gate pass with that replacement.
+Oxlint 1.88 has no equivalent rule for no-substitution template literals, and
+strict `tsc` accepts evolving-any declarations such as `let value; value = 1`.
+Pinned Biome 2.5.15 remains only for `noUnusedTemplateLiteral` and
+`noImplicitAnyLet` over first-party TypeScript/JavaScript sources. Run
+`pnpm lint:residual`; `pnpm quality` includes it after `vp check`. Biome
+formatting and every other Biome lint rule are disabled. The real-tool negative
+fixtures in `test/unit/config/vite-plus-quality.test.ts` protect both rules.
+Remove a residual rule only when a replacement rejects its negative fixture
+and the complete quality gate passes.
 
 Non-null expression assertions are errors in product
 and extension code: use checked initialization or guards, or explain a proven

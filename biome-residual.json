@@ -29,6 +29,9 @@
       "recommended": false,
       "style": {
         "noUnusedTemplateLiteral": "error"
+      },
+      "suspicious": {
+        "noImplicitAnyLet": "error"
       }
     }
   },

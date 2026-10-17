@@ -61,15 +61,17 @@ describe('Vite+ quality coverage', () => {
     }
   });
 
-  it('runs only the unsupported template-literal rule over first-party sources', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'yt-template-rule-'));
+  it('runs only the two residual Biome rules over first-party sources', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'yt-residual-rules-'));
     try {
       copyFileSync(join(root, 'biome-residual.json'), join(directory, 'biome-residual.json'));
       mkdirSync(join(directory, 'scripts'));
       mkdirSync(join(directory, 'packages/core/src'), { recursive: true });
-      const warning = join(directory, 'scripts/template.ts');
+      const template = join(directory, 'scripts/template.ts');
+      const evolvingAny = join(directory, 'scripts/evolving-any.ts');
       const ordinary = join(directory, 'scripts/parameter.ts');
-      writeFileSync(warning, 'export const value = `unchanged`;\n');
+      writeFileSync(template, 'export const value = `unchanged`;\n');
+      writeFileSync(evolvingAny, 'let value;\nvalue = 1;\nvoid value;\n');
       writeFileSync(
         ordinary,
         'export function bump(value: number) { value += 1; return value; }\n'
@@ -84,18 +86,24 @@ describe('Vite+ quality coverage', () => {
       const rejected = run();
       expect(rejected.status, rejected.stdout + rejected.stderr).toBe(1);
       expect(rejected.stdout + rejected.stderr).toContain('noUnusedTemplateLiteral');
+      expect(rejected.stdout + rejected.stderr).toContain('noImplicitAnyLet');
       expect(rejected.stdout + rejected.stderr).not.toContain('noParameterAssign');
-      writeFileSync(warning, "export const value = 'unchanged';\n");
+      writeFileSync(template, "export const value = 'unchanged';\n");
+      const stillRejected = run();
+      expect(stillRejected.status, stillRejected.stdout + stillRejected.stderr).toBe(1);
+      expect(stillRejected.stdout + stillRejected.stderr).toContain('noImplicitAnyLet');
+      expect(stillRejected.stdout + stillRejected.stderr).not.toContain('noUnusedTemplateLiteral');
+      writeFileSync(evolvingAny, 'let value: number;\nvalue = 1;\nvoid value;\n');
       const accepted = run();
       expect(accepted.status, accepted.stdout + accepted.stderr).toBe(0);
       expect(readFileSync(ordinary, 'utf8')).toContain('value += 1');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-    expect(scripts['lint:template-literals']).toBe(
+    expect(scripts['lint:residual']).toBe(
       'biome lint --config-path=biome-residual.json --error-on-warnings .'
     );
-    expect(scripts.quality).toContain('pnpm -s lint:template-literals');
+    expect(scripts.quality).toContain('pnpm -s lint:residual');
   });
 
   it('keeps first-party format boundaries and generated/dependency exclusions', () => {
