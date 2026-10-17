@@ -7,13 +7,13 @@ import { constants } from 'node:fs';
 import { lstat, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.mjs';
-import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
+import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
   redactDiagnosticText,
   validateLiveRenderer,
-} from './live-rendering.mjs';
+} from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.mjs';
 import { run as runFixture } from './profile.mjs';
 import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.mjs';

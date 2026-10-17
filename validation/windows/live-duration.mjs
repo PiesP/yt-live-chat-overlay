@@ -11,7 +11,7 @@ import {
   isYouTubeHostError,
   redactDiagnosticText,
   validateLiveRenderer,
-} from './live-rendering.mjs';
+} from './live-rendering.ts';
 
 const ACTIVE_MS = 300_000;
 const HIDDEN_MS = 600_000;

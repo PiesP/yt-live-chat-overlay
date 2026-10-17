@@ -3,8 +3,15 @@
 
 import assert from 'node:assert/strict';
 
+export interface LiveDiagnosticEntry {
+  level?: string;
+  type?: string;
+  text: string;
+  url?: string;
+}
+
 /** Accept the product's policy fallback only when the public page records it. */
-export function isTrustedTypesWorkerBlock(entry) {
+export function isTrustedTypesWorkerBlock(entry: LiveDiagnosticEntry): boolean {
   return (
     (entry.level ?? entry.type) === 'error' &&
     (/^This document requires ['"]TrustedScriptURL['"] assignment\. The action has been blocked\./.test(
@@ -16,7 +23,10 @@ export function isTrustedTypesWorkerBlock(entry) {
   );
 }
 
-export function countUnexpectedLiveErrors(entries, workerPolicyFallback) {
+export function countUnexpectedLiveErrors(
+  entries: LiveDiagnosticEntry[],
+  workerPolicyFallback: boolean
+): number {
   return entries.filter(
     (entry) =>
       (entry.level ?? entry.type) === 'error' &&
@@ -26,7 +36,7 @@ export function countUnexpectedLiveErrors(entries, workerPolicyFallback) {
 }
 
 /** These native YouTube media, ad, and site-module requests are outside the overlay. */
-export function isYouTubeHostError(entry) {
+export function isYouTubeHostError(entry: LiveDiagnosticEntry): boolean {
   if ((entry.level ?? entry.type) !== 'error') return false;
   const text = entry.text;
   if (
@@ -59,14 +69,14 @@ export function isYouTubeHostError(entry) {
   }
 }
 
-export function redactDiagnosticText(text) {
+export function redactDiagnosticText(text: string): string {
   return text
     .replace(/https?:\/\/[^\s‘’'"<>]+/g, (value) => {
       try {
         const url = new URL(value);
         url.search = '';
         url.hash = '';
-        url.pathname = url.pathname.split(';')[0];
+        url.pathname = url.pathname.split(';')[0] ?? '';
         return url.href;
       } catch {
         return value;
@@ -75,7 +85,12 @@ export function redactDiagnosticText(text) {
     .slice(0, 1000);
 }
 
-export function validateLiveRenderer(renderer, installation, diagnostics, bridgeReady = false) {
+export function validateLiveRenderer(
+  renderer: string,
+  installation: 'extension' | 'userscript',
+  diagnostics: LiveDiagnosticEntry[],
+  bridgeReady = false
+): { renderer: string; workerPolicyFallback: boolean } {
   if (installation === 'extension')
     assert(bridgeReady, 'The installed extension bridge is missing');
   const appWorkerFailure = diagnostics.some(({ text }) =>
@@ -85,7 +100,7 @@ export function validateLiveRenderer(renderer, installation, diagnostics, bridge
     if (!isTrustedTypesWorkerBlock(entry)) return false;
     if (appWorkerFailure) return true;
     try {
-      const url = new URL(entry.url);
+      const url = new URL(entry.url ?? '');
       return (
         ['chrome-extension:', 'moz-extension:'].includes(url.protocol) &&
         url.pathname === '/page-script.js'

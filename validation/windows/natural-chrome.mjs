@@ -10,7 +10,7 @@ import {
   readOwnedBrowserProcessId,
   removeOwnedChromeProfile,
 } from './chrome-install.mjs';
-import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
+import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 
 const VIEWPORT = { width: 1280, height: 720 };
 const DEVTOOLS_WAIT_MS = 30_000;

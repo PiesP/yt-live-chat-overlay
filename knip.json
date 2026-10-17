@@ -14,6 +14,7 @@
     "src/**/*.ts!",
     "extension/**/*.ts!",
     "scripts/**/*.ts",
+    "validation/windows/**/*.ts",
     "tooling/**/*.ts",
     "vite*.ts",
     "test/**/*.ts"

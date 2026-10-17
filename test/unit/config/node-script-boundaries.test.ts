@@ -55,7 +55,7 @@ describe('Node script boundaries', () => {
     const moduleRoot = join(root, 'validation/windows');
     const modules = readdirSync(moduleRoot, { recursive: true })
       .map((path) => path.toString())
-      .filter((path) => path.endsWith('.mjs'))
+      .filter((path) => path.endsWith('.mjs') || path.endsWith('.ts'))
       .sort();
     expect(modules.length).toBeGreaterThan(0);
     for (const module of modules) {
@@ -70,6 +70,15 @@ describe('Node script boundaries', () => {
       compilerOptions: { module: string; erasableSyntaxOnly: boolean; lib: string[] };
       include: string[];
     };
+    const windowsConfig = JSON.parse(readFileSync(join(root, 'tsconfig.windows.json'), 'utf8')) as {
+      compilerOptions: {
+        module: string;
+        erasableSyntaxOnly: boolean;
+        strict: boolean;
+        allowImportingTsExtensions: boolean;
+      };
+      include: string[];
+    };
     const browserConfig = readFileSync(join(root, 'tsconfig.json'), 'utf8');
 
     expect(scriptsConfig.compilerOptions.module).toBe('NodeNext');
@@ -77,6 +86,13 @@ describe('Node script boundaries', () => {
     expect(scriptsConfig.compilerOptions.lib).toEqual(['ES2022']);
     expect(scriptsConfig.include).toContain('scripts/**/*.ts');
     expect(scriptsConfig.include).toContain('test/unit/config/fixtures/devtools-endpoint.ts');
+    expect(windowsConfig.compilerOptions).toMatchObject({
+      module: 'NodeNext',
+      erasableSyntaxOnly: true,
+      strict: true,
+      allowImportingTsExtensions: true,
+    });
+    expect(windowsConfig.include).toEqual(['validation/windows/**/*.ts']);
     expect(browserConfig.match(/"include":\s*\[([^\]]*)\]/)?.[1]).not.toContain(
       '"scripts/**/*.ts"'
     );

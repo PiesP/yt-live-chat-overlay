@@ -10,7 +10,7 @@ import {
   isYouTubeHostError,
   redactDiagnosticText,
   validateLiveRenderer,
-} from './live-rendering.mjs';
+} from './live-rendering.ts';
 
 const EXTENSION_ID = 'yt-live-chat-overlay@piesp.github.io';
 const OVERLAY_ID = 'yt-live-chat-overlay';
