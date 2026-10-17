@@ -11,7 +11,7 @@
       "validation/windows/chrome-install.mjs",
       "validation/windows/release-upgrade",
       "validation/windows/placement-timing.mjs",
-      "validation/windows/bitmap-lifecycle.mjs",
+      "validation/windows/bitmap-lifecycle.ts",
       "validation/windows/chrome-process.ts",
       "validation/windows/live-duration.mjs",
       "validation/windows/live-rendering.ts",

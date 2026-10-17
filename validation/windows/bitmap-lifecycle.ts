@@ -5,6 +5,50 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { BrowserContext, Route } from '@playwright/test';
+
+type BitmapCache = {
+  get(key: string): ImageBitmap | undefined;
+  set(key: string, value: ImageBitmap): boolean;
+  has(key: string): boolean;
+  delete(key: string): boolean;
+};
+
+type BitmapProbeResult = {
+  phase: string;
+  owned?: boolean;
+  width?: number | null;
+  height?: number | null;
+  pixel?: number[] | null;
+  drawError?: string | null;
+  sameReferenceAccepted?: boolean | null;
+  aliasErrorType?: string | null;
+  aliasOwned?: boolean | null;
+  errorType?: string;
+};
+
+type BitmapWorkerRecord = {
+  worker: Worker;
+  ready: boolean;
+  attached: boolean;
+  results: BitmapProbeResult[];
+  overflow: number;
+};
+
+declare global {
+  interface Window {
+    __ytBitmapWorkers: BitmapWorkerRecord[];
+    __ytBitmapWorkerOverflow: number;
+    __ytBitmapCacheClass: new (
+      maxBytes: number,
+      sizeOf: (value: ImageBitmap) => number,
+      dispose: (value: ImageBitmap) => void
+    ) => BitmapCache;
+    ytcfg: object;
+    ytInitialData: object;
+  }
+}
+
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsBitmapLifecycle';
 const BITMAP_URL = 'https://yt3.ggpht.com/windows-bitmap-lifecycle';
 const SELF_FETCH_URL = 'https://yt3.ggpht.com/windows-bitmap-self-fetch.png';
@@ -15,10 +59,14 @@ const RED_PNG = Buffer.from(
 
 // This suffix receives the real WorkerRenderer instance from the packaged Blob.
 // The existing addMessages receiver performs insertion before these probes run.
-function attachWorkerBitmapProbe(renderer) {
+function attachWorkerBitmapProbe(renderer: {
+  handleMessage: (event: MessageEvent) => void;
+  emojiCache: BitmapCache;
+  prefetchImages: (urls: string[], cache: BitmapCache) => Promise<void>;
+}) {
   if (typeof renderer?.handleMessage !== 'function') return;
   self.postMessage({ type: 'ytBitmapProbeAttached' });
-  let retained;
+  let retained: ImageBitmap | undefined;
   self.addEventListener('message', async (event) => {
     if (event.data?.type !== 'ytBitmapProbe') return;
     const { phase, url } = event.data;
@@ -35,23 +83,25 @@ function attachWorkerBitmapProbe(renderer) {
       let aliasErrorType = null;
       let aliasOwned = null;
       if (phase === 'before' || phase === 'self-fetch-before') {
+        if (!retained) throw new Error('Worker bitmap was not cached');
         sameReferenceAccepted = cache.set(url, retained);
         try {
           cache.set(`${url}#alias`, retained);
         } catch (error) {
-          aliasErrorType = error?.name ?? typeof error;
+          aliasErrorType = error instanceof Error ? error.name : typeof error;
         }
         aliasOwned = cache.has(`${url}#alias`);
       }
       const canvas = new OffscreenCanvas(4, 4);
       const ctx = canvas.getContext('2d');
+      if (!ctx || !retained) throw new Error('Worker bitmap context unavailable');
       let drawError = null;
       let pixel = null;
       try {
         ctx.drawImage(retained, 0, 0);
         pixel = Array.from(ctx.getImageData(0, 0, 1, 1).data);
       } catch (error) {
-        drawError = error?.name ?? String(error);
+        drawError = error instanceof Error ? error.name : String(error);
       }
       self.postMessage({
         type: 'ytBitmapProbeResult',
@@ -69,14 +119,22 @@ function attachWorkerBitmapProbe(renderer) {
       self.postMessage({
         type: 'ytBitmapProbeResult',
         phase,
-        errorType: error?.name ?? typeof error,
+        errorType: error instanceof Error ? error.name : typeof error,
       });
     }
   });
 }
 
 /** Installed Edge: verify real ImageBitmap cleanup in the compiled cache and renderer Worker. */
-export async function runBitmapLifecycleFixture({ context, root, extensionId }) {
+export async function runBitmapLifecycleFixture({
+  context,
+  root,
+  extensionId,
+}: {
+  context: BrowserContext;
+  root: string;
+  extensionId: string;
+}) {
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
   const marker = '\n\tmain();\n';
   assert(
@@ -99,13 +157,13 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
     );
   assert.notEqual(html, preview, 'Bitmap fixture video was not installed');
   const page = await context.newPage();
-  const pageErrors = [];
+  const pageErrors: string[] = [];
   let pageErrorOverflow = 0;
   page.on('pageerror', (error) => {
     if (pageErrors.length < 10) pageErrors.push(error.name);
     else pageErrorOverflow++;
   });
-  const consoleErrors = [];
+  const consoleErrors: string[] = [];
   let consoleErrorOverflow = 0;
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -113,7 +171,7 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
     else consoleErrorOverflow++;
   });
   let selfFetchRequests = 0;
-  const selfFetchRoute = (route) => {
+  const selfFetchRoute = (route: Route) => {
     selfFetchRequests++;
     return route.fulfill({
       status: 200,
@@ -174,7 +232,7 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
         body: 'Blocked by bitmap fixture',
       });
     });
-    await page.addInitScript((probeSource) => {
+    await page.addInitScript((probeSource: string) => {
       window.__ytBitmapWorkers = [];
       window.__ytBitmapWorkerOverflow = 0;
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
@@ -206,10 +264,16 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       window.Worker = new Proxy(NativeWorker, {
         construct(target, args) {
           const worker = Reflect.construct(target, args);
-          const record = { worker, ready: false, attached: false, results: [], overflow: 0 };
+          const record: BitmapWorkerRecord = {
+            worker,
+            ready: false,
+            attached: false,
+            results: [],
+            overflow: 0,
+          };
           if (window.__ytBitmapWorkers.length < 4) window.__ytBitmapWorkers.push(record);
           else window.__ytBitmapWorkerOverflow++;
-          worker.addEventListener('message', (event) => {
+          worker.addEventListener('message', (event: MessageEvent) => {
             if (event.data?.type === 'ready') record.ready = true;
             if (event.data?.type === 'ytBitmapProbeAttached') record.attached = true;
             if (event.data?.type === 'ytBitmapProbeResult') {
@@ -262,6 +326,7 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
     const main = await page.evaluate(async () => {
       const source = new OffscreenCanvas(4, 4);
       const sourceCtx = source.getContext('2d');
+      if (!sourceCtx) throw new Error('Main bitmap context unavailable');
       sourceCtx.fillStyle = '#ff0000';
       sourceCtx.fillRect(0, 0, 4, 4);
       const bitmap = await createImageBitmap(source);
@@ -276,10 +341,13 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       try {
         cache.set('main-alias', bitmap);
       } catch (error) {
-        aliasErrorType = error.name;
+        aliasErrorType = error instanceof Error ? error.name : String(error);
       }
       const draw = new OffscreenCanvas(4, 4).getContext('2d');
-      draw.drawImage(cache.get('main'), 0, 0);
+      if (!draw) throw new Error('Main bitmap draw context unavailable');
+      const cached = cache.get('main');
+      if (!cached) throw new Error('Main bitmap was not cached');
+      draw.drawImage(cached, 0, 0);
       const before = {
         owned: cache.has('main'),
         width: bitmap.width,
@@ -294,7 +362,7 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       try {
         draw.drawImage(bitmap, 0, 0);
       } catch (error) {
-        drawError = error.name;
+        drawError = error instanceof Error ? error.name : String(error);
       }
       return {
         before,
@@ -305,10 +373,12 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
     const sender = await page.evaluate(async (url) => {
       const source = new OffscreenCanvas(4, 4);
       const ctx = source.getContext('2d');
+      if (!ctx) throw new Error('Sender bitmap context unavailable');
       ctx.fillStyle = '#ff0000';
       ctx.fillRect(0, 0, 4, 4);
       const bitmap = await createImageBitmap(source);
       const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+      if (!record) throw new Error('Bitmap Worker was not attached');
       record.worker.postMessage(
         { type: 'addMessages', messages: [], imageData: [{ url, bitmap, target: 'emoji' }] },
         [bitmap]
@@ -324,13 +394,11 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       undefined,
       { timeout: 15_000 }
     );
-    await page.evaluate(
-      (url) =>
-        window.__ytBitmapWorkers
-          .find((record) => record.ready && record.attached)
-          .worker.postMessage({ type: 'ytBitmapProbe', phase: 'after', url }),
-      BITMAP_URL
-    );
+    await page.evaluate((url: string) => {
+      const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+      if (!record) throw new Error('Bitmap Worker was not attached');
+      record.worker.postMessage({ type: 'ytBitmapProbe', phase: 'after', url });
+    }, BITMAP_URL);
     await page.waitForFunction(
       () =>
         window.__ytBitmapWorkers.some((record) =>
@@ -339,13 +407,11 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       undefined,
       { timeout: 15_000 }
     );
-    await page.evaluate(
-      (url) =>
-        window.__ytBitmapWorkers
-          .find((record) => record.ready && record.attached)
-          .worker.postMessage({ type: 'ytBitmapProbe', phase: 'self-fetch-before', url }),
-      SELF_FETCH_URL
-    );
+    await page.evaluate((url: string) => {
+      const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+      if (!record) throw new Error('Bitmap Worker was not attached');
+      record.worker.postMessage({ type: 'ytBitmapProbe', phase: 'self-fetch-before', url });
+    }, SELF_FETCH_URL);
     await page.waitForFunction(
       () =>
         window.__ytBitmapWorkers.some((record) =>
@@ -354,13 +420,11 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       undefined,
       { timeout: 15_000 }
     );
-    await page.evaluate(
-      (url) =>
-        window.__ytBitmapWorkers
-          .find((record) => record.ready && record.attached)
-          .worker.postMessage({ type: 'ytBitmapProbe', phase: 'self-fetch-after', url }),
-      SELF_FETCH_URL
-    );
+    await page.evaluate((url: string) => {
+      const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+      if (!record) throw new Error('Bitmap Worker was not attached');
+      record.worker.postMessage({ type: 'ytBitmapProbe', phase: 'self-fetch-after', url });
+    }, SELF_FETCH_URL);
     await page.waitForFunction(
       () =>
         window.__ytBitmapWorkers.some((record) =>
@@ -369,9 +433,11 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       undefined,
       { timeout: 15_000 }
     );
-    const worker = await page.evaluate(
-      () => window.__ytBitmapWorkers.find((record) => record.ready && record.attached).results
-    );
+    const worker = await page.evaluate(() => {
+      const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+      if (!record) throw new Error('Bitmap Worker was not attached');
+      return record.results;
+    });
     const probeOverflow = await page.evaluate(() => ({
       workers: window.__ytBitmapWorkerOverflow,
       results: window.__ytBitmapWorkers.reduce((sum, record) => sum + record.overflow, 0),
@@ -394,28 +460,30 @@ export async function runBitmapLifecycleFixture({ context, root, extensionId }) 
       worker.map((result) => result.phase),
       ['before', 'after', 'self-fetch-before', 'self-fetch-after']
     );
-    assert.deepEqual(worker[0].pixel, [255, 0, 0, 255]);
-    assert.equal(worker[0].owned, true);
-    assert.equal(worker[0].width, 4);
-    assert.equal(worker[0].height, 4);
-    assert.equal(worker[0].sameReferenceAccepted, true);
-    assert.equal(worker[0].aliasErrorType, 'TypeError');
-    assert.equal(worker[0].aliasOwned, false);
-    assert.equal(worker[1].owned, false);
-    assert.equal(worker[1].width, 0);
-    assert.equal(worker[1].height, 0);
-    assert(worker[1].drawError, 'Released Worker bitmap remained drawable');
-    assert.deepEqual(worker[2].pixel, [255, 0, 0, 255]);
-    assert.equal(worker[2].owned, true);
-    assert.equal(worker[2].width, 4);
-    assert.equal(worker[2].height, 4);
-    assert.equal(worker[2].sameReferenceAccepted, true);
-    assert.equal(worker[2].aliasErrorType, 'TypeError');
-    assert.equal(worker[2].aliasOwned, false);
-    assert.equal(worker[3].owned, false);
-    assert.equal(worker[3].width, 0);
-    assert.equal(worker[3].height, 0);
-    assert(worker[3].drawError, 'Released self-fetched bitmap remained drawable');
+    const [before, after, selfFetchBefore, selfFetchAfter] = worker;
+    assert(before && after && selfFetchBefore && selfFetchAfter);
+    assert.deepEqual(before.pixel, [255, 0, 0, 255]);
+    assert.equal(before.owned, true);
+    assert.equal(before.width, 4);
+    assert.equal(before.height, 4);
+    assert.equal(before.sameReferenceAccepted, true);
+    assert.equal(before.aliasErrorType, 'TypeError');
+    assert.equal(before.aliasOwned, false);
+    assert.equal(after.owned, false);
+    assert.equal(after.width, 0);
+    assert.equal(after.height, 0);
+    assert(after.drawError, 'Released Worker bitmap remained drawable');
+    assert.deepEqual(selfFetchBefore.pixel, [255, 0, 0, 255]);
+    assert.equal(selfFetchBefore.owned, true);
+    assert.equal(selfFetchBefore.width, 4);
+    assert.equal(selfFetchBefore.height, 4);
+    assert.equal(selfFetchBefore.sameReferenceAccepted, true);
+    assert.equal(selfFetchBefore.aliasErrorType, 'TypeError');
+    assert.equal(selfFetchBefore.aliasOwned, false);
+    assert.equal(selfFetchAfter.owned, false);
+    assert.equal(selfFetchAfter.width, 0);
+    assert.equal(selfFetchAfter.height, 0);
+    assert(selfFetchAfter.drawError, 'Released self-fetched bitmap remained drawable');
     assert.equal(selfFetchRequests, 1);
     assert.deepEqual(pageErrors, []);
     assert.equal(pageErrorOverflow, 0);

@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { runBitmapLifecycleFixture } from './bitmap-lifecycle.mjs';
+
+import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import {
   countUnexpectedLiveErrors,
@@ -649,8 +650,8 @@ async function inspectLivePage(
     observation.extensionBridge = bridge;
     observation.installedBridgeReady = Boolean(
       bridge.workerSupported &&
-        bridge.storageType === 'chrome.storage.local' &&
-        bridge.workerUrlUsesDocumentOrigin
+      bridge.storageType === 'chrome.storage.local' &&
+      bridge.workerUrlUsesDocumentOrigin
     );
     Object.assign(
       observation,
@@ -795,8 +796,8 @@ async function inspectLivePage(
     const nextBridge = await readExtensionBridgeDiagnostic(page);
     const nextBridgeReady = Boolean(
       nextBridge.workerSupported &&
-        nextBridge.storageType === 'chrome.storage.local' &&
-        nextBridge.workerUrlUsesDocumentOrigin
+      nextBridge.storageType === 'chrome.storage.local' &&
+      nextBridge.workerUrlUsesDocumentOrigin
     );
     const nextRendererPolicy = validateLiveRenderer(
       nextRenderer,

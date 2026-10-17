@@ -101,7 +101,7 @@ packaged OffscreenCanvas Worker; the other makes
 normal Canvas fallback. Both pages use the normal extension, chat response
 parser, runtime, and renderer with routed, bounded text and paid-card messages.
 
-The installed Edge extension also runs `bitmap-lifecycle.mjs` in a bounded fixture
+The installed Edge extension also runs `bitmap-lifecycle.ts` in a bounded fixture
 page. It uses the compiled page bundle's cache with a real main-thread
 `ImageBitmap`, then defensively transfers a separate real bitmap through the
 Worker's existing `addMessages` protocol into its compiled renderer's emoji cache.
