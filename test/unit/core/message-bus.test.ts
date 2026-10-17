@@ -1,5 +1,5 @@
 import { BatchMessageBus } from '@util/message-bus';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 describe('BatchMessageBus', () => {
   let bus: BatchMessageBus<string>;

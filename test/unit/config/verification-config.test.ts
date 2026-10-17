@@ -3,7 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const scripts = (
@@ -52,7 +53,7 @@ if [ "$joined" = "$FAIL_COMMAND" ]; then
   printf 'Deliberate fixture failure: %s\n' "$command" >&2
   exit 17
 fi
-if [ "$command" = vite ]; then
+if [ "$command" = vp ]; then
   target=production
   previous=
   for arg do
@@ -83,7 +84,7 @@ vite.config.extension.firefox.ts vite.config.extension.cs.firefox.ts vite.config
 fi
 `
   );
-  for (const tool of ['vite', 'playwright']) {
+  for (const tool of ['vp', 'playwright']) {
     const shim = join(bin, tool);
     writeFileSync(shim, `#!/bin/sh\nexec sh '${record}' ${tool} "$@"\n`);
     chmodSync(shim, 0o755);
@@ -113,7 +114,7 @@ fi
       const fields = readFileSync(log, 'utf8').split('\0');
       fields.pop();
       const calls: string[][] = [];
-      for (let index = 0; index < fields.length; ) {
+      for (let index = 0; index < fields.length;) {
         const count = Number(fields[index++]);
         calls.push(fields.slice(index, index + count));
         index += count;
@@ -150,22 +151,22 @@ describe('Verification configuration', () => {
       expect(names).toEqual([
         'quality',
         'check:versions',
-        'vite',
-        'vite',
-        'vite',
-        'vite',
-        'vite',
-        'vite',
-        'vite',
+        'vp',
+        'vp',
+        'vp',
+        'vp',
+        'vp',
+        'vp',
+        'vp',
         'check:artifacts',
         'test:core',
         'test:cov',
-        'vite',
+        'vp',
         'check:artifacts',
         'playwright',
       ]);
       expect(
-        calls.filter(([name, ...args]) => name === 'vite' && args.includes('--config'))
+        calls.filter(([name, ...args]) => name === 'vp' && args.includes('--config'))
       ).toHaveLength(6);
       expect(calls.filter(([name]) => name === 'check:artifacts')).toEqual([
         ['check:artifacts'],
@@ -182,7 +183,7 @@ describe('Verification configuration', () => {
       rmSync(join(fixture.directory, 'outputs'), { recursive: true, force: true });
       const missing = fixture.run('test:e2e', 'missing');
       expect(missing.status, missing.output).toBe(0);
-      expect(missing.calls.filter(([name]) => name === 'vite')).toHaveLength(7);
+      expect(missing.calls.filter(([name]) => name === 'vp')).toHaveLength(7);
       expect(missing.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
       expect(missing.calls.at(-1)?.[0]).toBe('playwright');
     } finally {
@@ -197,7 +198,7 @@ describe('Verification configuration', () => {
       expect(old.status, old.output).toBe(0);
       const stale = fixture.run('test:e2e:headed', 'fresh', '', ['--', '--project=chromium']);
       expect(stale.status, stale.output).toBe(0);
-      expect(stale.calls.filter(([name]) => name === 'vite')).toHaveLength(7);
+      expect(stale.calls.filter(([name]) => name === 'vp')).toHaveLength(7);
       expect(stale.calls.at(-2)).toEqual(['check:artifacts', '--e2e']);
       expect(stale.calls.at(-1)?.join(' ')).toContain('--headed');
       expect(stale.calls.at(-1)?.join(' ')).toContain('--project=chromium');
@@ -207,11 +208,11 @@ describe('Verification configuration', () => {
   }, 30_000);
 
   it.each([
-    ['verify:full', 'vite build --config vite.config.extension.cs.firefox.ts'],
+    ['verify:full', 'vp build --config vite.config.extension.cs.firefox.ts'],
     ['verify:full', 'check:artifacts'],
-    ['verify:full', 'vite build --mode development'],
+    ['verify:full', 'vp build --mode development'],
     ['verify:full', 'check:artifacts --e2e'],
-    ['test:e2e', 'vite build --config vite.config.extension.page.ts'],
+    ['test:e2e', 'vp build --config vite.config.extension.page.ts'],
     ['test:e2e', 'check:artifacts --e2e'],
   ])(
     'stops %s after %s fails',
@@ -326,7 +327,7 @@ describe('Verification configuration', () => {
     );
   });
 
-  it('runs one complete Biome pass, preserves quality order, and propagates failures', () => {
+  it('runs one complete Vite+ pass, preserves quality order, and propagates failures', () => {
     const scripts = (
       JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
         scripts: Record<string, string>;
@@ -346,7 +347,7 @@ appendFileSync(process.env.CALL_LOG, JSON.stringify(args) + '\\n');
 process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
 `
       );
-      for (const tool of ['biome', 'pnpm']) {
+      for (const tool of ['vp', 'pnpm']) {
         const shim = join(bin, tool);
         writeFileSync(shim, `#!/bin/sh\nexec '${process.execPath}' '${record}' ${tool} "$@"\n`);
         chmodSync(shim, 0o755);
@@ -376,8 +377,20 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
       }
       const quality = run('quality');
       expect(quality.status).toBe(0);
-      expect(quality.calls[0]).toEqual(['biome', 'check', '--error-on-warnings', '.']);
-      expect(quality.calls.filter(([tool]) => tool === 'biome')).toHaveLength(1);
+      expect(quality.calls[0]).toEqual([
+        'vp',
+        'check',
+        'src',
+        'scripts',
+        'extension',
+        'test',
+        'tooling',
+        'validation/windows',
+        '.github/actions',
+        '*.ts',
+        '*.json',
+      ]);
+      expect(quality.calls.filter(([tool]) => tool === 'vp')).toHaveLength(1);
       expect(quality.calls.slice(1).map((call) => call.at(-1))).toEqual([
         'check',
         'check:extension',
@@ -389,18 +402,34 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'circular',
         'knip',
       ]);
-      const rejected = run('quality', 'biome check --error-on-warnings .');
+      const rejected = run(
+        'quality',
+        'vp check src scripts extension test tooling validation/windows .github/actions *.ts *.json'
+      );
       expect(rejected.status).toBe(17);
       expect(rejected.calls).toHaveLength(1);
       const typeFailure = run('quality', 'pnpm -s check:extension');
       expect(typeFailure.status).toBe(17);
       expect(typeFailure.calls.map((call) => call.at(-1))).toEqual([
-        '.',
+        '*.json',
         'check',
         'check:extension',
       ]);
       expect(run('quality:fix').calls).toEqual([
-        ['biome', 'check', '--write', '--error-on-warnings', '.'],
+        [
+          'vp',
+          'check',
+          '--fix',
+          'src',
+          'scripts',
+          'extension',
+          'test',
+          'tooling',
+          'validation/windows',
+          '.github/actions',
+          '*.ts',
+          '*.json',
+        ],
         ['pnpm', '-s', 'quality'],
       ]);
       const targets = [

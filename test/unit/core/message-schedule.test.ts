@@ -15,7 +15,7 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const baseInput = {
   mode: 'scroll' as const,

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { ChannelLanguageMemory } from '@translation/channel-memory';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('ChannelLanguageMemory.keyFromUrl', () => {
   describe('watch video URLs', () => {

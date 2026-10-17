@@ -52,7 +52,7 @@ export function removeMessageFromLaneIndex<T extends LaneIndexedMessage>(
     const index = message.laneArrayIndices[slot];
     if (index === undefined || index < 0 || index >= laneMessages.length) continue;
 
-    // biome-ignore lint/style/noNonNullAssertion: the nonempty lane array was checked above.
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- the nonempty lane array was checked above.
     const lastMessage = laneMessages[laneMessages.length - 1]!;
     if (lastMessage !== message) {
       laneMessages[index] = lastMessage;

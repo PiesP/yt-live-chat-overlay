@@ -6,7 +6,7 @@ import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function makeReplayMessage(id: string, offsetMs: number): ChatMessage {
   return {

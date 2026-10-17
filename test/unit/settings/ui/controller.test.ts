@@ -7,7 +7,7 @@ import { MAX_SETTINGS_IMPORT_BYTES, SettingsUi } from '@settings/ui/controller';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Mock findPlayerContainerElement so it returns our player element
 vi.mock('@util/dom', async () => {

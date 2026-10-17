@@ -19,7 +19,7 @@ import { SIN_LUT_SCALE, SIN_TABLE } from '@renderer/constants';
  */
 export function fastSin(elapsedMs: number): number {
   const idx = ((elapsedMs * SIN_LUT_SCALE) | 0) & 255;
-  // biome-ignore lint/style/noNonNullAssertion: bitmask bounds the index to the 256-entry table.
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- bitmask bounds the index to the 256-entry table.
   return SIN_TABLE[idx]!;
 }
 

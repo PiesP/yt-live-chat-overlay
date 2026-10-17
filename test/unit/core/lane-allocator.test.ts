@@ -12,7 +12,7 @@ import {
   type LaneAllocationState,
   type LaneSelectionStrategy,
 } from '@renderer/layout/lane-shared';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

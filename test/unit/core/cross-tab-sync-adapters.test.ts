@@ -1,6 +1,6 @@
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import type { CrossTabSyncAdapter } from '@platform/types';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 type ChromeChangeListener = (changes: Record<string, unknown>, areaName: string) => void;
 type GmChangeListener = (

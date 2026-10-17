@@ -4,7 +4,7 @@ import {
   getEmojiVisibleFallbackText,
   parseEmoji,
 } from '@chat/emoji-parser';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── extractBestThumbnail ─────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { LanguageDetectorService } from '@translation/language-detector';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolvePromise: ((value: T) => void) | undefined;

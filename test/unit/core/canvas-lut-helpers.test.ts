@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { computePulseAlpha, fastSin } from '@renderer/canvas/lut-helpers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // fastSin

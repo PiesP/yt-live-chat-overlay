@@ -4,7 +4,7 @@ import {
   computeDensityRampFactor,
   decayActivityCount,
 } from '@util/backlog-scheduler';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const config = {
   backlogInjectionRateMin: 4,

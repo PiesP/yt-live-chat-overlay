@@ -4,7 +4,7 @@
 import type { OverlaySettings } from '@app-types';
 import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 const mocks = vi.hoisted(() => ({
   refreshBootstrap: vi.fn(),

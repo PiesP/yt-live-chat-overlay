@@ -1,5 +1,5 @@
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vite-plus/test';
 
 // ── HighFirstPriorityBucketQueue ─────────────────────────────────
 

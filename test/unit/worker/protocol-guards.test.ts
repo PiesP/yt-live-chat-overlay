@@ -19,7 +19,7 @@ import {
 import { WorkerRenderer } from '@renderer/worker/renderer';
 import { resolveLimits } from '@settings/limits';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const mockContext = {
   setTransform: vi.fn(),

@@ -2,7 +2,7 @@ import {
   ChatResponseTooLargeError,
   readBoundedChatResponseText,
 } from '@chat/youtube/response-text';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 const NOT_SETTLED = Symbol('not-settled');
 

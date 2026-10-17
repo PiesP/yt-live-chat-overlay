@@ -40,6 +40,8 @@ updates:
         patterns:
           - "typescript"
           - "vite"
+          - "vite-plus"
+          - "@voidzero-dev/vite-plus-core"
           - "vite-plugin-monkey"
           - "@types/*"
         update-types:
@@ -48,7 +50,6 @@ updates:
 
       quality:
         patterns:
-          - "@biomejs/*"
           - "knip"
         update-types:
           - "minor"

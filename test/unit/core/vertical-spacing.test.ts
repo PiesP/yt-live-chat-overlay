@@ -16,7 +16,7 @@ import {
   measureTextTopBounds,
 } from '@renderer/text-measure';
 import { CanvasRenderingContext2D, createCanvas } from 'canvas';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const message = (text: string): ChatMessage => ({
   text,

@@ -8,7 +8,7 @@ import {
   fastRandom,
   removeMessageFromLaneIndex,
 } from '@renderer/canvas/pipeline-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // createFastRandom

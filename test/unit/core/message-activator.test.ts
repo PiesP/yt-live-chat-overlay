@@ -10,7 +10,7 @@ import {
   MessageActivator,
   type MessageActivatorConfig,
 } from '@util/message-activator';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

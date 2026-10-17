@@ -5,7 +5,7 @@ import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage, t } from '@i18n/index';
 import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   return {

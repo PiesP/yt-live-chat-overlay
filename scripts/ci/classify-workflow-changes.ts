@@ -87,7 +87,7 @@ export function classifyWorkflowChanges(
     } else if (path.startsWith('test/visual/')) {
       mark('semgrep', 'codeql_javascript');
     } else if (
-      ['biome.json', 'knip.json', 'vitest.config.ts'].includes(path) ||
+      ['knip.json', 'vitest.config.ts'].includes(path) ||
       /^tsconfig.*\.json$/.test(path)
     ) {
       mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript');

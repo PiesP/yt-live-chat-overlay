@@ -2,7 +2,7 @@ import type { OverlaySettings } from '@app-types';
 import { ChatSource } from '@chat/source-base';
 import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Minimal concrete ChatSource for testing pause reason set ────────
 

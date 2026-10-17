@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { PageWatcher } from '@app/page-watcher';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── isValidPage ─────────────────────────────────────────────────────
 

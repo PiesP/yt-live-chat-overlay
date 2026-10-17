@@ -5,7 +5,7 @@
  * These tests override that mock with vi.mock to test the real implementation.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════════════════
 // We explicitly NOT import from @util/logging here because test/setup.ts

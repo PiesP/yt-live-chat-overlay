@@ -95,7 +95,7 @@ export function computeDensityAdjustedMs(
 
   let sum = 0;
   for (let i = 0; i < densityRingFilled; i++) {
-    // biome-ignore lint/style/noNonNullAssertion: the caller tracks filled slots in this ring.
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- the caller tracks filled slots in this ring.
     sum += densityRing[i]!;
   }
   const avgCount = sum / densityRingFilled;

@@ -1,5 +1,5 @@
 import { AR } from '@i18n/ar';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('Arabic translations', () => {
   it('has proper Arabic labels for font-related keys', () => {

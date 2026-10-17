@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import { createExtensionContentConfig } from '../../../tooling/vite/configs/extension-content.ts';
 import { createExtensionPageConfig } from '../../../tooling/vite/configs/extension-page.ts';
 

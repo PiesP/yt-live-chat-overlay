@@ -7,7 +7,7 @@
 import type { OverlaySettings } from '@app-types';
 import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
 import { PANES } from '@settings/ui/panes';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

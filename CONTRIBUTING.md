@@ -56,8 +56,8 @@ pinned. The table records execution stage, inputs, side effects and checks.
 | `pnpm check:i18n`, `check:artifacts` | `scripts/check/i18n.ts` compares locale keys to English; `scripts/check/artifacts.ts` verifies built userscript/extensions, with `--e2e` selecting development user script. | Reads locale or generated build files; reports failures, no product source writes. `test/consistency/i18n-coverage.test.ts`, artifact/config tests and direct commands. |
 | `pnpm check:versions`, `sync:versions`, `release:prepare` | `scripts/release/version.ts` checks or syncs extension versions against package version (`BUILD_VERSION` may select check target). `scripts/release/prepare.ts` validates `RELEASE_VERSION` and optional SHA, then prepares archives, checksums, metadata and release notes. | `check` reads; `sync` writes manifests; prepare reads builds/source identity and writes local release assets. `test/unit/config/{node-script-boundaries,release-prepare,release-runtime}.test.ts` plus artifact inspection. Preparation does not publish. |
 | `pnpm check`, `check:extension`, `check:test`, `check:e2e`, `check:scripts`, `typecheck` | TypeScript projects for browser, extension, Vitest, Playwright and strict NodeNext/erasable scripts. `tsconfig.scripts.json` includes all `scripts/**/*.ts` plus the Node DevTools endpoint fixture; `tsconfig.test.json` excludes that direct-Node fixture. | Read-only; `pnpm quality` executes every type boundary. Windows `.mjs` is outside TypeScript checking and needs its own syntax/unit checks. |
-| `pnpm fmt`, `fmt:check`, `lint`, `knip`, `knip:full`, `knip:production`, `circular` | `fmt`/`fmt:check` check formatting and import assists; `lint` checks lint alone. Knip and circular check unused code and source graphs. | Read-only; `fmt:fix` and `lint:fix` apply only safe fixes in their respective surfaces. `quality:fix` applies one complete safe Biome pass, then runs quality. Review the diff; unsafe transformations require separate review. |
-| `pnpm quality`, `verify`, `verify:full` | Quality runs one read-only `biome check .` for formatting, lint and imports, then all type projects, direct Node CI tests, i18n, circular, Knip without an optional clone detector. Verify adds versions and all production target builds/artifact checks; full adds core verification, coverage and the internal `test:e2e:prepared` path. | `verify` ends with production `dist` and both extensions. `verify:full` validates those outputs first, then rebuilds only the development userscript for E2E; its final `dist` is development-only because Vite clears that directory. Full verification does not leave a prepared release candidate. Reports and browser fixtures are also generated. |
+| `pnpm fmt`, `fmt:check`, `lint`, `knip`, `knip:full`, `knip:production`, `circular` | `fmt`/`fmt:check` check formatting and import assists; `lint` checks lint alone. Knip and circular check unused code and source graphs. | Read-only; `fmt:fix` and `lint:fix` apply only safe fixes in their respective surfaces. `quality:fix` applies one complete safe Vite+ pass, then runs quality. Review the diff; unsafe transformations require separate review. |
+| `pnpm quality`, `verify`, `verify:full` | Quality runs one read-only `vp check` for formatting, lint and imports, then all type projects, direct Node CI tests, i18n, circular, Knip without an optional clone detector. Verify adds versions and all production target builds/artifact checks; full adds core verification, coverage and the internal `test:e2e:prepared` path. | `verify` ends with production `dist` and both extensions. `verify:full` validates those outputs first, then rebuilds only the development userscript for E2E; its final `dist` is development-only because Vite clears that directory. Full verification does not leave a prepared release candidate. Reports and browser fixtures are also generated. |
 | `pnpm test`, `test:watch`, `test:cov`, `test:ci`, `test:core`, `validate:consistency` | Vitest and direct Node `scripts/ci/repository-authority.test.ts` and `scripts/release/{verify-source,verify-publication}.test.ts`; `test:core` installs/verifies the pinned core checkout, and consistency selects contract tests. | Watch persists and coverage writes reports; `test:ci` checks repository authority and release source/publication guards, not UI. `test:core` changes submodule dependencies and needs a prepared checkout. |
 | `pnpm test:e2e`, `test:e2e:headed`, `pretest:e2e`, internal `test:e2e:prepared` | Public E2E commands run `pretest:e2e`: rebuild development userscript and all three Chromium and Firefox extension contexts, check `--e2e` artifacts, then run the configured Playwright browser projects. `test:e2e:prepared` is called only after the successful production builds, artifact check, core verification and coverage in the same `verify:full` sequence; it rebuilds development userscript, checks `--e2e` artifacts and runs Playwright with the same config. | Public E2E remains self-contained from absent or stale outputs. The internal path consumes the extension bytes built earlier in that invocation; do not run it standalone or after source/input changes. All E2E paths leave development-only `dist` and write profiles/results/screenshots. Pass Playwright options directly to `pnpm run test:e2e`, for example `pnpm run test:e2e --project=chromium --grep=... --reporter=line`, or use `pnpm run test:e2e:headed -- --project=chromium`. Headed local tests are distinct from source-bound Windows installation/live acceptance. |
 | `python3 validation/windows/prepare-userscript-manager.py --output <new-directory>` | Host-side Python standard-library preparation of reviewed Tampermonkey before optional Windows userscript installation; it is not a guest bundle asset. | Direct HTTPS to clients2.google.com or clients2.googleusercontent.com, at most five redirects, 60-second timeout and 16 MiB body; verifies pinned SHA-256, CRX3 bounds and MV3 manifest, limits ZIP to 1,000 entries/64 MiB declared uncompressed size, then writes an installation receipt by atomic rename. Thirteen local fixtures in `test/unit/config/userscript-manager-package.test.ts`; see `validation/windows/README.md` for tested archive/write failures and remaining VM/expanded-byte limits. |
@@ -127,14 +127,15 @@ checks from reuse or previously reported evidence that has not been rechecked.
 
 ## Code style
 
-`biome.json` owns style coverage and exceptions. Keep two-space indentation,
-100 columns, LF, single quotes, semicolons, ES5 trailing commas and parentheses
-around arrow parameters. Style checks cover supported product, extension, test,
+`vite.config.ts` owns Oxlint and Oxfmt coverage and exceptions. Keep two-space
+indentation, 100 columns, LF, single quotes, semicolons, ES5 trailing commas and
+parentheses around arrow parameters. Style checks cover supported product, extension, test,
 tooling, CI helper and Windows ESM files, plus maintained root configurations.
 Generated builds, reports, browser profiles, vendor code and `packages/core`
-remain excluded. Biome does not validate Python, shell or YAML; retain their
-existing boundary checks. HTML fixtures are deliberately excluded from style checks while the pinned
-tool's full HTML support is experimental; existing browser checks still load them.
+remain excluded. Vite+ does not validate Python, shell or YAML; retain their
+existing boundary checks. HTML fixtures remain excluded from style checks while
+the pinned formatter's full HTML support is experimental; browser checks still
+load them.
 
 Use `import type` for type-only statements and inline `type` specifiers when
 the same module supplies values. Keep side-effect import order and direct-Node
@@ -143,7 +144,10 @@ local module and existing aliases across product domains; do not create runtime
 barrels just to shorten paths. Safe fixes must converge on a second run.
 
 Keep the recommended lint preset and explicitly stronger correctness and
-performance severities. Non-null expression assertions are errors in product
+performance severities. Oxlint type-aware lint is disabled because automatic
+project discovery does not cover all five custom TypeScript contexts reliably;
+all five explicit `tsc --noEmit` checks remain mandatory in `pnpm quality`.
+Non-null expression assertions are errors in product
 and extension code: use checked initialization or guards, or explain a proven
 bounded-index invariant at its exact use. Definite-assignment fields have a
 different initialization contract. Test assertions and direct Node test mocks
@@ -157,9 +161,9 @@ failures in `finally` while preserving the primary failure. Test source strings
 may contain literal template placeholders. Static helper classes remain allowed;
 this project does not impose class, loop or file-length bans.
 
-The pinned Biome supports nursery Promise rules, but they are not enforcement
-gates: Promise-presence checks for serialization, storage and replay produce
-false positives, and `void` alone does not define rejection handling. Detached
+Promise-presence checks are not enforcement gates: they can misclassify
+serialization, storage and replay code, and `void` alone does not define
+rejection handling. Detached
 tasks must instead have a reviewed rejection/cancellation policy. Rule trials
 and decisions belong in the change's validation evidence.
 

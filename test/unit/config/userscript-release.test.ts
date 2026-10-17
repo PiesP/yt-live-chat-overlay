@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import monkeyPlugin from 'vite-plugin-monkey';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createUserscriptConfig } from '../../../tooling/vite/configs/userscript';
 
 vi.mock('vite-plugin-monkey', () => ({ default: vi.fn(() => []) }));

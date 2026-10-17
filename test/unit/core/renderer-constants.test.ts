@@ -1,6 +1,6 @@
 import { desaturateColor } from '@renderer/color-utils';
 import { hashStringForTier } from '@renderer/constants';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── hashStringForTier ────────────────────────────────────────────────
 

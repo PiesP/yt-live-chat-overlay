@@ -1,5 +1,5 @@
 import { parseSettingsControlName, type SettingsControlTarget } from '@settings/ui/control-codec';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('settings control name codec', () => {
   it.each<[string, SettingsControlTarget]>([

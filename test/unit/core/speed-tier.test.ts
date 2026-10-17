@@ -6,7 +6,7 @@ import { getSpeedTier, type SpeedTierConfig } from '@renderer/canvas/speed-tier'
 import { SPEED_TIER } from '@renderer/constants';
 import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
 import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

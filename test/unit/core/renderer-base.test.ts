@@ -2,7 +2,7 @@ import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Test subclass ─────────────────────────────────────────────────────────
 

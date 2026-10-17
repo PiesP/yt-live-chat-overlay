@@ -3,7 +3,7 @@ import {
   SUPERCHAT_CARD_CONFIG,
   toWorkerConfig,
 } from '@renderer/card-config';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── helpers ──────────────────────────────────────────────────────────
 

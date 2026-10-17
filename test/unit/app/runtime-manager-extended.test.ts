@@ -5,7 +5,7 @@ import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   const d = {

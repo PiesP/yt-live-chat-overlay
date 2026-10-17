@@ -14,7 +14,7 @@ import {
 import { WorkerRenderer } from '@renderer/worker/renderer';
 import type { WorkerMessage, WorkerStatsMessage } from '@renderer/worker/types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const context = {
   setTransform: vi.fn(),

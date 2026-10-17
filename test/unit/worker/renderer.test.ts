@@ -4,7 +4,7 @@
 import { LruMap } from '@piesp/browser-core/util';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { WorkerRenderer } from '@renderer/worker/renderer';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Mock OffscreenCanvas
 class MockOffscreenCanvas {

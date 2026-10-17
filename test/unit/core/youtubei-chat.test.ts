@@ -10,7 +10,7 @@ import {
   WATCH_HTML_TIMEOUT_MS,
 } from '@chat/youtube/api';
 import { ResponseTooLargeError } from '@chat/youtube/response-text';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 afterEach(() => {
   vi.unstubAllGlobals();

@@ -20,7 +20,7 @@ import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worke
 import type { WorkerStatsMessage } from '@renderer/worker/types';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { LanguageDetectorService } from '@translation/language-detector';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Mock OffscreenCanvas
 vi.stubGlobal(

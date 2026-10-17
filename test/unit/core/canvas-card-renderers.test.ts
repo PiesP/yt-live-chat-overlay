@@ -7,7 +7,7 @@ import { drawLeftRoundedRect, renderPaidCard } from '@renderer/canvas/card-rende
 import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 afterEach(() => {
   vi.unstubAllGlobals();

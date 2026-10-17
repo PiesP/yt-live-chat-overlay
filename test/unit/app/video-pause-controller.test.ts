@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 
 import { VideoPauseController } from '@app/video-pause-controller';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function createVideo(paused: boolean): HTMLVideoElement {
   const video = document.createElement('video');

@@ -8,7 +8,7 @@ import {
   resolveVisualInlineLines,
   resolveVisualInlinePieces,
 } from '@renderer/canvas/bidi-layout';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const measureText = (text: string): number => Array.from(text).length * 10;
 

@@ -1875,7 +1875,7 @@ export class CanvasRenderer extends RendererBase {
         isReplay: this.replayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.size,
-        // biome-ignore lint/style/noNonNullAssertion: fastRandom yields [0, 1), bounding the index to this 256-entry table.
+        // oxlint-disable-next-line typescript/no-non-null-assertion -- fastRandom yields [0, 1), bounding the index to this 256-entry table.
         staggerSample: CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
         maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
         mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,

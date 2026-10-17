@@ -3,7 +3,7 @@
 
 import { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { getRegularRowHeight, getRowSlotCount } from '@renderer/layout/row-geometry';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const baseOptions = {
   safeTop: 0,

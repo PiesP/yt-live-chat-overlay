@@ -5,7 +5,7 @@ import { DESIGN_ICON_CONTRACT, QUIET_INSTRUMENTS_TOKENS } from '@piesp/browser-c
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('settings Quiet Instruments adapter', () => {
   it('maps the dark settings roles to shared tokens without changing renderer tokens', () => {

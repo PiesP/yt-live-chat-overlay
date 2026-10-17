@@ -4,7 +4,7 @@
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';
 import { Settings } from '@settings/store';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 vi.mock('@platform/cross-tab-sync-adapters', () => ({
   getCrossTabSyncAdapter: vi.fn(() => ({

@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 
 import { createChatPreflight } from '@app/chat-availability-preflight';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('ChatAvailabilityPreflight', () => {
   it('starts in idle state', () => {

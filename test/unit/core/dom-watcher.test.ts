@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { installDomChatWatcher } from '@chat/dom-watcher';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function createTextRenderer(author: string, text: string, id: string): HTMLElement {
   const renderer = document.createElement('yt-live-chat-text-message-renderer');

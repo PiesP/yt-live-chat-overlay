@@ -7,7 +7,7 @@ import {
   MAX_RENDER_CONTENT_SEGMENTS,
   MAX_RENDER_FIELD_CODE_POINTS,
 } from '@chat/render-resource-limits';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('render message resource limits', () => {
   it('accepts the exact BMP and astral code-point boundaries', () => {

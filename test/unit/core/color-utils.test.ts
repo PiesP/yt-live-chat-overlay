@@ -6,7 +6,7 @@ import {
   resolveSuperChatRgb,
   toRgba,
 } from '@renderer/color-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── parseAnyColor ─────────────────────────────────────────────────────
 

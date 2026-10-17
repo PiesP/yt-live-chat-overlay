@@ -6,7 +6,7 @@ import {
   getWatchdogRestartDelay,
   type RuntimeHealthPolicyInput,
 } from '@app/runtime-watchdog-policy';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const healthy: RuntimeHealthPolicyInput = {
   idleDurationMs: 0,

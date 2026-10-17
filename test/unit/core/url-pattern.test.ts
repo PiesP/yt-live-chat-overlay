@@ -3,7 +3,7 @@
  */
 
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('isYouTubeWatch', () => {
   it('returns true for youtube.com/watch', () => {

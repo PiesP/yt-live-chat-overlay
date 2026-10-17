@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Mock bootstrapChatSession
 vi.mock('@chat/youtube/api', () => ({

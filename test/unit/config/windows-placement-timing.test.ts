@@ -3,7 +3,7 @@
 
 import { runInNewContext } from 'node:vm';
 import { BurstDetector } from '@renderer/layout/burst-detector';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   assertBacklogMotion,
   assertBacklogReflow,

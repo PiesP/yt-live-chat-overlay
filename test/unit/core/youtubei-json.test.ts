@@ -7,7 +7,7 @@ import {
   getString,
   isRecord,
 } from '@chat/youtube/request';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── isRecord ──────────────────────────────────────────────────────────
 
