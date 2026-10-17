@@ -331,52 +331,61 @@ export async function exercisePlayerPausePlay(
   };
 }
 
-async function publicState(page: Page) {
-  return page.evaluate(() => {
-    const video = document.querySelector('video');
-    if (video instanceof HTMLVideoElement) video.muted = true;
-    const playerError = [
-      ...document.querySelectorAll('.ytp-error, .ytp-error-content-wrap, .ytp-error-content'),
-    ].some((element) => {
+export function readPublicDurationPageState() {
+  const video = document.querySelector('video');
+  if (video instanceof HTMLVideoElement) video.muted = true;
+  const visibleError = [
+    {
+      marker: 'youtube-player-error-ui-visible',
+      selector: '.ytp-error, .ytp-error-content-wrap, .ytp-error-content',
+    },
+    {
+      marker: 'youtube-playability-error-ui-visible',
+      selector: '#player yt-playability-error-supported-renderers#error-screen',
+    },
+  ].find(({ selector }) =>
+    [...document.querySelectorAll(selector)].some((element) => {
       const style = getComputedStyle(element);
       return (
         style.display !== 'none' &&
         style.visibility !== 'hidden' &&
         element.getClientRects().length > 0
       );
-    });
-    return {
-      visibility: document.visibilityState,
-      hud:
-        document
-          .querySelector('#yt-chat-overlay-debug')
-          ?.textContent?.replace(/\s+/gu, ' ')
-          .trim() ?? null,
-      canvasAttached: document.querySelectorAll('#yt-live-chat-overlay canvas').length === 1,
-      accessibilityRenderedNodeCount: document.querySelectorAll(
-        '.yt-live-chat-overlay-live-region > p'
-      ).length,
-      installedBridgeReady: Boolean(
-        globalThis.__ytExtensionBridge?.workerSupported === true &&
-        globalThis.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-        globalThis.__ytExtensionBridge?.workerUrl?.startsWith(`blob:${location.origin}/`)
-      ),
-      playerErrorUi: {
-        visible: playerError,
-        marker: playerError ? 'youtube-player-error-ui-visible' : null,
-      },
-      video:
-        video instanceof HTMLVideoElement
-          ? {
-              currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
-              errorCode: video.error?.code ?? null,
-              muted: video.muted,
-              paused: video.paused,
-              readyState: video.readyState,
-            }
-          : null,
-    };
-  });
+    })
+  );
+  return {
+    visibility: document.visibilityState,
+    hud:
+      document.querySelector('#yt-chat-overlay-debug')?.textContent?.replace(/\s+/gu, ' ').trim() ??
+      null,
+    canvasAttached: document.querySelectorAll('#yt-live-chat-overlay canvas').length === 1,
+    accessibilityRenderedNodeCount: document.querySelectorAll(
+      '.yt-live-chat-overlay-live-region > p'
+    ).length,
+    installedBridgeReady: Boolean(
+      globalThis.__ytExtensionBridge?.workerSupported === true &&
+      globalThis.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
+      globalThis.__ytExtensionBridge?.workerUrl?.startsWith(`blob:${location.origin}/`)
+    ),
+    playerErrorUi: {
+      visible: Boolean(visibleError),
+      marker: visibleError?.marker ?? null,
+    },
+    video:
+      video instanceof HTMLVideoElement
+        ? {
+            currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
+            errorCode: video.error?.code ?? null,
+            muted: video.muted,
+            paused: video.paused,
+            readyState: video.readyState,
+          }
+        : null,
+  };
+}
+
+async function publicState(page: Page) {
+  return page.evaluate(readPublicDurationPageState);
 }
 
 /** Capture bounded player-error structure without page, account, or chat content. */
