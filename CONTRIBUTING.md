@@ -147,6 +147,7 @@ can otherwise hide peer metadata conflicts.
 
 Update the managed toolchain as one unit. Select an exact stable Vite+ release
 that has cleared the 24-hour window, then run from the repository root:
+Replace `VERSION` in both commands with that selected exact release.
 
 ```sh
 pnpm dlx --package=vite-plus@VERSION vp help migrate
