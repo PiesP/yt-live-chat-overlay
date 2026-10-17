@@ -27,6 +27,7 @@ const STORE_HOSTS = new Set(['clients2.google.com', 'clients2.googleusercontent.
 // boundary local, qualify the real runtime, and never bind a missing named export.
 interface ZipEntryView {
   readonly name: string;
+  readonly nameBuffer: Buffer;
   readonly size: number;
   readonly isDirectory: boolean;
   readonly isFile: boolean;
@@ -193,6 +194,61 @@ interface ExtractedFile {
   content: Buffer;
 }
 
+// Node 26.9 checks local method, flags and sizes against the central directory,
+// but does not compare their filenames. Check that one field before extracting.
+function assertLocalNames(zip: Buffer, entries: ZipEntryView[]): void {
+  let end = -1;
+  for (let offset = zip.length - 22; offset >= Math.max(0, zip.length - 22 - 0xffff); offset -= 1) {
+    if (
+      zip.readUInt32LE(offset) === 0x06054b50 &&
+      offset + 22 + zip.readUInt16LE(offset + 20) === zip.length
+    ) {
+      if (end !== -1) throw new Error('Ambiguous ZIP directory end.');
+      end = offset;
+    }
+  }
+  if (end < 0 || zip.readUInt16LE(end + 10) !== entries.length) {
+    throw new Error('Invalid ZIP directory.');
+  }
+  const centralSize = zip.readUInt32LE(end + 12);
+  const centralOffset = zip.readUInt32LE(end + 16);
+  const centralStart = end - centralSize;
+  const prefix = centralStart - centralOffset;
+  if (centralSize === 0xffffffff || centralOffset === 0xffffffff || prefix < 0) {
+    throw new Error('Unsupported ZIP directory layout.');
+  }
+  let cursor = centralStart;
+  for (const entry of entries) {
+    if (cursor < 0 || cursor + 46 > end || zip.readUInt32LE(cursor) !== 0x02014b50) {
+      throw new Error('Invalid ZIP directory.');
+    }
+    const nameLength = zip.readUInt16LE(cursor + 28);
+    const recordEnd =
+      cursor + 46 + nameLength + zip.readUInt16LE(cursor + 30) + zip.readUInt16LE(cursor + 32);
+    const centralName = zip.subarray(cursor + 46, cursor + 46 + nameLength);
+    const localOffset = prefix + zip.readUInt32LE(cursor + 42);
+    if (
+      recordEnd > end ||
+      !centralName.equals(entry.nameBuffer) ||
+      localOffset < 0 ||
+      localOffset + 30 > centralStart ||
+      zip.readUInt32LE(localOffset) !== 0x04034b50
+    ) {
+      throw new Error('Invalid ZIP entry header.');
+    }
+    const localNameLength = zip.readUInt16LE(localOffset + 26);
+    const localNameStart = localOffset + 30;
+    if (
+      localNameStart + localNameLength + zip.readUInt16LE(localOffset + 28) > centralStart ||
+      !zip.subarray(localNameStart, localNameStart + localNameLength).equals(centralName)
+    ) {
+      throw new Error('Local and central ZIP entry names disagree.');
+    }
+    cursor = recordEnd;
+  }
+  if (cursor !== end) throw new Error('Invalid ZIP directory.');
+}
+
 export async function unpackPackage(
   body: Buffer,
   expectedSha256: string = SHA256
@@ -216,10 +272,12 @@ export async function unpackPackage(
   const reader = zipApi.ZipEntry;
   if (!reader) throw new Error('The pinned Node ZIP reader is unavailable.');
   const entries: ZipEntryView[] = [];
-  for (const entry of reader.read(body.subarray(12 + headerSize))) {
+  const zip = body.subarray(12 + headerSize);
+  for (const entry of reader.read(zip)) {
     if (entries.length === MAX_ENTRIES) throw new Error('Unexpected package size.');
     entries.push(entry);
   }
+  assertLocalNames(zip, entries);
   let declared = 0;
   const names = new Map<string, { name: string; kind: 'file' | 'directory'; explicit: boolean }>();
   const selected: { parts: string[]; entry: ZipEntryView }[] = [];

@@ -353,6 +353,16 @@ describe('pinned Node userscript manager preparation', () => {
     }
   });
 
+  it('rejects local header names that disagree with the central directory, including omitted metadata', async () => {
+    for (const name of ['manifest.json', '_metadata/verified_contents.json']) {
+      const body = packageBytes();
+      const localName = body.indexOf(Buffer.from(name));
+      expect(localName).toBeGreaterThan(0);
+      body[localName] = (body[localName] ?? 0) ^ 1;
+      await expectCleanFailure(body, /Local and central ZIP entry names disagree/);
+    }
+  });
+
   it('verifies CRC, truncation and dishonest size with the actual Node ZIP reader', async () => {
     await expectCleanFailure(
       packageBytes([{ name: 'bad-crc', content: 'payload', crc: 1 }]),

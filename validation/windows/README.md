@@ -396,7 +396,7 @@ It writes `installation-source.json` with Store identity, URL, digest, method,
 and omission, then renames a fresh sibling staging directory into place. Failures
 remove only that staging directory.
 
-The fifteen local tests in `test/unit/config/userscript-manager-node.test.ts`
+The sixteen local tests in `test/unit/config/userscript-manager-node.test.ts`
 exercise the package, receipt, runtime guard, pin, existing output, redirect and
 HTTP limits, direct agent, timeout destruction, malformed and colliding archives,
 CRC and size lies, plus staged-write cleanup. The reviewed CRX has also been
