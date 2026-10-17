@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,8 +23,13 @@ const nodeScripts = [
   'scripts/build/clean.ts',
   'scripts/check/artifacts.ts',
   'scripts/check/i18n.ts',
+  'scripts/ci/classify-workflow-changes.ts',
+  'scripts/ci/dependabot-apply.ts',
+  'scripts/ci/update-browser-core.ts',
   'scripts/release/prepare.ts',
   'scripts/release/version.ts',
+  'scripts/release/verify-publication.ts',
+  'scripts/release/verify-source.ts',
 ] as const;
 
 function fixtureRoot(): string {
@@ -211,6 +217,19 @@ describe('Node script boundaries', () => {
       expect(existsSync(join(directory, name))).toBe(false);
     }
     expect(readFileSync(join(directory, 'keep'), 'utf8')).toBe('keep');
+  });
+
+  it('treats a symlinked clean script as a direct invocation', () => {
+    const directory = fixtureRoot();
+    const linkedScript = join(directory, 'clean.ts');
+    symlinkSync(join(root, 'scripts/build/clean.ts'), linkedScript);
+    mkdirSync(join(directory, 'dist'));
+    writeFileSync(join(directory, 'dist/sentinel'), 'delete');
+
+    const result = runCli(linkedScript, [], directory);
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(existsSync(join(directory, 'dist'))).toBe(false);
   });
 
   it('retains version CLI defaults, diagnostics, and sync behavior in a fixture', () => {

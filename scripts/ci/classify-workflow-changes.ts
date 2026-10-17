@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { appendFileSync } from 'node:fs';
 
 export const SCOPES = [
   'all',
@@ -216,11 +215,6 @@ function emit(scopes: Decision, env: Environment): void {
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, body);
 }
 
-// Resolving both sides keeps a symlink to the CLI executable while imports stay inert.
-if (
-  process.argv[1] &&
-  existsSync(process.argv[1]) &&
-  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
-) {
+if (import.meta.main) {
   emit(classifyWorkflowChanges(process.argv.slice(2)), process.env);
 }
