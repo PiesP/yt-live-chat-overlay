@@ -4,7 +4,7 @@
 import type { ChatMessage } from '@app-types';
 import { computeAgeFadeRate, computeInvFadeDuration, enqueueWithOverflow } from '@renderer/shared';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // computeAgeFadeRate

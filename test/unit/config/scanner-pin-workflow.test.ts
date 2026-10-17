@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const reviewedSha = '83364ae1027cf6b1761a91dcb855ea9a95c8886c';
@@ -46,7 +47,7 @@ describe('reviewed scanner helper boundary', () => {
       expect(job).toContain('git -c advice.detachedHead=false checkout --detach "$RELEASE_SHA"');
       expect(job).toContain('git submodule update --init --recursive');
     }
-    expect(publish).toContain('needs: [provenance, quality, unit, e2e, mutation, build]');
+    expect(publish).toContain('needs: [provenance, quality, unit, e2e, build]');
     expect(publish).toContain('name: 📥 Checkout protected publication guard');
     expect(publish).toContain(
       'run: node --experimental-strip-types scripts/release/verify-publication.ts'

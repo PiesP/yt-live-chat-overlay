@@ -4,7 +4,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 class PendingImage {
   static readonly instances: PendingImage[] = [];

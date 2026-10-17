@@ -5,7 +5,7 @@
  * Canvas2D API support for renderer tests via the `canvas` package.
  */
 
-import { afterAll, beforeEach, vi } from 'vitest';
+import { afterAll, beforeEach, vi } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════
 // GM_* API Mocks
@@ -112,7 +112,7 @@ if (typeof globalThis.ResizeObserver !== 'function') {
 // IntersectionObserver
 if (typeof globalThis.IntersectionObserver !== 'function') {
   class IntersectionObserverMock {
-    // biome-ignore lint/complexity/noUselessConstructor: Preserve the callback-taking browser constructor signature.
+    // oxlint-disable-next-line no-useless-constructor -- Preserve the callback-taking browser constructor signature.
     constructor(_cb: IntersectionObserverCallback) {}
     observe() {}
     unobserve() {}

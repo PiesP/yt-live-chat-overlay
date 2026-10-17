@@ -16,46 +16,10 @@ export const SCOPES = [
   'codeql_actions',
   'codeql_javascript',
   'pinned_tools',
-  'deep_fast',
 ] as const;
 type Scope = (typeof SCOPES)[number];
 type Decision = ReadonlySet<Scope>;
 type Environment = Record<string, string | undefined>;
-
-const fastMutationExclusions = new Set([
-  'src/main.ts',
-  'src/app/chat-availability-preflight.ts',
-  'src/app/overlay.ts',
-  'src/app/runtime-manager.ts',
-  'src/app/standby-controller.ts',
-  'src/app/video-pause-controller.ts',
-  'src/media/image-fetch-manager.ts',
-  'src/platform/menu-adapters.ts',
-  'src/platform/storage-adapters.ts',
-  'src/platform/worker-factory.ts',
-  'src/settings/store.ts',
-  'src/settings/ui/controller.ts',
-  'src/settings/ui/form.ts',
-  'src/settings/ui/panes.ts',
-  'src/settings/ui/styles.ts',
-  'src/translation/service.ts',
-  'src/translation/language-detector.ts',
-  'src/util/backlog-indicator.ts',
-  'src/util/backlog-sampler.ts',
-  'src/util/observability.ts',
-]);
-
-function isFastMutationSource(path: string): boolean {
-  return (
-    path.startsWith('src/') &&
-    path.endsWith('.ts') &&
-    !path.endsWith('.d.ts') &&
-    !path.startsWith('src/types/') &&
-    !path.startsWith('src/renderer/') &&
-    !path.startsWith('src/chat/') &&
-    !fastMutationExclusions.has(path)
-  );
-}
 
 function gitSucceeded(cwd: string, ...args: string[]): boolean {
   const result = spawnSync('git', args, { cwd, stdio: 'ignore' });
@@ -94,12 +58,10 @@ export function classifyWorkflowChanges(
         'osv',
         'semgrep',
         'codeql_javascript',
-        'pinned_tools',
-        'deep_fast'
+        'pinned_tools'
       );
     } else if (path.startsWith('src/')) {
       mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript');
-      if (isFastMutationSource(path)) mark('deep_fast');
     } else if (path.startsWith('extension/icons/')) {
       mark('e2e', 'build');
     } else if (path.startsWith('extension/') && path.endsWith('.ts')) {
@@ -121,15 +83,14 @@ export function classifyWorkflowChanges(
       path.startsWith('test/consistency/') ||
       path === 'test/setup.ts'
     ) {
-      mark('quality', 'unit', 'semgrep', 'codeql_javascript', 'deep_fast');
+      mark('quality', 'unit', 'semgrep', 'codeql_javascript');
     } else if (path.startsWith('test/visual/')) {
       mark('semgrep', 'codeql_javascript');
     } else if (
-      ['biome.json', 'knip.json', 'vitest.config.ts'].includes(path) ||
-      /^tsconfig.*\.json$/.test(path) ||
-      /^stryker\.conf.*\.json$/.test(path)
+      ['biome-residual.json', 'knip.json', 'vitest.config.ts'].includes(path) ||
+      /^tsconfig.*\.json$/.test(path)
     ) {
-      mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript', 'deep_fast');
+      mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript');
     } else if (path.startsWith('scripts/')) {
       mark('quality', 'unit', 'build', 'semgrep', 'codeql_javascript');
       if (path.startsWith('scripts/ci/')) {
@@ -142,8 +103,6 @@ export function classifyWorkflowChanges(
       mark('quality', 'unit', 'core', 'e2e', 'build', 'semgrep', 'codeql_actions', 'pinned_tools');
     } else if (path === '.github/workflows/security.yaml') {
       mark('quality', 'unit', 'osv', 'semgrep', 'codeql_actions', 'pinned_tools');
-    } else if (path === '.github/workflows/deep-checks.yaml') {
-      mark('quality', 'unit', 'semgrep', 'codeql_actions', 'pinned_tools', 'deep_fast');
     } else if (path === '.github/workflows/release.yaml') {
       mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_actions', 'pinned_tools');
     } else if (path.startsWith('.github/workflows/')) {

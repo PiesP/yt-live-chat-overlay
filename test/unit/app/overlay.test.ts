@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
-import { Overlay } from '@app/overlay';
 import type { OverlaySettings } from '@app-types';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Overlay } from '@app/overlay';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function makeSettings(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   return {

@@ -12,7 +12,7 @@ import {
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
 import { spacing } from '@util/design-tokens';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 describe('canvas bitmap allocation guards', () => {
   it('rejects oversized dimensions and cache budgets before allocation', () => {

@@ -4,7 +4,7 @@ import {
   resolveLimits,
   resolveOutlineLimits,
 } from '@settings/limits';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── resolveLimits ───────────────────────────────────────────────
 

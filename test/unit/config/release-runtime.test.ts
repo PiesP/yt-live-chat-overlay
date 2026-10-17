@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it } from 'vite-plus/test';
 
 const script = resolve(
   import.meta.dirname,
@@ -59,7 +60,7 @@ describe('release runtime selection', () => {
     expect(provenance).toContain("install-dependencies: 'false'");
     expect(
       workflow.match(/node-version: \$\{\{ needs.provenance.outputs.node-version \}\}/g)
-    ).toHaveLength(5);
+    ).toHaveLength(4);
   });
 
   it.each([undefined, 26, '26', 'latest', '26.9.0\nextra=value'])(

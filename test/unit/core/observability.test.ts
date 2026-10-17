@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ObservabilityReporter } from '@util/observability';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 describe('ObservabilityReporter', () => {
   let reporter: ObservabilityReporter;

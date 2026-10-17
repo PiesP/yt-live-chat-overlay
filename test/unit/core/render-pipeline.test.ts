@@ -14,7 +14,7 @@ import {
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 describe('scrolling motion on the main Canvas path', () => {
   it.each([false, true])(

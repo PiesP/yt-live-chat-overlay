@@ -5,7 +5,7 @@ import {
   recordDrainResult,
   selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 describe('Canvas drain batch bookkeeping', () => {
   it('rotates beyond repeated failures without losing or reordering the queue', () => {

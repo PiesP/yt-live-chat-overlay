@@ -2,7 +2,9 @@
 // Copyright (c) 2026 PiesP
 
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it } from 'vite-plus/test';
+
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as profileModule from '../../../validation/windows/profile.mjs';
 
@@ -54,7 +56,7 @@ describe('installed Windows fixture admission', () => {
     ];
     class FixtureWorker {
       listeners = new Map<string, (event: { data: unknown }) => void>();
-      // biome-ignore lint/complexity/noUselessConstructor: The instrumented Worker subclass forwards its URL to this fixture.
+      // oxlint-disable-next-line no-useless-constructor -- The instrumented Worker subclass forwards its URL to this fixture.
       constructor(_url: string) {}
       postMessage(_message: unknown) {}
       terminate() {}

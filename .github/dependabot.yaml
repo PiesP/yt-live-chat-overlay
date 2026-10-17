@@ -36,17 +36,12 @@ updates:
           - "minor"
           - "patch"
 
-      stryker:
-        patterns:
-          - "@stryker-mutator/*"
-        update-types:
-          - "minor"
-          - "patch"
-
       build:
         patterns:
           - "typescript"
           - "vite"
+          - "vite-plus"
+          - "@voidzero-dev/vite-plus-core"
           - "vite-plugin-monkey"
           - "@types/*"
         update-types:
@@ -55,7 +50,7 @@ updates:
 
       quality:
         patterns:
-          - "@biomejs/*"
+          - "@biomejs/biome"
           - "knip"
         update-types:
           - "minor"

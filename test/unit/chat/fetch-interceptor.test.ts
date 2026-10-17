@@ -8,7 +8,7 @@ import {
   isChatEndpointUrl,
 } from '@chat/fetch-interceptor';
 import { MAX_CHAT_RESPONSE_BYTES } from '@chat/youtube/response-text';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const mocks = vi.hoisted(() => ({
   extractChatEvents: vi.fn(),

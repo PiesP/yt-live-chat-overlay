@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
-import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
+import { RuntimeManager } from '@app/runtime-manager';
 import { ReplayChatSource } from '@chat/source-replay';
 import * as youtubeApi from '@chat/youtube/api';
 import { ObservabilityReporter } from '@util/observability';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // RuntimeManager requires getCurrentUrl, getSettings, isValidPage callbacks.
 // Tests verify constructor, settings access via backdoor, and health shape.

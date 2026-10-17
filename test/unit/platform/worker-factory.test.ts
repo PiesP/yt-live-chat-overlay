@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 
 import { createWorkerUrl } from '@platform/worker-factory';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 afterEach(() => {
   delete window.__ytExtensionBridge;

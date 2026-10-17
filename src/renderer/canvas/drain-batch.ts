@@ -51,9 +51,9 @@ export function selectDrainCandidates<T>(
   if (resumeIndex > 0) priorities.push(...priorities.splice(0, resumeIndex));
   const result: T[] = [];
   for (let index = 0; index < priorities.length; index++) {
-    // biome-ignore lint/style/noNonNullAssertion: index is bounded by priorities.length.
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- index is bounded by priorities.length.
     const priority = priorities[index]!;
-    // biome-ignore lint/style/noNonNullAssertion: each priority comes from groups.keys(); groups is not mutated.
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- each priority comes from groups.keys(); groups is not mutated.
     const group = groups.get(priority)!;
     const cursor = cursors.get(priority);
     const start = cursor === undefined ? 0 : (group.indexOf(cursor) + 1) % group.length;
@@ -62,7 +62,7 @@ export function selectDrainCandidates<T>(
       Math.max(0, limit - result.length - (priorities.length - index - 1))
     );
     for (let offset = 0; offset < quota; offset++) {
-      // biome-ignore lint/style/noNonNullAssertion: group is nonempty and modulo selects a valid index.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- group is nonempty and modulo selects a valid index.
       result.push(group[(start + offset) % group.length]!);
     }
   }

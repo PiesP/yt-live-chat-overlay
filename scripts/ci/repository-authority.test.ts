@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
 import { parseGate } from './dependabot-apply.ts';
 
 const dir = fileURLToPath(new URL('.', import.meta.url));

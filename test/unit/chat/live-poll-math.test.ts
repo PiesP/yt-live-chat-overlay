@@ -8,7 +8,7 @@ import {
   computeErrorBackoffMs,
   recordDensitySample,
 } from '@chat/live-poll-math';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const limits = { minPollIntervalMs: 500, maxPollIntervalMs: 30000 };
 

@@ -4,7 +4,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { serializeWorkerMessage } from '@renderer/worker/message-serializer';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const dimensions = { width: 320, height: 72 };
 const settings = DEFAULT_SETTINGS as OverlaySettings;

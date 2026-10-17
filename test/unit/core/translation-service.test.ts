@@ -1,6 +1,6 @@
 import type { TranslatorInstance } from '@platform/translation-adapter';
 import { TranslationService } from '@translation/service';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function deferred<T>(): {
   promise: Promise<T>;

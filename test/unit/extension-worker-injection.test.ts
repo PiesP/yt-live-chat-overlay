@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function stubChrome(): void {
   vi.stubGlobal('chrome', {

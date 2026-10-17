@@ -71,9 +71,9 @@ export class BacklogInjectionController implements Pauseable {
   /** Monotonic cursor makes ordinary-slot searches aggregate O(capacity). */
   private ordinarySearchCursor = 0;
   /** Test-visible performance counters; no message data is retained. */
-  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Security regression tests inspect this counter without widening the production API.
+  // oxlint-disable-next-line no-unused-private-class-members -- Security regression tests inspect this counter without widening the production API.
   private capacityScanSteps = 0;
-  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Security regression tests inspect this counter without widening the production API.
+  // oxlint-disable-next-line no-unused-private-class-members -- Security regression tests inspect this counter without widening the production API.
   private trackingRebuildCount = 0;
   private backlogSeenIds = new Set<string>();
   private backlogPendingIndices = new Map<string, number>();

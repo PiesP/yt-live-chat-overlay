@@ -1,4 +1,5 @@
 import type { Plugin } from 'vite';
+
 import { BIDI_LICENSE_BANNER } from '../bidi-license.ts';
 
 interface SourceMapPayload {

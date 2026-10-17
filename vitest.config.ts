@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+
+import { defineConfig } from 'vite-plus';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const srcDir = resolve(__dirname, 'src');
@@ -8,6 +9,8 @@ const srcDir = resolve(__dirname, 'src');
 export default defineConfig({
   define: { __DEV__: true, __USERSCRIPT__: false },
   test: {
+    // Preserve Vitest 4 mock history while validating the migrated test suite.
+    clearMocks: false,
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./test/setup.ts'],

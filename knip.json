@@ -2,6 +2,7 @@
   "$schema": "./node_modules/knip/schema.json",
   "entry": [
     "src/main.ts!",
+    "extension/background.ts!",
     "extension/content-script.ts!",
     "extension/page-script.ts!",
     "scripts/ci/check-pinned-tools.ts",
@@ -17,7 +18,6 @@
     "vite*.ts",
     "test/**/*.ts"
   ],
-  "ignoreBinaries": ["unshare"],
   "paths": {
     "@app/*": ["src/app/*"],
     "@chat/*": ["src/chat/*"],

@@ -4,7 +4,7 @@ import {
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@settings/defaults';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── migrateSettings ─────────────────────────────────────────────
 

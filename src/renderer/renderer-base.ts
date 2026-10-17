@@ -16,8 +16,8 @@
  *   and message ingress check this flag.
  */
 
-import type { Overlay } from '@app/overlay';
 import type { BurstLevel, ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { Overlay } from '@app/overlay';
 import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';
@@ -620,7 +620,7 @@ export abstract class RendererBase {
     if (msgs.length < 2) return [];
     const intervals: number[] = [];
     for (let i = 1; i < msgs.length; i++) {
-      // biome-ignore lint/style/noNonNullAssertion: both adjacent indices are inside the bounded loop.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- both adjacent indices are inside the bounded loop.
       const delta = msgs[i]!.timestamp - msgs[i - 1]!.timestamp;
       if (delta >= 0) intervals.push(delta);
     }

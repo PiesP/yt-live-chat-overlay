@@ -3,6 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import type { Page } from '@playwright/test';
 
 export const PLAYBACK_WORKER_URL =

@@ -214,7 +214,7 @@ export class BurstDetector {
     // Seed the next sampling tick with an estimated message count so the
     // burst level evaluation has data to work with immediately.
     if (sampleIntervalsMs.length > 0) {
-      // biome-ignore lint/style/noNonNullAssertion: the sorted copy is nonempty and its median index is bounded.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- the sorted copy is nonempty and its median index is bounded.
       const medianInterval = sampleIntervalsMs.slice().sort((a, b) => a - b)[
         (sampleIntervalsMs.length / 2) | 0
       ]!;

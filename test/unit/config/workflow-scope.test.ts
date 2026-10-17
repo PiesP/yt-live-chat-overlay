@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const classifier = resolve(root, 'scripts/ci/classify-workflow-changes.ts');
@@ -60,8 +61,7 @@ type Scope =
   | 'semgrep'
   | 'codeql_actions'
   | 'codeql_javascript'
-  | 'pinned_tools'
-  | 'deep_fast';
+  | 'pinned_tools';
 
 function classify(paths: string[]): Record<Scope, boolean> {
   const result = spawnSync(
@@ -118,7 +118,6 @@ describe('workflow change classification', () => {
       semgrep: true,
       codeql_actions: false,
       codeql_javascript: false,
-      deep_fast: false,
     });
   });
 
@@ -135,16 +134,7 @@ describe('workflow change classification', () => {
       semgrep: true,
       codeql_actions: false,
       codeql_javascript: true,
-      deep_fast: true,
     });
-  });
-
-  it('aligns the fast mutation scope with its excluded renderer sources', () => {
-    const scopes = classify(['src/renderer/canvas-renderer.ts']);
-
-    expect(scopes.unit).toBe(true);
-    expect(scopes.e2e).toBe(true);
-    expect(scopes.deep_fast).toBe(false);
   });
 
   it('treats the shared-core gitlink as relevant to every consumer gate', () => {
@@ -159,7 +149,15 @@ describe('workflow change classification', () => {
       osv: true,
       semgrep: true,
       codeql_javascript: true,
-      deep_fast: true,
+    });
+  });
+
+  it('routes the retained single-rule template-literal policy through quality checks', () => {
+    expect(classify(['biome-residual.json'])).toMatchObject({
+      quality: true,
+      unit: true,
+      e2e: true,
+      build: true,
     });
   });
 
@@ -175,7 +173,6 @@ describe('workflow change classification', () => {
       semgrep: true,
       codeql_actions: true,
       pinned_tools: true,
-      deep_fast: false,
     });
   });
 
@@ -398,16 +395,8 @@ describe('workflow scope integration', () => {
       expect(changes).toContain("install-dependencies: 'false'");
       expect(changes).toContain('RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}');
       expect(changes).toContain(
-        'for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast'
+        'for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools'
       );
     }
-  });
-
-  it('limits non-required PR and push workflows to conservative relevant paths', () => {
-    const deep = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
-
-    expect(deep).toContain('  schedule:');
-    expect(deep).toContain('  workflow_dispatch:');
-    expect(deep).not.toContain('\n  push:\n');
   });
 });

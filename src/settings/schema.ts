@@ -31,10 +31,7 @@ export {
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@settings/defaults';
-export type {
-  OutlineSettingKey,
-  RootNumericSettingKey,
-} from '@settings/limits';
+export type { OutlineSettingKey, RootNumericSettingKey } from '@settings/limits';
 export {
   getOutlineDisplayScale,
   OUTLINE_NUMERIC_KEYS,

@@ -269,13 +269,13 @@ export function cleanupAndBucketStage(
     msg._frameElapsed = elapsed;
     // Route to the correct speed-tier bucket for z-order rendering
     if (msg.speedTier === SPEED_TIER.FAR) {
-      // biome-ignore lint/style/noNonNullAssertion: bucket arrays are initialized for every opacity index.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- bucket arrays are initialized for every opacity index.
       farBuckets[bucketIndex]!.push(msg);
     } else if (msg.speedTier === SPEED_TIER.NEAR) {
-      // biome-ignore lint/style/noNonNullAssertion: bucket arrays are initialized for every opacity index.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- bucket arrays are initialized for every opacity index.
       nearBuckets[bucketIndex]!.push(msg);
     } else {
-      // biome-ignore lint/style/noNonNullAssertion: bucket arrays are initialized for every opacity index.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- bucket arrays are initialized for every opacity index.
       midBuckets[bucketIndex]!.push(msg);
     }
   }
@@ -339,7 +339,7 @@ export function drawStage(
 
     try {
       for (const msg of entries) {
-        // biome-ignore lint/style/noNonNullAssertion: the bucket pass sets this before drawStage runs.
+        // oxlint-disable-next-line typescript/no-non-null-assertion -- the bucket pass sets this before drawStage runs.
         const elapsed = msg._frameElapsed!;
         const snappedX = Math.floor(msg.x);
         const snappedY = Math.floor(msg.y);

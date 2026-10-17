@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
@@ -8,9 +9,8 @@ const centralAction =
 const centralWorkflowJobs = {
   'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
   'security.yaml': ['changes', 'pin-metadata', 'pinned-tools', 'osv-scan-pr', 'osv-scan-dispatch'],
-  'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
 } as const;
-const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
+const releaseJobs = ['quality', 'unit', 'e2e', 'build'];
 const releaseLocalExecutionJobs = releaseJobs;
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
@@ -26,7 +26,7 @@ function topLevelBlock(workflow: string, key: string): string {
 }
 
 describe('project setup actions', () => {
-  it('keeps CI and deep jobs on the immutable central action', () => {
+  it('keeps CI and security jobs on the immutable central action', () => {
     for (const [filename, jobs] of Object.entries(centralWorkflowJobs)) {
       const workflow = readFileSync(resolve(root, '.github/workflows', filename), 'utf8');
 
@@ -38,9 +38,7 @@ describe('project setup actions', () => {
         expect(jobSection).toContain(`uses: ${centralAction}`);
         expect(jobSection).not.toContain('node-version:');
       }
-      expect(workflow.split(centralAction)).toHaveLength(
-        filename === 'deep-checks.yaml' ? 5 : jobs.length + 1
-      );
+      expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
       if (filename === 'ci.yaml') {
         const unit = workflow.split('\n  unit:\n')[1]?.split('\n  e2e:\n')[0] ?? '';

@@ -10,7 +10,7 @@ import {
   measureTextWidth,
 } from '@renderer/text-measure';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 describe('getFontString', () => {
   const defaultFamily = DEFAULT_FONT_FAMILY;

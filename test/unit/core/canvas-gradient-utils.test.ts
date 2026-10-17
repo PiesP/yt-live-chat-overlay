@@ -4,7 +4,7 @@
 import { LruMap } from '@piesp/browser-core/util';
 import { type GradientContext, getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vite-plus/test';
 
 // ── Mock CanvasGradient ──────────────────────────────────────────────
 

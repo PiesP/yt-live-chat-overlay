@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 type InstalledListener = (details: { reason: string }) => void;
 type MenuClickListener = (info: { menuItemId: string | number }, tab?: { id?: number }) => void;

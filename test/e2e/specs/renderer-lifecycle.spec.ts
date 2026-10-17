@@ -10,7 +10,9 @@
  */
 
 import { existsSync } from 'node:fs';
+
 import { expect, test } from '@playwright/test';
+
 import {
   applySettings,
   getSettings,

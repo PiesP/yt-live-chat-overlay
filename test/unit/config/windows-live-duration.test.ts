@@ -3,7 +3,9 @@
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+
+import { describe, expect, it, vi } from 'vite-plus/test';
+
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as installProfileModule from '../../../validation/windows/install-profile.mjs';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.

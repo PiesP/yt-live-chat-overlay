@@ -10,7 +10,7 @@ import {
   stripControlCharacters,
   truncateForKind,
 } from '@chat/message-helpers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── stripControlCharacters ────────────────────────────────────────────
 

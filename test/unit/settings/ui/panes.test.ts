@@ -4,7 +4,7 @@
 import { ROOT_SETTING_META } from '@settings/meta';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { type FieldDef, PANES, type PaneDef } from '@settings/ui/panes';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 function allSections(pane: PaneDef): PaneDef['sections'] {
   return [

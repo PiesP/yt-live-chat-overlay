@@ -2,7 +2,7 @@
 // Copyright (c) 2025 PiesP
 
 import { extractBestThumbnail } from '@chat/emoji-parser';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const YT_THUMB = 'https://yt3.ggpht.com/emoji/abc123';
 const YT_THUMB2 = 'https://yt3.ggpht.com/emoji/def456';

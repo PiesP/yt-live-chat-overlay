@@ -21,7 +21,7 @@ import {
 } from '@renderer/canvas/shared';
 import { rendererLayout, spacing } from '@util/design-tokens';
 import { Canvas, createCanvas } from 'canvas';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════════════
 // Mock Canvas context (mirrors test/setup.ts pattern)
@@ -1206,28 +1206,24 @@ describe('renderRegularMessageBackground', () => {
 describe('strokeTextOutline', () => {
   it('skips stroke when outlineWidthPx is 0', () => {
     const { ctx, state } = createMockContext();
-    // biome-ignore format: this is a test
     strokeTextOutline(ctx, 'test', 10, 20, '#fff', 0, 0.7);
     expect(state.ops).not.toContain('strokeText');
   });
 
   it('skips stroke when outlineOpacity is 0', () => {
     const { ctx, state } = createMockContext();
-    // biome-ignore format: this is a test
     strokeTextOutline(ctx, 'test', 10, 20, '#fff', 2, 0);
     expect(state.ops).not.toContain('strokeText');
   });
 
   it('calls strokeText with correct parameters', () => {
     const { ctx, state } = createMockContext();
-    // biome-ignore format: this is a test
     strokeTextOutline(ctx, 'test', 10, 20, '#ffffff', 2, 0.7);
     expect(state.ops).toContain('strokeText');
   });
 
   it('calls save/restore around strokeText', () => {
     const { ctx, state } = createMockContext();
-    // biome-ignore format: this is a test
     strokeTextOutline(ctx, 'hello', 10, 20, '#ffffff', 2, 0.7);
     expect(state.ops).toContain('save');
     expect(state.ops).toContain('restore');
@@ -1236,7 +1232,6 @@ describe('strokeTextOutline', () => {
 
   it('clamps opacity and configures a rounded scaled stroke', () => {
     const { ctx } = createMockContext();
-    // biome-ignore format: this is a test
     strokeTextOutline(ctx, 'hello', 10, 20, '#ffffff', 2, 2);
 
     expect(ctx.strokeStyle).toBe('rgba(0, 0, 0, 1)');

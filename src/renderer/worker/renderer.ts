@@ -139,8 +139,8 @@ import {
   rendererLayout,
   spacing,
 } from '@util/design-tokens';
-import { isValidControlMessage } from './protocol-guards';
 
+import { isValidControlMessage } from './protocol-guards';
 import type {
   ActiveMessage,
   WorkerConfig,
@@ -1564,7 +1564,7 @@ export class WorkerRenderer {
         isReplay: this.config.isReplayMode,
         previousStaggerDelayMs,
         queueDepth: this.pendingQueue.length,
-        // biome-ignore lint/style/noNonNullAssertion: fastRandom yields [0, 1), bounding the index to this 256-entry table.
+        // oxlint-disable-next-line typescript/no-non-null-assertion -- fastRandom yields [0, 1), bounding the index to this 256-entry table.
         staggerSample: WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
         maxStaggerDelayMs: this.config.staggerMaxDelayMs,
         mediumStaggerDelayMs: this.config.staggerMediumDelayMs,
@@ -1889,7 +1889,7 @@ export class WorkerRenderer {
                   msg.height,
                   sx,
                   sy,
-                  // biome-ignore lint/style/noNonNullAssertion: the active bucket pass assigns elapsed before drawing.
+                  // oxlint-disable-next-line typescript/no-non-null-assertion -- the active bucket pass assigns elapsed before drawing.
                   msg._frameElapsed!,
                   msg.cardConfigWorker,
                   cfg.fontSize,

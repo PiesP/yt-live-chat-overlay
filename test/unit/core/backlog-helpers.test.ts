@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@app-types';
 import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

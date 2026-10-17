@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { expect, type Page, test } from '@playwright/test';
+
 import {
   DEFAULT_SETTINGS,
   injectUserscript,

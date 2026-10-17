@@ -8,7 +8,7 @@ import { LiveChatSource } from '@chat/source-live';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 type LiveSourceInternals = {
   callback: ((messages: unknown[], isInitialSeed?: boolean) => void) | null;

@@ -1,7 +1,7 @@
 import type { OverlaySettings } from '@app-types';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Mock Worker ──────────────────────────────────────────────────────
 

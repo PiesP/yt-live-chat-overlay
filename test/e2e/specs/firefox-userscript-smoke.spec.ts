@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { expect, test } from '@playwright/test';
+
 import { applySettings, OVERLAY_ID, setupOverlayPage } from '../fixtures/test-utils';
 
 test('Firefox userscript ingests and renders a live-chat message', async ({ page }) => {

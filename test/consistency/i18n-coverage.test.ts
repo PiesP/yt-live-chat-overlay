@@ -1,6 +1,6 @@
 import { TRANSLATION_MAPS } from '@i18n/index';
 import { PANES } from '@settings/ui/panes';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vite-plus/test';
 
 function collectI18nKeys(): string[] {
   const keys: string[] = [];

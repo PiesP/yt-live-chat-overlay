@@ -6,7 +6,9 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Script } from 'node:vm';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+
 // @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
 import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.mjs';
 // @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.

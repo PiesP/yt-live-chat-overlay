@@ -9,6 +9,7 @@
  */
 
 import type { OverlaySettings } from '@app-types';
+
 import type { WorkerConfig } from './types';
 
 /**

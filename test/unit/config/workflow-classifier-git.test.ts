@@ -13,7 +13,9 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { expect, it } from 'vitest';
+
+import { expect, it } from 'vite-plus/test';
+
 import { classifyWorkflowChanges, SCOPES } from '../../../scripts/ci/classify-workflow-changes.ts';
 
 const classifier = resolve(import.meta.dirname, '../../../scripts/ci/classify-workflow-changes.ts');

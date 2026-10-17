@@ -5,7 +5,7 @@ import {
   SHOW_AUTHOR_KEYS,
   VISUAL_ROOT_KEYS,
 } from '@settings/meta';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── getRootDisplayMeta ──────────────────────────────────────────
 

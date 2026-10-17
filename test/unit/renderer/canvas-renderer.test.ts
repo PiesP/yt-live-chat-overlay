@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
-import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { Overlay } from '@app/overlay';
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { LruMap } from '@piesp/browser-core/util';
-import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
+import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
 import { type CanvasMessage, GRADIENT_CACHE_MAX } from '@renderer/constants';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import {
@@ -20,7 +20,7 @@ import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worke
 import type { WorkerStatsMessage } from '@renderer/worker/types';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { LanguageDetectorService } from '@translation/language-detector';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Mock OffscreenCanvas
 vi.stubGlobal(
@@ -1640,32 +1640,30 @@ describe('CanvasRenderer', () => {
       const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
       const origin = performance.timeOrigin;
       vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
-        ...[0, 2000].map(
-          (start, laneIndex): WorkerRecoveryMessage => ({
-            message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog },
-            trackDrops: false,
-            activeMotion: {
-              id: `active-${laneIndex}`,
-              mode: 'scroll',
-              startX: viewportWidth,
-              width: messageWidth,
-              height: 20,
-              y: laneIndex * 20,
-              laneIndex,
-              laneSlotCount: 1,
-              durationMs,
-              startEpochMs: origin + start,
-              fadeStartEpochMs: origin + start,
-              speedTier: backlog ? 3 : 1,
-              epoch: 0,
-              capturedAtEpochMs: origin + 1000,
-              effectiveNowEpochMs: origin + 1000,
-              isPaused: paused,
-              viewportWidthPx: viewportWidth,
-              exitPaddingPx: 100,
-            },
-          })
-        ),
+        ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
+          message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog },
+          trackDrops: false,
+          activeMotion: {
+            id: `active-${laneIndex}`,
+            mode: 'scroll',
+            startX: viewportWidth,
+            width: messageWidth,
+            height: 20,
+            y: laneIndex * 20,
+            laneIndex,
+            laneSlotCount: 1,
+            durationMs,
+            startEpochMs: origin + start,
+            fadeStartEpochMs: origin + start,
+            speedTier: backlog ? 3 : 1,
+            epoch: 0,
+            capturedAtEpochMs: origin + 1000,
+            effectiveNowEpochMs: origin + 1000,
+            isPaused: paused,
+            viewportWidthPx: viewportWidth,
+            exitPaddingPx: 100,
+          },
+        })),
         { message: makeMessage('pending-only', 'pending'), trackDrops: true },
       ]);
       clock = 1500;

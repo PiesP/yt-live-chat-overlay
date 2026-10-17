@@ -12,7 +12,8 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+
+import { afterEach, describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const nodeBinary = process.env.NODE_SCRIPT_TEST_BINARY ?? process.execPath;

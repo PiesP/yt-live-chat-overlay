@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { Overlay } from '@app/overlay';
 import { RuntimeManager } from '@app/runtime-manager';
-import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ReplayChatSource } from '@chat/source-replay';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import type { CanvasMessage } from '@renderer/constants';
@@ -11,7 +11,7 @@ import { motionPlansCollide } from '@renderer/layout/message-schedule';
 import { WorkerRenderer } from '@renderer/worker/renderer';
 import type { ActiveMessage } from '@renderer/worker/types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const dimensions = { width: 640, height: 160 };
 

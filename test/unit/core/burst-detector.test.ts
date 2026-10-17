@@ -1,5 +1,5 @@
 import { BurstDetector, type BurstLevelObserver } from '@renderer/layout/burst-detector';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

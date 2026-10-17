@@ -4,7 +4,7 @@ import {
   isAllowedImageUrl,
   normalizeYouTubeImageUrl,
 } from '@media/image-url-validation';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 

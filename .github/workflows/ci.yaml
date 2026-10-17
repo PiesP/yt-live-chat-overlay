@@ -6,9 +6,6 @@ name: 🏗️ CI
 # - Run browser E2E tests
 # - Build all distribution targets
 #
-# Expensive mutation testing lives in deep-checks.yaml so PR feedback is not
-# blocked by a long-running, resource-heavy analysis.
-#
 # Triggered on: Push/PR to master + merge queue
 
 # Security: All third-party actions pinned to full commit SHAs.
@@ -86,7 +83,7 @@ jobs:
           fi
 
           echo "Change classification failed; enabling every CI scope." >&2
-          for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools deep_fast; do
+          for scope in all quality unit core e2e build osv semgrep codeql_actions codeql_javascript pinned_tools; do
             echo "$scope=true" >> "$GITHUB_OUTPUT"
           done
 

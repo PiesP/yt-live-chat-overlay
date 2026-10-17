@@ -12,11 +12,12 @@
  * Extracted from CanvasRenderer for single-responsibility separation.
  */
 
-import type { Overlay } from '@app/overlay';
 import type { AccessibleChatMessage, ChatMessage, OverlaySettings } from '@app-types';
+import type { Overlay } from '@app/overlay';
 import { createWorkerUrl, workerSupported } from '@platform/worker-factory';
 import { createLogger } from '@util/logging';
 import type { ObservabilityReporter } from '@util/observability';
+
 import {
   buildPartialWorkerConfig,
   sendClearStateToWorker,
@@ -60,8 +61,7 @@ export interface WorkerRecoveryMessage {
 }
 
 export interface WorkerRecoveryMotion
-  extends WorkerActiveMotion,
-    Omit<WorkerMotionSnapshot, 'activeMotions'> {
+  extends WorkerActiveMotion, Omit<WorkerMotionSnapshot, 'activeMotions'> {
   epoch: number;
 }
 

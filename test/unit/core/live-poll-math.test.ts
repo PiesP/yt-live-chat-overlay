@@ -12,7 +12,7 @@ import {
   EXTREME_DENSITY_THRESHOLD,
   recordDensitySample,
 } from '@chat/live-poll-math';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 const TEST_LIMITS: DensityConfig = {
   minPollIntervalMs: 200,

@@ -71,6 +71,6 @@ export function getWatchdogRestartDelay(attempt: number): number | null {
     return null;
   }
   const index = Math.min(attempt - 1, RESTART_BACKOFF_DELAYS_MS.length - 1);
-  // biome-ignore lint/style/noNonNullAssertion: attempt is bounded by this nonempty tuple's length.
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- attempt is bounded by this nonempty tuple's length.
   return RESTART_BACKOFF_DELAYS_MS[index]!;
 }

@@ -15,7 +15,7 @@ import {
   STORAGE_KEY,
   shouldResetRendererForSettingsChange,
 } from '@settings/schema';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════
 // Constants

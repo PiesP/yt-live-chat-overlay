@@ -8,8 +8,8 @@
  * the base class and its concrete implementations (LiveChatSource, ReplayChatSource).
  */
 
-import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@app/bootstrap-resolver';
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
+import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@app/bootstrap-resolver';
 import {
   type ChatBootstrapData,
   getLiveChatPayload,

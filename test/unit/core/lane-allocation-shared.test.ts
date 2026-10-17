@@ -17,7 +17,7 @@ import {
   resetBatchShared,
   shiftLaneTimersShared,
 } from '@renderer/layout/lane-shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ── Helper: create a minimal LaneAllocationState ────────────────
 

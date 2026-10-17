@@ -5,7 +5,7 @@
 import type { ChatMessage } from '@app-types';
 import type { ChatEvent } from '@chat/message-parser';
 import { ReplayBuffer } from '@chat/replay-buffer';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vite-plus/test';
 
 function makeMsg(id: string, offsetMs: number): ChatMessage {
   return {

@@ -8,7 +8,7 @@ import {
   sendSetPausedToWorker,
   sendUpdateConfigToWorker,
 } from '@renderer/worker/common';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 // Minimal settings shape for testing — all fields the worker config picks from
 const mockSettings = {

@@ -15,7 +15,9 @@
  */
 
 import { readFileSync } from 'node:fs';
+
 import { expect, type Page, test } from '@playwright/test';
+
 import { applySettings, setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
 
 const BUTTON_ID = 'yt-chat-overlay-settings-button';

@@ -1,5 +1,5 @@
 import { computeScrollDuration } from '@util/design-tokens';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 // ═══════════════════════════════════════════════════════════
 // computeScrollDuration (5-arg signature at 0900552)
