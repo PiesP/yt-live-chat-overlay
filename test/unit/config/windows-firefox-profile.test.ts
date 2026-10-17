@@ -10,8 +10,7 @@ import { Script } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.ts';
-// @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
-import * as firefoxInstallModule from '../../../validation/windows/firefox-install.mjs';
+import * as firefoxInstallModule from '../../../validation/windows/firefox-install.ts';
 
 const {
   categorizeErrors,
@@ -663,11 +662,7 @@ describe('Windows Firefox installation profile', () => {
       Object.fromEntries(Object.keys(result.checks).map((key) => [key, true]))
     );
     expect(result.status).toBe('passed');
-    expect(
-      result.observations.live.map(
-        (item: { workflow: { seek: { target: number } } }) => item.workflow.seek.target
-      )
-    ).toEqual([27, 33]);
+    expect(result.observations.live.map((item) => item.workflow?.seek?.target)).toEqual([27, 33]);
     const liveSeekExpression = session.evaluateJson.mock.calls
       .map(([expression]) => expression)
       .find((expression) => expression.includes('const completed = new Promise'));
@@ -999,6 +994,28 @@ describe('Windows Firefox installation profile', () => {
     expect(
       JSON.parse(await readFile(join(output, 'firefox-installation-result.json'), 'utf8'))
     ).toEqual(result);
+  });
+
+  it('records and rethrows a falsy Firefox startup rejection', async () => {
+    const { output, root } = await createBundle();
+    let fulfilled = false;
+    try {
+      await runFirefoxInstallation(
+        { executablePath: '/test/firefox.exe', output, root },
+        { launch: () => Promise.reject(undefined) }
+      );
+      fulfilled = true;
+    } catch (error) {
+      expect(error).toBeUndefined();
+    }
+    expect(fulfilled).toBe(false);
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt).toMatchObject({
+      status: 'failed',
+      errors: [{ name: 'Error', message: 'undefined' }],
+    });
   });
 
   it('leaves public-page checks not-run when only the installed fixture was requested', async () => {

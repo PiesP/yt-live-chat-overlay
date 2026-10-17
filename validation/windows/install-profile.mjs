@@ -3,8 +3,9 @@
 
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+
 import { runChromeInstallation } from './chrome-install.mjs';
-import { runFirefoxInstallation } from './firefox-install.mjs';
+import { runFirefoxInstallation } from './firefox-install.ts';
 
 export function validateLiveObservation(value = null) {
   assert(value === null || (value && typeof value === 'object'), 'Invalid live observation option');
