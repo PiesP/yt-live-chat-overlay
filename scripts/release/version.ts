@@ -1,6 +1,5 @@
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..', '..');
 const manifestFiles = ['extension/manifest.json', 'extension/manifest.firefox.json'] as const;
@@ -58,13 +57,4 @@ export function runVersionCommand(command = process.argv[2] ?? 'check'): void {
   else throw new Error(`Unknown version command: ${command}. Use "check" or "sync".`);
 }
 
-function isDirectInvocation(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectInvocation()) runVersionCommand();
+if (import.meta.main) runVersionCommand();

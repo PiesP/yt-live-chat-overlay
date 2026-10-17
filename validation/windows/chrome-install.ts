@@ -23,12 +23,16 @@ import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
+  readPublicPageBrowserState,
   redactDiagnosticText,
+  selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
+
+export { selectPublicSeekTarget };
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -655,75 +659,14 @@ async function installUserscript(
   }
 }
 
-/** Select an in-range move that differs materially from current playback. */
-export function selectPublicSeekTarget(
-  { currentTime, start, end }: { currentTime: number; start: number; end: number },
-  { preferBackward = false }: { preferBackward?: boolean } = {}
-) {
-  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
-  const backward = Math.max(start + 1, currentTime - 3);
-  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
-  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
-  if (Math.abs(forward - currentTime) >= 1) return forward;
-  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
-}
-
 export async function readPublicPageState(page: Page) {
-  return page
-    .evaluate(() => {
-      const initialData = window.ytInitialData as Record<string, unknown> | undefined;
-      const nestedRenderer = (
-        initialData?.contents as
-          | {
-              twoColumnWatchNextResults?: {
-                conversationBar?: {
-                  liveChatRenderer?: { isReplay?: boolean; continuations?: unknown };
-                };
-              };
-            }
-          | undefined
-      )?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
-      let renderer = nestedRenderer;
-      if (!renderer && initialData && typeof initialData === 'object') {
-        const pending: Record<string, unknown>[] = [initialData];
-        const seen = new Set<Record<string, unknown>>();
-        for (let visited = 0; pending.length && visited < 1000; visited++) {
-          const value = pending.pop();
-          if (!value || typeof value !== 'object' || seen.has(value)) continue;
-          seen.add(value);
-          const found = value.liveChatRenderer as
-            | { isReplay?: boolean; continuations?: unknown }
-            | undefined;
-          if (found?.continuations) {
-            renderer = found;
-            break;
-          }
-          for (const child of Object.values(value)) {
-            if (child && typeof child === 'object') pending.push(child as Record<string, unknown>);
-          }
-        }
-      }
-      const hostname = new URL(location.href).hostname;
-      return {
-        chatMode: renderer ? (renderer.isReplay === true ? 'replay' : 'live') : 'unknown',
-        chatRendererFound: Boolean(renderer),
-        playabilityStatus:
-          (
-            window as Window & {
-              ytInitialPlayerResponse?: { playabilityStatus?: { status?: string } };
-            }
-          ).ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
-        loginRedirect: hostname === 'accounts.google.com',
-        consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com',
-      };
-    })
-    .catch(() => ({
-      chatMode: 'unknown',
-      chatRendererFound: false,
-      playabilityStatus: null,
-      loginRedirect: false,
-      consentRedirect: false,
-    }));
+  return page.evaluate(readPublicPageBrowserState).catch(() => ({
+    chatMode: 'unknown',
+    chatRendererFound: false,
+    playabilityStatus: null,
+    loginRedirect: false,
+    consentRedirect: false,
+  }));
 }
 
 /** Observe a real watch page without supplying application code or site responses. */

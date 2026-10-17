@@ -7,6 +7,8 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Route } from '@playwright/test';
 
+import { buildVisibleWatchHtml } from './visible-watch.ts';
+
 type BitmapCache = {
   get(key: string): ImageBitmap | undefined;
   set(key: string, value: ImageBitmap): boolean;
@@ -144,16 +146,7 @@ export async function runBitmapLifecycleFixture({
     `\n\twindow.__ytBitmapCacheClass = ResizableByteLimitedCache;${marker}`
   );
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
-  const html = preview
-    .replace(
-      '<div class="player-inner">Video Player Placeholder</div>',
-      '<video aria-label="Bitmap lifecycle fixture video" style="width:100%;height:100%"></video>'
-    )
-    .replace(
-      '</body>',
-      '<div id="chat"><yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer></div></body>'
-    );
-  assert.notEqual(html, preview, 'Bitmap fixture video was not installed');
+  const html = buildVisibleWatchHtml(preview, 'Bitmap lifecycle fixture video');
   const page = await context.newPage();
   const pageErrors: string[] = [];
   let pageErrorOverflow = 0;

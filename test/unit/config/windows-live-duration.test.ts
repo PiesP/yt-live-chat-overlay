@@ -128,6 +128,30 @@ describe('public duration observation contract', () => {
     });
   });
 
+  it('redacts URLs in the bounded public-player failure capture', async () => {
+    const page = {
+      evaluate: vi.fn().mockResolvedValue({
+        playerFound: true,
+        providerStatus: 'UNPLAYABLE',
+        providerReason: 'Video unavailable https://www.youtube.com/watch?v=private',
+        mediaNetworkState: 3,
+        mediaErrorCode: null,
+        candidates: [
+          {
+            path: [],
+            errorText: 'Video unavailable https://www.youtube.com/watch?v=private',
+          },
+        ],
+      }),
+    };
+    const captured = await durationModule.captureFailurePlayerDom(page as unknown as Page);
+    expect(captured.providerReason).toBe('Video unavailable https://www.youtube.com/watch');
+    expect(captured.candidates[0]?.errorText).toBe(
+      'Video unavailable https://www.youtube.com/watch'
+    );
+    expect(JSON.stringify(captured)).not.toContain('v=private');
+  });
+
   it.each([
     { name: 'normal increase', times: [10, 40, 70], range: 60 },
     { name: 'stalled playback', times: [10, 10, 10], range: 0 },

@@ -1,8 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const payloads = [
   'yt-live-chat-overlay.user.js',
@@ -196,16 +195,7 @@ export async function verifyPublication(
   return { publish: false };
 }
 
-function directInvocation(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-}
-
-if (directInvocation()) {
+if (import.meta.main) {
   const repository = process.env.GITHUB_REPOSITORY ?? '';
   const token = process.env.GITHUB_TOKEN;
   const output = process.env.GITHUB_OUTPUT;

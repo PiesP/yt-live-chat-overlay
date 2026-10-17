@@ -245,21 +245,9 @@ describe('installed Chrome acceptance outcomes', () => {
     }
   );
 
-  it('selects a real seek movement only from a usable public media range', () => {
+  it('uses the shared seek calculation in the Chrome driver', () => {
+    expect(selectPublicSeekTarget).toBe(liveRenderingModule.selectPublicSeekTarget);
     expect(selectPublicSeekTarget({ currentTime: 10, start: 0, end: 100 })).toBe(13);
-    expect(selectPublicSeekTarget({ currentTime: 99, start: 0, end: 100 })).toBe(96);
-    expect(
-      selectPublicSeekTarget({ currentTime: 97, start: 0, end: 100 }, { preferBackward: true })
-    ).toBe(94);
-    expect(selectPublicSeekTarget({ currentTime: 97, start: 0, end: 100 })).toBe(99);
-    expect(
-      selectPublicSeekTarget({ currentTime: 1.5, start: 0, end: 100 }, { preferBackward: true })
-    ).toBe(4.5);
-    expect(
-      selectPublicSeekTarget({ currentTime: 10, start: 8, end: 11 }, { preferBackward: true })
-    ).toBeNull();
-    expect(selectPublicSeekTarget({ currentTime: 10, start: 8, end: 11 })).toBeNull();
-    expect(selectPublicSeekTarget({ currentTime: NaN, start: 0, end: 100 })).toBeNull();
   });
 
   it.each([

@@ -9,9 +9,13 @@ import { launchFirefoxBidi } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
+  readPublicPageBrowserState,
   redactDiagnosticText,
+  selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
+
+export { selectPublicSeekTarget };
 
 type FirefoxLog = { level: string; text: string; type: string };
 type FirefoxSession = {
@@ -266,18 +270,6 @@ export function categorizeErrors(logs: FirefoxLog[]) {
   );
 }
 
-export function selectPublicSeekTarget(
-  { currentTime, start, end }: { currentTime: number; start: number; end: number },
-  { preferBackward = false } = {}
-) {
-  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
-  const backward = Math.max(start + 1, currentTime - 3);
-  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
-  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
-  if (Math.abs(forward - currentTime) >= 1) return forward;
-  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
-}
-
 export function requireFirefoxPublicCoverage(observations: PublicObservation[]) {
   const modes = new Set(observations.map((item) => item.provider?.chatMode));
   assert(
@@ -300,45 +292,10 @@ export function requireFirefoxPublicCoverage(observations: PublicObservation[]) 
   );
 }
 
-async function readPublicPageState(session: FirefoxSession) {
-  return evaluate<{
-    finalUrl: string;
-    chatMode: string;
-    chatRendererFound: boolean;
-    playabilityStatus: string | null;
-    loginRedirect: boolean;
-    consentRedirect: boolean;
-  }>(
+export async function readPublicPageState(session: FirefoxSession) {
+  return evaluate<ReturnType<typeof readPublicPageBrowserState> & { finalUrl: string }>(
     session,
-    `(() => {
-    const initialData = window.ytInitialData;
-    let renderer = initialData?.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
-    if (!renderer && initialData && typeof initialData === 'object') {
-      const pending = [initialData];
-      const seen = new Set();
-      for (let visited = 0; pending.length && visited < 1000; visited++) {
-        const value = pending.pop();
-        if (!value || typeof value !== 'object' || seen.has(value)) continue;
-        seen.add(value);
-        if (value.liveChatRenderer?.continuations) {
-          renderer = value.liveChatRenderer;
-          break;
-        }
-        for (const child of Object.values(value)) {
-          if (child && typeof child === 'object') pending.push(child);
-        }
-      }
-    }
-    const hostname = location.hostname;
-    return {
-      finalUrl: location.href,
-      chatMode: renderer ? (renderer.isReplay === true ? 'replay' : 'live') : 'unknown',
-      chatRendererFound: Boolean(renderer),
-      playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
-      loginRedirect: hostname === 'accounts.google.com',
-      consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com'
-    };
-  })()`
+    `(() => ({ ...(${readPublicPageBrowserState.toString()})(), finalUrl: location.href }))()`
   );
 }
 

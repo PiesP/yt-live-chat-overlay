@@ -1,5 +1,4 @@
-import { realpathSync, rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { rmSync } from 'node:fs';
 
 export function cleanBuildArtifacts(): void {
   for (const path of ['dist', 'dist-extension', 'dist-extension-firefox']) {
@@ -7,13 +6,4 @@ export function cleanBuildArtifacts(): void {
   }
 }
 
-function isDirectInvocation(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectInvocation()) cleanBuildArtifacts();
+if (import.meta.main) cleanBuildArtifacts();

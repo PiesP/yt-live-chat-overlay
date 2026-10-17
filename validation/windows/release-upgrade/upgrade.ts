@@ -9,6 +9,8 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 
+import { buildVisibleWatchHtml } from '../visible-watch.ts';
+
 type UpgradeInput = {
   schemaVersion: number;
   baselineSha256: string;
@@ -706,16 +708,7 @@ async function setSettingsThroughUi(page: Page, values: Settings, managerId: str
 
 async function openOwnedWatchFixture(context: BrowserContext, managerId: string, root: string) {
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
-  const withVideo = preview.replace(
-    '<div class="player-inner">Video Player Placeholder</div>',
-    '<video aria-label="Upgrade fixture video" style="width:100%;height:100%"></video>'
-  );
-  assert.notEqual(withVideo, preview, 'Upgrade fixture video placeholder changed');
-  const html = withVideo.replace(
-    '</body>',
-    '<div id="chat"><yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer></div></body>'
-  );
-  assert.notEqual(html, withVideo, 'Upgrade fixture body changed');
+  const html = buildVisibleWatchHtml(preview, 'Upgrade fixture video');
   const page = await context.newPage();
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url());
