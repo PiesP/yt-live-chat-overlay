@@ -4,14 +4,12 @@ import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { Page } from '@playwright/test';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as installProfileModule from '../../../validation/windows/install-profile.mjs';
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as durationModule from '../../../validation/windows/live-duration.mjs';
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as naturalChromeModule from '../../../validation/windows/natural-chrome.mjs';
+import * as installProfileModule from '../../../validation/windows/install-profile.ts';
+import * as durationModule from '../../../validation/windows/live-duration.ts';
+import * as naturalChromeModule from '../../../validation/windows/natural-chrome.ts';
 
 const healthySample = {
   phase: 'active',
@@ -264,7 +262,7 @@ describe('public duration observation contract', () => {
     const page = { locator: () => ({ first: () => locator }) };
 
     await expect(
-      durationModule.exercisePlayerPausePlay(page, {
+      durationModule.exercisePlayerPausePlay(page as unknown as Page, {
         delay: vi.fn().mockResolvedValue(undefined),
         timeoutMs: 50,
       })
@@ -288,7 +286,9 @@ describe('natural Chrome ownership boundaries', () => {
     try {
       const result = await naturalChromeModule.cleanupFailedNaturalChrome(
         {
-          child,
+          child: child as unknown as Parameters<
+            typeof naturalChromeModule.cleanupFailedNaturalChrome
+          >[0]['child'],
           childState: { spawnError: null },
           browserProcessIdentity: null,
           profile,
@@ -296,9 +296,14 @@ describe('natural Chrome ownership boundaries', () => {
         },
         {
           stopChild: (ownedChild: unknown, state: unknown, cdp: unknown) =>
-            naturalChromeModule.stopUnidentifiedChild(ownedChild, state, cdp, {
-              waitForChildExit,
-            }),
+            naturalChromeModule.stopUnidentifiedChild(
+              ownedChild as Parameters<typeof naturalChromeModule.stopUnidentifiedChild>[0],
+              state as Parameters<typeof naturalChromeModule.stopUnidentifiedChild>[1],
+              cdp as Parameters<typeof naturalChromeModule.stopUnidentifiedChild>[2],
+              {
+                waitForChildExit,
+              }
+            ),
         }
       );
 
@@ -329,7 +334,9 @@ describe('natural Chrome ownership boundaries', () => {
     };
     const result = await naturalChromeModule.cleanupFailedNaturalChrome(
       {
-        child: { pid: 42 },
+        child: { pid: 42 } as unknown as Parameters<
+          typeof naturalChromeModule.cleanupFailedNaturalChrome
+        >[0]['child'],
         childState: { spawnError: null },
         browserProcessIdentity: identity,
         profile: 'C:\\owned-profile',
@@ -365,7 +372,9 @@ describe('natural Chrome ownership boundaries', () => {
     const spawnError = new Error('spawn failed');
     const result = await naturalChromeModule.cleanupFailedNaturalChrome(
       {
-        child: { pid: undefined },
+        child: { pid: undefined } as unknown as Parameters<
+          typeof naturalChromeModule.cleanupFailedNaturalChrome
+        >[0]['child'],
         childState: { spawnError },
         browserProcessIdentity: null,
         profile: 'C:\\owned-profile',

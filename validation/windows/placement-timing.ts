@@ -5,8 +5,319 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { BrowserContext } from '@playwright/test';
+
+type CanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+type Rect = { left: number; top: number; right: number; bottom: number };
+type InkRun = { text: string; left: number; top: number; width: number; height: number };
+type BitmapInk = {
+  fill?: { japanese: InkRun | null; [key: string]: unknown };
+  stroke?: { japanese: InkRun | null; [key: string]: unknown };
+};
+type ProbeOptions = {
+  worker: boolean;
+  tokens: readonly string[];
+  forceFallback?: boolean;
+  workerPrelude?: string;
+  attachProbeSource?: string;
+};
+type ChatAction = { addChatItemAction: { item: Record<string, unknown> } };
+type ScenarioOptions = {
+  context: BrowserContext;
+  root: string;
+  output: string;
+  extensionId: string;
+  name: string;
+  forceFallback: boolean;
+  mode: 'scroll' | 'reverse' | 'top' | 'bottom' | 'replay';
+  transition?: string;
+  comparisonOnly?: boolean;
+  spacingOnly?: boolean;
+};
+type WorkerProbeMessage = {
+  id: string;
+  height: number;
+  isBacklog?: boolean;
+  burstSpeedMultiplier?: number;
+  trackDrops?: boolean;
+};
+type WorkerActive = ActiveRow & {
+  startX: number;
+  startTime: number;
+  pausedDuration: number;
+  duration: number;
+  laneIndex: number;
+  laneSlotCount: number;
+  motion?: {
+    viewportEntryTime: number;
+    actualVelocityPxPerMs: number;
+    travelDistancePx: number;
+    visibleExitTime: number;
+    staggerDelayMs: number;
+    isScrolling: boolean;
+  };
+};
+type WorkerRendererProbe = {
+  ctx: CanvasContext;
+  logicalWidth: number;
+  logicalHeight: number;
+  laneHeight: number;
+  numLanes: number;
+  laneDensityFactor: number;
+  config: {
+    danmakuMode: string;
+    exitPaddingPx: number;
+    reducedMotion: boolean;
+    ignoreReducedMotion: boolean;
+    laneSpacing: number;
+    fontSize: number;
+    translationGeneration?: number;
+    speedPxPerSec?: number;
+    backlogSpeedMultiplier?: number;
+    outline?: unknown;
+    backgroundColors?: unknown;
+    safeTop?: number;
+    safeBottom?: number;
+    maxConcurrentMessages?: number;
+    queueMaxSize?: number;
+  } | null;
+  pendingQueue: WorkerProbeMessage[];
+  activeMessages: WorkerActive[];
+  enqueueMessage(message: WorkerProbeMessage): boolean;
+  activateMessage(
+    message: WorkerProbeMessage,
+    frameTime: number,
+    placement?: { waitMs?: number; slotCount?: number }
+  ): unknown;
+  recordDrop(message: WorkerProbeMessage, ...args: unknown[]): unknown;
+  checkCollision(...args: unknown[]): boolean;
+  findPlacement(...args: unknown[]): unknown;
+  drainQueue(...args: unknown[]): unknown;
+  renderFrame(...args: unknown[]): unknown;
+};
+type CanvasProbeMessage = { id: string; isBacklog?: boolean };
+type CanvasActive = ActiveRow & {
+  message: CanvasProbeMessage;
+  laneIndex: number;
+  slotCount: number;
+  startTime: number;
+  pausedDuration: number;
+  duration: number;
+  motion?: {
+    durationMs: number;
+    actualVelocityPxPerMs: number;
+    travelDistancePx: number;
+    viewportEntryTime: number;
+    visibleExitTime: number;
+  };
+};
+type CanvasObservability = {
+  onMessageDropped?: (...args: unknown[]) => unknown;
+  onMessagesDropped?: (...args: unknown[]) => unknown;
+};
+type CanvasRendererProbe = {
+  ctx: CanvasContext;
+  pendingQueue: { toArray(): CanvasProbeMessage[]; size: number };
+  activeMessages: CanvasActive[];
+  observability?: CanvasObservability;
+  overlay: { getDimensions(): { width: number; height: number } | null };
+  settings: {
+    danmakuMode: string;
+    laneSpacing: number;
+    fontSize: number;
+    safeTop: number;
+    safeBottom: number;
+    speedPxPerSec: number;
+    backlogSpeedMultiplier: number;
+    outline: unknown;
+    backgroundColors: { normal?: string };
+  };
+  laneAllocator: { getLaneHeight(): number; getLaneCount(): number };
+  currentLaneDensityFactor: number;
+  enqueueMessage(message: CanvasProbeMessage, ...args: unknown[]): unknown;
+  placeQueuedMessage(message: CanvasProbeMessage, ...args: unknown[]): { placed?: boolean } | null;
+  renderFrame(...args: unknown[]): unknown;
+};
+type ActiveRow = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  startAtEpochMs: number;
+  endAtEpochMs: number;
+  visibleNow?: boolean;
+  isScrolling?: boolean | null;
+};
+type Draw = {
+  id: string;
+  frameId: number;
+  kind?: string;
+  alpha: number;
+  backingRatioX?: number;
+  backingRatioY?: number;
+  rect: Rect | null;
+  japanese?: { text: string; rect: Rect | null } | null;
+};
+type FrameConfig = {
+  renderer?: string;
+  mode?: string | null;
+  fontSize?: number | null;
+  laneSpacing?: number | null;
+  laneDensityFactor?: number | null;
+  safeTop?: number | null;
+  safeBottom?: number | null;
+  logicalWidth?: number | null;
+  logicalHeight?: number | null;
+  laneHeight?: number | null;
+  backgroundColors?: { normal?: string } | null;
+  reducedMotion?: boolean | null;
+  ignoreReducedMotion?: boolean | null;
+  translationGeneration?: number | null;
+  maxConcurrentMessages?: number | null;
+  queueMaxSize?: number | null;
+  [key: string]: unknown;
+};
+type RenderFrame = {
+  frameId: number;
+  startedAtEpochMs: number;
+  finishedAtEpochMs: number | null;
+  complete: boolean;
+  cleared: boolean;
+  truncated: boolean;
+  failed?: boolean;
+  logicalWidth: number | null;
+  logicalHeight: number | null;
+  backingWidth: number | null;
+  backingHeight: number | null;
+  backingRatioX: number;
+  backingRatioY: number;
+  config: FrameConfig;
+  active: ActiveRow[];
+  draws: Draw[];
+};
+type FrameTiming = {
+  atEpochMs?: number;
+  workMs: number;
+  preClearMs?: number | null;
+  pendingBefore?: number;
+  activeAfter?: number;
+};
+type FrameView = Partial<Omit<RenderFrame, 'config' | 'active' | 'draws'>> & {
+  config?: FrameConfig;
+  active?: readonly (Partial<ActiveRow> | undefined)[] | null;
+  draws?: readonly (Partial<Draw> | undefined)[] | null;
+};
+type CompleteFrame = RenderFrame & {
+  logicalWidth: number;
+  logicalHeight: number;
+  finishedAtEpochMs: number;
+  config: FrameConfig & {
+    renderer: string;
+    fontSize: number;
+    laneSpacing: number;
+    laneDensityFactor: number;
+    safeTop: number;
+    safeBottom: number;
+  };
+};
+type ProbeDisposition = {
+  id: string;
+  kind: string;
+  geometricEntryAtEpochMs?: number | null;
+  slotCount?: number | null;
+  isScrolling?: boolean | null;
+  pendingDepth?: number;
+  staggerDelayMs?: number;
+  optionalEntryDelayMs?: number | null;
+  [key: string]: unknown;
+};
+type ProbeExact = {
+  frames?: FrameTiming[];
+  drains?: FrameTiming[];
+  dispositions: ProbeDisposition[];
+  active?: ActiveRow[];
+  activeNow: ActiveRow[];
+  config: FrameConfig | null;
+  drops: Record<string, number>;
+  overflow: number;
+  samplesScope?: string;
+  [key: string]: unknown;
+};
+type WorkerExact = ProbeExact & {
+  frames: FrameTiming[];
+  drains: (FrameTiming & {
+    pendingBefore: number;
+    pendingAfter: number;
+    activeBefore: number;
+    activeAfter: number;
+    collisionRejects: number;
+    placementMisses: number;
+  })[];
+  active: ActiveRow[];
+  collisionRejects: number;
+  placementMisses: number;
+};
+type CanvasExact = ProbeExact & { peaks: { pending: number; active: number } };
+type WorkerRecord = {
+  ready: boolean;
+  stats: Record<string, unknown>[];
+  sample: ProbeSample | null;
+  worker: Worker;
+  flushId?: string | number;
+};
+type ProbeSample = {
+  frames: FrameTiming[];
+  bounds: (Rect & { id: string; atEpochMs: number })[];
+  ink: Record<string, unknown>[];
+  firstEntry: Record<string, number>;
+  ingress: Record<string, number>;
+  exact?: ProbeExact;
+  latestRenderFrame: RenderFrame | null;
+  overflow: number;
+};
+type ProbeState = ProbeSample & {
+  stats: Record<string, unknown>[];
+  workers: WorkerRecord[];
+  sourcePrefixed: boolean;
+  sourceHooked: boolean;
+  ready: boolean;
+  canvas: HTMLCanvasElement | OffscreenCanvas | null;
+  frameCount: number;
+  reportCount: number;
+  videoEntry: Record<
+    string,
+    { atEpochMs: number; videoTimeMs: number; offsetMs: number; videoTimeErrorMs: number }
+  >;
+  renderFrameId: number;
+  currentRenderFrame: RenderFrame | null;
+  currentFrame: { startedAt: number; preClearMs: number | null } | null;
+  requestAtEpochMs?: number;
+  flushSequence?: number;
+  canvasSourceHooked?: boolean;
+  readRegularInsets?: (
+    fontSize: number,
+    outlineWidthPx: number,
+    backgroundVisible: boolean
+  ) => unknown;
+  beginRenderFrame: (input: {
+    ctx: CanvasContext;
+    logicalWidth: number | null;
+    logicalHeight: number | null;
+    config: FrameConfig;
+  }) => RenderFrame;
+  endRenderFrame: (frame: RenderFrame, active: ActiveRow[]) => void;
+};
+declare global {
+  interface Window {
+    __ytPlacementProbe: ProbeState;
+    __ytPlacementSetVideoTime: (seconds: number) => void;
+    __ytPlacementSetPaused: (paused: boolean) => void;
+  }
+}
+
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows193Placement';
-const MIXED_IDS = ['WINDOWS204_MIX_REGULAR', 'WINDOWS204_MIX_PAID'];
+const MIXED_IDS: [string, string] = ['WINDOWS204_MIX_REGULAR', 'WINDOWS204_MIX_PAID'];
 const TOKENS = [
   'WINDOWS193_SHORT',
   'WINDOWS193_LONG',
@@ -29,7 +340,7 @@ const TOKENS = [
   ...Array.from({ length: 10 }, (_, index) => `WINDOWS196_GAP0_${String(index).padStart(2, '0')}`),
   ...Array.from({ length: 10 }, (_, index) => `WINDOWS196_GAP8_${String(index).padStart(2, '0')}`),
   ...MIXED_IDS,
-];
+] as const;
 const MAX_SAMPLES = 240;
 export const MIXED_PRESSURE_COUNT = 40;
 export const MIXED_PRESSURE_CHUNK_SIZE = 4;
@@ -59,7 +370,7 @@ export const PLACEMENT_SCENARIOS = Object.freeze([
   { name: 'main-spacing-speed', forceFallback: true, mode: 'scroll', transition: 'spacing-speed' },
   { name: 'worker-mixed-gap', forceFallback: false, mode: 'top', transition: 'mixed-gap' },
   { name: 'main-mixed-gap', forceFallback: true, mode: 'top', transition: 'mixed-gap' },
-]);
+] as const);
 
 export function spacingFixtureIds() {
   return {
@@ -68,13 +379,16 @@ export function spacingFixtureIds() {
   };
 }
 
-function installProbeRuntime(options) {
+function installProbeRuntime(options: ProbeOptions) {
   const MAX_SAMPLES = 240;
-  const scope = globalThis;
+  const scope = globalThis as typeof globalThis & {
+    __ytPlacementProbe?: ProbeState;
+    postMessage(message: unknown): void;
+  };
   const ids = new Set(options.tokens);
-  const bitmapIds = new WeakMap();
-  const bitmapInk = new WeakMap();
-  const frameContexts = new WeakMap();
+  const bitmapIds = new WeakMap<object, string>();
+  const bitmapInk = new WeakMap<object, BitmapInk>();
+  const frameContexts = new WeakMap<RenderFrame, CanvasContext>();
   const state = {
     frames: [],
     bounds: [],
@@ -93,15 +407,17 @@ function installProbeRuntime(options) {
     videoEntry: {},
     renderFrameId: 0,
     latestRenderFrame: null,
-  };
+    currentRenderFrame: null,
+    currentFrame: null,
+  } as unknown as ProbeState;
   scope.__ytPlacementProbe = state;
   const epochNow = () => performance.timeOrigin + performance.now();
-  const tokenIn = (text) => options.tokens.find((token) => String(text).includes(token));
-  const overlayContext = (ctx) =>
+  const tokenIn = (text: unknown) => options.tokens.find((token) => String(text).includes(token));
+  const overlayContext = (ctx: CanvasContext) =>
     options.worker
       ? ctx.canvas === state.canvas
-      : Boolean(ctx.canvas?.closest?.('#yt-live-chat-overlay'));
-  const japaneseRun = (text, ctx, x, y) => {
+      : 'closest' in ctx.canvas && Boolean(ctx.canvas.closest('#yt-live-chat-overlay'));
+  const japaneseRun = (text: string, ctx: CanvasContext, x: number, y: number) => {
     const match = /[\u3040-\u30ff\u3400-\u9fff]+/u.exec(String(text));
     if (!match) return null;
     const startX = x + ctx.measureText(String(text).slice(0, match.index)).width;
@@ -115,15 +431,23 @@ function installProbeRuntime(options) {
       height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
     };
   };
-  const transformedRect = (ctx, x, y, width, height) => {
+  const transformedRect = (
+    ctx: CanvasContext,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): Rect | null => {
     if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
     const transform = ctx.getTransform();
-    const points = [
-      [x, y],
-      [x + width, y],
-      [x, y + height],
-      [x + width, y + height],
-    ].map(([px, py]) => ({
+    const points = (
+      [
+        [x, y],
+        [x + width, y],
+        [x, y + height],
+        [x + width, y + height],
+      ] satisfies [number, number][]
+    ).map(([px, py]) => ({
       x: transform.a * px + transform.c * py + transform.e,
       y: transform.b * px + transform.d * py + transform.f,
     }));
@@ -134,8 +458,11 @@ function installProbeRuntime(options) {
       bottom: Math.max(...points.map((point) => point.y)),
     };
   };
-  const logicalRect = (rect, frame) =>
-    rect && frame?.backingRatioX > 0 && frame?.backingRatioY > 0
+  const logicalRect = (
+    rect: Rect | null,
+    frame: { backingRatioX: number; backingRatioY: number } | null
+  ) =>
+    rect && frame && frame.backingRatioX > 0 && frame.backingRatioY > 0
       ? {
           left: rect.left / frame.backingRatioX,
           top: rect.top / frame.backingRatioY,
@@ -146,7 +473,7 @@ function installProbeRuntime(options) {
   state.beginRenderFrame = ({ ctx, logicalWidth, logicalHeight, config }) => {
     const backingWidth = ctx?.canvas?.width ?? null;
     const backingHeight = ctx?.canvas?.height ?? null;
-    const frame = {
+    const frame: RenderFrame = {
       frameId: ++state.renderFrameId,
       startedAtEpochMs: epochNow(),
       finishedAtEpochMs: null,
@@ -157,8 +484,8 @@ function installProbeRuntime(options) {
       logicalHeight,
       backingWidth,
       backingHeight,
-      backingRatioX: backingWidth / logicalWidth,
-      backingRatioY: backingHeight / logicalHeight,
+      backingRatioX: Number(backingWidth) / Number(logicalWidth),
+      backingRatioY: Number(backingHeight) / Number(logicalHeight),
       config,
       active: [],
       draws: [],
@@ -172,8 +499,8 @@ function installProbeRuntime(options) {
     const ctx = frameContexts.get(frame);
     frame.backingWidth = ctx?.canvas?.width ?? null;
     frame.backingHeight = ctx?.canvas?.height ?? null;
-    frame.backingRatioX = frame.backingWidth / frame.logicalWidth;
-    frame.backingRatioY = frame.backingHeight / frame.logicalHeight;
+    frame.backingRatioX = Number(frame.backingWidth) / Number(frame.logicalWidth);
+    frame.backingRatioY = Number(frame.backingHeight) / Number(frame.logicalHeight);
     frame.complete =
       !frame.failed &&
       frame.cleared &&
@@ -192,15 +519,24 @@ function installProbeRuntime(options) {
     state.latestRenderFrame = frame;
     if (state.currentRenderFrame === frame) state.currentRenderFrame = null;
   };
-  const recordRect = (ctx, id, x, y, width, height, kind = 'image', ink = null) => {
+  const recordRect = (
+    ctx: CanvasContext,
+    id: string | undefined,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    kind = 'image',
+    ink: (Record<string, unknown> & { japanese?: InkRun | null }) | null = null
+  ) => {
     if (!id || !overlayContext(ctx)) return;
     const rect = transformedRect(ctx, x, y, width, height);
     if (!rect) return;
     const bound = { id, atEpochMs: epochNow(), ...rect };
     const frame = state.currentRenderFrame;
     if (frame && frame.draws.length < MAX_SAMPLES) {
-      const backingRatioX = ctx.canvas.width / frame.logicalWidth;
-      const backingRatioY = ctx.canvas.height / frame.logicalHeight;
+      const backingRatioX = ctx.canvas.width / Number(frame.logicalWidth);
+      const backingRatioY = ctx.canvas.height / Number(frame.logicalHeight);
       const ratios = { backingRatioX, backingRatioY };
       const japanese = ink?.japanese ?? null;
       frame.draws.push({
@@ -352,21 +688,36 @@ function installProbeRuntime(options) {
       return result;
     };
     const nativeDrawImage = prototype.drawImage;
-    prototype.drawImage = function (image, ...args) {
+    prototype.drawImage = function (
+      this: CanvasContext,
+      image: CanvasImageSource,
+      ...args: number[]
+    ) {
       const id = bitmapIds.get(image);
-      const result = nativeDrawImage.call(this, image, ...args);
-      if (id && overlayContext(this)) {
-        const destination =
+      const result = Reflect.apply(nativeDrawImage, this, [image, ...args]);
+      if (
+        id &&
+        overlayContext(this) &&
+        'width' in image &&
+        'height' in image &&
+        typeof image.width === 'number' &&
+        typeof image.height === 'number'
+      ) {
+        const destination: [number, number, number, number] | null =
           args.length === 2
-            ? [args[0], args[1], image.width, image.height]
+            ? [Number(args[0]), Number(args[1]), image.width, image.height]
             : args.length === 4
-              ? args
-              : args.slice(4, 8);
-        if (destination.length === 4) {
+              ? [Number(args[0]), Number(args[1]), Number(args[2]), Number(args[3])]
+              : args.length === 8
+                ? [Number(args[4]), Number(args[5]), Number(args[6]), Number(args[7])]
+                : null;
+        if (destination) {
           const sourceInk = bitmapInk.get(image) ?? null;
           const run = sourceInk?.fill?.japanese ?? sourceInk?.stroke?.japanese ?? null;
           const [sourceX, sourceY, sourceWidth, sourceHeight] =
-            args.length === 8 ? args.slice(0, 4) : [0, 0, image.width, image.height];
+            args.length === 8
+              ? [Number(args[0]), Number(args[1]), Number(args[2]), Number(args[3])]
+              : [0, 0, image.width, image.height];
           const [destX, destY, destWidth, destHeight] = destination;
           const runLeft = run ? Math.max(run.left, sourceX) : 0;
           const runTop = run ? Math.max(run.top, sourceY) : 0;
@@ -386,7 +737,7 @@ function installProbeRuntime(options) {
         }
       }
       return result;
-    };
+    } as CanvasRenderingContext2D['drawImage'];
     const nativeClearRect = prototype.clearRect;
     prototype.clearRect = function (...args) {
       const result = nativeClearRect.call(this, ...args);
@@ -397,8 +748,8 @@ function installProbeRuntime(options) {
         args.length >= 4 &&
         args[0] <= 0 &&
         args[1] <= 0 &&
-        args[0] + args[2] >= renderFrame.logicalWidth &&
-        args[1] + args[3] >= renderFrame.logicalHeight
+        args[0] + args[2] >= Number(renderFrame.logicalWidth) &&
+        args[1] + args[3] >= Number(renderFrame.logicalHeight)
       ) {
         renderFrame.cleared = true;
         renderFrame.draws.length = 0;
@@ -456,9 +807,9 @@ function installProbeRuntime(options) {
         }
       }
       if (event.data?.type === 'ytPlacementResetSamples' && state.exact) {
-        state.exact.frames.length = 0;
-        state.exact.drains.length = 0;
-        state.exact.active.length = 0;
+        if (state.exact.frames) state.exact.frames.length = 0;
+        if (state.exact.drains) state.exact.drains.length = 0;
+        if (state.exact.active) state.exact.active.length = 0;
         state.exact.samplesScope = 'congestion phase';
       }
       if (event.data?.type === 'ytPlacementResetIssueInk') {
@@ -484,21 +835,25 @@ function installProbeRuntime(options) {
     });
     return;
   }
-  const replayOffsets = {
+  const replayOffsets: Record<string, number> = {
     WINDOWS193_REPLAY_DUE: 10000,
     WINDOWS193_REPLAY_NEXT: 10001,
     WINDOWS193_REPLAY_FUTURE: 11500,
   };
   new MutationObserver(() => {
-    for (const element of document.querySelectorAll('.yt-live-chat-overlay-live-region > p')) {
+    for (const element of document.querySelectorAll<HTMLElement>(
+      '.yt-live-chat-overlay-live-region > p'
+    )) {
       const id = element.dataset.messageId;
-      if (ids.has(id) && !state.videoEntry[id] && replayOffsets[id] !== undefined) {
-        const videoTimeMs = document.querySelector('video')?.currentTime * 1000;
+      if (id && ids.has(id) && !state.videoEntry[id] && replayOffsets[id] !== undefined) {
+        const videoTimeMs =
+          (document.querySelector<HTMLVideoElement>('video')?.currentTime ?? NaN) * 1000;
+        const offsetMs = replayOffsets[id] ?? NaN;
         state.videoEntry[id] = {
           atEpochMs: epochNow(),
           videoTimeMs,
-          offsetMs: replayOffsets[id],
-          videoTimeErrorMs: videoTimeMs - replayOffsets[id],
+          offsetMs,
+          videoTimeErrorMs: videoTimeMs - offsetMs,
         };
       }
     }
@@ -536,13 +891,22 @@ function installProbeRuntime(options) {
   const NativeWorker = scope.Worker;
   scope.Worker = new Proxy(NativeWorker, {
     construct(target, args) {
-      const worker = Reflect.construct(target, args);
-      const record = { ready: false, stats: [], sample: null, worker };
+      const worker = Reflect.construct(target, args) as Worker;
+      const record: WorkerRecord = { ready: false, stats: [], sample: null, worker };
       state.workers.push(record);
       worker.addEventListener('message', (event) => {
-        if (event.data?.type === 'ready') record.ready = true;
-        if (event.data?.type === 'stats' && record.stats.length < 60) {
-          const { activeMessages, pendingQueueDepth, totalRendered, totalDrops } = event.data;
+        const data = event.data as {
+          type?: string;
+          activeMessages?: number;
+          pendingQueueDepth?: number;
+          totalRendered?: number;
+          totalDrops?: number;
+          sample?: ProbeSample;
+          requestId?: string | number;
+        } | null;
+        if (data?.type === 'ready') record.ready = true;
+        if (data?.type === 'stats' && record.stats.length < 60) {
+          const { activeMessages, pendingQueueDepth, totalRendered, totalDrops } = data;
           record.stats.push({
             atEpochMs: epochNow(),
             activeMessages,
@@ -551,29 +915,34 @@ function installProbeRuntime(options) {
             totalDrops,
           });
         }
-        if (event.data?.type === 'ytPlacementProbe') {
-          record.sample = event.data.sample;
-          record.flushId = event.data.requestId;
+        if (data?.type === 'ytPlacementProbe') {
+          record.sample = data.sample ?? null;
+          if (data.requestId !== undefined) record.flushId = data.requestId;
         }
       });
       const nativePostMessage = worker.postMessage.bind(worker);
-      worker.postMessage = (message, transfer) => {
+      worker.postMessage = ((
+        message: { type?: string; messages?: { id: string }[] },
+        transfer?: Transferable[]
+      ) => {
         if (message?.type === 'addMessages') {
           for (const entry of message.messages ?? []) {
             if (ids.has(entry.id)) state.ingress[entry.id] ??= epochNow();
           }
         }
-        if (transfer === undefined) nativePostMessage(message);
-        else nativePostMessage(message, transfer);
-      };
+        if (transfer === undefined) Reflect.apply(nativePostMessage, worker, [message]);
+        else Reflect.apply(nativePostMessage, worker, [message, transfer]);
+      }) as Worker['postMessage'];
       return worker;
     },
   });
 }
 
-export function summarizeSamples(values) {
+export function summarizeSamples(values: (number | null | undefined)[]) {
   const samples = values
-    .filter((value) => Number.isFinite(value) && value >= 0)
+    .filter(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+    )
     .toSorted((left, right) => left - right);
   if (samples.length === 0) return { count: 0, p50: null, p95: null, max: null };
   return {
@@ -584,11 +953,30 @@ export function summarizeSamples(values) {
   };
 }
 
-export function summarizeExactWorkerProbe(selected, renderer) {
+export function summarizeExactWorkerProbe(
+  selected:
+    | {
+        exact?:
+          | {
+              frames?: { workMs: number }[];
+              drains?: { workMs: number }[];
+              dispositions?: unknown[];
+              active?: unknown[];
+            }
+          | undefined;
+      }
+    | null
+    | undefined,
+  renderer: string
+) {
   if (renderer !== 'worker' || !selected?.exact) {
     return { exactWorkerFrameMs: null, exactWorkerDrainMs: null, exactWorker: null };
   }
   const exact = selected.exact;
+  assert(
+    exact.frames && exact.drains && exact.dispositions && exact.active,
+    'Incomplete exact Worker sample'
+  );
   return {
     exactWorkerFrameMs: summarizeSamples(exact.frames.map((frame) => frame.workMs)),
     exactWorkerDrainMs: summarizeSamples(exact.drains.map((drain) => drain.workMs)),
@@ -600,7 +988,11 @@ export function summarizeExactWorkerProbe(selected, renderer) {
   };
 }
 
-export function findOverlappingActivePair(messages, width, height) {
+export function findOverlappingActivePair(
+  messages: (Pick<ActiveRow, 'id' | 'x' | 'y' | 'width' | 'height'> & { visibleNow?: boolean })[],
+  width: number,
+  height: number
+) {
   const visible = messages.filter(
     (item) =>
       item.x < width &&
@@ -613,6 +1005,7 @@ export function findOverlappingActivePair(messages, width, height) {
     for (let right = left + 1; right < visible.length; right++) {
       const a = visible[left];
       const b = visible[right];
+      if (!a || !b) continue;
       if (
         a.x < b.x + b.width - 1 &&
         b.x < a.x + a.width - 1 &&
@@ -627,7 +1020,10 @@ export function findOverlappingActivePair(messages, width, height) {
 }
 
 /** Smallest sampled allocation-origin distance; adjacent lane occupancy is not established. */
-export function measureAllocationRowPitch(messages, prefix = 'WINDOWS196_GAP0_') {
+export function measureAllocationRowPitch(
+  messages: { id?: string; y: number; height: number }[],
+  prefix = 'WINDOWS196_GAP0_'
+) {
   const ys = messages
     .filter(
       (entry) =>
@@ -637,14 +1033,27 @@ export function measureAllocationRowPitch(messages, prefix = 'WINDOWS196_GAP0_')
     .toSorted((a, b) => a - b);
   const pitches = ys
     .slice(1)
-    .map((y, index) => y - ys[index])
+    .map((y, index) => y - (ys[index] ?? y))
     .filter((pitch) => pitch > 0);
   return pitches.length ? Math.min(...pitches) : null;
 }
 
 /** Sampled row origins in one completed frame, not proven adjacency or a historical ink join. */
-export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
-  const result = {
+export function measureVisibleRowPitch(
+  frame: FrameView | null | undefined,
+  prefix = 'WINDOWS196_GAP0_'
+) {
+  const result: {
+    pitchPx: number | null;
+    status: string;
+    reason: string | null;
+    frameId: number | null;
+    includedIds: string[];
+    excluded: { id: string; reason: string }[];
+    unknownIds: string[];
+    japaneseVisibleIds: string[];
+    japaneseVisibleRowOriginsPx: number[];
+  } = {
     pitchPx: null,
     status: 'unknown',
     reason: null,
@@ -655,7 +1064,7 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
     japaneseVisibleIds: [],
     japaneseVisibleRowOriginsPx: [],
   };
-  const unknown = (reason, id) => {
+  const unknown = (reason: string, id?: string) => {
     result.reason = reason;
     if (id) result.unknownIds.push(id);
     return result;
@@ -663,21 +1072,21 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
   if (
     !frame ||
     !Number.isSafeInteger(frame.frameId) ||
-    frame.frameId <= 0 ||
+    Number(frame.frameId) <= 0 ||
     frame.complete !== true ||
     frame.truncated !== false ||
     !Number.isFinite(frame.startedAtEpochMs) ||
     !Number.isFinite(frame.finishedAtEpochMs) ||
-    frame.finishedAtEpochMs < frame.startedAtEpochMs ||
+    Number(frame.finishedAtEpochMs) < Number(frame.startedAtEpochMs) ||
     !Number.isFinite(frame.logicalWidth) ||
-    frame.logicalWidth <= 0 ||
+    Number(frame.logicalWidth) <= 0 ||
     !Number.isFinite(frame.logicalHeight) ||
-    frame.logicalHeight <= 0 ||
+    Number(frame.logicalHeight) <= 0 ||
     !Number.isFinite(frame.backingRatioX) ||
-    frame.backingRatioX <= 0 ||
+    Number(frame.backingRatioX) <= 0 ||
     !Number.isFinite(frame.backingRatioY) ||
-    frame.backingRatioY <= 0 ||
-    !['main', 'worker'].includes(frame.config?.renderer) ||
+    Number(frame.backingRatioY) <= 0 ||
+    !['main', 'worker'].includes(frame.config?.renderer ?? '') ||
     !Number.isFinite(frame.config?.fontSize) ||
     !Number.isFinite(frame.config?.laneSpacing) ||
     !Array.isArray(frame.active) ||
@@ -685,20 +1094,23 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
   ) {
     return unknown('incomplete_or_unsupported_frame');
   }
-  const intersects = (rect) =>
-    rect &&
-    [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
-    rect.right > rect.left &&
-    rect.bottom > rect.top &&
-    rect.left < frame.logicalWidth &&
-    rect.right > 0 &&
-    rect.top < frame.logicalHeight &&
-    rect.bottom > 0;
-  const tracked = frame.active.filter(
+  const measuredFrame = frame as CompleteFrame;
+  const intersects = (rect: Rect | null | undefined): rect is Rect =>
+    Boolean(
+      rect &&
+      [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
+      rect.right > rect.left &&
+      rect.bottom > rect.top &&
+      rect.left < measuredFrame.logicalWidth &&
+      rect.right > 0 &&
+      rect.top < measuredFrame.logicalHeight &&
+      rect.bottom > 0
+    );
+  const tracked = measuredFrame.active.filter(
     (row) => typeof row?.id === 'string' && row.id.startsWith(prefix)
   );
   const ids = new Set();
-  const unmatchedDraw = frame.draws.find(
+  const unmatchedDraw = measuredFrame.draws.find(
     (draw) =>
       typeof draw?.id === 'string' &&
       draw.id.startsWith(prefix) &&
@@ -706,7 +1118,7 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
   );
   if (unmatchedDraw) return unknown('draw_without_active_row', unmatchedDraw.id);
   const visible = [];
-  const japaneseRows = new Set();
+  const japaneseRows = new Set<number>();
   for (const row of tracked) {
     if (ids.has(row.id)) return unknown('duplicate_active_id', row.id);
     ids.add(row.id);
@@ -719,15 +1131,18 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
       row.endAtEpochMs <= row.startAtEpochMs
     )
       return unknown('invalid_active_geometry_or_time', row.id);
-    if (frame.finishedAtEpochMs < row.startAtEpochMs) {
+    if (measuredFrame.finishedAtEpochMs < row.startAtEpochMs) {
       result.excluded.push({ id: row.id, reason: 'future' });
       continue;
     }
-    if (frame.startedAtEpochMs >= row.endAtEpochMs) {
+    if (measuredFrame.startedAtEpochMs >= row.endAtEpochMs) {
       result.excluded.push({ id: row.id, reason: 'expired' });
       continue;
     }
-    if (frame.startedAtEpochMs < row.startAtEpochMs || frame.finishedAtEpochMs >= row.endAtEpochMs)
+    if (
+      measuredFrame.startedAtEpochMs < row.startAtEpochMs ||
+      measuredFrame.finishedAtEpochMs >= row.endAtEpochMs
+    )
       return unknown('eligibility_changed_during_frame', row.id);
     const rowRect = {
       left: row.x,
@@ -739,8 +1154,8 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
       result.excluded.push({ id: row.id, reason: 'offscreen_row' });
       continue;
     }
-    const draws = frame.draws.filter((draw) => draw?.id === row.id);
-    if (draws.some((draw) => draw.frameId !== frame.frameId)) {
+    const draws = measuredFrame.draws.filter((draw) => draw?.id === row.id);
+    if (draws.some((draw) => draw.frameId !== measuredFrame.frameId)) {
       return unknown('draw_frame_mismatch', row.id);
     }
     if (draws.length === 0) {
@@ -762,7 +1177,9 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
       result.excluded.push({ id: row.id, reason: 'zero_alpha' });
       continue;
     }
-    const painted = draws.filter((draw) => draw.alpha > 0 && intersects(draw.rect));
+    const painted = draws.filter(
+      (draw): draw is Draw & { rect: Rect } => draw.alpha > 0 && intersects(draw.rect)
+    );
     if (
       painted.some(
         (draw) =>
@@ -788,7 +1205,7 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
   const ys = [...new Set(visible.map((row) => row.y))].toSorted((a, b) => a - b);
   const pitches = ys
     .slice(1)
-    .map((y, index) => y - ys[index])
+    .map((y, index) => y - (ys[index] ?? y))
     .filter((pitch) => pitch > 0);
   if (pitches.length === 0) {
     result.status = 'insufficient';
@@ -801,8 +1218,17 @@ export function measureVisibleRowPitch(frame, prefix = 'WINDOWS196_GAP0_') {
 }
 
 /** Content-rectangle clearance of both fixture rows painted in one completed frame. */
-export function measureMixedHeightClearance(frame) {
-  const result = {
+export function measureMixedHeightClearance(frame: FrameView | null | undefined) {
+  const result: {
+    status: string;
+    reason: string | null;
+    frameId: number | null;
+    observedLaneDensityFactor: number | null;
+    paintedIds: string[];
+    heightsPx: number[];
+    pairs: { ids: string[]; gapPx: number }[];
+    minimumGapPx: number | null;
+  } = {
     status: 'unknown',
     reason: null,
     frameId: frame?.frameId ?? null,
@@ -812,60 +1238,64 @@ export function measureMixedHeightClearance(frame) {
     pairs: [],
     minimumGapPx: null,
   };
-  const unknown = (reason) => {
+  const unknown = (reason: string) => {
     result.reason = reason;
     return result;
   };
   if (
     !frame ||
     !Number.isSafeInteger(frame.frameId) ||
-    frame.frameId <= 0 ||
+    Number(frame.frameId) <= 0 ||
     frame.complete !== true ||
     frame.truncated !== false ||
     !Number.isFinite(frame.startedAtEpochMs) ||
     !Number.isFinite(frame.finishedAtEpochMs) ||
-    frame.finishedAtEpochMs < frame.startedAtEpochMs ||
+    Number(frame.finishedAtEpochMs) < Number(frame.startedAtEpochMs) ||
     !Number.isFinite(frame.logicalWidth) ||
-    frame.logicalWidth <= 0 ||
+    Number(frame.logicalWidth) <= 0 ||
     !Number.isFinite(frame.logicalHeight) ||
-    frame.logicalHeight <= 0 ||
+    Number(frame.logicalHeight) <= 0 ||
     !Number.isFinite(frame.backingRatioX) ||
-    frame.backingRatioX <= 0 ||
+    Number(frame.backingRatioX) <= 0 ||
     !Number.isFinite(frame.backingRatioY) ||
-    frame.backingRatioY <= 0 ||
-    !['main', 'worker'].includes(frame.config?.renderer) ||
+    Number(frame.backingRatioY) <= 0 ||
+    !['main', 'worker'].includes(frame.config?.renderer ?? '') ||
     frame.config?.mode !== 'top' ||
     frame.config?.laneSpacing !== 8 ||
     !Number.isFinite(frame.config?.laneDensityFactor) ||
     !Number.isFinite(frame.config.safeTop) ||
     !Number.isFinite(frame.config.safeBottom) ||
-    frame.config.safeTop < 0 ||
-    frame.config.safeBottom < 0 ||
-    frame.config.safeTop + frame.config.safeBottom >= 1 ||
+    Number(frame.config?.safeTop) < 0 ||
+    Number(frame.config?.safeBottom) < 0 ||
+    Number(frame.config?.safeTop) + Number(frame.config?.safeBottom) >= 1 ||
     !Array.isArray(frame.active) ||
     !Array.isArray(frame.draws)
   ) {
     return unknown('incomplete_or_unsupported_frame');
   }
-  if (frame.config.laneDensityFactor !== 0.5) return unknown('wrong_lane_density');
-  const intersects = (rect) =>
-    rect &&
-    [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
-    rect.right > rect.left &&
-    rect.bottom > rect.top &&
-    rect.left < frame.logicalWidth &&
-    rect.right > 0 &&
-    rect.top < frame.logicalHeight &&
-    rect.bottom > 0;
-  const rows = [];
+  const measuredFrame = frame as CompleteFrame;
+  if (measuredFrame.config.laneDensityFactor !== 0.5) return unknown('wrong_lane_density');
+  const intersects = (rect: Rect | null | undefined): rect is Rect =>
+    Boolean(
+      rect &&
+      [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
+      rect.right > rect.left &&
+      rect.bottom > rect.top &&
+      rect.left < measuredFrame.logicalWidth &&
+      rect.right > 0 &&
+      rect.top < measuredFrame.logicalHeight &&
+      rect.bottom > 0
+    );
+  const rows: { id: string; rect: Rect }[] = [];
   for (const id of MIXED_IDS) {
-    const matches = frame.active.filter((row) => row?.id === id);
+    const matches = measuredFrame.active.filter((row) => row?.id === id);
     if (matches.length !== 1) {
       result.status = 'insufficient';
       result.reason = `missing_or_duplicate_active_${id}`;
       return result;
     }
     const row = matches[0];
+    if (!row) return unknown('missing_active_row');
     if (
       ![row.x, row.y, row.width, row.height, row.startAtEpochMs, row.endAtEpochMs].every(
         Number.isFinite
@@ -876,14 +1306,17 @@ export function measureMixedHeightClearance(frame) {
     )
       return unknown('invalid_active_geometry_or_time');
     if (
-      frame.finishedAtEpochMs < row.startAtEpochMs ||
-      frame.startedAtEpochMs >= row.endAtEpochMs
+      measuredFrame.finishedAtEpochMs < row.startAtEpochMs ||
+      measuredFrame.startedAtEpochMs >= row.endAtEpochMs
     ) {
       result.status = 'insufficient';
       result.reason = `not_time_eligible_${id}`;
       return result;
     }
-    if (frame.startedAtEpochMs < row.startAtEpochMs || frame.finishedAtEpochMs >= row.endAtEpochMs)
+    if (
+      measuredFrame.startedAtEpochMs < row.startAtEpochMs ||
+      measuredFrame.finishedAtEpochMs >= row.endAtEpochMs
+    )
       return unknown('eligibility_changed_during_frame');
     const rect = { left: row.x, top: row.y, right: row.x + row.width, bottom: row.y + row.height };
     if (!intersects(rect)) {
@@ -891,18 +1324,18 @@ export function measureMixedHeightClearance(frame) {
       result.reason = `offscreen_${id}`;
       return result;
     }
-    const safeTop = frame.logicalHeight * frame.config.safeTop;
-    const safeBottom = frame.logicalHeight * (1 - frame.config.safeBottom);
+    const safeTop = measuredFrame.logicalHeight * measuredFrame.config.safeTop;
+    const safeBottom = measuredFrame.logicalHeight * (1 - measuredFrame.config.safeBottom);
     if (rect.top + 1e-6 < safeTop || rect.bottom > safeBottom + 1e-6) {
       result.status = 'violation';
       result.reason = `content_outside_safe_zone_${id}`;
       return result;
     }
-    const draws = frame.draws.filter((draw) => draw?.id === id);
+    const draws = measuredFrame.draws.filter((draw) => draw?.id === id);
     if (
       draws.some(
         (draw) =>
-          draw.frameId !== frame.frameId ||
+          draw.frameId !== measuredFrame.frameId ||
           !Number.isFinite(draw.alpha) ||
           draw.alpha < 0 ||
           draw.alpha > 1 ||
@@ -916,6 +1349,7 @@ export function measureMixedHeightClearance(frame) {
         (draw) =>
           draw.alpha > 0 &&
           intersects(draw.rect) &&
+          draw.rect !== null &&
           draw.rect.left < rect.right &&
           draw.rect.right > rect.left &&
           draw.rect.top < rect.bottom &&
@@ -936,6 +1370,7 @@ export function measureMixedHeightClearance(frame) {
     return result;
   }
   const [a, b] = rows;
+  if (!a || !b) return unknown('missing_painted_row');
   if (a.rect.left >= b.rect.right || b.rect.left >= a.rect.right) {
     result.status = 'insufficient';
     result.reason = 'horizontal_lane_sharing';
@@ -944,13 +1379,24 @@ export function measureMixedHeightClearance(frame) {
   const gapPx = a.rect.top <= b.rect.top ? b.rect.top - a.rect.bottom : a.rect.top - b.rect.bottom;
   result.pairs.push({ ids: [a.id, b.id], gapPx });
   result.minimumGapPx = gapPx;
-  result.status = gapPx + 1e-6 >= frame.config.laneSpacing ? 'measured' : 'violation';
+  result.status = gapPx + 1e-6 >= measuredFrame.config.laneSpacing ? 'measured' : 'violation';
   result.reason = result.status === 'violation' ? 'content_clearance_below_lane_gap' : null;
   return result;
 }
 
 /** Accept one phase's available observations, without inferring adjacency across cohorts. */
-export function assertSpacingPhase(snapshot, prefix, laneSpacing, renderer) {
+export function assertSpacingPhase(
+  snapshot: {
+    renderFrame?: FrameView | null;
+    exact?: {
+      config?: { laneSpacing?: number | null } | null;
+      activeNow: { id?: string; y: number; height: number }[];
+    } | null;
+  } | null,
+  prefix: string,
+  laneSpacing: number,
+  renderer: string
+) {
   const visibleRowPitch = measureVisibleRowPitch(snapshot?.renderFrame, prefix);
   assert(
     visibleRowPitch.status === 'measured' &&
@@ -958,77 +1404,98 @@ export function assertSpacingPhase(snapshot, prefix, laneSpacing, renderer) {
     `No complete frame with two visible Japanese rows: ${JSON.stringify(visibleRowPitch)}`
   );
   assert.equal(
-    snapshot.renderFrame.config.renderer,
+    snapshot?.renderFrame?.config?.renderer,
     renderer,
     'Spacing frame came from the wrong renderer'
   );
   assert.equal(
-    snapshot.renderFrame.config.laneSpacing,
+    snapshot?.renderFrame?.config?.laneSpacing,
     laneSpacing,
     'Spacing frame did not use the phase Lane Gap'
   );
   assert.equal(
-    snapshot.exact?.config?.laneSpacing,
+    snapshot?.exact?.config?.laneSpacing,
     laneSpacing,
     'Spacing snapshot did not use the phase Lane Gap'
   );
-  const allocationPitchPx = measureAllocationRowPitch(snapshot.exact.activeNow, prefix);
+  const allocationPitchPx = measureAllocationRowPitch(snapshot?.exact?.activeNow ?? [], prefix);
   assert(allocationPitchPx !== null, 'Spacing fixture did not allocate distinct regular rows');
   // Spread placement and surviving reservations can change the sampled lane separation.
   // Exact option correctness belongs to the controlled adjacent-row source test.
   return { allocationPitchPx, visibleRowPitch };
 }
 
-export function assertBacklogMotion(disposition, renderer, comparisonOnly = false) {
+export function assertBacklogMotion(
+  disposition: unknown,
+  renderer: string,
+  comparisonOnly = false
+) {
+  const motion = disposition as {
+    kind: string;
+    isBacklog: boolean;
+    width: number;
+    burstSpeedMultiplier: number | null;
+    durationMs: number;
+    travelDistancePx: number;
+    actualVelocityPxPerMs: number;
+  } | null;
   assert(
-    disposition?.kind === 'activated' && disposition.isBacklog === true,
+    motion?.kind === 'activated' && motion.isBacklog === true,
     'Long parser-ingress message was not activated as Backlog'
   );
-  assert(disposition.width > 1870, 'Backlog text did not produce unclamped travel geometry');
+  assert(motion.width > 1870, 'Backlog text did not produce unclamped travel geometry');
   assert(renderer === 'worker' || renderer === 'main', 'Unknown renderer for Backlog motion');
-  const burstMultiplier = disposition.burstSpeedMultiplier;
+  const burstMultiplier = motion.burstSpeedMultiplier;
   assert(
     (renderer === 'main' && burstMultiplier === null) ||
-      (Number.isFinite(burstMultiplier) && burstMultiplier > 1),
+      (Number.isFinite(burstMultiplier) && burstMultiplier !== null && burstMultiplier > 1),
     'Worker did not receive a finite burst multiplier above one'
   );
   assert(
-    disposition.durationMs > 5000 && disposition.durationMs < 30000,
+    motion.durationMs > 5000 && motion.durationMs < 30000,
     'Backlog duration was clamped, so this cannot verify speed policy'
   );
   assert(
-    Number.isFinite(disposition.travelDistancePx) &&
-      Number.isFinite(disposition.actualVelocityPxPerMs),
+    Number.isFinite(motion.travelDistancePx) && Number.isFinite(motion.actualVelocityPxPerMs),
     'Committed motion fields are unavailable'
   );
   const expectedVelocity = (250 * 2) / 1000;
   if (!comparisonOnly) {
     assert(
-      Math.abs(disposition.actualVelocityPxPerMs - expectedVelocity) < 0.002,
+      Math.abs(motion.actualVelocityPxPerMs - expectedVelocity) < 0.002,
       'Backlog motion acquired an extra burst multiplier'
     );
     assert(
-      Math.abs(disposition.durationMs - disposition.travelDistancePx / expectedVelocity) < 25,
+      Math.abs(motion.durationMs - motion.travelDistancePx / expectedVelocity) < 25,
       'Backlog duration does not match the selected nominal speed'
     );
   }
 }
 
-export function assertBacklogReflow(before, after, id) {
+export function assertBacklogReflow(before: unknown, after: unknown, id: string) {
+  const previous = before as {
+    config: { logicalWidth: number; logicalHeight: number; fontSize: number };
+  } | null;
+  const next = after as {
+    config: { logicalWidth: number; logicalHeight: number; fontSize: number };
+    activeNow: { id: string }[];
+  } | null;
   assert(
-    after?.config?.logicalWidth > before?.config?.logicalWidth &&
-      after.config.logicalHeight > before.config.logicalHeight,
+    next?.config?.logicalWidth !== undefined &&
+      previous?.config?.logicalWidth !== undefined &&
+      next.config.logicalWidth > previous.config.logicalWidth &&
+      next.config.logicalHeight > previous.config.logicalHeight,
     'Fixture video geometry did not grow during resize'
   );
-  assert.equal(before.config.fontSize, 32);
-  assert.equal(after.config.fontSize, 32, 'Reflow changed the configured 32px font');
+  assert.equal(previous.config.fontSize, 32);
+  assert.equal(next.config.fontSize, 32, 'Reflow changed the configured 32px font');
   assert(
-    after.activeNow.some((entry) => entry.id === id),
+    next.activeNow.some((entry) => entry.id === id),
     'Backlog message disappeared during resize and spacing reflow'
   );
 }
 
-export function workerProbePrelude(tokens = TOKENS) {
+export function workerProbePrelude(tokens: readonly string[] = TOKENS) {
   return `;(${installProbeRuntime.toString()})(${JSON.stringify({ worker: true, tokens })});\n`;
 }
 
@@ -1036,7 +1503,7 @@ export function canvasProbePrelude({
   tokens = TOKENS,
   forceFallback = false,
   workerPrelude = workerProbePrelude(tokens),
-} = {}) {
+}: { tokens?: readonly string[]; forceFallback?: boolean; workerPrelude?: string } = {}) {
   return (
     `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
     `;(${installProbeRuntime.toString()})(${JSON.stringify({
@@ -1052,7 +1519,7 @@ export function canvasProbePrelude({
 // The emitted Worker is a classic Blob script. The suffix runs in its lexical
 // scope, after the original onmessage assignment. Fail closed on bundle drift.
 export function workerProbeSuffix(
-  source,
+  source: string,
   attachProbeSource = attachWorkerRendererProbe.toString()
 ) {
   const handler =
@@ -1063,10 +1530,11 @@ export function workerProbeSuffix(
   return `\n;(${attachProbeSource})(${handler[2]});\n`;
 }
 
-function attachWorkerRendererProbe(renderer) {
-  const state = globalThis.__ytPlacementProbe;
+function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
+  const state = (globalThis as typeof globalThis & { __ytPlacementProbe?: ProbeState })
+    .__ytPlacementProbe;
   if (!state || !renderer || typeof renderer.drainQueue !== 'function') return;
-  const exact = {
+  const exact: WorkerExact = {
     frames: [],
     drains: [],
     dispositions: [],
@@ -1079,13 +1547,14 @@ function attachWorkerRendererProbe(renderer) {
     overflow: 0,
   };
   state.exact = exact;
-  const queuedAt = new Map();
+  const queuedAt = new Map<string, number>();
   const epochNow = () => performance.timeOrigin + performance.now();
-  const bounded = (list, value) => {
+  const bounded = <T>(list: T[], value: T) => {
     if (list.length < 240) list.push(value);
     else exact.overflow++;
   };
-  const isFixture = (id) => typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
+  const isFixture = (id: unknown): id is string =>
+    typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
   let inEnqueue = false;
   let inDrain = false;
   const nativeEnqueue = renderer.enqueueMessage;
@@ -1149,10 +1618,13 @@ function attachWorkerRendererProbe(renderer) {
             );
           })();
       const placementWaitMs = args[1]?.waitMs ?? 0;
+      if (!active) throw new Error('Activated fixture has no active renderer message');
       bounded(exact.dispositions, {
         id: message.id,
         kind: 'activated',
-        queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
+        queueResidenceMs: queuedAt.has(message.id)
+          ? epochNow() - (queuedAt.get(message.id) ?? epochNow())
+          : null,
         atEpochMs: epochNow(),
         laneIndex: active?.laneIndex ?? null,
         startX: active?.startX ?? null,
@@ -1207,7 +1679,9 @@ function attachWorkerRendererProbe(renderer) {
         kind: 'dropped',
         reason,
         tracked: message.trackDrops !== false,
-        queueResidenceMs: queuedAt.has(message.id) ? epochNow() - queuedAt.get(message.id) : null,
+        queueResidenceMs: queuedAt.has(message.id)
+          ? epochNow() - (queuedAt.get(message.id) ?? epochNow())
+          : null,
         atEpochMs: epochNow(),
       });
       queuedAt.delete(message.id);
@@ -1337,7 +1811,7 @@ function attachWorkerRendererProbe(renderer) {
 // closure. This additive probe is inserted immediately before its app entry.
 // A changed bundle shape is an acceptance failure, never a silent fallback.
 export function instrumentCanvasPageScript(
-  source,
+  source: string,
   probeSource = attachCanvasRendererProbe.toString()
 ) {
   const marker = '\n\tmain();\n';
@@ -1353,8 +1827,17 @@ export function instrumentCanvasPageScript(
   );
 }
 
-function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
-  const state = globalThis.__ytPlacementProbe;
+function attachCanvasRendererProbe(
+  Renderer: { prototype: CanvasRendererProbe },
+  getRegularCardInsets: (
+    fontSize: number,
+    outlineWidthPx: number,
+    drawOutline: boolean,
+    backgroundVisible: boolean
+  ) => unknown
+) {
+  const state = (globalThis as typeof globalThis & { __ytPlacementProbe?: ProbeState })
+    .__ytPlacementProbe;
   if (
     !state ||
     typeof Renderer?.prototype?.placeQueuedMessage !== 'function' ||
@@ -1364,7 +1847,7 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
   state.canvasSourceHooked = true;
   state.readRegularInsets = (fontSize, outlineWidthPx, backgroundVisible) =>
     getRegularCardInsets(fontSize, outlineWidthPx, false, backgroundVisible);
-  const exact = {
+  const exact: CanvasExact = {
     dispositions: [],
     activeNow: [],
     config: null,
@@ -1373,12 +1856,13 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
     overflow: 0,
   };
   state.exact = exact;
-  const queuedAt = new Map();
-  const bounded = (value) => {
+  const queuedAt = new Map<string, number>();
+  const bounded = (value: ProbeDisposition) => {
     if (exact.dispositions.length < 240) exact.dispositions.push(value);
     else exact.overflow++;
   };
-  const isFixture = (id) => typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
+  const isFixture = (id: unknown): id is string =>
+    typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
   const nativeEnqueue = Renderer.prototype.enqueueMessage;
   Renderer.prototype.enqueueMessage = function (message, ...args) {
     const result = nativeEnqueue.call(this, message, ...args);
@@ -1415,7 +1899,9 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
         actualVelocityPxPerMs: motion?.actualVelocityPxPerMs ?? null,
         travelDistancePx: motion?.travelDistancePx ?? null,
         queueResidenceMs: queuedAt.has(message.id)
-          ? performance.timeOrigin + performance.now() - queuedAt.get(message.id)
+          ? performance.timeOrigin +
+            performance.now() -
+            (queuedAt.get(message.id) ?? performance.timeOrigin + performance.now())
           : null,
         geometricEntryAtEpochMs: motion ? performance.timeOrigin + motion.viewportEntryTime : null,
         visibleExitAtEpochMs: motion ? performance.timeOrigin + motion.visibleExitTime : null,
@@ -1429,18 +1915,20 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
   const observed = new WeakSet();
   Renderer.prototype.renderFrame = function (...args) {
     if (this.observability && !observed.has(this.observability)) {
-      observed.add(this.observability);
-      for (const [method, countIndex] of [
+      const observability = this.observability;
+      observed.add(observability);
+      const dropMethods: [keyof CanvasObservability, 0 | 1][] = [
         ['onMessageDropped', 1],
         ['onMessagesDropped', 0],
-      ]) {
-        const native = this.observability[method];
+      ];
+      for (const [method, countIndex] of dropMethods) {
+        const native = observability[method];
         if (typeof native !== 'function') continue;
-        this.observability[method] = (...dropArgs) => {
-          const reason = dropArgs[1 - countIndex] ?? 'other';
-          const count = countIndex === 0 ? dropArgs[0] : 1;
+        observability[method] = (...dropArgs: unknown[]) => {
+          const reason = (dropArgs[1 - countIndex] ?? 'other') as string;
+          const count = countIndex === 0 ? (dropArgs[0] as number) : 1;
           exact.drops[reason] = (exact.drops[reason] ?? 0) + count;
-          return native.apply(this.observability, dropArgs);
+          return native.apply(observability, dropArgs);
         };
       }
     }
@@ -1514,7 +2002,7 @@ function attachCanvasRendererProbe(Renderer, getRegularCardInsets) {
   };
 }
 
-function messageAction(id, text) {
+function messageAction(id: string, text: string) {
   return {
     addChatItemAction: {
       item: {
@@ -1528,7 +2016,15 @@ function messageAction(id, text) {
   };
 }
 
-export function mixedPressureBatches(phase) {
+function applyFixtureSettings(
+  settings: Parameters<NonNullable<Window['__ytChatOverlay']>['applySettings']>[0]
+) {
+  const app = window.__ytChatOverlay;
+  if (!app) throw new Error('Placement runtime settings are unavailable');
+  app.applySettings(settings);
+}
+
+export function mixedPressureBatches(phase: string) {
   return Array.from({ length: MIXED_PRESSURE_COUNT / MIXED_PRESSURE_CHUNK_SIZE }, (_, chunk) => ({
     key: `${phase}-${chunk}`,
     actions: Array.from({ length: MIXED_PRESSURE_CHUNK_SIZE }, (_, offset) => {
@@ -1541,7 +2037,7 @@ export function mixedPressureBatches(phase) {
   }));
 }
 
-function chatResponse(actions) {
+function chatResponse(actions: ChatAction[]) {
   return {
     continuationContents: {
       liveChatContinuation: {
@@ -1554,7 +2050,12 @@ function chatResponse(actions) {
   };
 }
 
-function replayResponse(actions, continuation = 'windows193-seek') {
+function replayResponse(
+  actions: {
+    replayChatItemAction: { videoOffsetTimeMsec: number; actions: (ChatAction | undefined)[] };
+  }[],
+  continuation = 'windows193-seek'
+) {
   return {
     continuationContents: {
       liveChatContinuation: {
@@ -1576,23 +2077,33 @@ async function runScenario({
   transition,
   comparisonOnly = false,
   spacingOnly = false,
-}) {
+}: ScenarioOptions) {
   const page = await context.newPage();
-  const requested = [];
-  let originalSettings;
-  const deliveredBatches = new Set();
-  const phaseObservations = [];
+  const requested: string[] = [];
+  let originalSettings:
+    | Parameters<NonNullable<Window['__ytChatOverlay']>['applySettings']>[0]
+    | undefined;
+  const deliveredBatches = new Set<string>();
+  const phaseObservations: Record<string, unknown>[] = [];
   let replayRequests = 0;
   const replay = mode === 'replay';
   const spacingSpeed = transition === 'spacing-speed';
   const mixedGap = transition === 'mixed-gap';
-  const hasMixedConfig = (config) =>
+  const hasMixedConfig = (
+    config: FrameConfig | null | undefined
+  ): config is FrameConfig & {
+    mode: 'top';
+    fontSize: 34;
+    laneSpacing: 8;
+    safeTop: 0.1;
+    safeBottom: 0.15;
+  } =>
     config?.mode === 'top' &&
     config?.fontSize === 34 &&
     config?.laneSpacing === 8 &&
     config?.safeTop === 0.1 &&
     config?.safeBottom === 0.15;
-  const replayObservations = {};
+  const replayObservations: { at10000?: string[]; at10001?: string[]; at11500?: string[] } = {};
   const ids = replay
     ? TOKENS.slice(3, 6)
     : mixedGap
@@ -1603,8 +2114,12 @@ async function runScenario({
           ? [TOKENS[2]]
           : TOKENS.slice(0, 2);
   const paidId = mixedGap ? MIXED_IDS[1] : 'WINDOWS193_PAID';
+  assert(
+    ids.every((id): id is string => typeof id === 'string') && typeof paidId === 'string',
+    'Placement fixture token is unavailable'
+  );
   const drawnIds = replay ? ids : spacingSpeed ? ids.slice(0, 2) : [...ids, paidId];
-  const actions = ids.map((id) =>
+  const actions: ChatAction[] = ids.map((id) =>
     messageAction(
       id,
       spacingSpeed
@@ -1632,7 +2147,7 @@ async function runScenario({
         replayChatItemAction: { videoOffsetTimeMsec: offsetMs, actions: [actions[index]] },
       }))
     : [];
-  const batches = new Map([
+  const batches = new Map<string, ChatAction[]>([
     ['1', actions],
     [
       '2',
@@ -1721,11 +2236,12 @@ async function runScenario({
   if (spacingSpeed || mixedGap) assert(canvasScript, 'Packaged Canvas page script shape changed');
   const screenshot = `placement-${name}.png`;
   let screenshotCaptured = false;
-  const sendBatch = async (batch) => {
+  const sendBatch = async (batch: string | string[]) => {
     const keys = Array.isArray(batch) ? batch : [batch];
     await page.evaluate(async (keys) => {
       for (const key of keys) {
         if (key === '1') {
+          if (!window.__ytPlacementProbe) throw new Error('Placement probe is unavailable');
           window.__ytPlacementProbe.requestAtEpochMs = performance.timeOrigin + performance.now();
         }
         const response = await fetch(
@@ -1744,12 +2260,14 @@ async function runScenario({
       assert(deliveredBatches.has(key), `Scoped placement batch ${key} was not intercepted`);
     }
   };
-  const sendPressure = (phase) => sendBatch(mixedPressureBatches(phase).map((batch) => batch.key));
+  const sendPressure = (phase: string) =>
+    sendBatch(mixedPressureBatches(phase).map((batch) => batch.key));
   const workerSnapshot = async () => {
     // Flush observes the preceding frame; let queued settings reach that frame first.
     await page.waitForTimeout(50);
     const requestId = await page.evaluate(() => {
       const probe = window.__ytPlacementProbe;
+      if (!probe) throw new Error('Placement probe is unavailable');
       const id = (probe.flushSequence ?? 0) + 1;
       probe.flushSequence = id;
       for (const record of probe.workers)
@@ -1758,19 +2276,30 @@ async function runScenario({
     });
     await page.waitForFunction(
       (id) =>
-        window.__ytPlacementProbe.workers.some((record) => record.ready && record.flushId === id),
+        window.__ytPlacementProbe?.workers.some((record) => record.ready && record.flushId === id),
       requestId,
       { timeout: 5000 }
     );
-    return page.evaluate(
-      () => window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample?.exact ?? null
+    const exact = await page.evaluate(
+      () => window.__ytPlacementProbe?.workers.find((record) => record.ready)?.sample?.exact ?? null
     );
+    assert(
+      exact?.config &&
+        Array.isArray(exact.drains) &&
+        Array.isArray(exact.frames) &&
+        typeof exact.config.logicalWidth === 'number' &&
+        typeof exact.config.logicalHeight === 'number',
+      'Exact Worker placement snapshot is unavailable'
+    );
+    return exact as WorkerExact & {
+      config: FrameConfig & { logicalWidth: number; logicalHeight: number };
+    };
   };
-  const waitForWorkerEntry = (id) =>
+  const waitForWorkerEntry = (id: string) =>
     page.waitForFunction(
       (messageId) =>
         Number.isFinite(
-          window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample?.firstEntry?.[
+          window.__ytPlacementProbe?.workers.find((record) => record.ready)?.sample?.firstEntry?.[
             messageId
           ]
         ),
@@ -1789,7 +2318,7 @@ async function runScenario({
       const probe = window.__ytPlacementProbe;
       if (!probe) return null;
       const video = document.querySelector('video')?.getBoundingClientRect();
-      const overlay = document.querySelector('#yt-live-chat-overlay canvas');
+      const overlay = document.querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas');
       const settings = window.__ytChatOverlay?.getSettings?.();
       const insets =
         settings &&
@@ -1828,9 +2357,9 @@ async function runScenario({
       raw?.canvasSourceHooked && selected?.exact,
       'Packaged mixed-height renderer probe did not attach'
     );
-    return selected;
+    return { ...selected, exact: selected.exact };
   };
-  const probeResult = (raw) => {
+  const probeResult = (raw: Awaited<ReturnType<typeof captureProbe>>) => {
     const selected =
       raw && (forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample);
     const ingress = forceFallback
@@ -1870,13 +2399,16 @@ async function runScenario({
       geometricEntryLatencyMs: Object.fromEntries(
         (selected?.exact?.dispositions ?? [])
           .filter(
-            (entry) => entry.kind === 'activated' && Number.isFinite(entry.geometricEntryAtEpochMs)
+            (entry) =>
+              entry.kind === 'activated' &&
+              typeof entry.geometricEntryAtEpochMs === 'number' &&
+              Number.isFinite(entry.geometricEntryAtEpochMs)
           )
           .map((entry) => [
             entry.id,
-            ingress[entry.id] === undefined
+            ingress[entry.id] === undefined || entry.geometricEntryAtEpochMs == null
               ? null
-              : entry.geometricEntryAtEpochMs - ingress[entry.id],
+              : entry.geometricEntryAtEpochMs - (ingress[entry.id] ?? 0),
           ])
       ),
       frameWorkMs: summarizeSamples(selected?.frames?.map((frame) => frame.workMs) ?? []),
@@ -1928,7 +2460,7 @@ async function runScenario({
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
-          json: chatResponse(deliver ? batches.get(batch) : []),
+          json: chatResponse(deliver ? (batches.get(batch) ?? []) : []),
         });
       }
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
@@ -2001,7 +2533,9 @@ async function runScenario({
     });
     originalSettings = await page.evaluate(
       ({ danmakuMode, spacingSpeed, mixedGap, mixedBurstSettings }) => {
-        const settings = window.__ytChatOverlay.getSettings();
+        const app = window.__ytChatOverlay;
+        if (!app) throw new Error('Placement runtime settings are unavailable');
+        const settings = app.getSettings();
         const overrides = {
           danmakuMode,
           outline: { ...settings.outline, enabled: spacingSpeed, widthPx: 2, opacity: 0.7 },
@@ -2047,14 +2581,14 @@ async function runScenario({
                     'speedBoostThreshold',
                   ]
                 : []),
-            ].map((key) => [key, settings[key]])
+            ].map((key) => [key, (settings as unknown as Record<string, unknown>)[key]])
           )
         );
-        window.__ytChatOverlay.applySettings(overrides);
+        app.applySettings(overrides);
         return previous;
       },
       {
-        danmakuMode: replay ? 'scroll' : mode,
+        danmakuMode: mode === 'replay' ? 'scroll' : mode,
         spacingSpeed,
         mixedGap,
         mixedBurstSettings: MIXED_BURST_SETTINGS,
@@ -2077,7 +2611,7 @@ async function runScenario({
         await page.waitForTimeout(200);
       }
       assert(
-        hasMixedConfig(configured?.exact.config),
+        configured && hasMixedConfig(configured.exact.config),
         `Mixed-height settings did not reach the renderer before ingress: ${JSON.stringify({
           config: configured?.exact.config,
           frameConfig: configured?.latestRenderFrame?.config,
@@ -2102,7 +2636,11 @@ async function runScenario({
       assert(replayRequests >= 2, 'Replay player-seek fixture was not requested');
       const futureAtDue = await page
         .locator('.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]')
-        .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+        .evaluateAll((elements) =>
+          elements
+            .map((element) => element.getAttribute('data-message-id'))
+            .filter((id): id is string => id !== null)
+        );
       replayObservations.at10000 = futureAtDue;
       assert.deepEqual(
         futureAtDue,
@@ -2120,9 +2658,13 @@ async function runScenario({
       );
       replayObservations.at10001 = await page
         .locator('.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]')
-        .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+        .evaluateAll((elements) =>
+          elements
+            .map((element) => element.getAttribute('data-message-id'))
+            .filter((id): id is string => id !== null)
+        );
       assert.deepEqual(
-        replayObservations.at10001.toSorted(),
+        replayObservations.at10001?.toSorted(),
         [TOKENS[3], TOKENS[4]].toSorted(),
         'A replay message appeared before 11500ms'
       );
@@ -2134,7 +2676,7 @@ async function runScenario({
     await page.waitForFunction(
       ({ expected, boundedStream }) => {
         const accessibleIds = new Set(
-          [...document.querySelectorAll('.yt-live-chat-overlay-live-region > p')].map(
+          [...document.querySelectorAll<HTMLElement>('.yt-live-chat-overlay-live-region > p')].map(
             (element) => element.dataset.messageId
           )
         );
@@ -2151,7 +2693,11 @@ async function runScenario({
     if (replay)
       replayObservations.at11500 = await page
         .locator('.yt-live-chat-overlay-live-region > p[data-message-id^="WINDOWS193_REPLAY_"]')
-        .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
+        .evaluateAll((elements) =>
+          elements
+            .map((element) => element.getAttribute('data-message-id'))
+            .filter((id): id is string => id !== null)
+        );
     await page.waitForFunction(
       ({ expected, worker }) => {
         const probe = window.__ytPlacementProbe;
@@ -2179,7 +2725,11 @@ async function runScenario({
         config: initial.exact.config,
         active: initial.exact.activeNow.filter((entry) => MIXED_IDS.includes(entry.id)),
       });
-      const waitForClearance = async (phase, priorFrameId, acceptsConfig) => {
+      const waitForClearance = async (
+        phase: string,
+        priorFrameId: number,
+        acceptsConfig: (config: FrameConfig | null) => boolean
+      ) => {
         let clearance;
         for (let attempt = 0; attempt < 40; attempt++) {
           const selected = await mixedSnapshot();
@@ -2189,10 +2739,11 @@ async function runScenario({
             continue;
           }
           clearance = measureMixedHeightClearance(frame);
+          const config = selected.exact.config;
           if (
-            !hasMixedConfig(selected.exact.config) ||
+            !hasMixedConfig(config) ||
             !hasMixedConfig(frame.config) ||
-            !acceptsConfig(selected.exact.config) ||
+            !acceptsConfig(config) ||
             !acceptsConfig(frame.config)
           ) {
             await page.waitForTimeout(200);
@@ -2214,7 +2765,7 @@ async function runScenario({
                 MIXED_IDS.includes(entry.id)
               ),
             });
-            return selected;
+            return { ...selected, exact: { ...selected.exact, config }, latestRenderFrame: frame };
           }
           await page.waitForTimeout(200);
         }
@@ -2226,10 +2777,10 @@ async function runScenario({
       const dense = await waitForClearance(
         'density-reflow',
         initial.latestRenderFrame?.frameId ?? 0,
-        (config) => config?.laneHeight < initial.exact.config.laneHeight
+        (config) => Number(config?.laneHeight) < Number(initial.exact.config?.laneHeight)
       );
       assert(
-        dense.exact.config.laneHeight < initial.exact.config.laneHeight,
+        Number(dense.exact.config.laneHeight) < Number(initial.exact.config?.laneHeight),
         'Parser-driven burst did not shrink the lane grid'
       );
       await page.locator('.player-wrapper').evaluate((element) => {
@@ -2240,10 +2791,10 @@ async function runScenario({
       const resized = await waitForClearance(
         'resize-reflow',
         dense.latestRenderFrame.frameId,
-        (config) => config?.logicalWidth > dense.exact.config.logicalWidth
+        (config) => Number(config?.logicalWidth) > Number(dense.exact.config.logicalWidth)
       );
       assert(
-        resized.exact.config.logicalWidth > dense.exact.config.logicalWidth,
+        Number(resized.exact.config.logicalWidth) > Number(dense.exact.config.logicalWidth),
         'Fixture video did not grow on resize'
       );
       await page.locator('#placement-fullscreen').evaluate((element) => {
@@ -2261,10 +2812,10 @@ async function runScenario({
       const fullscreen = await waitForClearance(
         'fullscreen-reflow',
         resized.latestRenderFrame.frameId,
-        (config) => config?.logicalHeight > resized.exact.config.logicalHeight
+        (config) => Number(config?.logicalHeight) > Number(resized.exact.config.logicalHeight)
       );
       assert(
-        fullscreen.exact.config.logicalHeight > resized.exact.config.logicalHeight,
+        Number(fullscreen.exact.config.logicalHeight) > Number(resized.exact.config.logicalHeight),
         'Actual fullscreen did not expand the overlay'
       );
     }
@@ -2275,7 +2826,7 @@ async function runScenario({
         const raw = await captureProbe();
         const selected = forceFallback ? raw : raw?.workers.find((record) => record.ready)?.sample;
         assert(
-          raw?.canvasSourceHooked && selected?.exact,
+          raw?.canvasSourceHooked && selected?.exact?.config,
           'Packaged renderer probe did not attach'
         );
         assert.equal(
@@ -2284,7 +2835,7 @@ async function runScenario({
           'Japanese fixture did not keep a transparent normal background'
         );
         return {
-          exact: selected.exact,
+          exact: { ...selected.exact, config: selected.exact.config },
           ink: selected.ink ?? [],
           renderFrame: selected.latestRenderFrame ?? null,
           regularInsets: raw.regularInsets,
@@ -2293,7 +2844,7 @@ async function runScenario({
             : raw.workers.flatMap((record) => record.stats),
         };
       };
-      const visibleGap = async (prefix, laneSpacing) => {
+      const visibleGap = async (prefix: string, laneSpacing: number) => {
         let snapshot;
         let visibleRowPitch;
         for (let attempt = 0; attempt < 40; attempt++) {
@@ -2347,7 +2898,11 @@ async function runScenario({
         for (const record of probe.workers)
           record.worker.postMessage({ type: 'ytPlacementResetIssueInk' });
       });
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ laneSpacing: 8 }));
+      await page.evaluate(() => {
+        const app = window.__ytChatOverlay;
+        if (!app) throw new Error('Placement runtime settings are unavailable');
+        app.applySettings({ laneSpacing: 8 });
+      });
       await page.waitForTimeout(350);
       await sendBatch('2');
       const {
@@ -2395,14 +2950,16 @@ async function runScenario({
         return { status: 'passed', ...probeResult(raw) };
       }
 
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({
+      await page.evaluate(() => {
+        const app = window.__ytChatOverlay;
+        if (!app) throw new Error('Placement runtime settings are unavailable');
+        app.applySettings({
           burstElevatedThreshold: 2,
           burstHighThreshold: 5,
           burstExtremeThreshold: 10,
           speedBoostThreshold: 2,
-        })
-      );
+        });
+      });
       await sendBatch('3'); // >50 parsed chat actions take the production Backlog path.
       await sendBatch('4'); // Ordinary live ingress raises the real burst detector.
       let backlog;
@@ -2416,6 +2973,7 @@ async function runScenario({
           break;
         await page.waitForTimeout(900);
       }
+      assert(backlog, 'Long parser-ingress Backlog snapshot is unavailable');
       assert(
         backlog.exact.dispositions.some(
           (entry) => entry.id === TOKENS[17] && entry.kind === 'activated'
@@ -2465,7 +3023,7 @@ async function runScenario({
       await page.waitForFunction(
         ({ width, height }) => {
           const video = document.querySelector('video')?.getBoundingClientRect();
-          return video && video.width > width && video.height > height;
+          return video && video.width > Number(width) && video.height > Number(height);
         },
         { width: resumed.exact.config.logicalWidth, height: resumed.exact.config.logicalHeight },
         { timeout: 5000 }
@@ -2480,6 +3038,7 @@ async function runScenario({
       if (!forceFallback) {
         await page.evaluate(() => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+          if (!record) throw new Error('Renderer Worker is unavailable for recovery');
           record.worker.dispatchEvent(
             new ErrorEvent('error', { message: 'Acceptance recovery trigger' })
           );
@@ -2528,7 +3087,9 @@ async function runScenario({
       if (!comparisonOnly)
         await page.waitForFunction(
           (before) => {
-            const element = document.querySelector('.yt-chat-overlay-settings-font-preview-text');
+            const element = document.querySelector<HTMLElement>(
+              '.yt-chat-overlay-settings-font-preview-text'
+            );
             return (
               element?.dataset.previewRows === '2' &&
               Number(element.dataset.previewRowPitch) > before
@@ -2574,9 +3135,15 @@ async function runScenario({
       for (let attempt = 0; attempt < 10; attempt++) {
         const saved = await storageWorker.evaluate(
           async () =>
-            (await chrome.storage.local.get('yt-live-chat-overlay-settings'))[
-              'yt-live-chat-overlay-settings'
-            ]
+            (
+              await (
+                globalThis as typeof globalThis & {
+                  chrome: {
+                    storage: { local: { get(key: string): Promise<Record<string, string>> } };
+                  };
+                }
+              ).chrome.storage.local.get('yt-live-chat-overlay-settings')
+            )['yt-live-chat-overlay-settings']
         );
         storedLaneSpacing = saved ? JSON.parse(saved).laneSpacing : null;
         if (storedLaneSpacing === 8) break;
@@ -2616,18 +3183,14 @@ async function runScenario({
         reduced.dispositions.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === false),
         'Reduced-motion message was not activated in fixed mode'
       );
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({ ignoreReducedMotion: true })
-      );
+      await page.evaluate(applyFixtureSettings, { ignoreReducedMotion: true });
       const override = await workerSnapshot();
       assert.equal(override.config.ignoreReducedMotion, true);
       assert(
         override.activeNow.some((entry) => entry.id === TOKENS[6] && entry.isScrolling === true),
         'Reduced-motion override did not restore scrolling'
       );
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({ ignoreReducedMotion: false })
-      );
+      await page.evaluate(applyFixtureSettings, { ignoreReducedMotion: false });
       const restored = await workerSnapshot();
       assert.equal(restored.config.ignoreReducedMotion, false);
       assert(
@@ -2670,15 +3233,13 @@ async function runScenario({
     if (transition === 'safe-density') {
       const baseline = await workerSnapshot();
       await page.setViewportSize({ width: 800, height: 600 });
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({
-          safeTop: 0.15,
-          safeBottom: 0.25,
-          fontSize: 40,
-          laneSpacing: 10,
-          maxConcurrentMessages: 30,
-        })
-      );
+      await page.evaluate(applyFixtureSettings, {
+        safeTop: 0.15,
+        safeBottom: 0.25,
+        fontSize: 40,
+        laneSpacing: 10,
+        maxConcurrentMessages: 30,
+      });
       await sendBatch('2');
       await page.waitForFunction(
         (id) =>
@@ -2714,15 +3275,13 @@ async function runScenario({
         'Messages overlapped after safe-zone and density shrink'
       );
       await page.setViewportSize({ width: 1280, height: 720 });
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({
-          safeTop: 0,
-          safeBottom: 0,
-          fontSize: 32,
-          laneSpacing: 0,
-          maxConcurrentMessages: 300,
-        })
-      );
+      await page.evaluate(applyFixtureSettings, {
+        safeTop: 0,
+        safeBottom: 0,
+        fontSize: 32,
+        laneSpacing: 0,
+        maxConcurrentMessages: 300,
+      });
       await sendBatch('3');
       await page.waitForFunction(
         (id) =>
@@ -2761,28 +3320,26 @@ async function runScenario({
       );
     }
     if (transition === 'congestion') {
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({
-          maxConcurrentMessages: 30,
-          queueMaxSize: 50,
-          fontSize: 16,
-          laneSpacing: 0,
-          safeTop: 0,
-          safeBottom: 0,
-          staggerMaxDelayMs: 200,
-          staggerMediumDelayMs: 80,
-        })
-      );
+      await page.evaluate(applyFixtureSettings, {
+        maxConcurrentMessages: 30,
+        queueMaxSize: 50,
+        fontSize: 16,
+        laneSpacing: 0,
+        safeTop: 0,
+        safeBottom: 0,
+        staggerMaxDelayMs: 200,
+        staggerMediumDelayMs: 80,
+      });
       await workerSnapshot();
-      await page.evaluate(() =>
-        window.__ytPlacementProbe.workers
-          .find((record) => record.ready)
-          .worker.postMessage({ type: 'ytPlacementResetSamples' })
-      );
+      await page.evaluate(() => {
+        const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+        if (!record) throw new Error('Renderer Worker is unavailable for sample reset');
+        record.worker.postMessage({ type: 'ytPlacementResetSamples' });
+      });
       await sendBatch('2');
       await page.waitForTimeout(500);
       const congested = await workerSnapshot();
-      const peakPending = Math.max(0, ...congested.drains.map((drain) => drain.pendingBefore));
+      const peakPending = Math.max(0, ...congested.drains.map((drain) => drain.pendingBefore ?? 0));
       assert.equal(congested.config.maxConcurrentMessages, 30);
       assert.equal(congested.config.queueMaxSize, 50);
       assert(peakPending >= 50, `No-stagger pressure was not reached: pending ${peakPending}`);
@@ -2790,20 +3347,22 @@ async function runScenario({
         congested.dispositions.some(
           (entry) =>
             entry.kind === 'activated' &&
-            entry.pendingDepth >= 50 &&
+            (entry.pendingDepth ?? 0) >= 50 &&
             entry.staggerDelayMs === 0 &&
-            Math.abs(entry.optionalEntryDelayMs) < 1
+            Math.abs(entry.optionalEntryDelayMs ?? Infinity) < 1
         ),
         'Queue pressure did not remove both temporal and geometric entry delay'
       );
-      assert(congested.drains.every((drain) => drain.activeAfter <= 30));
+      assert(congested.drains.every((drain) => (drain.activeAfter ?? Infinity) <= 30));
       phaseObservations.push({
         phase: 'congested',
         config: congested.config,
         peakPending,
         zeroStaggerActivations: congested.dispositions.filter(
           (entry) =>
-            entry.kind === 'activated' && entry.pendingDepth >= 50 && entry.staggerDelayMs === 0
+            entry.kind === 'activated' &&
+            (entry.pendingDepth ?? 0) >= 50 &&
+            entry.staggerDelayMs === 0
         ).length,
       });
     }
@@ -2811,12 +3370,13 @@ async function runScenario({
       const before = await workerSnapshot();
       const active = before.activeNow.find((entry) => entry.id === TOKENS[0]);
       assert(active, 'Translation fixture message has no active geometry');
-      await page.evaluate(() => window.__ytChatOverlay.applySettings({ translationEnabled: true }));
+      await page.evaluate(applyFixtureSettings, { translationEnabled: true });
       const enabled = await workerSnapshot();
       assert(Number.isInteger(enabled.config.translationGeneration));
       await page.evaluate(
         ({ id, width, height, generation }) => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+          if (!record) throw new Error('Renderer Worker is unavailable for translation');
           record.worker.postMessage({
             type: 'updateTranslation',
             id,
@@ -2850,13 +3410,12 @@ async function runScenario({
           translatedActive.height >= active.height + 32,
         'Injected production translation protocol did not reflow active geometry'
       );
-      await page.evaluate(() =>
-        window.__ytChatOverlay.applySettings({ translationEnabled: false })
-      );
+      await page.evaluate(applyFixtureSettings, { translationEnabled: false });
       const disabled = await workerSnapshot();
       await page.evaluate(
         ({ id, width, height, generation }) => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
+          if (!record) throw new Error('Renderer Worker is unavailable for translation');
           record.worker.postMessage({
             type: 'updateTranslation',
             id,
@@ -2903,6 +3462,7 @@ async function runScenario({
     await page.screenshot({ path: join(output, screenshot), animations: 'disabled' });
     screenshotCaptured = true;
     const raw = await captureProbe();
+    assert(raw, 'Placement probe capture is unavailable');
     const selected = forceFallback ? raw : raw.workers.find((worker) => worker.ready)?.sample;
     assert(forceFallback || raw.sourcePrefixed, 'Packaged Worker source was not instrumented');
     assert(forceFallback || raw.sourceHooked, 'Packaged Worker renderer shape changed');
@@ -2912,21 +3472,25 @@ async function runScenario({
     );
     assert(selected && selected.frames.length > 0, 'No overlay frames were observed');
     assert(
-      forceFallback || selected.exact?.drains?.length > 0,
+      forceFallback || (selected.exact?.drains?.length ?? 0) > 0,
       'No exact Worker drains were observed'
     );
     if (mode === 'top' || mode === 'bottom') {
-      assert.equal(selected.exact.config.mode, mode);
+      const exact = selected.exact;
+      const config = exact?.config;
       assert(
-        selected.exact.activeNow.some((entry) => ids.includes(entry.id)),
+        config &&
+          typeof config.logicalWidth === 'number' &&
+          typeof config.logicalHeight === 'number',
+        'Placement geometry dimensions are unavailable'
+      );
+      assert.equal(config.mode, mode);
+      assert(
+        exact.activeNow.some((entry) => ids.includes(entry.id)),
         `No ${mode} message remained active for placement geometry`
       );
       assert.equal(
-        findOverlappingActivePair(
-          selected.exact.activeNow,
-          selected.exact.config.logicalWidth,
-          selected.exact.config.logicalHeight
-        ),
+        findOverlappingActivePair(exact.activeNow, config.logicalWidth, config.logicalHeight),
         null,
         `${mode} active messages overlapped`
       );
@@ -2975,6 +3539,14 @@ export async function runPlacementTimingFixture({
   comparisonOnly = false,
   selectedScenarios,
   spacingOnly = false,
+}: {
+  context: BrowserContext;
+  root: string;
+  output: string;
+  extensionId: string;
+  comparisonOnly?: boolean;
+  selectedScenarios?: string[];
+  spacingOnly?: boolean;
 }) {
   assert.equal(typeof comparisonOnly, 'boolean');
   assert.equal(typeof spacingOnly, 'boolean');

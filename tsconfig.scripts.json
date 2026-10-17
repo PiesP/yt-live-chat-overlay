@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", "test/unit/config/fixtures/devtools-endpoint.ts"]
+  "include": ["scripts/**/*.ts"]
 }

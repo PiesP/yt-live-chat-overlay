@@ -3,6 +3,7 @@
 
 import { runInNewContext } from 'node:vm';
 
+import type { BrowserContext } from '@playwright/test';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
@@ -27,8 +28,7 @@ import {
   summarizeSamples,
   workerProbePrelude,
   workerProbeSuffix,
-  // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-} from '../../../validation/windows/placement-timing.mjs';
+} from '../../../validation/windows/placement-timing.ts';
 
 function spacingSnapshot(renderer: string, gap: number, origins: number[], offscreenIndex = -1) {
   const prefix = `WINDOWS196_GAP${gap}_`;
@@ -100,9 +100,7 @@ describe('Windows placement timing probe', () => {
 
   it('routes bounded parser callbacks that reach real half-cell density', () => {
     const pressure = ['2', '4', '5'].map((phase) => mixedPressureBatches(phase));
-    const actions = pressure.flatMap((batches) =>
-      batches.flatMap((batch: { actions: unknown[] }) => batch.actions)
-    );
+    const actions = pressure.flatMap((batches) => batches.flatMap((batch) => batch.actions));
     const ids = actions.map(
       (action: {
         addChatItemAction: {
@@ -217,7 +215,7 @@ describe('Windows placement timing probe', () => {
         // Case B passes the allocation comparison but fails the old visible comparison.
         expect(() =>
           expect(after.visibleRowPitch.pitchPx).toBeGreaterThanOrEqual(
-            before.visibleRowPitch.pitchPx
+            before.visibleRowPitch.pitchPx!
           )
         ).toThrow();
       }
@@ -1006,7 +1004,7 @@ describe('Windows placement timing probe', () => {
       waitForTimeout: async () => {},
     };
     const result = await runPlacementTimingFixture({
-      context: { newPage: async () => page },
+      context: { newPage: async () => page } as unknown as BrowserContext,
       root: process.cwd(),
       output: '/tmp',
       extensionId: 'fixture',
@@ -1024,7 +1022,12 @@ describe('Windows placement timing probe', () => {
   });
 
   it('accepts only explicit, known spacing scenario names for a narrow run', async () => {
-    const args = { context: {}, root: process.cwd(), output: '/tmp', extensionId: 'fixture' };
+    const args = {
+      context: {} as BrowserContext,
+      root: process.cwd(),
+      output: '/tmp',
+      extensionId: 'fixture',
+    };
     for (const options of [
       { spacingOnly: true },
       { spacingOnly: true, selectedScenarios: ['worker-scroll'] },

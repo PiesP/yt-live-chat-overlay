@@ -9,10 +9,8 @@ import { Script } from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
-// @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
-import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.mjs';
-// @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
-import * as firefoxInstallModule from '../../../validation/windows/firefox-install.mjs';
+import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.ts';
+import * as firefoxInstallModule from '../../../validation/windows/firefox-install.ts';
 
 const {
   categorizeErrors,
@@ -405,7 +403,7 @@ describe('Windows Firefox installation profile', () => {
     const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [owned] };
     const child = { pid: 10, exitCode: 0, signalCode: null };
     const stop = vi.fn(
-      async (_entry: { pid: number }, _bound: { expectedProcesses: unknown[] }) => {}
+      async (_entry: { pid: number }, _bound: { expectedProcesses?: unknown[] }) => {}
     );
     const inspect = vi
       .fn()
@@ -448,7 +446,7 @@ describe('Windows Firefox installation profile', () => {
     const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [root] };
     const child = { pid: 10, exitCode: 0, signalCode: null };
     const stop = vi.fn(
-      async (_entry: { pid: number }, _bound: { expectedProcesses: unknown[] }) => {}
+      async (_entry: { pid: number }, _bound: { expectedProcesses?: unknown[] }) => {}
     );
     const inspect = vi
       .fn()
@@ -664,11 +662,7 @@ describe('Windows Firefox installation profile', () => {
       Object.fromEntries(Object.keys(result.checks).map((key) => [key, true]))
     );
     expect(result.status).toBe('passed');
-    expect(
-      result.observations.live.map(
-        (item: { workflow: { seek: { target: number } } }) => item.workflow.seek.target
-      )
-    ).toEqual([27, 33]);
+    expect(result.observations.live.map((item) => item.workflow?.seek?.target)).toEqual([27, 33]);
     const liveSeekExpression = session.evaluateJson.mock.calls
       .map(([expression]) => expression)
       .find((expression) => expression.includes('const completed = new Promise'));
@@ -1002,6 +996,28 @@ describe('Windows Firefox installation profile', () => {
     ).toEqual(result);
   });
 
+  it('records and rethrows a falsy Firefox startup rejection', async () => {
+    const { output, root } = await createBundle();
+    let fulfilled = false;
+    try {
+      await runFirefoxInstallation(
+        { executablePath: '/test/firefox.exe', output, root },
+        { launch: () => Promise.reject(undefined) }
+      );
+      fulfilled = true;
+    } catch (error) {
+      expect(error).toBeUndefined();
+    }
+    expect(fulfilled).toBe(false);
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt).toMatchObject({
+      status: 'failed',
+      errors: [{ name: 'Error', message: 'undefined' }],
+    });
+  });
+
   it('leaves public-page checks not-run when only the installed fixture was requested', async () => {
     const { output, root } = await createBundle();
     const { session } = createSession();
@@ -1326,6 +1342,7 @@ describe('Windows Firefox installation profile', () => {
     );
     const failure = combineFirefoxCloseFailures(snapshotError, cleanupError);
     expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) throw new Error('Expected aggregate cleanup failure');
     expect(failure.errors).toEqual([snapshotError, cleanupError]);
     expect(combineFirefoxCloseFailures(snapshotError, undefined)).toBe(snapshotError);
     expect(combineFirefoxCloseFailures(undefined, cleanupError)).toBe(cleanupError);

@@ -5,12 +5,16 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import type { Browser, BrowserContext, BrowserType, CDPSession } from '@playwright/test';
+
 import {
   cleanupChromeInstallation,
   readOwnedBrowserProcessId,
   removeOwnedChromeProfile,
-} from './chrome-install.mjs';
-import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
+} from './chrome-install.ts';
+import type { ChromeProcessIdentity } from './chrome-process.ts';
+import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 
 const VIEWPORT = { width: 1280, height: 720 };
 const DEVTOOLS_WAIT_MS = 30_000;
@@ -19,15 +23,34 @@ const STDERR_LIMIT_BYTES = 64 * 1024;
 const PROTOCOL_TIMEOUT_MS = 15_000;
 const IDENTITY_WAIT_MS = 8_000;
 const DEVTOOLS_FILE_MAX_BYTES = 4096;
+type ChildState = { spawnError: Error | null };
+type ChildStatus = {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  pid?: number | undefined;
+};
+type OwnedChild = ChildStatus & {
+  kill: () => boolean;
+  once: (event: 'exit', listener: () => void) => unknown;
+};
+type Protocol = {
+  send: (method: string, parameters?: Record<string, unknown>) => Promise<unknown>;
+};
+type Checkpoint = (name: string, phase: 'before' | 'after') => Promise<void>;
+type CleanupContext = {
+  close: () => Promise<unknown>;
+  browser: () => { close: () => Promise<unknown> };
+};
 
-const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 
-async function boundedProtocolOperation(operation, label) {
-  let timeout;
+async function boundedProtocolOperation<T>(operation: () => Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       Promise.resolve().then(operation),
-      new Promise((_, reject) => {
+      new Promise<T>((_, reject) => {
         timeout = setTimeout(() => {
           const error = new Error(`${label} exceeded its protocol deadline`);
           error.name = 'TimeoutError';
@@ -40,7 +63,7 @@ async function boundedProtocolOperation(operation, label) {
   }
 }
 
-export function naturalChromeArguments(profile) {
+export function naturalChromeArguments(profile: string) {
   return [
     `--user-data-dir=${profile}`,
     '--remote-debugging-port=0',
@@ -55,7 +78,7 @@ export function naturalChromeArguments(profile) {
   ];
 }
 
-async function waitForChildExit(child, timeoutMs = CHILD_EXIT_MS) {
+async function waitForChildExit(child: OwnedChild, timeoutMs = CHILD_EXIT_MS): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) return true;
   return new Promise((resolveExit) => {
     const timeout = setTimeout(() => resolveExit(false), timeoutMs);
@@ -66,7 +89,12 @@ async function waitForChildExit(child, timeoutMs = CHILD_EXIT_MS) {
   });
 }
 
-export async function readDevToolsEndpoint(profile, child, childState, { sleep = delay } = {}) {
+export async function readDevToolsEndpoint(
+  profile: string,
+  child: ChildStatus,
+  childState: ChildState,
+  { sleep = delay }: { sleep?: (ms: number) => Promise<void> } = {}
+) {
   const portFile = join(profile, 'DevToolsActivePort');
   const deadline = Date.now() + DEVTOOLS_WAIT_MS;
   while (Date.now() < deadline) {
@@ -113,7 +141,7 @@ export async function readDevToolsEndpoint(profile, child, childState, { sleep =
       assert.match(webSocketPath ?? '', /^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u);
       return `ws://127.0.0.1:${port}${webSocketPath}`;
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
     } finally {
       await portHandle?.close();
     }
@@ -122,14 +150,19 @@ export async function readDevToolsEndpoint(profile, child, childState, { sleep =
   throw new Error('Timed out waiting for the owned Chrome DevTools endpoint');
 }
 
-async function discoverInstalledChrome(chromium, root, output, checkpoint) {
+async function discoverInstalledChrome(
+  chromium: BrowserType,
+  root: string,
+  output: string,
+  checkpoint: Checkpoint
+) {
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   const result = { cleanup: {} };
-  let context;
-  let cdp;
-  let browserProcessId;
-  let browserProcessIdentity;
-  let primaryError;
+  let context: BrowserContext | undefined;
+  let cdp: CDPSession | undefined;
+  let browserProcessId: number | undefined;
+  let browserProcessIdentity: ChromeProcessIdentity | undefined;
+  let primaryError: unknown;
   try {
     await checkpoint('natural-launch:discovery-browser', 'before');
     context = await chromium.launchPersistentContext(profile, {
@@ -141,11 +174,13 @@ async function discoverInstalledChrome(chromium, root, output, checkpoint) {
       args: ['--mute-audio'],
     });
     await checkpoint('natural-launch:discovery-browser', 'after');
-    cdp = await context.browser().newBrowserCDPSession();
+    const browser = context.browser();
+    assert(browser);
+    cdp = await browser.newBrowserCDPSession();
     browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
     browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
     return {
-      browserVersion: context.browser().version(),
+      browserVersion: browser.version(),
       executablePath: browserProcessIdentity.executablePath,
     };
   } catch (error) {
@@ -178,12 +213,14 @@ async function discoverInstalledChrome(chromium, root, output, checkpoint) {
 
 /** Stop a spawned browser before its full CIM identity has been captured. */
 export async function stopUnidentifiedChild(
-  child,
-  childState,
-  browserCdp,
-  { waitForChildExit: wait = waitForChildExit } = {}
+  child: OwnedChild,
+  childState: ChildState,
+  browserCdp: Protocol | null,
+  {
+    waitForChildExit: wait = waitForChildExit,
+  }: { waitForChildExit?: (child: OwnedChild, timeoutMs?: number) => Promise<boolean> } = {}
 ) {
-  const errors = [];
+  const errors: unknown[] = [];
   if (childState.spawnError && !Number.isInteger(child.pid)) {
     return { exited: true, errors };
   }
@@ -208,11 +245,19 @@ export async function stopUnidentifiedChild(
 }
 
 export async function captureSpawnedChromeIdentity(
-  child,
-  childState,
-  profile,
-  executablePath,
-  { captureProcess = captureOwnedChromeProcess, sleep = delay, timeoutMs = IDENTITY_WAIT_MS } = {}
+  child: ChildStatus,
+  childState: ChildState,
+  profile: string,
+  executablePath: string,
+  {
+    captureProcess = captureOwnedChromeProcess,
+    sleep = delay,
+    timeoutMs = IDENTITY_WAIT_MS,
+  }: {
+    captureProcess?: typeof captureOwnedChromeProcess;
+    sleep?: (ms: number) => Promise<void>;
+    timeoutMs?: number;
+  } = {}
 ) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -221,9 +266,10 @@ export async function captureSpawnedChromeIdentity(
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error('Owned Chrome exited before its process identity was captured');
     }
-    if (Number.isSafeInteger(child.pid) && child.pid > 0) {
+    const pid = child.pid;
+    if (typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0) {
       try {
-        const identity = await captureProcess(child.pid, profile);
+        const identity = await captureProcess(pid, profile);
         assert.equal(
           identity.executablePath.toLowerCase(),
           executablePath.toLowerCase(),
@@ -242,14 +288,30 @@ export async function captureSpawnedChromeIdentity(
 }
 
 export async function cleanupFailedNaturalChrome(
-  { child, childState, browserProcessIdentity, profile, root },
+  {
+    child,
+    childState,
+    browserProcessIdentity,
+    profile,
+    root,
+  }: {
+    child: OwnedChild;
+    childState: ChildState;
+    browserProcessIdentity: ChromeProcessIdentity | null | undefined;
+    profile: string;
+    root: string;
+  },
   {
     removeProfile = removeOwnedChromeProfile,
     stopChild = stopUnidentifiedChild,
     terminateProcessTree = terminateOwnedChromeProcess,
+  }: {
+    removeProfile?: typeof removeOwnedChromeProfile;
+    stopChild?: typeof stopUnidentifiedChild;
+    terminateProcessTree?: (identity: ChromeProcessIdentity) => Promise<unknown>;
   } = {}
 ) {
-  const errors = [];
+  const errors: unknown[] = [];
   const cleanup = {
     directChildExited: false,
     processIdentityCaptured: Boolean(browserProcessIdentity),
@@ -304,11 +366,16 @@ export async function launchOwnedNaturalChrome({
   chromium,
   root,
   output,
-  checkpoint = async () => {},
+  checkpoint = async (_name: string, _phase: 'before' | 'after') => {},
+}: {
+  chromium: BrowserType;
+  root: string;
+  output: string;
+  checkpoint?: Checkpoint;
 }) {
   const discovered = await discoverInstalledChrome(chromium, root, output, checkpoint);
   const profile = await mkdtemp(join(root, 'chrome-install-'));
-  let child;
+  let child: ReturnType<typeof spawn>;
   try {
     child = spawn(discovered.executablePath, naturalChromeArguments(profile), {
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -321,22 +388,23 @@ export async function launchOwnedNaturalChrome({
     throw error;
   }
 
-  const childState = { spawnError: null };
+  const childState: ChildState = { spawnError: null };
   child.once('error', (error) => {
     childState.spawnError = error;
   });
   let stderrBytes = 0;
   let stderrTail = Buffer.alloc(0);
-  child.stderr.on('data', (chunk) => {
+  assert(child.stderr);
+  child.stderr.on('data', (chunk: Buffer | string) => {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     stderrBytes += bytes.length;
     stderrTail = Buffer.concat([stderrTail, bytes]).subarray(-STDERR_LIMIT_BYTES);
   });
 
-  let browser;
-  let browserCdp;
-  let browserProcessId;
-  let browserProcessIdentity;
+  let browser: Browser | undefined;
+  let browserCdp: CDPSession | undefined;
+  let browserProcessId: number | undefined;
+  let browserProcessIdentity: ChromeProcessIdentity | undefined;
   try {
     await checkpoint('natural-launch:process-identity', 'before');
     browserProcessIdentity = await captureSpawnedChromeIdentity(
@@ -359,9 +427,12 @@ export async function launchOwnedNaturalChrome({
     const contexts = browser.contexts();
     assert.equal(contexts.length, 1, 'Owned Chrome did not expose one default context');
     const [context] = contexts;
+    assert(context);
     context.setDefaultTimeout(15_000);
     context.setDefaultNavigationTimeout(45_000);
     browserCdp = await browser.newBrowserCDPSession();
+    const activeCdp = browserCdp;
+    const activeBrowser = browser;
     const cdpBrowserProcessId = readOwnedBrowserProcessId(
       await browserCdp.send('SystemInfo.getProcessInfo')
     );
@@ -376,9 +447,12 @@ export async function launchOwnedNaturalChrome({
       browserProcessIdentity,
       'Owned Chrome process identity changed between spawn and CDP verification'
     );
-    const cleanupCdp = {
+    const cleanupCdp: Protocol = {
       send: (method, parameters) =>
-        boundedProtocolOperation(() => browserCdp.send(method, parameters), method),
+        boundedProtocolOperation(
+          () => Reflect.apply(activeCdp.send, activeCdp, [method, parameters]) as Promise<unknown>,
+          method
+        ),
     };
     return {
       browser,
@@ -390,11 +464,11 @@ export async function launchOwnedNaturalChrome({
       profile,
       cleanupContext: {
         close: () =>
-          boundedProtocolOperation(() => browserCdp.send('Browser.close'), 'Browser.close'),
+          boundedProtocolOperation(() => activeCdp.send('Browser.close'), 'Browser.close'),
         browser: () => ({
-          close: () => boundedProtocolOperation(() => browser.close(), 'browser.close'),
+          close: () => boundedProtocolOperation(() => activeBrowser.close(), 'browser.close'),
         }),
-      },
+      } satisfies CleanupContext,
       launchEvidence: {
         browserVersion: browser.version(),
         discoveryBrowserVersion: discovered.browserVersion,

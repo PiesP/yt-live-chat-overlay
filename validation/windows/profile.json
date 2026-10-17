@@ -1,23 +1,25 @@
 {
   "id": "yt-visual",
+  "entry": "validation/windows/profile.ts",
   "assets": [
     "dist/yt-live-chat-overlay.user.js",
     "test/visual/preview.html",
     "test/visual/gm-mocks.js"
   ],
   "installation": {
-    "entry": "validation/windows/install-profile.mjs",
+    "entry": "validation/windows/install-profile.ts",
     "assets": [
-      "validation/windows/chrome-install.mjs",
+      "validation/windows/chrome-install.ts",
+      "validation/windows/profile.ts",
       "validation/windows/release-upgrade",
-      "validation/windows/placement-timing.mjs",
-      "validation/windows/bitmap-lifecycle.mjs",
-      "validation/windows/chrome-process.mjs",
-      "validation/windows/live-duration.mjs",
-      "validation/windows/live-rendering.mjs",
-      "validation/windows/natural-chrome.mjs",
-      "validation/windows/firefox-bidi.mjs",
-      "validation/windows/firefox-install.mjs",
+      "validation/windows/placement-timing.ts",
+      "validation/windows/bitmap-lifecycle.ts",
+      "validation/windows/chrome-process.ts",
+      "validation/windows/live-duration.ts",
+      "validation/windows/live-rendering.ts",
+      "validation/windows/natural-chrome.ts",
+      "validation/windows/firefox-bidi.ts",
+      "validation/windows/firefox-install.ts",
       "dist-extension",
       "dist-extension-firefox"
     ],

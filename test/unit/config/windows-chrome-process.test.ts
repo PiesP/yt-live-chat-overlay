@@ -2,8 +2,7 @@
 
 import { describe, expect, it, vi } from 'vite-plus/test';
 
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as chromeProcessModule from '../../../validation/windows/chrome-process.mjs';
+import * as chromeProcessModule from '../../../validation/windows/chrome-process.ts';
 
 const { captureOwnedChromeProcess, isOwnedChromeProcess, terminateOwnedChromeProcess } =
   chromeProcessModule;

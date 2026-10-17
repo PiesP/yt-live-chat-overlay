@@ -8,8 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 
 // The VM harness remains a raw JavaScript asset with a separate runner contract.
-// @ts-expect-error The external Windows harness has no TypeScript declarations.
-import { readDevToolsEndpoint } from '../../../../validation/windows/natural-chrome.mjs';
+import { readDevToolsEndpoint } from '../../../../validation/windows/natural-chrome.ts';
 
 const actualFs = { open: fs.open, stat: fs.stat };
 const record = '9222\n/devtools/browser/owned-browser\n';

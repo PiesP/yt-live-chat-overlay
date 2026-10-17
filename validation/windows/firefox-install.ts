@@ -4,13 +4,94 @@
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
-import { launchFirefoxBidi } from './firefox-bidi.mjs';
+
+import { launchFirefoxBidi } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
   redactDiagnosticText,
   validateLiveRenderer,
-} from './live-rendering.mjs';
+} from './live-rendering.ts';
+
+type FirefoxLog = { level: string; text: string; type: string };
+type FirefoxSession = {
+  browserName: string;
+  browserVersion: string;
+  platformName: string;
+  context: string;
+  pageErrors: FirefoxLog[];
+  pageLogs: FirefoxLog[];
+  captureScreenshot: () => Promise<Buffer>;
+  clearPageLogs: () => void;
+  close: () => Promise<void>;
+  command: (
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs?: number
+  ) => Promise<unknown>;
+  evaluateJson: (expression: string) => Promise<unknown>;
+  installExtension: (extensionPath: string) => Promise<string>;
+  navigate: (url: string, options?: { wait?: string; timeoutMs?: number }) => Promise<void>;
+  reload: () => Promise<void>;
+  startMockYouTube: (fixture: {
+    chatResponseJson: string;
+    nonWatchHtml: string;
+    watchHtml: string;
+  }) => Promise<() => Promise<void>>;
+  uninstallExtension: (extensionId: string) => Promise<void>;
+  waitFor: (expression: string, description: string, timeoutMs?: number) => Promise<void>;
+};
+type LiveEntry = { kind: 'watch' | 'live'; url: string };
+type WorkflowStep = {
+  status: string;
+  reason?: string | null | undefined;
+  kind?: string;
+  postReloadPlayback?: PlayerObservation;
+  [key: string]: unknown;
+};
+type PublicObservation = {
+  status?: string;
+  loaded?: boolean;
+  provider?: { chatMode?: string } | undefined;
+  workflow?: Record<string, WorkflowStep>;
+  [key: string]: unknown;
+};
+type PlayerObservation = {
+  status: string;
+  reason?: string | null;
+  content?: { status: string; reason?: string | null } | null;
+  finalState?: unknown;
+  inputMethod?: string;
+  playbackStarted?: boolean;
+};
+type FailureDescription = {
+  name: string;
+  message: string;
+  cause?: FailureDescription;
+  errors?: FailureDescription[];
+};
+type FirefoxChecks = {
+  nativeBidi: boolean;
+  extensionInstalled: boolean;
+  extensionIdMatched: boolean;
+  bridgeReady: boolean;
+  workerReady: boolean;
+  chatRendered: boolean;
+  settingsInteraction: boolean;
+  settingsPersisted: boolean;
+  reloadSucceeded: boolean;
+  spaLifecycle: boolean;
+  deterministicErrorsAbsent: boolean;
+  livePagesLoaded: boolean | null;
+  liveRenderingPassed: boolean | null;
+  liveWorkflowCoverage: boolean | null;
+  extensionUninstalled: boolean;
+  browserClosed: boolean;
+};
+
+async function evaluate<T>(session: FirefoxSession, expression: string): Promise<T> {
+  return (await session.evaluateJson(expression)) as T;
+}
 
 const EXTENSION_ID = 'yt-live-chat-overlay@piesp.github.io';
 const OVERLAY_ID = 'yt-live-chat-overlay';
@@ -85,22 +166,23 @@ const NON_WATCH_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Firefox extension fixture</title></head>
 <body><div id="page-manager"><div id="content"><h1>Fixture page</h1></div></div></body></html>`;
 
-function describeFailure(error, depth = 0) {
+function describeFailure(error: unknown, depth = 0): FailureDescription {
+  const detail = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
   return {
-    name: error?.name ?? 'Error',
-    message: String(error?.message ?? error).slice(0, 2000),
-    ...(depth < 3 && error?.cause ? { cause: describeFailure(error.cause, depth + 1) } : {}),
-    ...(depth < 3 && Array.isArray(error?.errors)
-      ? { errors: error.errors.slice(0, 10).map((entry) => describeFailure(entry, depth + 1)) }
+    name: typeof detail.name === 'string' ? detail.name : 'Error',
+    message: String(detail.message ?? error).slice(0, 2000),
+    ...(depth < 3 && detail.cause ? { cause: describeFailure(detail.cause, depth + 1) } : {}),
+    ...(depth < 3 && Array.isArray(detail.errors)
+      ? { errors: detail.errors.slice(0, 10).map((entry) => describeFailure(entry, depth + 1)) }
       : {}),
   };
 }
 
-function delay(ms) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+function delay(ms: number) {
+  return new Promise<void>((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-function errorMessage(reason) {
+function errorMessage(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
 }
 
@@ -108,7 +190,7 @@ export function resolveSystemFirefoxExecutable({
   executablePath,
   env = process.env,
   platform = process.platform,
-} = {}) {
+}: { executablePath?: unknown; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {}) {
   if (executablePath !== undefined) {
     if (typeof executablePath !== 'string' || !isAbsolute(executablePath)) {
       throw new TypeError('executablePath must be an absolute path');
@@ -125,7 +207,7 @@ export function resolveSystemFirefoxExecutable({
   return win32.join(programFiles, 'Mozilla Firefox', 'firefox.exe');
 }
 
-export function normalizeLiveUrls(liveUrls = []) {
+export function normalizeLiveUrls(liveUrls: unknown = []): LiveEntry[] {
   if (!Array.isArray(liveUrls)) throw new TypeError('liveUrls must be an array');
   if (liveUrls.length > MAX_LIVE_URLS) {
     throw new RangeError(`liveUrls supports at most ${MAX_LIVE_URLS} entries`);
@@ -160,8 +242,8 @@ export function normalizeLiveUrls(liveUrls = []) {
   });
 }
 
-export function categorizeErrors(logs) {
-  const categories = {};
+export function categorizeErrors(logs: FirefoxLog[]) {
+  const categories: Record<string, number> = {};
   for (const log of logs) {
     if (log.level !== 'error') continue;
     const message = log.text.toLowerCase();
@@ -185,7 +267,7 @@ export function categorizeErrors(logs) {
 }
 
 export function selectPublicSeekTarget(
-  { currentTime, start, end },
+  { currentTime, start, end }: { currentTime: number; start: number; end: number },
   { preferBackward = false } = {}
 ) {
   if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
@@ -196,7 +278,7 @@ export function selectPublicSeekTarget(
   return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
-export function requireFirefoxPublicCoverage(observations) {
+export function requireFirefoxPublicCoverage(observations: PublicObservation[]) {
   const modes = new Set(observations.map((item) => item.provider?.chatMode));
   assert(
     observations.length >= 2 &&
@@ -218,8 +300,17 @@ export function requireFirefoxPublicCoverage(observations) {
   );
 }
 
-async function readPublicPageState(session) {
-  return session.evaluateJson(`(() => {
+async function readPublicPageState(session: FirefoxSession) {
+  return evaluate<{
+    finalUrl: string;
+    chatMode: string;
+    chatRendererFound: boolean;
+    playabilityStatus: string | null;
+    loginRedirect: boolean;
+    consentRedirect: boolean;
+  }>(
+    session,
+    `(() => {
     const initialData = window.ytInitialData;
     let renderer = initialData?.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
     if (!renderer && initialData && typeof initialData === 'object') {
@@ -247,10 +338,11 @@ async function readPublicPageState(session) {
       loginRedirect: hostname === 'accounts.google.com',
       consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com'
     };
-  })()`);
+  })()`
+  );
 }
 
-async function writeFailureScreenshot(session, output, fileName) {
+async function writeFailureScreenshot(session: FirefoxSession, output: string, fileName: string) {
   try {
     const screenshot = await session.captureScreenshot();
     await writeFile(join(output, fileName), screenshot);
@@ -259,7 +351,12 @@ async function writeFailureScreenshot(session, output, fileName) {
   }
 }
 
-async function waitForLog(session, predicate, description, timeoutMs = 20_000) {
+async function waitForLog(
+  session: FirefoxSession,
+  predicate: (entry: FirefoxLog) => boolean,
+  description: string,
+  timeoutMs = 20_000
+) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (session.pageLogs.some(predicate)) return;
@@ -268,7 +365,7 @@ async function waitForLog(session, predicate, description, timeoutMs = 20_000) {
   throw new Error(`Timed out waiting for ${description}`);
 }
 
-async function verifyStoredSettings(session) {
+async function verifyStoredSettings(session: FirefoxSession) {
   await session.waitFor(
     `new Promise((resolve) => {
       const nonce = window.__ytExtensionBridge?.nonce;
@@ -301,7 +398,7 @@ async function verifyStoredSettings(session) {
   );
 }
 
-async function waitForStoredPublicFontSize(session, target) {
+async function waitForStoredPublicFontSize(session: FirefoxSession, target: number) {
   await session.waitFor(
     `new Promise((resolve) => {
       const nonce = window.__ytExtensionBridge?.nonce;
@@ -330,7 +427,11 @@ async function waitForStoredPublicFontSize(session, target) {
   );
 }
 
-async function runDeterministicPhase(session, checks, diagnostics) {
+async function runDeterministicPhase(
+  session: FirefoxSession,
+  checks: FirefoxChecks,
+  diagnostics: Record<string, unknown>
+) {
   await session.navigate(FIXTURE_URL);
   await session.waitFor(
     `Boolean(
@@ -341,7 +442,16 @@ async function runDeterministicPhase(session, checks, diagnostics) {
     'the installed Firefox extension overlay'
   );
 
-  const startupResult = await session.evaluateJson(`(() => {
+  const startupResult = await evaluate<{
+    workerUrl: string | null;
+    canvasAriaHidden: string | null;
+    pageScriptCount: number;
+    storageType: string | null;
+    workerSupported: boolean;
+    workerUrlValid: boolean;
+  }>(
+    session,
+    `(() => {
     const bridge = window.__ytExtensionBridge;
     return {
       workerUrl: bridge?.workerUrl ?? null,
@@ -351,7 +461,8 @@ async function runDeterministicPhase(session, checks, diagnostics) {
       workerSupported: bridge?.workerSupported === true,
       workerUrlValid: typeof bridge?.workerUrl === 'string' && bridge.workerUrl.startsWith('blob:' + location.origin + '/')
     };
-  })()`);
+  })()`
+  );
   const { workerUrl, ...startup } = startupResult;
   diagnostics.startup = startup;
   diagnostics.workerUrl = workerUrl;
@@ -419,7 +530,8 @@ async function runDeterministicPhase(session, checks, diagnostics) {
     `Boolean(window.__ytChatOverlay && document.querySelector('#${OVERLAY_ID} canvas'))`,
     'the installed Firefox extension overlay to reload'
   );
-  const reloaded = await session.evaluateJson(
+  const reloaded = await evaluate<{ persisted: boolean; accessibleMessageCount: number }>(
+    session,
     `(() => {
       const settings = window.__ytChatOverlay?.getSettings();
       return {
@@ -435,7 +547,8 @@ async function runDeterministicPhase(session, checks, diagnostics) {
     `document.querySelector('#yt-chat-overlay-debug > div')?.textContent === 'Rcvd: 1 | Rndr: 1'`,
     'the installed Firefox extension chat render'
   );
-  const renderedCount = await session.evaluateJson(
+  const renderedCount = await evaluate<number>(
+    session,
     `document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p').length`
   );
   assert.ok(renderedCount >= 1, 'The installed Firefox extension did not render chat');
@@ -490,7 +603,11 @@ async function runDeterministicPhase(session, checks, diagnostics) {
   };
 }
 
-async function admitPublicPlayback(session, observation, description) {
+async function admitPublicPlayback(
+  session: FirefoxSession,
+  observation: PlayerObservation,
+  description: string
+) {
   await session.waitFor('Boolean(document.querySelector("video"))', 'the public video element');
   Object.assign(
     observation,
@@ -511,7 +628,9 @@ async function admitPublicPlayback(session, observation, description) {
     })()`,
     `${description} or a clickable YouTube play button`
   );
-  const playPoint = await session.evaluateJson(`(() => {
+  const playPoint = await evaluate<{ x: number; y: number } | null>(
+    session,
+    `(() => {
     const video = document.querySelector('video');
     if (video && !video.paused && video.readyState >= 2) return null;
     const button = document.querySelector('.ytp-large-play-button');
@@ -519,7 +638,8 @@ async function admitPublicPlayback(session, observation, description) {
     return rect && rect.width > 0 && rect.height > 0
       ? { x: Math.floor(rect.x + rect.width / 2), y: Math.floor(rect.y + rect.height / 2) }
       : null;
-  })()`);
+  })()`
+  );
   if (playPoint) {
     observation.inputMethod = 'native-pointer';
     try {
@@ -552,7 +672,7 @@ async function admitPublicPlayback(session, observation, description) {
   observation.reason = null;
 }
 
-function publicContentStateExpression(expectedVideoId, isReplay) {
+function publicContentStateExpression(expectedVideoId: string | null, isReplay: boolean) {
   return `(() => {
     const expectedVideoId = ${JSON.stringify(expectedVideoId)};
     const player = document.querySelector('#movie_player');
@@ -585,12 +705,19 @@ function publicContentStateExpression(expectedVideoId, isReplay) {
   })()`;
 }
 
-async function readPublicContentState(session, expectedVideoId, isReplay) {
-  return session.evaluateJson(publicContentStateExpression(expectedVideoId, isReplay));
+async function readPublicContentState(
+  session: FirefoxSession,
+  expectedVideoId: string | null,
+  isReplay: boolean
+) {
+  return evaluate<{ status: string; reason?: string | null }>(
+    session,
+    publicContentStateExpression(expectedVideoId, isReplay)
+  );
 }
 
-async function runLivePhase(session, liveEntries, output) {
-  const observations = [];
+async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], output: string) {
+  const observations: PublicObservation[] = [];
   let previousMarker = null;
   let previousUrl = null;
   for (const [index, entry] of liveEntries.entries()) {
@@ -599,12 +726,27 @@ async function runLivePhase(session, liveEntries, output) {
       entry.kind === 'watch' ? url.searchParams.get('v') : url.pathname.slice(6);
     session.clearPageLogs();
     let loaded = false;
-    let state;
-    let player;
+    let state:
+      | {
+          videoPaused: boolean;
+          videoReadyState: number;
+          renderer: string;
+          canvasCount: number;
+          overlayCount: number;
+          pageScriptCount: number;
+          renderedMessageCount: number;
+          settingsButtonCount: number;
+          workerBridgeReady: boolean;
+        }
+      | undefined;
+    let player: PlayerObservation | undefined;
     let workerReady = false;
-    let provider;
+    let provider: Awaited<ReturnType<typeof readPublicPageState>> | undefined;
     let phase = 'navigation';
-    const workflow = {
+    const workflow: Record<
+      'startup' | 'settings' | 'pause' | 'resume' | 'seek' | 'navigation',
+      WorkflowStep
+    > = {
       startup: { status: 'not-run' },
       settings: { status: 'not-run' },
       pause: { status: 'not-run' },
@@ -641,7 +783,9 @@ async function runLivePhase(session, liveEntries, output) {
       if (player.content.status !== 'passed') {
         throw new Error(`Public content was not ready: ${player.content.reason}`);
       }
-      state = await session.evaluateJson(`(() => ({
+      state = await evaluate<NonNullable<typeof state>>(
+        session,
+        `(() => ({
         videoPaused: document.querySelector('#movie_player video.html5-main-video')?.paused ?? true,
         videoReadyState: document.querySelector('#movie_player video.html5-main-video')?.readyState ?? 0,
         renderer: document.querySelector('#yt-chat-overlay-debug')?.textContent.includes('Render: n/a')
@@ -653,7 +797,8 @@ async function runLivePhase(session, liveEntries, output) {
         settingsButtonCount: document.querySelectorAll('#yt-chat-overlay-settings-button').length,
         workerBridgeReady: Boolean(window.__ytExtensionBridge?.workerSupported &&
           (window.__ytExtensionBridge?.workerUrl ?? '').startsWith('blob:' + location.origin + '/'))
-      }))()`);
+      }))()`
+      );
       workerReady = session.pageLogs.some(({ text }) =>
         text.includes('[RenderWorkerManager] renderer.worker.started')
       );
@@ -685,11 +830,14 @@ async function runLivePhase(session, liveEntries, output) {
       };
       if (previousMarker !== null) {
         phase = 'fresh-document-canvas-isolation';
-        const freshDocumentCanvasIsolated = await session.evaluateJson(`(() => {
+        const freshDocumentCanvasIsolated = await evaluate<boolean>(
+          session,
+          `(() => {
           const canvas = document.querySelector('#${OVERLAY_ID} canvas');
           return Boolean(canvas && canvas.getAttribute('data-firefox-live-session') !== '${previousMarker}' &&
             !document.querySelector('#${OVERLAY_ID} canvas[data-firefox-live-session="${previousMarker}"]'));
-        })()`);
+        })()`
+        );
         const crossWatch = previousUrl !== entry.url;
         workflow.navigation = {
           status: freshDocumentCanvasIsolated && crossWatch ? 'passed' : 'unverified',
@@ -712,20 +860,26 @@ async function runLivePhase(session, liveEntries, output) {
           document.querySelector('#movie_player video.html5-main-video').readyState >= 2)`,
         'public video playback before pausing'
       );
-      workflow.pause = await session.evaluateJson(`(() => {
+      workflow.pause = await evaluate<WorkflowStep>(
+        session,
+        `(() => {
         const video = document.querySelector('#movie_player video.html5-main-video');
         if (!video) return { status: 'unverified', reason: 'video-unavailable' };
         video.pause();
         return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
-      })()`);
+      })()`
+      );
       phase = 'resume';
-      workflow.resume = await session.evaluateJson(`(async () => {
+      workflow.resume = await evaluate<WorkflowStep>(
+        session,
+        `(async () => {
         const video = document.querySelector('#movie_player video.html5-main-video');
         if (!video) return { status: 'unverified', reason: 'video-unavailable' };
         try { await video.play(); }
         catch { return { status: 'unverified', reason: 'play-rejected' }; }
         return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
-      })()`);
+      })()`
+      );
       phase = 'seek';
       const seekContent = await readPublicContentState(
         session,
@@ -736,20 +890,29 @@ async function runLivePhase(session, liveEntries, output) {
         workflow.seek = { status: 'unverified', reason: seekContent.reason, content: seekContent };
         throw new Error(`Public seek content was not ready: ${seekContent.reason}`);
       }
-      const seekRange = await session.evaluateJson(`(() => {
+      const seekRange = await evaluate<{
+        currentTime: number;
+        start: number;
+        end: number;
+      } | null>(
+        session,
+        `(() => {
         const video = document.querySelector('#movie_player video.html5-main-video');
         if (!video?.seekable.length) return null;
         const last = video.seekable.length - 1;
         return { currentTime: video.currentTime, start: video.seekable.start(last),
           end: video.seekable.end(last) };
-      })()`);
+      })()`
+      );
       const seekTarget =
         seekRange &&
         selectPublicSeekTarget(seekRange, { preferBackward: provider.chatMode === 'live' });
       workflow.seek =
         seekTarget === null
           ? { status: 'unverified', reason: 'seek-range-unavailable', range: seekRange }
-          : await session.evaluateJson(`(async () => {
+          : await evaluate<WorkflowStep>(
+              session,
+              `(async () => {
               const content = ${publicContentStateExpression(expectedVideoId, provider.chatMode === 'replay')};
               if (content.status !== 'passed') {
                 return { status: 'unverified', reason: content.reason, content, seekedEvent: false };
@@ -782,11 +945,14 @@ async function runLivePhase(session, liveEntries, output) {
                 reason: !seeked ? 'seeked-event-timeout' : positionMatched
                   ? null : 'seek-position-mismatch', target: ${seekTarget}, range,
                 preSeekTime, afterTime, seekedEvent: seeked, currentTime: afterTime };
-            })()`);
+            })()`
+            );
       workflow.seek.selectionRange = seekRange;
       workflow.seek.content ??= seekContent;
       phase = 'settings';
-      const changed = await session.evaluateJson(`(() => {
+      const changed = await evaluate<{ before: string; target: string; modalClosed: boolean }>(
+        session,
+        `(() => {
         const button = document.querySelector('#yt-chat-overlay-settings-button');
         if (!(button instanceof HTMLButtonElement)) throw new Error('Public settings button is missing');
         button.click();
@@ -804,7 +970,8 @@ async function runLivePhase(session, liveEntries, output) {
         input.dispatchEvent(new Event('change', { bubbles: true }));
         close.click();
         return { before, target, modalClosed: !modal.open };
-      })()`);
+      })()`
+      );
       assert(
         ['34', '36'].includes(changed.target),
         'Public settings UI returned an invalid font size'
@@ -834,14 +1001,17 @@ async function runLivePhase(session, liveEntries, output) {
         `Boolean(document.querySelector('video')?.readyState >= 2)`,
         'the public video to be ready after settings reload'
       );
-      const persisted = await session.evaluateJson(`(() => {
+      const persisted = await evaluate<{ value: string | null; effective: number | null }>(
+        session,
+        `(() => {
         const button = document.querySelector('#yt-chat-overlay-settings-button');
         button?.click();
         const modal = document.querySelector('#yt-chat-overlay-settings-backdrop');
         const value = modal?.querySelector('input[name="fontSize"]')?.value ?? null;
         modal?.querySelector('button[data-action="close"]')?.click();
         return { value, effective: window.__ytChatOverlay?.getSettings()?.fontSize ?? null };
-      })()`);
+      })()`
+      );
       workflow.settings = {
         status:
           changed.modalClosed &&
@@ -960,8 +1130,28 @@ async function runLivePhase(session, liveEntries, output) {
 }
 
 export async function runFirefoxInstallation(
-  { root, output, executablePath, headless = false, liveUrls = [] },
-  { launch = launchFirefoxBidi } = {}
+  {
+    root,
+    output,
+    executablePath,
+    headless = false,
+    liveUrls = [],
+  }: {
+    root: string;
+    output: string;
+    executablePath?: string;
+    headless?: boolean;
+    liveUrls?: unknown;
+  },
+  {
+    launch = launchFirefoxBidi,
+  }: {
+    launch?: (options: {
+      root: string;
+      executablePath: string;
+      headless: boolean;
+    }) => Promise<FirefoxSession>;
+  } = {}
 ) {
   assert.equal(typeof root, 'string', 'root must be the extracted bundle directory');
   assert.equal(typeof output, 'string', 'output must be an artifact directory');
@@ -975,7 +1165,7 @@ export async function runFirefoxInstallation(
   await mkdir(output, { recursive: true });
   const liveEntries = normalizeLiveUrls(liveUrls);
 
-  const checks = {
+  const checks: FirefoxChecks = {
     nativeBidi: false,
     extensionInstalled: false,
     extensionIdMatched: false,
@@ -993,14 +1183,15 @@ export async function runFirefoxInstallation(
     extensionUninstalled: false,
     browserClosed: false,
   };
-  const diagnostics = {};
-  let session;
-  let extensionId;
-  let stopMock;
-  let primaryError;
-  const cleanupErrors = [];
-  let deterministic;
-  let live = [];
+  const diagnostics: Record<string, unknown> = {};
+  let session: FirefoxSession | undefined;
+  let extensionId: string | undefined;
+  let stopMock: (() => Promise<void>) | undefined;
+  let primaryError: unknown;
+  let caught = false;
+  const cleanupErrors: Error[] = [];
+  let deterministic: Awaited<ReturnType<typeof runDeterministicPhase>> | undefined;
+  let live: PublicObservation[] = [];
 
   try {
     session = await launch({ root, executablePath: resolvedExecutable, headless });
@@ -1036,6 +1227,7 @@ export async function runFirefoxInstallation(
       );
     }
   } catch (error) {
+    caught = true;
     primaryError = error;
     if (!checks.deterministicErrorsAbsent && session)
       diagnostics.errorLogs = session.pageLogs
@@ -1078,8 +1270,10 @@ export async function runFirefoxInstallation(
   }
 
   const result = {
-    status: primaryError || cleanupErrors.length > 0 ? 'failed' : 'passed',
-    errors: [primaryError, ...cleanupErrors].filter(Boolean).map((error) => describeFailure(error)),
+    status: caught || cleanupErrors.length > 0 ? 'failed' : 'passed',
+    errors: (caught ? [primaryError, ...cleanupErrors] : cleanupErrors).map((error) =>
+      describeFailure(error)
+    ),
     checks,
     observations: {
       browser: {
@@ -1106,13 +1300,13 @@ export async function runFirefoxInstallation(
       new Error(`Failed to persist Firefox installation result: ${errorMessage(error)}`)
     );
   }
-  if (primaryError && cleanupErrors.length > 0) {
+  if (caught && cleanupErrors.length > 0) {
     throw new AggregateError(
       [primaryError, ...cleanupErrors],
       'Firefox installation validation failed'
     );
   }
-  if (primaryError) throw primaryError;
+  if (caught) throw primaryError;
   if (cleanupErrors.length > 0) {
     throw new AggregateError(cleanupErrors, 'Firefox installation cleanup failed');
   }

@@ -8,12 +8,15 @@
     "scripts/ci/check-pinned-tools.ts",
     "scripts/ci/classify-workflow-changes.ts",
     "scripts/ci/pinned-tools.ts",
+    "validation/windows/profile.ts",
+    "validation/windows/install-profile.ts",
     "vite.config.*.ts"
   ],
   "project": [
     "src/**/*.ts!",
     "extension/**/*.ts!",
     "scripts/**/*.ts",
+    "validation/windows/**/*.{ts,mjs}",
     "tooling/**/*.ts",
     "vite*.ts",
     "test/**/*.ts"

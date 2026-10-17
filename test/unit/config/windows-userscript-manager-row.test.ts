@@ -4,8 +4,7 @@
 
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.mjs';
+import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.ts';
 
 const scriptName = 'YouTube Live Chat Overlay';
 const entry = (version: string) => `<tr class="scripttr">

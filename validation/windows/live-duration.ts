@@ -5,13 +5,93 @@ import assert from 'node:assert/strict';
 import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+
+import type { BrowserContext, Locator, Page } from '@playwright/test';
+
 import {
   countUnexpectedLiveErrors,
   isTrustedTypesWorkerBlock,
   isYouTubeHostError,
   redactDiagnosticText,
   validateLiveRenderer,
-} from './live-rendering.mjs';
+} from './live-rendering.ts';
+import type { LiveDiagnosticEntry } from './live-rendering.ts';
+
+type HealthSample = {
+  phase: string;
+  visibility?: string;
+  canvasAttached?: boolean;
+  installedBridgeReady?: boolean;
+  playerErrorUi?: { visible: boolean; marker?: string | null };
+  video?: {
+    currentTime: number | null;
+    errorCode: number | null;
+    muted: boolean;
+    paused: boolean;
+    readyState: number;
+  } | null;
+};
+
+type Fingerprint = { count: number; fingerprint: string };
+type ObservationStatus = { status: string; reason?: string };
+type DurationSample = HealthSample & {
+  index: number;
+  scheduledElapsedMs: number;
+  elapsedMs: number;
+  hud: string | null;
+};
+type DurationDiagnostics = {
+  pageErrorTypes: string[];
+  pageErrorOverflow: number;
+  unexpectedConsoleErrors: number;
+  hostConsoleErrors: number;
+  consoleErrors: { type: string; text: string; url: string }[];
+};
+type DurationResult = {
+  schemaVersion: number;
+  kind: string;
+  status: string;
+  evidenceStatus: string;
+  scenario: Record<string, string | number | boolean>;
+  preflight: {
+    consentBarrier?: { visible: boolean; actionTaken: boolean };
+    mediaReadiness?: Awaited<ReturnType<typeof waitForInitialMedia>>;
+    initialState?: Awaited<ReturnType<typeof publicState>>;
+    visibilityProof?: string[];
+    elapsedMs?: number;
+  };
+  samples: DurationSample[];
+  transitions: {
+    from: string;
+    to: string;
+    scheduledElapsedMs: number;
+    observedElapsedMs: number;
+    observerTransitionMs: number;
+    visibility: string;
+  }[];
+  playerControl: ObservationStatus;
+  resumeAccessibleRender: ObservationStatus & {
+    beforeCount?: number;
+    beforeFingerprint?: string;
+    observerLatencyMs?: number | null;
+  };
+  rendererValidation: ObservationStatus & { renderer?: string; workerPolicyFallback?: boolean };
+  diagnostics: Partial<DurationDiagnostics>;
+  failures: { stage: string; errorType: string }[];
+  limitations: string[];
+  progress?: { stage: string; state: string; elapsedMs: number; sampleCount: number };
+  phaseHealth?: Record<string, ReturnType<typeof summarizePhaseHealth>>;
+  trustedTypesMainFallback?: { observed: boolean; diagnosticCount: number };
+  observation?: { plannedMs: number; elapsedMs: number; sampleCount: number };
+  evidenceStatusReasons?: string[];
+  failureState?: Awaited<ReturnType<typeof publicState>> | null;
+};
+
+declare global {
+  var __ytExtensionBridge:
+    | { workerSupported?: boolean; storageType?: string; workerUrl?: string }
+    | undefined;
+}
 
 const ACTIVE_MS = 300_000;
 const HIDDEN_MS = 600_000;
@@ -23,36 +103,36 @@ const RESULT_FILE = 'live-duration-result.json';
 const MAX_CONSOLE_ERRORS = 64;
 const MAX_PAGE_ERRORS = 32;
 
-const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+const sleep = (ms: number) => new Promise<void>((resolveSleep) => setTimeout(resolveSleep, ms));
 
-function phaseMatches(sample, phase) {
+function phaseMatches(sample: HealthSample, phase: string) {
   return phase === 'resumed' ? sample.phase.startsWith('resumed') : sample.phase === phase;
 }
 
-function healthySample(sample) {
+function healthySample(sample: HealthSample) {
   const expectedVisibility = sample.phase === 'hidden' ? 'hidden' : 'visible';
   return Boolean(
     sample.visibility === expectedVisibility &&
-      sample.canvasAttached &&
-      sample.installedBridgeReady &&
-      sample.playerErrorUi?.visible === false &&
-      sample.video &&
-      sample.video.errorCode === null &&
-      sample.video.muted &&
-      !sample.video.paused &&
-      sample.video.readyState >= 2
+    sample.canvasAttached &&
+    sample.installedBridgeReady &&
+    sample.playerErrorUi?.visible === false &&
+    sample.video &&
+    sample.video.errorCode === null &&
+    sample.video.muted &&
+    !sample.video.paused &&
+    sample.video.readyState >= 2
   );
 }
 
-export function summarizePhaseHealth(samples, phase) {
+export function summarizePhaseHealth(samples: HealthSample[], phase: string) {
   const selected = samples.filter((sample) => phaseMatches(sample, phase));
   const healthy = selected.filter(healthySample);
   const times = selected
     .map((sample) => sample.video?.currentTime)
-    .filter((value) => typeof value === 'number' && Number.isFinite(value));
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const nonProgressingIntervalCount = times
     .slice(1)
-    .filter((value, index) => value - times[index] < 1).length;
+    .filter((value, index) => value - (times[index] ?? value) < 1).length;
   const reasons = [];
   if (selected.length < 2) reasons.push('insufficient-phase-samples');
   if (healthy.length !== selected.length) reasons.push('sample-health-incomplete');
@@ -70,7 +150,11 @@ export function summarizePhaseHealth(samples, phase) {
   };
 }
 
-export function classifyResumeFingerprint(before, after, observerLatencyMs) {
+export function classifyResumeFingerprint(
+  before: Fingerprint,
+  after: Fingerprint,
+  observerLatencyMs: number | null
+) {
   if (before.count === 0 && after.count === 0) {
     return {
       status: 'not-run',
@@ -109,6 +193,14 @@ export function durationEvidenceReasons({
   resumeAccessibleRender,
   pageErrorTypes,
   unexpectedConsoleErrors,
+}: {
+  visibilityProof?: string[];
+  samples: HealthSample[];
+  rendererValidation?: ObservationStatus;
+  playerControl?: ObservationStatus;
+  resumeAccessibleRender?: ObservationStatus;
+  pageErrorTypes?: string[];
+  unexpectedConsoleErrors: number;
 }) {
   const reasons = [];
   if (
@@ -141,8 +233,8 @@ export function durationEvidenceReasons({
   return reasons;
 }
 
-export function validateDurationLiveUrl(value) {
-  assert.equal(typeof value, 'string', 'The duration live URL must be a string');
+export function validateDurationLiveUrl(value: unknown) {
+  assert(typeof value === 'string', 'The duration live URL must be a string');
   assert(!/\s/u.test(value) && !value.includes('\\'), 'The duration live URL is unsafe');
   const url = new URL(value);
   assert.equal(url.protocol, 'https:');
@@ -154,45 +246,74 @@ export function validateDurationLiveUrl(value) {
   return url.href;
 }
 
-async function waitUntil(target) {
+async function waitUntil(target: number) {
   while (performance.now() < target) {
     await sleep(Math.min(1_000, Math.max(1, target - performance.now())));
   }
 }
 
-async function waitForVideoState(locator, predicate, timeoutMs, delay) {
+async function waitForVideoState(
+  locator: Locator,
+  predicate: (state: VideoState) => boolean,
+  timeoutMs: number,
+  delay: (ms: number) => Promise<void>
+) {
   const deadline = performance.now() + timeoutMs;
   let state;
   do {
-    state = await locator.evaluate((video) => ({
-      currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
-      errorCode: video.error?.code ?? null,
-      muted: video.muted,
-      paused: video.paused,
-      readyState: video.readyState,
-    }));
+    state = await locator.evaluate((element) => {
+      const video = element as HTMLVideoElement;
+      return {
+        currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
+        errorCode: video.error?.code ?? null,
+        muted: video.muted,
+        paused: video.paused,
+        readyState: video.readyState,
+      };
+    });
     if (predicate(state)) return state;
     await delay(Math.min(100, Math.max(1, deadline - performance.now())));
   } while (performance.now() < deadline);
   throw new Error('Public player did not reach the requested bounded playback state');
 }
 
-export async function exercisePlayerPausePlay(page, { timeoutMs = 5_000, delay = sleep } = {}) {
+type VideoState = {
+  currentTime: number | null;
+  errorCode: number | null;
+  muted: boolean;
+  paused: boolean;
+  readyState: number;
+};
+
+export async function exercisePlayerPausePlay(
+  page: Page,
+  {
+    timeoutMs = 5_000,
+    delay = sleep,
+  }: {
+    timeoutMs?: number;
+    delay?: (ms: number) => Promise<void>;
+  } = {}
+) {
   const video = page.locator('video').first();
-  const before = await video.evaluate((element) => ({
-    currentTime: Number.isFinite(element.currentTime) ? element.currentTime : null,
-    errorCode: element.error?.code ?? null,
-    readyState: element.readyState,
-  }));
+  const before = await video.evaluate((element) => {
+    const media = element as HTMLVideoElement;
+    return {
+      currentTime: Number.isFinite(media.currentTime) ? media.currentTime : null,
+      errorCode: media.error?.code ?? null,
+      readyState: media.readyState,
+    };
+  });
   if (before.readyState < 2 || before.errorCode !== null) {
     throw new Error('Public player media is not ready for pause/play verification');
   }
-  await video.evaluate((element) => element.pause());
+  await video.evaluate((element) => (element as HTMLVideoElement).pause());
   const paused = await waitForVideoState(video, (state) => state.paused, timeoutMs, delay);
   await video.evaluate((element) => {
-    element.muted = true;
+    const media = element as HTMLVideoElement;
+    media.muted = true;
     // Some public-player promises remain pending. Playback state is checked separately.
-    void element.play().catch(() => {});
+    void media.play().catch(() => {});
   });
   const resumed = await waitForVideoState(
     video,
@@ -209,7 +330,7 @@ export async function exercisePlayerPausePlay(page, { timeoutMs = 5_000, delay =
   };
 }
 
-async function publicState(page) {
+async function publicState(page: Page) {
   return page.evaluate(() => {
     const video = document.querySelector('video');
     if (video instanceof HTMLVideoElement) video.muted = true;
@@ -236,8 +357,8 @@ async function publicState(page) {
       ).length,
       installedBridgeReady: Boolean(
         globalThis.__ytExtensionBridge?.workerSupported === true &&
-          globalThis.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-          globalThis.__ytExtensionBridge?.workerUrl?.startsWith(`blob:${location.origin}/`)
+        globalThis.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
+        globalThis.__ytExtensionBridge?.workerUrl?.startsWith(`blob:${location.origin}/`)
       ),
       playerErrorUi: {
         visible: playerError,
@@ -257,20 +378,20 @@ async function publicState(page) {
   });
 }
 
-export function isInitialObservationReady(state) {
+export function isInitialObservationReady(state: Partial<HealthSample> | null) {
   return Boolean(
     state?.visibility === 'visible' &&
-      state.canvasAttached &&
-      state.installedBridgeReady &&
-      state.playerErrorUi?.visible === false &&
-      state.video?.errorCode === null &&
-      state.video?.muted &&
-      !state.video?.paused &&
-      state.video?.readyState >= 2
+    state.canvasAttached &&
+    state.installedBridgeReady &&
+    state.playerErrorUi?.visible === false &&
+    state.video?.errorCode === null &&
+    state.video?.muted &&
+    !state.video?.paused &&
+    state.video?.readyState >= 2
   );
 }
 
-async function waitForInitialMedia(page, timeoutMs) {
+async function waitForInitialMedia(page: Page, timeoutMs: number) {
   const started = performance.now();
   const deadline = started + timeoutMs;
   let first = null;
@@ -297,7 +418,7 @@ async function waitForInitialMedia(page, timeoutMs) {
   };
 }
 
-async function accessibleFingerprint(page) {
+async function accessibleFingerprint(page: Page): Promise<Fingerprint> {
   return page.evaluate(async () => {
     const nodes = [...document.querySelectorAll('.yt-live-chat-overlay-live-region > p')];
     const encoded = new TextEncoder().encode(
@@ -313,7 +434,13 @@ async function accessibleFingerprint(page) {
   });
 }
 
-async function observeAccessibleChange(page, baseline, startedAt, deadline, signal) {
+async function observeAccessibleChange(
+  page: Page,
+  baseline: Fingerprint,
+  startedAt: number,
+  deadline: number,
+  signal: AbortSignal
+) {
   let latest = baseline;
   while (!signal.aborted && performance.now() < deadline) {
     await sleep(Math.min(1_000, Math.max(1, deadline - performance.now())));
@@ -329,24 +456,34 @@ async function observeAccessibleChange(page, baseline, startedAt, deadline, sign
   return classifyResumeFingerprint(baseline, latest, null);
 }
 
-function rendererFromHud(hud) {
+function rendererFromHud(hud: string | null | undefined) {
   if (typeof hud !== 'string' || !/Render:\s*(?:n\/a|[0-9.]+ms)/u.test(hud)) {
     return null;
   }
   return /Render:\s*n\/a/u.test(hud) ? 'worker' : 'main';
 }
 
-function failure(stage, error) {
+function failure(stage: string, error: unknown) {
   return { stage, errorType: error instanceof Error ? error.name : typeof error };
 }
 
 /** Observe one real public stream through a caller-owned, naturally focused context. */
-export async function runLiveDuration({ context, url, output, installation = 'extension' }) {
+export async function runLiveDuration({
+  context,
+  url,
+  output,
+  installation = 'extension',
+}: {
+  context: BrowserContext;
+  url: string;
+  output: string;
+  installation?: 'extension';
+}) {
   assert(context && typeof context.newPage === 'function', 'A caller-owned context is required');
   assert.equal(installation, 'extension');
   const liveUrl = validateDurationLiveUrl(url);
   const progressStarted = performance.now();
-  const result = {
+  const result: DurationResult = {
     schemaVersion: 1,
     kind: 'public-youtube-installed-extension-duration-observation',
     status: 'failed',
@@ -379,7 +516,7 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       'No synthetic chat, route interception, account interaction, or TLS change is used.',
     ],
   };
-  const persist = async (stage, state) => {
+  const persist = async (stage: string, state: string) => {
     result.progress = {
       stage,
       state,
@@ -390,32 +527,32 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
     await writeFile(pending, JSON.stringify(result, null, 2), { flush: true });
     await rename(pending, join(output, RESULT_FILE));
   };
-  const remainingPreflight = (requestedMs) => {
+  const remainingPreflight = (requestedMs: number) => {
     const remaining = PREFLIGHT_LIMIT_MS - (performance.now() - progressStarted);
     if (remaining <= 0) throw new Error('Duration observation preflight exceeded five minutes');
     return Math.max(1, Math.min(requestedMs, Math.floor(remaining)));
   };
 
-  const consoleErrors = [];
-  const pageErrors = [];
+  const consoleErrors: LiveDiagnosticEntry[] = [];
+  const pageErrors: string[] = [];
   let consoleOverflow = 0;
   let pageErrorOverflow = 0;
-  const captureDiagnostics = (workerFallback) => ({
+  const captureDiagnostics = (workerFallback: boolean): DurationDiagnostics => ({
     pageErrorTypes: [...new Set(pageErrors)],
     pageErrorOverflow,
     unexpectedConsoleErrors:
       consoleOverflow + countUnexpectedLiveErrors(consoleErrors, workerFallback),
     hostConsoleErrors: consoleErrors.filter(isYouTubeHostError).length,
     consoleErrors: consoleErrors.map(({ type, text, url: errorUrl }) => ({
-      type,
+      type: type ?? 'error',
       text: redactDiagnosticText(text),
-      url: redactDiagnosticText(errorUrl),
+      url: redactDiagnosticText(errorUrl ?? ''),
     })),
   });
-  let page;
-  let background;
-  let resumeObserver;
-  let resumeObserverController;
+  let page: Page | undefined;
+  let background: Page | undefined;
+  let resumeObserver: Promise<ObservationStatus> | undefined;
+  let resumeObserverController: AbortController | undefined;
   let stage = 'preflight:create-page';
   try {
     await persist(stage, 'before');
@@ -460,8 +597,9 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       .locator('video')
       .first()
       .evaluate((video) => {
-        video.muted = true;
-        void video.play().catch(() => {});
+        const media = video as HTMLVideoElement;
+        media.muted = true;
+        void media.play().catch(() => {});
       });
     result.preflight.mediaReadiness = await waitForInitialMedia(page, remainingPreflight(90_000));
     assert.equal(
@@ -476,11 +614,12 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       timeout: remainingPreflight(10_000),
     });
     result.preflight.visibilityProof = [];
-    for (const [target, expected] of [
+    const tabOrder: [Page, string][] = [
       [page, 'visible'],
       [background, 'hidden'],
       [page, 'visible'],
-    ]) {
+    ];
+    for (const [target, expected] of tabOrder) {
       await target.bringToFront();
       await page.waitForFunction(
         (visibility) => document.visibilityState === visibility,
@@ -499,9 +638,10 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
 
     stage = 'observe:active';
     const started = performance.now();
-    const sample = async (phase, scheduledElapsedMs) => {
+    const activePage = page;
+    const sample = async (phase: string, scheduledElapsedMs: number) => {
       stage = `observe:sample:${phase}:${result.samples.length}`;
-      const state = await publicState(page);
+      const state = await publicState(activePage);
       result.samples.push({
         index: result.samples.length,
         phase,
@@ -584,7 +724,7 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       await sample(offset === TOTAL_MS ? 'resumed-final' : 'resumed', offset);
     }
     result.resumeAccessibleRender = await resumeObserver;
-    resumeObserver = null;
+    resumeObserver = undefined;
     result.phaseHealth = Object.fromEntries(
       ['active', 'hidden', 'resumed'].map((phase) => [
         phase,
@@ -615,9 +755,8 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       observed: result.rendererValidation.workerPolicyFallback === true,
       diagnosticCount: workerDiagnostics.filter(isTrustedTypesWorkerBlock).length,
     };
-    result.diagnostics = captureDiagnostics(
-      result.rendererValidation.workerPolicyFallback === true
-    );
+    const diagnostics = captureDiagnostics(result.rendererValidation.workerPolicyFallback === true);
+    result.diagnostics = diagnostics;
     result.observation = {
       plannedMs: TOTAL_MS,
       elapsedMs: performance.now() - started,
@@ -630,10 +769,10 @@ export async function runLiveDuration({ context, url, output, installation = 'ex
       playerControl: result.playerControl,
       resumeAccessibleRender: result.resumeAccessibleRender,
       pageErrorTypes: [
-        ...result.diagnostics.pageErrorTypes,
+        ...diagnostics.pageErrorTypes,
         ...Array.from({ length: pageErrorOverflow }, () => 'overflow'),
       ],
-      unexpectedConsoleErrors: result.diagnostics.unexpectedConsoleErrors,
+      unexpectedConsoleErrors: diagnostics.unexpectedConsoleErrors,
     });
     result.status = 'completed';
     result.evidenceStatus = result.evidenceStatusReasons.length === 0 ? 'observed' : 'unverified';
