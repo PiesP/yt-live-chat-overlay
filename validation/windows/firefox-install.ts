@@ -9,6 +9,7 @@ import { launchFirefoxBidi } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
+  readPublicPageBrowserState,
   redactDiagnosticText,
   selectPublicSeekTarget,
   validateLiveRenderer,
@@ -291,45 +292,10 @@ export function requireFirefoxPublicCoverage(observations: PublicObservation[]) 
   );
 }
 
-async function readPublicPageState(session: FirefoxSession) {
-  return evaluate<{
-    finalUrl: string;
-    chatMode: string;
-    chatRendererFound: boolean;
-    playabilityStatus: string | null;
-    loginRedirect: boolean;
-    consentRedirect: boolean;
-  }>(
+export async function readPublicPageState(session: FirefoxSession) {
+  return evaluate<ReturnType<typeof readPublicPageBrowserState> & { finalUrl: string }>(
     session,
-    `(() => {
-    const initialData = window.ytInitialData;
-    let renderer = initialData?.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
-    if (!renderer && initialData && typeof initialData === 'object') {
-      const pending = [initialData];
-      const seen = new Set();
-      for (let visited = 0; pending.length && visited < 1000; visited++) {
-        const value = pending.pop();
-        if (!value || typeof value !== 'object' || seen.has(value)) continue;
-        seen.add(value);
-        if (value.liveChatRenderer?.continuations) {
-          renderer = value.liveChatRenderer;
-          break;
-        }
-        for (const child of Object.values(value)) {
-          if (child && typeof child === 'object') pending.push(child);
-        }
-      }
-    }
-    const hostname = location.hostname;
-    return {
-      finalUrl: location.href,
-      chatMode: renderer ? (renderer.isReplay === true ? 'replay' : 'live') : 'unknown',
-      chatRendererFound: Boolean(renderer),
-      playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
-      loginRedirect: hostname === 'accounts.google.com',
-      consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com'
-    };
-  })()`
+    `(() => ({ ...(${readPublicPageBrowserState.toString()})(), finalUrl: location.href }))()`
   );
 }
 
