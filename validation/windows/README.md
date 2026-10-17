@@ -400,10 +400,10 @@ invalid CRX headers, corrupt/truncated ZIP payloads, symlink entries, excessive
 entry counts and declared expanded sizes. Extraction, receipt-write and final
 rename failure fixtures verify staging cleanup and preservation of unrelated
 files. They do not establish duplicate-entry behavior, actual expanded-byte
-limits, or VM installation. The manifest-pinned Node runtime has
-no ZIP archive reader in its standard modules, and this repository has no
-reviewed ZIP package. Keep the Python exception until a reviewed, pinned ZIP
-reader can be supplied by the portable host contract.
+limits, or VM installation. Node 26.9.0 provides an experimental ZIP archive
+reader in `node:zlib`; its availability alone does not qualify a replacement for
+this preparer. Keep the Python exception until that API passes the transport,
+archive, cleanup, and source-bound Windows installation contracts.
 Revisit the migration with adversarial archive and transport fixtures plus
 source-bound Windows validation; do not add a guest runtime just to change the
 helper's language.
