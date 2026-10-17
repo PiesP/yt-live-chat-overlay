@@ -41,7 +41,8 @@ details.
 
 ## Development security
 
-CI combines strict TypeScript, Biome, i18n and consistency checks, unit coverage,
+CI combines strict TypeScript, Vite+ formatting/linting, scoped Biome residual
+lint, i18n and consistency checks, unit coverage,
 userscript and extension Playwright tests, production builds, artifact checks,
 CodeQL, OSV Scanner, and Semgrep. The
 workflow files and package scripts are authoritative for the exact checks.
