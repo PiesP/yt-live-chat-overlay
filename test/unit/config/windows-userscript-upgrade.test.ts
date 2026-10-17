@@ -9,8 +9,7 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as chromeInstall from '../../../validation/windows/chrome-install.mjs';
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.mjs';
+import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.ts';
 
 const roots: string[] = [];
 const baselineVersion = '0.45.6';
@@ -66,6 +65,7 @@ describe('installed manager upgrade inputs', () => {
   it('accepts fixed public and candidate paths with byte hashes and matching identity', async () => {
     const { root } = await fixture();
     const inputs = await upgrade.loadUpgradeInputs(root);
+    if (!inputs) throw new Error('Upgrade input fixture was not loaded');
     expect(inputs.baseline.version).toBe(baselineVersion);
     expect(inputs.candidate.version).toBe(candidateVersion);
     expect(inputs.candidate.grants).toContain('unsafeWindow');
@@ -197,7 +197,12 @@ describe('installed manager upgrade inputs', () => {
   });
 
   it('keeps the deferred update receipt after the later approval', () => {
-    let prompt = { status: 'unobserved', deferred: false, approved: false, events: [] };
+    let prompt: ReturnType<typeof upgrade.appendPromptEvent> = {
+      status: 'unobserved',
+      deferred: false,
+      approved: false,
+      events: [],
+    };
     expect(() =>
       upgrade.appendPromptEvent(prompt, { kind: 'approved', decision: 'approve' })
     ).toThrow('observed prompt');

@@ -17,7 +17,7 @@ import {
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.mjs';
 import { run as runFixture } from './profile.mjs';
-import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.mjs';
+import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';

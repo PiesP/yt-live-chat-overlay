@@ -7,6 +7,84 @@ import { constants } from 'node:fs';
 import { lstat, open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { BrowserContext, Locator, Page } from '@playwright/test';
+
+type UpgradeInput = {
+  schemaVersion: number;
+  baselineSha256: string;
+  candidateVersion: string;
+  publishedAssetUrl: string;
+};
+
+type UserscriptMetadata = {
+  name: string;
+  namespace: string;
+  version: string;
+  updateUrl: string;
+  downloadUrl: string;
+  grants: string[];
+};
+
+type Settings = Record<string, string>;
+type PromptEvent = { kind: string; decision: string };
+type PromptState = {
+  status: string;
+  deferred: boolean;
+  approved: boolean;
+  events: PromptEvent[];
+};
+type GrantRow = {
+  index: number;
+  visible: boolean;
+  inSourceEditor: boolean;
+  text: string;
+  className?: string;
+};
+type GrantDisplay = {
+  status: string;
+  rowIndex?: number;
+  visibleText?: string;
+  reason?: string;
+};
+type UpgradeObservation = {
+  status: string;
+  baselineSha256: string;
+  candidateSha256: string;
+  baselineVersion: string;
+  candidateVersion: string;
+  publishedAssetUrl: string;
+  scriptName: string;
+  namespace: string;
+  candidateUnsafeWindowGrant: boolean;
+  prompt: PromptState;
+  permissionDisplay: {
+    status: string;
+    attempts: (GrantDisplay & {
+      scanScope: string;
+      scanOverflow: number;
+      rowScrolled: boolean | null;
+      screenshot: string | null;
+    })[];
+  };
+  stages: { kind: string; prompt: string; actionLabel?: string }[];
+  installedRowDiagnostics?: object[];
+  confirmationDiagnostics?: object[];
+  before?: object;
+  afterDeferral?: object;
+  after?: object;
+  settingsOriginal?: Settings;
+  settingsBefore?: Settings;
+  settingsAfterDeferral?: Settings;
+  settingsAfter?: Settings;
+  settingsRestoredForFixture?: Settings;
+  activeStage?: string;
+  cleanupErrors?: string[];
+};
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}
+
 const DIRECTORY = 'validation/windows/release-upgrade';
 const INPUT_FILE = `${DIRECTORY}/input.json`;
 const BASELINE_FILE = `${DIRECTORY}/public-v0.45.6.user.js`;
@@ -22,39 +100,44 @@ const CANDIDATE_DOWNLOAD_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js';
 const MAX_SCRIPT_BYTES = 16 * 1024 * 1024;
 
-export function sha256(bytes) {
+export function sha256(bytes: Buffer | Uint8Array) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-export function validateUpgradeInput(value) {
+export function validateUpgradeInput(value: unknown): UpgradeInput {
   assert(value && typeof value === 'object' && !Array.isArray(value), 'Invalid upgrade input');
+  const input = value as Record<string, unknown>;
   assert.deepEqual(
-    Object.keys(value).sort(),
+    Object.keys(input).sort(),
     ['baselineSha256', 'candidateVersion', 'publishedAssetUrl', 'schemaVersion'],
     'Unknown or missing upgrade input fields'
   );
-  assert.equal(value.schemaVersion, 1, 'Unsupported upgrade input schema');
-  assert.match(value.baselineSha256, /^[a-f0-9]{64}$/u, 'Invalid public baseline SHA-256');
-  assert.equal(value.candidateVersion, '0.45.7', 'Unexpected candidate version');
-  assert.equal(value.publishedAssetUrl, PUBLIC_ASSET_URL, 'Unexpected public asset URL');
-  return value;
+  assert.equal(input.schemaVersion, 1, 'Unsupported upgrade input schema');
+  assert(typeof input.baselineSha256 === 'string');
+  assert.match(input.baselineSha256, /^[a-f0-9]{64}$/u, 'Invalid public baseline SHA-256');
+  assert.equal(input.candidateVersion, '0.45.7', 'Unexpected candidate version');
+  assert.equal(input.publishedAssetUrl, PUBLIC_ASSET_URL, 'Unexpected public asset URL');
+  return input as UpgradeInput;
 }
 
-export function readUserscriptMetadata(source) {
+export function readUserscriptMetadata(source: string): UserscriptMetadata {
   const header = /^\/\/ ==UserScript==\r?\n([\s\S]*?)^\/\/ ==\/UserScript==/mu.exec(source);
   assert(header, 'Userscript metadata header is missing');
-  const fields = new Map();
-  for (const line of header[1].split(/\r?\n/u)) {
+  const fields = new Map<string, string[]>();
+  for (const line of header[1]?.split(/\r?\n/u) ?? []) {
     const entry = /^\/\/\s+@([A-Za-z-]+)\s+(.+)$/u.exec(line);
     if (!entry) continue;
-    const values = fields.get(entry[1]) ?? [];
-    values.push(entry[2].trim());
-    fields.set(entry[1], values);
+    const key = entry[1];
+    const value = entry[2];
+    if (!key || !value) continue;
+    const values = fields.get(key) ?? [];
+    values.push(value.trim());
+    fields.set(key, values);
   }
-  const exactlyOne = (key) => {
+  const exactlyOne = (key: string) => {
     const values = fields.get(key) ?? [];
     assert.equal(values.length, 1, `Userscript metadata requires one @${key}`);
-    return values[0];
+    return values[0] ?? '';
   };
   return {
     name: exactlyOne('name'),
@@ -66,11 +149,16 @@ export function readUserscriptMetadata(source) {
   };
 }
 
-export function requireUpgradeMetadata(baseline, candidate, candidateVersion) {
-  for (const [label, metadata, version] of [
+export function requireUpgradeMetadata(
+  baseline: UserscriptMetadata,
+  candidate: UserscriptMetadata,
+  candidateVersion: string
+) {
+  const scripts: [string, UserscriptMetadata, string][] = [
     ['baseline', baseline, BASELINE_VERSION],
     ['candidate', candidate, candidateVersion],
-  ]) {
+  ];
+  for (const [label, metadata, version] of scripts) {
     assert.equal(metadata.name, SCRIPT_NAME, `${label} script name changed`);
     assert.equal(metadata.namespace, SCRIPT_NAMESPACE, `${label} script namespace changed`);
     assert.equal(metadata.version, version, `${label} script version changed`);
@@ -86,7 +174,7 @@ export function requireUpgradeMetadata(baseline, candidate, candidateVersion) {
   );
 }
 
-async function readBoundedFile(root, relativePath) {
+async function readBoundedFile(root: string, relativePath: string) {
   const file = join(root, relativePath);
   const flags =
     process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
@@ -94,13 +182,14 @@ async function readBoundedFile(root, relativePath) {
   try {
     handle = await open(file, flags);
   } catch (error) {
-    if (error?.code === 'ELOOP') assert.fail(`Invalid upgrade file: ${relativePath}`);
-    if (error?.code === 'ENOENT') {
+    if (isNodeError(error) && error.code === 'ELOOP')
+      assert.fail(`Invalid upgrade file: ${relativePath}`);
+    if (isNodeError(error) && error.code === 'ENOENT') {
       try {
         // A dangling symlink is an invalid supplied file, not absent input.
         await lstat(file);
       } catch (inspectionError) {
-        if (inspectionError?.code === 'ENOENT') throw error;
+        if (isNodeError(inspectionError) && inspectionError.code === 'ENOENT') throw error;
         throw inspectionError;
       }
       assert.fail(`Invalid upgrade file: ${relativePath}`);
@@ -118,7 +207,7 @@ async function readBoundedFile(root, relativePath) {
     try {
       entry = await lstat(file, { bigint: true });
     } catch (error) {
-      if (error?.code === 'ENOENT')
+      if (isNodeError(error) && error.code === 'ENOENT')
         assert.fail(`Upgrade file changed since inspection: ${relativePath}`);
       throw error;
     }
@@ -156,12 +245,12 @@ async function readBoundedFile(root, relativePath) {
 }
 
 /** No input means the existing fresh installation path. A supplied input is all-or-nothing. */
-export async function loadUpgradeInputs(root) {
+export async function loadUpgradeInputs(root: string) {
   let inputBytes;
   try {
     inputBytes = await readBoundedFile(root, INPUT_FILE);
   } catch (error) {
-    if (error?.code === 'ENOENT') return null;
+    if (isNodeError(error) && error.code === 'ENOENT') return null;
     throw error;
   }
   const input = validateUpgradeInput(JSON.parse(inputBytes.toString('utf8')));
@@ -188,9 +277,9 @@ export async function loadUpgradeInputs(root) {
   };
 }
 
-export function requireInstalledScriptRow(rows, version) {
+export function requireInstalledScriptRow(rows: string[], version: string) {
   assert.equal(rows.length, 1, 'Manager must show one installation for the script identity');
-  const words = rows[0].replace(/\s+/gu, ' ').trim();
+  const words = rows[0]?.replace(/\s+/gu, ' ').trim() ?? '';
   assert(
     words.split(/\s+/u).includes(version),
     `Manager did not show installed version ${version}`
@@ -202,8 +291,8 @@ export function requireInstalledScriptRow(rows, version) {
 // Its separate action-menu renderer also uses tr.script, so that is not a list entry.
 export const INSTALLED_SCRIPT_ROW_SELECTOR = 'tr.scripttr';
 
-export function requireRetainedSettings(before, after) {
-  const numericValues = (values) => {
+export function requireRetainedSettings(before: Settings, after: Settings) {
+  const numericValues = (values: Settings) => {
     assert.deepEqual(Object.keys(values).sort(), ['fontSize', 'opacity', 'safeTop']);
     return Object.fromEntries(
       Object.entries(values).map(([key, value]) => {
@@ -219,7 +308,7 @@ export function requireRetainedSettings(before, after) {
   return after;
 }
 
-export function appendPromptEvent(prompt, event) {
+export function appendPromptEvent(prompt: PromptState, event: PromptEvent): PromptState {
   assert(['observed', 'deferred', 'approved'].includes(event.kind), 'Unknown manager prompt event');
   assert(['defer', 'approve'].includes(event.decision), 'Unknown manager prompt decision');
   if (event.kind !== 'observed')
@@ -233,7 +322,7 @@ export function appendPromptEvent(prompt, event) {
   };
 }
 
-export function classifyManagerGrantRows(rows) {
+export function classifyManagerGrantRows(rows: GrantRow[]): GrantDisplay {
   const found = rows.find(
     (row) =>
       row.visible === true &&
@@ -250,7 +339,7 @@ export function classifyManagerGrantRows(rows) {
     : { status: 'not-observed', reason: 'no-visible-permission-specific-unsafeWindow-row' };
 }
 
-async function observeManagerGrantDisplay(page, output, attempt) {
+async function observeManagerGrantDisplay(page: Page, output: string, attempt: number) {
   const selector = 'tr,[role="row"],li,dl,[class*="grant"],[class*="permission"]';
   const scan = await page.evaluate((query) => {
     const elements = Array.from(document.querySelectorAll(query));
@@ -263,7 +352,7 @@ async function observeManagerGrantDisplay(page, output, attempt) {
           style.display !== 'none' &&
           style.visibility === 'visible',
         inSourceEditor: Boolean(element.closest('.CodeMirror,pre,code,textarea')),
-        text: (element.innerText ?? '').trim().slice(0, 351),
+        text: ((element as HTMLElement).innerText ?? '').trim().slice(0, 351),
         className: typeof element.className === 'string' ? element.className.slice(0, 100) : '',
       };
     });
@@ -274,6 +363,7 @@ async function observeManagerGrantDisplay(page, output, attempt) {
     evidence.reason = 'bounded-permission-row-scan-overflow';
   let rowScrolled = null;
   if (evidence.status === 'observed') {
+    assert(typeof evidence.rowIndex === 'number');
     rowScrolled = await page
       .locator(selector)
       .nth(evidence.rowIndex)
@@ -297,7 +387,14 @@ async function observeManagerGrantDisplay(page, output, attempt) {
   };
 }
 
-async function installedRow(page, labels, version, observation, output, stage) {
+async function installedRow(
+  page: Page,
+  labels: { installedUserscripts: string },
+  version: string,
+  observation: UpgradeObservation,
+  output: string,
+  stage: string
+) {
   await page.getByText(labels.installedUserscripts, { exact: true }).first().click();
   const scriptName = page.locator('span.nameNname16:visible').filter({
     hasText: /^YouTube Live Chat Overlay$/u,
@@ -322,7 +419,7 @@ async function installedRow(page, labels, version, observation, output, stage) {
       elements.slice(0, 12).map((element) => ({
         className: typeof element.className === 'string' ? element.className.slice(0, 120) : '',
         installedEntryDescendants: element.querySelectorAll('tr.scripttr').length,
-        text: (element.innerText ?? '').replace(/\s+/gu, ' ').trim().slice(0, 240),
+        text: ((element as HTMLElement).innerText ?? '').replace(/\s+/gu, ' ').trim().slice(0, 240),
       }))
     );
     const screenshot = `userscript-installed-rows-${stage}.png`;
@@ -347,33 +444,40 @@ async function installedRow(page, labels, version, observation, output, stage) {
   return row;
 }
 
-async function readInstalledEditorSource(page, row) {
+async function readInstalledEditorSource(page: Page, row: Locator) {
   await row
     .locator('span.nameNname16')
     .filter({ hasText: /^YouTube Live Chat Overlay$/u })
     .click();
   const editor = page.locator('.CodeMirror:visible').first();
   await editor.waitFor({ state: 'visible' });
-  const source = await editor.evaluate((element) => element.CodeMirror?.getValue());
+  const source = await editor.evaluate((element) =>
+    (element as HTMLElement & { CodeMirror?: { getValue: () => string } }).CodeMirror?.getValue()
+  );
   assert(typeof source === 'string' && source.length > 0, 'Manager editor source is unavailable');
   return source;
 }
 
 async function observeInstalledScript(
-  page,
-  managerId,
-  version,
-  expectedSha256,
-  observation,
-  output,
-  stage
+  page: Page,
+  managerId: string,
+  version: string,
+  expectedSha256: string,
+  observation: UpgradeObservation,
+  output: string,
+  stage: string
 ) {
   const optionsUrl = `chrome-extension://${managerId}/options.html`;
   await page.goto(optionsUrl);
   assert.equal(page.url(), optionsUrl, 'Manager options page navigated away');
-  const labels = await page.evaluate(() => ({
-    installedUserscripts: chrome.i18n.getMessage('Installed_userscripts'),
-  }));
+  const labels = await page.evaluate(() => {
+    const managerChrome = (
+      globalThis as typeof globalThis & {
+        chrome: { i18n: { getMessage: (key: string) => string } };
+      }
+    ).chrome;
+    return { installedUserscripts: managerChrome.i18n.getMessage('Installed_userscripts') };
+  });
   assert.equal(page.url(), optionsUrl, 'Manager options page navigated during label lookup');
   assert(typeof labels.installedUserscripts === 'string' && labels.installedUserscripts.length > 0);
   const row = await installedRow(page, labels, version, observation, output, stage);
@@ -385,24 +489,31 @@ async function observeInstalledScript(
 }
 
 async function importThroughManager(
-  page,
-  context,
-  managerId,
-  filePath,
-  expectedKind,
-  decision = 'approve',
-  observation = null,
-  output = null
+  page: Page,
+  context: BrowserContext,
+  managerId: string,
+  filePath: string,
+  expectedKind: 'install' | 'update',
+  decision: 'approve' | 'defer' = 'approve',
+  observation: UpgradeObservation | null = null,
+  output: string | null = null
 ) {
   const optionsUrl = `chrome-extension://${managerId}/options.html`;
   await page.goto(optionsUrl);
   assert.equal(page.url(), optionsUrl, 'Manager options page navigated away');
-  const labels = await page.evaluate(() => ({
-    utilities: chrome.i18n.getMessage('Utilities'),
-    install: chrome.i18n.getMessage('Install'),
-    update: chrome.i18n.getMessage('Update'),
-    updateHeading: chrome.i18n.getMessage('You_are_about_to_update_a_UserScript_'),
-  }));
+  const labels = await page.evaluate(() => {
+    const managerChrome = (
+      globalThis as typeof globalThis & {
+        chrome: { i18n: { getMessage: (key: string) => string } };
+      }
+    ).chrome;
+    return {
+      utilities: managerChrome.i18n.getMessage('Utilities'),
+      install: managerChrome.i18n.getMessage('Install'),
+      update: managerChrome.i18n.getMessage('Update'),
+      updateHeading: managerChrome.i18n.getMessage('You_are_about_to_update_a_UserScript_'),
+    };
+  });
   assert.equal(page.url(), optionsUrl, 'Manager options page navigated during label lookup');
   assert(Object.values(labels).every((value) => typeof value === 'string' && value.length > 0));
   await page.getByText(labels.utilities, { exact: true }).click();
@@ -419,6 +530,7 @@ async function importThroughManager(
           .waitFor({ state: 'visible', timeout: 10_000 });
       }
       if (observation) {
+        assert(output, 'Upgrade output directory is required for observation');
         observation.prompt = appendPromptEvent(observation.prompt, {
           kind: 'observed',
           decision,
@@ -494,7 +606,7 @@ async function importThroughManager(
   }
 }
 
-async function openSettingsAndRead(page, timeout = 15_000) {
+async function openSettingsAndRead(page: Page, timeout = 15_000): Promise<Settings> {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout });
   await page.locator('#movie_player').hover({ timeout });
@@ -509,7 +621,7 @@ async function openSettingsAndRead(page, timeout = 15_000) {
   return values;
 }
 
-async function observeSettings(page) {
+async function observeSettings(page: Page) {
   const values = await openSettingsAndRead(page);
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await page.keyboard.press('Escape');
@@ -517,22 +629,27 @@ async function observeSettings(page) {
   return values;
 }
 
-export function matchesStoredSettings(stored, values) {
+export function matchesStoredSettings(stored: Settings | null | undefined, values: Settings) {
   return Boolean(
     stored &&
-      ['fontSize', 'opacity', 'safeTop'].every((key) => {
-        const actual = stored[key];
-        return (
-          typeof actual === 'string' &&
-          actual.trim() !== '' &&
-          Number.isFinite(Number(actual)) &&
-          Number(actual) === Number(values[key])
-        );
-      })
+    ['fontSize', 'opacity', 'safeTop'].every((key) => {
+      const actual = stored[key];
+      return (
+        typeof actual === 'string' &&
+        actual.trim() !== '' &&
+        Number.isFinite(Number(actual)) &&
+        Number(actual) === Number(values[key])
+      );
+    })
   );
 }
 
-async function waitForStoredSettings(page, managerId, root, values) {
+async function waitForStoredSettings(
+  page: Page,
+  managerId: string,
+  root: string,
+  values: Settings
+) {
   // A fresh userscript instance reads the manager's persisted settings into
   // its UI. Keep the original tab alive so its idle save can run; never close
   // the readback dialog through the UI because a stale copy would be saved.
@@ -557,7 +674,7 @@ async function waitForStoredSettings(page, managerId, root, values) {
   }
 }
 
-async function setSettingsThroughUi(page, values, managerId, root) {
+async function setSettingsThroughUi(page: Page, values: Settings, managerId: string, root: string) {
   await page.locator('#yt-chat-overlay-settings-button').waitFor({ state: 'visible' });
   await page.locator('#movie_player').hover();
   await page.locator('#yt-chat-overlay-settings-button').click();
@@ -587,7 +704,7 @@ async function setSettingsThroughUi(page, values, managerId, root) {
   return observed;
 }
 
-async function openOwnedWatchFixture(context, managerId, root) {
+async function openOwnedWatchFixture(context: BrowserContext, managerId: string, root: string) {
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   const withVideo = preview.replace(
     '<div class="player-inner">Video Player Placeholder</div>',
@@ -676,10 +793,16 @@ async function openOwnedWatchFixture(context, managerId, root) {
 }
 
 /** Perform a real UI import and update in one manager installation and browser profile. */
-export async function runManagerUpgrade(context, managerId, root, inputs, output) {
+export async function runManagerUpgrade(
+  context: BrowserContext,
+  managerId: string,
+  root: string,
+  inputs: NonNullable<Awaited<ReturnType<typeof loadUpgradeInputs>>>,
+  output: string
+) {
   const manager = await context.newPage();
-  let fixture;
-  const result = {
+  let fixture: Page | undefined;
+  const result: UpgradeObservation = {
     status: 'incomplete',
     baselineSha256: inputs.baselineSha256,
     candidateSha256: inputs.candidateSha256,
@@ -693,8 +816,8 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
     permissionDisplay: { status: 'not-run', attempts: [] },
     stages: [],
   };
-  let primaryError;
-  let cleanupErrors = [];
+  let primaryError: unknown;
+  let cleanupErrors: unknown[] = [];
   try {
     result.stages.push(
       await importThroughManager(
@@ -790,19 +913,21 @@ export async function runManagerUpgrade(context, managerId, root, inputs, output
     result.status = 'passed';
   } catch (error) {
     primaryError = error;
-    if (error && typeof error === 'object') error.upgradeObservation = result;
+    if (error && typeof error === 'object') Object.assign(error, { upgradeObservation: result });
   } finally {
     const cleanup = await Promise.allSettled([fixture?.close(), manager.close()]);
     cleanupErrors = cleanup.filter((item) => item.status === 'rejected').map((item) => item.reason);
     if (cleanupErrors.length)
-      result.cleanupErrors = cleanupErrors.map((error) => error?.name ?? 'Error');
+      result.cleanupErrors = cleanupErrors.map((error) =>
+        error instanceof Error ? error.name : 'Error'
+      );
   }
   if (cleanupErrors.length) {
     const combined = new AggregateError(
       primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
       primaryError ? 'Upgrade and UI cleanup failed' : 'Upgrade UI cleanup failed'
     );
-    combined.upgradeObservation = result;
+    Object.assign(combined, { upgradeObservation: result });
     throw combined;
   }
   if (primaryError) throw primaryError;
