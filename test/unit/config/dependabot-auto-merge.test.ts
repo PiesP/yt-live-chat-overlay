@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vite-plus/test';
 
@@ -13,6 +15,47 @@ const applyWorkflow = readFileSync(
 );
 
 describe('Dependabot auto-merge security', () => {
+  it.each([
+    { dependencies: 'vite-plus', alert: '', eligible: false },
+    { dependencies: 'vite', alert: '', eligible: false },
+    { dependencies: 'vitest', alert: '', eligible: false },
+    { dependencies: '@vitest/coverage-v8', alert: '', eligible: false },
+    { dependencies: '@voidzero-dev/vite-plus-core', alert: '', eligible: false },
+    { dependencies: 'typescript,vite-plus', alert: '', eligible: false },
+    { dependencies: 'typescript', alert: '', eligible: true },
+    { dependencies: 'vitest', alert: 'open', eligible: true },
+  ])(
+    'evaluates $dependencies with alert $alert as $eligible',
+    ({ dependencies, alert, eligible }) => {
+      const decision = gateWorkflow
+        .split('        id: decide\n')[1]
+        ?.split('\n      - name:')[0]
+        ?.split('        run: |\n')[1]
+        ?.replace(/^ {10}/gm, '');
+      expect(decision).toBeDefined();
+      if (!decision) throw new Error('Missing update decision step');
+      const fixture = mkdtempSync(join(tmpdir(), 'dependabot-managed-toolchain-'));
+      try {
+        const output = join(fixture, 'output');
+        execFileSync('bash', ['-euo', 'pipefail', '-c', decision], {
+          env: {
+            ...process.env,
+            ECOSYSTEM: 'npm',
+            UPDATE_TYPE: 'version-update:semver-minor',
+            DEPENDENCIES: dependencies,
+            ALERT_STATE: alert,
+            MAINTAINER_CHANGES: 'false',
+            GITHUB_OUTPUT: output,
+          },
+          stdio: 'pipe',
+        });
+        expect(readFileSync(output, 'utf8')).toContain(`should_merge=${eligible}\n`);
+      } finally {
+        rmSync(fixture, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('evaluates only Dependabot events with read-only permissions', () => {
     expect(gateWorkflow).toContain("github.event.sender.login == 'dependabot[bot]'");
     expect(gateWorkflow).toContain("github.event.pull_request.user.login == 'dependabot[bot]'");

@@ -27,11 +27,34 @@ updates:
     allow:
       - dependency-type: "direct"
 
+    # Vite+ owns these versions. Normal updates use its reviewed migration flow;
+    # version-update filters do not disable Dependabot security updates.
+    ignore:
+      - dependency-name: "vite"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      - dependency-name: "vitest"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      - dependency-name: "@vitest/*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      - dependency-name: "@voidzero-dev/vite-plus-core"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+
     groups:
-      vitest:
+      vite-plus:
         patterns:
-          - "vitest"
-          - "@vitest/*"
+          - "vite-plus"
         update-types:
           - "minor"
           - "patch"
@@ -39,9 +62,6 @@ updates:
       build:
         patterns:
           - "typescript"
-          - "vite"
-          - "vite-plus"
-          - "@voidzero-dev/vite-plus-core"
           - "vite-plugin-monkey"
           - "@types/*"
         update-types:
