@@ -408,12 +408,16 @@ Revisit the migration with adversarial archive and transport fixtures plus
 source-bound Windows validation; do not add a guest runtime just to change the
 helper's language.
 
-The Semgrep SARIF validator is a separate Python boundary in
-`.github/workflows/security.yaml`. It runs in the pinned Semgrep 1.178.0 scanner
-container under `sh`, immediately after the scan and before SARIF upload. That
-job has no reviewed Node setup in the scanner container. Keep its local Python
-validation and scan-exit gating until a qualified Node stage can preserve the
-same container trust boundary and SARIF checks without another runtime bootstrap.
+The Semgrep SARIF validator is the repository-owned, commit-pinned JavaScript
+Action in `.github/actions/validate-semgrep-sarif`. The scanner still runs in the
+pinned Semgrep container under `sh`; the Action uses the GitHub runner's Node 24
+runtime in that same job and loads its own relative erasable TypeScript source.
+No Node installation or container `PATH` lookup is needed. The shell passes
+scanner exits 0 and 1 to the Action, rejects operational exits, and uploads only
+reports the Action validated. Manual security-workflow runs also scan a bounded
+finding fixture after the production scan to verify the failing finding and
+upload-guard path without uploading the synthetic report. Python used internally
+by Semgrep remains vendor code, separate from the host ZIP preparer above.
 
 This tests Tampermonkey loaded as an unpacked package,
 not the Chrome Web Store installation confirmation. It enables Developer Mode

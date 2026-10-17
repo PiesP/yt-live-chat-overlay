@@ -415,7 +415,7 @@ jobs:
           persist-credentials: false
 
       - name: 🔍 Run Semgrep scan
-        id: semgrep-report
+        id: semgrep-scan
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true' }}
         shell: sh
         run: |
@@ -445,74 +445,16 @@ jobs:
             exit "$scan_status"
           fi
 
-          python3 - "$category" "$scan_status" <<'PY'
-          import json
-          import pathlib
-          import sys
+          printf 'category=%s\nscanner-status=%s\n' "$category" "$scan_status" >> "$GITHUB_OUTPUT"
 
-          category, scan_status = sys.argv[1], int(sys.argv[2])
-          path = pathlib.Path('semgrep.sarif')
-          try:
-              report = json.loads(path.read_text(encoding='utf-8'))
-              if not isinstance(report, dict) or report.get('version') != '2.1.0':
-                  raise ValueError('expected SARIF 2.1.0')
-              runs = report.get('runs')
-              if not isinstance(runs, list) or not runs:
-                  raise ValueError('expected at least one SARIF run')
-              result_count = 0
-              for run in runs:
-                  if not isinstance(run, dict):
-                      raise ValueError('invalid SARIF run')
-                  tool = run.get('tool')
-                  if not isinstance(tool, dict):
-                      raise ValueError('missing SARIF tool')
-                  driver = tool.get('driver')
-                  if not isinstance(driver, dict) or not isinstance(driver.get('name'), str) or not driver['name']:
-                      raise ValueError('missing SARIF tool name')
-                  rules = driver.get('rules')
-                  if driver['name'] != 'Semgrep OSS' or not isinstance(rules, list) or not rules:
-                      raise ValueError('unexpected Semgrep SARIF tool or rules')
-                  rule_ids = {rule.get('id') for rule in rules if isinstance(rule, dict)}
-                  if len(rule_ids) != len(rules) or any(not isinstance(rule_id, str) or not rule_id for rule_id in rule_ids):
-                      raise ValueError('invalid SARIF rules')
-                  results = run.get('results')
-                  if not isinstance(results, list) or any(
-                      not isinstance(result, dict)
-                      or result.get('ruleId') not in rule_ids
-                      or not isinstance(result.get('message'), dict)
-                      or not isinstance(result['message'].get('text'), str)
-                      for result in results
-                  ):
-                      raise ValueError('invalid SARIF results')
-                  invocations = run.get('invocations')
-                  if not isinstance(invocations, list) or not invocations:
-                      raise ValueError('missing SARIF invocation')
-                  for invocation in invocations:
-                      if not isinstance(invocation, dict) or invocation.get('executionSuccessful') is not True:
-                          raise ValueError('unsuccessful SARIF invocation')
-                      notifications = invocation.get('toolExecutionNotifications', [])
-                      if not isinstance(notifications, list) or any(
-                          not isinstance(notification, dict) or notification.get('level') == 'error'
-                          for notification in notifications
-                      ):
-                          raise ValueError('SARIF tool execution error')
-                  result_count += len(results)
-                  details = run.get('automationDetails')
-                  if details is not None and not isinstance(details, dict):
-                      raise ValueError('invalid SARIF automation details')
-                  run['automationDetails'] = {**(details or {}), 'id': f'{category}/'}
-              if scan_status == 1 and result_count == 0:
-                  raise ValueError('findings exit without SARIF results')
-              if scan_status == 0 and result_count != 0:
-                  raise ValueError('clean exit with SARIF results under --error')
-              path.write_text(json.dumps(report), encoding='utf-8')
-          except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
-              print(f'Invalid Semgrep SARIF: {error}', file=sys.stderr)
-              sys.exit(2)
-          PY
-
-          printf 'sarif-upload=true\ncategory=%s\n' "$category" >> "$GITHUB_OUTPUT"
-          exit "$scan_status"
+      - name: ✅ Validate Semgrep SARIF
+        id: semgrep-report
+        if: ${{ !cancelled() && steps.semgrep-scan.outcome == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') }}
+        uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@0c7fea5ab60757cad50520cf5ace89eb6396fabd
+        with:
+          sarif_path: semgrep.sarif
+          category: ${{ steps.semgrep-scan.outputs.category }}
+          scanner_status: ${{ steps.semgrep-scan.outputs.scanner-status }}
 
       - name: 📊 Upload SARIF to GitHub Security
         if: ${{ !cancelled() && steps.semgrep-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') }}
@@ -520,6 +462,59 @@ jobs:
         with:
           sarif_file: semgrep.sarif
           category: ${{ steps.semgrep-report.outputs.category }}
+
+      - name: 🧪 Scan bounded Semgrep finding fixture
+        id: semgrep-fixture-scan
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+        shell: sh
+        run: |
+          set -eu
+          fixture_dir=$(mktemp -d "$RUNNER_TEMP/semgrep-finding.XXXXXXXX")
+          printf '# Scanner fixture; never executed.\neval(input())\n' > "$fixture_dir/source-audit.py"
+          set +e
+          semgrep scan --config=p/typescript --config=p/javascript --config=p/security-audit --config=p/secrets --error --sarif --output="$fixture_dir/finding.sarif" "$fixture_dir/source-audit.py"
+          fixture_status=$?
+          set -e
+          if [ "$fixture_status" -ne 1 ]; then
+            echo "Semgrep finding fixture expected exit 1, got $fixture_status" >&2
+            exit 2
+          fi
+          printf 'report-path=%s\n' "$fixture_dir/finding.sarif" >> "$GITHUB_OUTPUT"
+
+      - name: ✅ Validate bounded Semgrep finding
+        id: semgrep-fixture-report
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.semgrep-fixture-scan.outcome == 'success' }}
+        continue-on-error: true
+        uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@0c7fea5ab60757cad50520cf5ace89eb6396fabd
+        with:
+          sarif_path: ${{ steps.semgrep-fixture-scan.outputs.report-path }}
+          category: semgrep/full
+          scanner_status: '1'
+
+      - name: 🧪 Exercise findings upload guard
+        id: semgrep-fixture-upload-guard
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.semgrep-fixture-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') }}
+        shell: sh
+        env:
+          REPORT_OUTCOME: ${{ steps.semgrep-fixture-report.outcome }}
+          REPORT_CATEGORY: ${{ steps.semgrep-fixture-report.outputs.category }}
+        run: |
+          set -eu
+          test "$REPORT_OUTCOME" = failure
+          test "$REPORT_CATEGORY" = semgrep/full
+
+      - name: ✅ Require bounded finding regression
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+        shell: sh
+        env:
+          SCAN_OUTCOME: ${{ steps.semgrep-fixture-scan.outcome }}
+          REPORT_OUTCOME: ${{ steps.semgrep-fixture-report.outcome }}
+          GUARD_OUTCOME: ${{ steps.semgrep-fixture-upload-guard.outcome }}
+        run: |
+          set -eu
+          test "$SCAN_OUTCOME" = success
+          test "$REPORT_OUTCOME" = failure
+          test "$GUARD_OUTCOME" = success
 
       - name: No relevant changes
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.semgrep != 'true' }}
