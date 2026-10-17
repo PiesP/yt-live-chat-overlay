@@ -1,5 +1,7 @@
 import { run } from './validate.ts';
 
+console.log(`Semgrep SARIF validator runtime: ${process.version} (${process.execPath})`);
+
 try {
   process.exitCode = run();
 } catch {

@@ -1,9 +1,18 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 type RecordValue = Record<string, unknown>;
+const losslessJson = JSON as typeof JSON & {
+  isRawJSON(value: unknown): boolean;
+  rawJSON(source: string): object;
+};
 
 function isObject(value: unknown): value is RecordValue {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !losslessJson.isRawJSON(value)
+  );
 }
 
 function fail(message: string): never {
@@ -106,7 +115,20 @@ export function run(): number {
     const bytes = readFileSync(path);
     // Keep the BOM visible: Python's former utf-8 JSON reader rejected it.
     const source = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    report = normalize(JSON.parse(source) as unknown, category, Number(status));
+    const parsed = JSON.parse(
+      source,
+      (_key: string, value: unknown, context?: { source?: string }) => {
+        const raw = context?.source;
+        // SARIF permits unrelated numeric metadata; preserve JSON integers beyond JS precision.
+        return typeof value === 'number' &&
+          !Number.isSafeInteger(value) &&
+          raw &&
+          /^-?(?:0|[1-9]\d*)$/.test(raw)
+          ? losslessJson.rawJSON(raw)
+          : value;
+      }
+    ) as unknown;
+    report = normalize(parsed, category, Number(status));
   } catch (error) {
     const message =
       error instanceof SyntaxError

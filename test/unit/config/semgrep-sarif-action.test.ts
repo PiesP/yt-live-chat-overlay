@@ -96,6 +96,8 @@ describe('repository-owned Semgrep SARIF Action', () => {
     source.automationDetails = { id: 'old', description: { text: 'retained' } };
     const check = invoke({ report: sarif([source]), category });
     expect(check.result.status, check.result.stderr).toBe(0);
+    expect(check.result.stdout).toMatch(/Semgrep SARIF validator runtime: v\d+\.\d+\.\d+ \(/);
+    expect(check.result.stdout).toContain(`(${runtime})`);
     expect(check.outputs).toBe(`sarif-upload=true\ncategory=${category}\n`);
     const normalized = JSON.parse(check.report ?? '') as { runs: { automationDetails: unknown }[] };
     expect(normalized.runs[0]?.automationDetails).toEqual({
@@ -116,6 +118,20 @@ describe('repository-owned Semgrep SARIF Action', () => {
       { id: 'semgrep/secrets/' },
       { id: 'semgrep/secrets/' },
     ]);
+  });
+
+  it('preserves large positive and negative integer metadata while replacing only the category ID', () => {
+    const source = sarif([
+      { ...run(), automationDetails: { id: 'old', marker: 'LARGE_INTEGERS' } },
+    ]).replace(
+      '"marker":"LARGE_INTEGERS"',
+      '"positive":9007199254740993,"negative":-9007199254740993'
+    );
+    const check = invoke({ report: source });
+    expect(check.result.status, check.result.stderr).toBe(0);
+    expect(check.report).toContain('"positive":9007199254740993');
+    expect(check.report).toContain('"negative":-9007199254740993');
+    expect(check.report).toContain('"id":"semgrep/secrets/"');
   });
 
   it.each([
@@ -167,6 +183,22 @@ describe('repository-owned Semgrep SARIF Action', () => {
       ]),
     ],
     ['invalid automation details', sarif([{ ...run(), automationDetails: [] }])],
+    [
+      'large integer automation details',
+      sarif([{ ...run(), automationDetails: 'PLACEHOLDER' }]).replace(
+        '"PLACEHOLDER"',
+        '9007199254740993'
+      ),
+    ],
+    [
+      'large integer notification',
+      sarif([
+        {
+          ...run(),
+          invocations: [{ executionSuccessful: true, toolExecutionNotifications: ['PLACEHOLDER'] }],
+        },
+      ]).replace('"PLACEHOLDER"', '-9007199254740993'),
+    ],
     ['invalid second run', sarif([run(), { ...run(), results: null }])],
   ] as const)('rejects %s before publishing outputs', (_label, report) => {
     const check = invoke({ report });
