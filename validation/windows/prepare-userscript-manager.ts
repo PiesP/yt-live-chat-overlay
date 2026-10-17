@@ -215,8 +215,11 @@ export async function unpackPackage(
   }
   const reader = zipApi.ZipEntry;
   if (!reader) throw new Error('The pinned Node ZIP reader is unavailable.');
-  const entries = [...reader.read(body.subarray(12 + headerSize))];
-  if (entries.length > MAX_ENTRIES) throw new Error('Unexpected package size.');
+  const entries: ZipEntryView[] = [];
+  for (const entry of reader.read(body.subarray(12 + headerSize))) {
+    if (entries.length === MAX_ENTRIES) throw new Error('Unexpected package size.');
+    entries.push(entry);
+  }
   let declared = 0;
   const names = new Map<string, { name: string; kind: 'file' | 'directory'; explicit: boolean }>();
   const selected: { parts: string[]; entry: ZipEntryView }[] = [];
