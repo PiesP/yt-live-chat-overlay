@@ -7,6 +7,8 @@ import { join } from 'node:path';
 
 import type { BrowserContext } from '@playwright/test';
 
+import { buildVisibleWatchHtml } from './visible-watch.ts';
+
 type CanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Rect = { left: number; top: number; right: number; bottom: number };
 type InkRun = { text: string; left: number; top: number; width: number; height: number };
@@ -2209,16 +2211,7 @@ async function runScenario({
     }
   }
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
-  let html = preview
-    .replace(
-      '<div class="player-inner">Video Player Placeholder</div>',
-      '<video aria-label="Placement fixture video" style="width:100%;height:100%"></video>'
-    )
-    .replace(
-      '</body>',
-      '<div id="chat"><yt-live-chat-item-list-renderer><div id="items"></div></yt-live-chat-item-list-renderer></div></body>'
-    );
-  assert.notEqual(html, preview, 'Placement fixture video was not installed');
+  let html = buildVisibleWatchHtml(preview, 'Placement fixture video');
   if (mixedGap)
     html = html
       .replace(

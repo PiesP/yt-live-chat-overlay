@@ -1,6 +1,3 @@
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
 import { AR } from '../../src/i18n/ar.ts';
 import { EN } from '../../src/i18n/en.ts';
 import { ES } from '../../src/i18n/es.ts';
@@ -44,13 +41,4 @@ export function checkLocaleKeys(): void {
   console.log(`All ${Object.keys(locales).length} locales match (${referenceKeys.length} keys).`);
 }
 
-function isDirectInvocation(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectInvocation()) checkLocaleKeys();
+if (import.meta.main) checkLocaleKeys();
