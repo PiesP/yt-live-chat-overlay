@@ -1,12 +1,14 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
-const reviewedSha = '83364ae1027cf6b1761a91dcb855ea9a95c8886c';
+const reviewedConsumerSha = '83364ae1027cf6b1761a91dcb855ea9a95c8886c';
+const reviewedProviderSha = '4ab0442d8d2e3cf640767b499b6444c92f6479b5';
+const action = `uses: PiesP/browser-core/automation/actions/prepare-scanner-pins@${reviewedProviderSha}`;
 const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
-const reviewedFiles = 'pinned-tools.json pinned-tools.ts check-pinned-tools.ts';
 
 function jobSection(workflow: string, job: string): string {
   const section = workflow.match(new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`))?.[0];
@@ -14,23 +16,64 @@ function jobSection(workflow: string, job: string): string {
   return section;
 }
 
+function stepSection(job: string, name: string): string {
+  return job.split(`      - name: ${name}\n`)[1]?.split('\n      - name: ')[0] ?? '';
+}
+
 describe('reviewed scanner helper boundary', () => {
-  it('retains scanner image and freshness validation in the reviewed source', () => {
+  it('retains consumer-owned scanner metadata byte-for-byte', () => {
+    expect(createHash('sha256').update(read('scripts/ci/pinned-tools.json')).digest('hex')).toBe(
+      '6272b8eb6806d92fcae67f4f1bba238b0955a08e7b5d544276b9fdb1006588b9'
+    );
     const pins = JSON.parse(read('scripts/ci/pinned-tools.json')) as Record<string, unknown>;
     expect(Object.keys(pins).sort()).toEqual(['osv', 'semgrep']);
-    expect(read('scripts/ci/pinned-tools.ts')).toContain('OSV_SCANNER_IMAGE=');
-    expect(read('scripts/ci/pinned-tools.ts')).toContain('SEMGREP_IMAGE=');
-    expect(read('scripts/ci/check-pinned-tools.ts')).toContain('checkOsvDigest');
-    expect(read('scripts/ci/check-pinned-tools.ts')).toContain("checkRelease('semgrep'");
   });
 
-  it('binds both active security helper copies to the published immutable revision', () => {
-    expect(reviewedSha).toMatch(/^[0-9a-f]{40}$/u);
+  it('binds both security jobs to the reviewed provider and YT metadata', () => {
+    expect(reviewedConsumerSha).toMatch(/^[0-9a-f]{40}$/u);
+    expect(reviewedProviderSha).toMatch(/^[0-9a-f]{40}$/u);
     const security = read('.github/workflows/security.yaml');
-    expect(security.match(new RegExp(`ref: ${reviewedSha}`, 'gu'))).toHaveLength(2);
-    expect(security.split(`for name in ${reviewedFiles}; do`)).toHaveLength(3);
-    expect(security).toContain('pinned-tools.ts" env');
-    expect(security).toContain('"$pinned_dir/check-pinned-tools.ts"');
+    const selected =
+      "${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}";
+    for (const [name, mode] of [
+      ['pin-metadata', 'env'],
+      ['pinned-tools', 'check'],
+    ] as const) {
+      const body = jobSection(security, name);
+      const checkout = body.indexOf(`ref: ${reviewedConsumerSha}`);
+      const runtime = body.indexOf("install-dependencies: 'false'");
+      const helper = body.indexOf(action);
+      const command = body.indexOf(` ${mode} "$pin_metadata"`);
+      expect(checkout).toBeGreaterThan(0);
+      expect(runtime).toBeGreaterThan(checkout);
+      expect(helper).toBeGreaterThan(runtime);
+      expect(command).toBeGreaterThan(helper);
+      expect(body).toContain('id: scanner_helper');
+      expect(body).toContain('pinned_dir="$(mktemp -d "$RUNNER_TEMP/pinned-tools.XXXXXXXX")"');
+      expect(body).toContain('pin_metadata="$pinned_dir/pinned-tools.json"');
+      expect(body).toContain('install -m 0600 scripts/ci/pinned-tools.json "$pin_metadata"');
+      expect(body).toContain('"${{ steps.scanner_helper.outputs.helper-path }}"');
+      expect(body).not.toContain('continue-on-error:');
+      expect(body).toContain('contents: read');
+      if (name === 'pinned-tools') {
+        for (const step of [
+          '📥 Checkout code',
+          '📦 Setup reviewed pin runtime',
+          '🔐 Prepare reviewed scanner pin helper',
+          '🔎 Check pinned tools after the cooling window',
+        ]) {
+          expect(stepSection(body, step)).toContain(`if: ${selected}`);
+        }
+        expect(body).toContain('GH_TOKEN: ${{ github.token }}');
+      }
+    }
+    expect(jobSection(security, 'pin-metadata')).toContain('GITHUB_ENV="$GITHUB_OUTPUT"');
+    expect(security).toContain('OSV_SCANNER_IMAGE: ${{ steps.pins.outputs.OSV_SCANNER_IMAGE }}');
+    expect(security).toContain('SEMGREP_IMAGE: ${{ steps.pins.outputs.SEMGREP_IMAGE }}');
+    expect(security).toContain("needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE");
+    expect(security).toContain("needs['pin-metadata'].outputs.SEMGREP_IMAGE");
+    expect(security).not.toContain('scripts/ci/pinned-tools.ts');
+    expect(security).not.toContain('check-pinned-tools.ts');
     expect(security).not.toContain('install-nose.ts');
   });
 

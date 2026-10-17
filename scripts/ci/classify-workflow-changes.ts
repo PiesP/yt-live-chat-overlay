@@ -94,7 +94,7 @@ export function classifyWorkflowChanges(
       mark('quality', 'unit', 'build', 'semgrep', 'codeql_javascript');
       if (path.startsWith('scripts/ci/')) {
         mark('pinned_tools');
-        if (path === 'scripts/ci/pinned-tools.json' || path === 'scripts/ci/pinned-tools.ts') {
+        if (path === 'scripts/ci/pinned-tools.json') {
           mark('osv');
         }
       }

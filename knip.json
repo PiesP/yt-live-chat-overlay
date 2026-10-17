@@ -5,9 +5,7 @@
     "extension/background.ts!",
     "extension/content-script.ts!",
     "extension/page-script.ts!",
-    "scripts/ci/check-pinned-tools.ts",
     "scripts/ci/classify-workflow-changes.ts",
-    "scripts/ci/pinned-tools.ts",
     "validation/windows/profile.ts",
     "validation/windows/install-profile.ts",
     "vite.config.*.ts"

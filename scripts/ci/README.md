@@ -15,19 +15,25 @@ and appends them to `GITHUB_OUTPUT` when set.
 # Pinned security tools
 
 `pinned-tools.json` records OSV scanner and Semgrep versions and image digests.
-The dependency-free `check-pinned-tools.ts` checks the newest stable GitHub
-release older than 24 hours and the OSV tag's GHCR manifest digest. Version
-drift warns; missing metadata, API failure, or digest drift fails. It continues
-checking later pins after an earlier failure. `pinned-tools.ts env` writes
-validated image references to `GITHUB_ENV` and accepts no metadata path. Both
-modules are inert on import.
+The reviewed `browser-core/automation/actions/prepare-scanner-pins` Action
+copies its dependency-free CLI into private runner storage. The security
+workflow separately copies this repository's reviewed JSON to a private file
+and passes its absolute path to both `env` and `check`. `env` writes validated
+image references to `GITHUB_ENV`; `check` checks stable GitHub releases older
+than 24 hours and the OSV tag's GHCR manifest digest. Version drift warns;
+invalid metadata, API failure, or digest drift fails. Later checks continue
+after an earlier failure.
 
-The security workflow resolves scanner images and freshness checks from the
-immutable reviewed `83364ae1027cf6b1761a91dcb855ea9a95c8886c` revision.
-Each job sets up Node before running a private copy of the helpers. The
-privileged security jobs never run candidate PR helper code. Repin only to a
-reviewed, published full commit. The focused CLI fixture test is
-`test/unit/config/pinned-tools-cli.test.ts`.
+The workflow pins consumer data at
+`83364ae1027cf6b1761a91dcb855ea9a95c8886c` and provider code at
+`4ab0442d8d2e3cf640767b499b6444c92f6479b5`, independently by full SHA.
+Both paths run after the selected Node setup, and no scanner code or pin data
+comes from a candidate PR checkout. The provider snapshots in
+`test/fixtures/scanner-provider/` are test-only copies from the reviewed Action
+revision. `test/unit/config/pinned-tools-cli.test.ts` checks their byte hashes
+and exercises the real Action preparation and CLI without changing the runtime
+`packages/core` gitlink. The workflow Action SHA and caller paths are checked by
+`test/unit/config/scanner-pin-workflow.test.ts`.
 
 CI runs `test:ci` within quality when quality is selected. When only unit is
 selected, the unit job runs it before independent full coverage. A failed or
