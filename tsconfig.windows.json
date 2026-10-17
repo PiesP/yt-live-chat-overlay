@@ -18,5 +18,9 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["validation/windows/**/*.ts", "src/types/globals.d.ts"]
+  "include": [
+    "validation/windows/**/*.ts",
+    "src/types/globals.d.ts",
+    "test/unit/config/fixtures/devtools-endpoint.ts"
+  ]
 }

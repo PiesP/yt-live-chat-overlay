@@ -8,10 +8,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 
+import type { BrowserContext, Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as chromeInstallModule from '../../../validation/windows/chrome-install.mjs';
+import * as chromeInstallModule from '../../../validation/windows/chrome-install.ts';
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.ts';
 
 const {
@@ -138,10 +138,15 @@ describe('installed Chrome acceptance outcomes', () => {
       };
     }
     let navigation = 'initial-watch';
-    const finish = beginOwnedExtensionResourceCapture(page, id, expected, () => ({
-      sourcePhase: 'navigation',
-      navigation,
-    }));
+    const finish = beginOwnedExtensionResourceCapture(
+      page as unknown as Page,
+      id,
+      expected,
+      () => ({
+        sourcePhase: 'navigation',
+        navigation,
+      })
+    );
     for (navigation of ['initial-watch', 'next-watch']) {
       for (const path of resources) {
         const body = Buffer.from(path);
@@ -181,6 +186,39 @@ describe('installed Chrome acceptance outcomes', () => {
     }
   });
 
+  it('records the bounded Playwright network failure reason for an owned resource', async () => {
+    const page = new EventEmitter();
+    const id = 'a'.repeat(32);
+    const body = Buffer.from('resource');
+    const expected = {
+      'page-script.js': {
+        maxBytes: 100,
+        bytes: body.length,
+        sha256: createHash('sha256').update(body).digest('hex'),
+      },
+    };
+    const finish = beginOwnedExtensionResourceCapture(
+      page as unknown as Page,
+      id,
+      expected,
+      () => ({
+        navigation: 'initial-watch',
+      })
+    );
+    const request = {
+      url: () => `chrome-extension://${id}/page-script.js`,
+      frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+      failure: () => ({ errorText: 'net::ERR_CONNECTION_RESET' }),
+    };
+    page.emit('request', request);
+    page.emit('requestfailed', request);
+    const result = await finish();
+    expect(result.requests[0]).toMatchObject({
+      status: 'unverified',
+      reason: 'net::ERR_CONNECTION_RESET',
+    });
+  });
+
   it.each([
     ['https://accounts.google.com/ServiceLogin', true, false],
     ['https://consent.youtube.com/', false, true],
@@ -200,7 +238,10 @@ describe('installed Chrome acceptance outcomes', () => {
             URL,
           }),
       };
-      expect(await readPublicPageState(page)).toMatchObject({ loginRedirect, consentRedirect });
+      expect(await readPublicPageState(page as unknown as Page)).toMatchObject({
+        loginRedirect,
+        consentRedirect,
+      });
     }
   );
 
@@ -247,7 +288,7 @@ describe('installed Chrome acceptance outcomes', () => {
           },
         }),
     };
-    expect(await readManagerUiLabels(page, 'owned')).toEqual(expected);
+    expect(await readManagerUiLabels(page as unknown as Page, 'owned')).toEqual(expected);
   });
 
   it('rejects manager label lookup outside its owned options page and after navigation', async () => {
@@ -261,9 +302,9 @@ describe('installed Chrome acceptance outcomes', () => {
     ]) {
       expect(isOwnedManagerOptionsUrl(url, 'owned')).toBe(false);
       const evaluate = vi.fn();
-      await expect(readManagerUiLabels({ url: () => url, evaluate }, 'owned')).rejects.toThrow(
-        'owned options page'
-      );
+      await expect(
+        readManagerUiLabels({ url: () => url, evaluate } as unknown as Page, 'owned')
+      ).rejects.toThrow('owned options page');
       expect(evaluate).not.toHaveBeenCalled();
     }
     expect(isOwnedManagerOptionsUrl(optionsUrl, 'owned')).toBe(true);
@@ -275,7 +316,10 @@ describe('installed Chrome acceptance outcomes', () => {
       });
     await expect(
       readManagerUiLabels(
-        { url: () => optionsUrl, evaluate: evaluateFrom('https://example.com/') },
+        {
+          url: () => optionsUrl,
+          evaluate: evaluateFrom('https://example.com/'),
+        } as unknown as Page,
         'owned'
       )
     ).rejects.toThrow('navigated away');
@@ -289,7 +333,7 @@ describe('installed Chrome acceptance outcomes', () => {
             reportedUrl = 'chrome-extension://other/options.html';
             return labels;
           },
-        },
+        } as unknown as Page,
         'owned'
       )
     ).rejects.toThrow('navigated away after label lookup');
@@ -330,7 +374,10 @@ describe('installed Chrome acceptance outcomes', () => {
         };
       });
       const page = { goto: vi.fn(async () => {}), locator, close: vi.fn(async () => {}) };
-      await enableDeveloperMode({ newPage: async () => page }, browserName);
+      await enableDeveloperMode(
+        { newPage: async () => page } as unknown as BrowserContext,
+        browserName
+      );
       expect(page.goto).toHaveBeenCalledWith(
         browserName === 'msedge' ? 'edge://extensions/' : 'chrome://extensions/'
       );
@@ -354,9 +401,9 @@ describe('installed Chrome acceptance outcomes', () => {
       })),
       close: vi.fn(async () => {}),
     };
-    await expect(enableDeveloperMode({ newPage: async () => page }, 'msedge')).rejects.toThrow(
-      'Developer mode is disabled'
-    );
+    await expect(
+      enableDeveloperMode({ newPage: async () => page } as unknown as BrowserContext, 'msedge')
+    ).rejects.toThrow('Developer mode is disabled');
     expect(page.close).toHaveBeenCalledOnce();
   });
 

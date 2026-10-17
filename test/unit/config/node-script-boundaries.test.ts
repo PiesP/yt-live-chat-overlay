@@ -85,14 +85,18 @@ describe('Node script boundaries', () => {
     expect(scriptsConfig.compilerOptions.erasableSyntaxOnly).toBe(true);
     expect(scriptsConfig.compilerOptions.lib).toEqual(['ES2022']);
     expect(scriptsConfig.include).toContain('scripts/**/*.ts');
-    expect(scriptsConfig.include).toContain('test/unit/config/fixtures/devtools-endpoint.ts');
+    expect(scriptsConfig.include).not.toContain('test/unit/config/fixtures/devtools-endpoint.ts');
     expect(windowsConfig.compilerOptions).toMatchObject({
       module: 'NodeNext',
       erasableSyntaxOnly: true,
       strict: true,
       allowImportingTsExtensions: true,
     });
-    expect(windowsConfig.include).toEqual(['validation/windows/**/*.ts']);
+    expect(windowsConfig.include).toEqual([
+      'validation/windows/**/*.ts',
+      'src/types/globals.d.ts',
+      'test/unit/config/fixtures/devtools-endpoint.ts',
+    ]);
     expect(browserConfig.match(/"include":\s*\[([^\]]*)\]/)?.[1]).not.toContain(
       '"scripts/**/*.ts"'
     );

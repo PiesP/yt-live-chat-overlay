@@ -4,10 +4,21 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
+import type { BigIntStats } from 'node:fs';
 import { lstat, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import type {
+  BrowserContext,
+  BrowserType,
+  CDPSession,
+  Page,
+  Request,
+  Response,
+} from '@playwright/test';
+
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
+import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import {
   countUnexpectedLiveErrors,
@@ -29,8 +40,107 @@ const OWNED_EXTENSION_RESOURCES = {
   'workers/renderer.js': 524_288,
   'page-script.js': 2_097_152,
 };
+type ExpectedResource = { maxBytes: number; bytes: number; sha256: string };
+type ResourceEntry = {
+  path: string;
+  sourcePhase?: string | undefined;
+  navigation?: string | undefined;
+  documentUrl: string | null;
+  documentUrlSha256: string | null;
+  status: string;
+  reason: string | null;
+  responseStatus: number | null;
+  mime: string | null;
+  expectedBytes: number;
+  expectedSha256: string;
+  bytes?: number;
+  sha256?: string;
+};
+type WorkflowStep = {
+  status: string;
+  kind?: string;
+  reason?: string | null;
+  [key: string]: unknown;
+};
+type LiveObservation = {
+  url: string;
+  status: string;
+  mocked: boolean;
+  phase?: string;
+  screenshot?: string;
+  finalUrl?: string;
+  title?: string;
+  video?: unknown;
+  fontSize?: number;
+  renderedMessages?: number;
+  canvasAttached?: boolean;
+  renderer?: string;
+  extensionBridge?: unknown;
+  installedBridgeReady?: boolean;
+  chatMode?: string;
+  provider?: Awaited<ReturnType<typeof readPublicPageState>>;
+  workflow?: Record<string, WorkflowStep>;
+  reason?: string;
+  extensionResources?: unknown;
+  workerDiagnostics?: unknown[];
+  pageErrorTypes?: string[];
+  unexpectedConsoleErrors?: number;
+  hostConsoleErrors?: number;
+  consoleErrors?: unknown[];
+  workerPolicyFallback?: boolean;
+  [key: string]: unknown;
+};
+type UpgradeResult =
+  | (Awaited<ReturnType<typeof runManagerUpgrade>> & { effectiveGrantEvidence?: unknown })
+  | { status: string };
+type ChromeResult<Live = LiveObservation> = {
+  installation: string;
+  fixture: Awaited<ReturnType<typeof runFixture>> | null;
+  placementTiming?: Awaited<ReturnType<typeof runPlacementTimingFixture>> | null;
+  bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
+  userscriptUpgrade?: UpgradeResult | null;
+  live: Live[];
+  liveWorkflowCoverage?: {
+    observedModes: (string | undefined)[];
+    crossWatch: boolean;
+    status: string;
+  } | null;
+  liveObservation?: { mode: 'duration'; duration_seconds: 1200 } | null;
+  cleanup: Record<string, unknown>;
+  browserVersion?: string;
+  installationMethod?: string;
+  userscriptManager?: unknown;
+  naturalChrome?: unknown;
+};
+type CleanupOptions = {
+  context?:
+    | BrowserContext
+    | { close: () => Promise<unknown>; browser?: () => { close: () => Promise<unknown> } }
+    | undefined;
+  cdp?:
+    | { send: (method: 'Extensions.uninstall', params: { id: string }) => Promise<unknown> }
+    | null
+    | undefined;
+  extensionId?: string | null | undefined;
+  profile: string;
+  output: string;
+  result: { cleanup: Record<string, unknown> };
+  browserProcessId?: number | undefined;
+  browserProcessIdentity?: ChromeProcessIdentity | undefined;
+  root: string;
+};
+type ChromeOptions = {
+  chromium: BrowserType;
+  root: string;
+  output: string;
+  browserName?: 'chrome' | 'msedge';
+  headless?: boolean;
+  installation: 'extension' | 'userscript';
+  liveUrls?: string[];
+  liveObservation?: { mode: 'duration'; duration_seconds: 1200 } | null;
+};
 
-export function ownedExtensionResourcePath(value, extensionId) {
+export function ownedExtensionResourcePath(value: string, extensionId: string) {
   if (typeof extensionId !== 'string' || !/^[a-p]{32}$/u.test(extensionId)) return null;
   try {
     const url = new URL(value);
@@ -50,7 +160,7 @@ export function ownedExtensionResourcePath(value, extensionId) {
   }
 }
 
-export function compareOwnedExtensionResourceBody(body, expected) {
+export function compareOwnedExtensionResourceBody(body: unknown, expected: ExpectedResource) {
   if (!Buffer.isBuffer(body) || body.length > expected.maxBytes) {
     return { status: 'unverified', reason: 'body-overflow' };
   }
@@ -63,14 +173,20 @@ export function compareOwnedExtensionResourceBody(body, expected) {
   };
 }
 
-export async function readBoundedPackagedResource(file, label, maxBytes, { onOpened } = {}) {
+export async function readBoundedPackagedResource(
+  file: string,
+  label: string,
+  maxBytes: number,
+  { onOpened }: { onOpened?: () => Promise<void> } = {}
+) {
   const flags =
     process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
   let handle;
   try {
     handle = await open(file, flags);
   } catch (error) {
-    if (error?.code === 'ELOOP') assert.fail(`Invalid packaged resource: ${label}`);
+    if ((error as NodeJS.ErrnoException)?.code === 'ELOOP')
+      assert.fail(`Invalid packaged resource: ${label}`);
     throw error;
   }
   try {
@@ -81,7 +197,7 @@ export async function readBoundedPackagedResource(file, label, maxBytes, { onOpe
       `Packaged ${label} exceeds diagnostic body limit or is empty`
     );
     await onOpened?.();
-    const matchesOpened = (entry) =>
+    const matchesOpened = (entry: BigIntStats) =>
       entry.isFile() &&
       !entry.isSymbolicLink() &&
       entry.dev === opened.dev &&
@@ -93,7 +209,8 @@ export async function readBoundedPackagedResource(file, label, maxBytes, { onOpe
       try {
         entry = await lstat(file, { bigint: true });
       } catch (error) {
-        if (error?.code === 'ENOENT') assert.fail(`Packaged ${label} changed during inspection`);
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT')
+          assert.fail(`Packaged ${label} changed during inspection`);
         throw error;
       }
       assert(matchesOpened(entry), `Packaged ${label} changed during inspection`);
@@ -117,8 +234,8 @@ export async function readBoundedPackagedResource(file, label, maxBytes, { onOpe
   }
 }
 
-async function readExpectedExtensionResources(root) {
-  const expected = {};
+async function readExpectedExtensionResources(root: string) {
+  const expected: Record<string, ExpectedResource> = {};
   for (const [path, maxBytes] of Object.entries(OWNED_EXTENSION_RESOURCES)) {
     const body = await readBoundedPackagedResource(
       join(root, 'dist-extension', path),
@@ -134,14 +251,21 @@ async function readExpectedExtensionResources(root) {
   return expected;
 }
 
-export function beginOwnedExtensionResourceCapture(page, extensionId, expected, sourceContext) {
-  const requests = [];
-  const pending = new Set();
-  const entries = new Map();
+export function beginOwnedExtensionResourceCapture(
+  page: Page,
+  extensionId: string,
+  expected: Record<string, ExpectedResource>,
+  sourceContext: () => { sourcePhase?: string | undefined; navigation?: string | undefined }
+) {
+  const requests: ResourceEntry[] = [];
+  const pending = new Set<Promise<void>>();
+  const entries = new Map<Request, ResourceEntry>();
   let overflow = 0;
-  const onRequest = (request) => {
+  const onRequest = (request: Request) => {
     const path = ownedExtensionResourcePath(request.url(), extensionId);
     if (!path) return;
+    const resource = expected[path];
+    assert(resource, 'Expected owned extension resource is missing');
     if (requests.length >= RESOURCE_REQUEST_LIMIT) {
       overflow++;
       return;
@@ -170,32 +294,33 @@ export function beginOwnedExtensionResourceCapture(page, extensionId, expected, 
       reason: 'request-incomplete',
       responseStatus: null,
       mime: null,
-      expectedBytes: expected[path].bytes,
-      expectedSha256: expected[path].sha256,
+      expectedBytes: resource.bytes,
+      expectedSha256: resource.sha256,
     };
     requests.push(entry);
     entries.set(request, entry);
   };
-  const recordResponse = (entry, response) => {
+  const recordResponse = (entry: ResourceEntry, response: Response) => {
     entry.responseStatus = response.status();
     const mime = response.headers()['content-type']?.split(';', 1)[0]?.trim();
     entry.mime = mime && /^[\w.+-]+\/[\w.+-]+$/u.test(mime) ? mime : null;
   };
-  const onResponse = (response) => {
+  const onResponse = (response: Response) => {
     const entry = entries.get(response.request());
     if (entry) recordResponse(entry, response);
   };
-  const onRequestFailed = (request) => {
+  const onRequestFailed = (request: Request) => {
     const entry = entries.get(request);
     if (!entry) return;
-    entry.reason = /^net::ERR_[A-Z_]+$/u.test(request.failure() ?? '')
-      ? request.failure()
-      : 'request-failed';
+    const failure = request.failure()?.errorText ?? '';
+    entry.reason = /^net::ERR_[A-Z_]+$/u.test(failure) ? failure : 'request-failed';
     entries.delete(request);
   };
-  const onRequestFinished = (request) => {
+  const onRequestFinished = (request: Request) => {
     const entry = entries.get(request);
     if (!entry) return;
+    const resource = expected[entry.path];
+    assert(resource, 'Expected owned extension resource is missing');
     entries.delete(request);
     const inspect = (async () => {
       const response = await request.response();
@@ -213,17 +338,17 @@ export function beginOwnedExtensionResourceCapture(page, extensionId, expected, 
         entry.reason = 'body-size-unavailable';
         return;
       }
-      if (size > expected[entry.path].maxBytes) {
+      if (size > resource.maxBytes) {
         entry.reason = 'body-overflow';
         return;
       }
       const contentLength = Number(response.headers()['content-length']);
-      if (Number.isFinite(contentLength) && contentLength > expected[entry.path].maxBytes) {
+      if (Number.isFinite(contentLength) && contentLength > resource.maxBytes) {
         entry.reason = 'body-overflow';
         return;
       }
       const body = await response.body();
-      Object.assign(entry, compareOwnedExtensionResourceBody(body, expected[entry.path]));
+      Object.assign(entry, compareOwnedExtensionResourceBody(body, resource));
     })().catch(() => {
       entry.reason = 'response-read-failed';
     });
@@ -270,9 +395,17 @@ export function beginOwnedExtensionResourceCapture(page, extensionId, expected, 
   };
 }
 
-async function readExtensionBridgeDiagnostic(page) {
+async function readExtensionBridgeDiagnostic(page: Page) {
   return page.evaluate(() => {
-    const bridge = window.__ytExtensionBridge;
+    const bridge = (
+      window as Window & {
+        __ytExtensionBridge?: {
+          workerUrl?: string;
+          workerSupported?: boolean;
+          storageType?: string;
+        };
+      }
+    ).__ytExtensionBridge;
     const workerUrl = bridge?.workerUrl;
     let workerBlobOrigin = null;
     try {
@@ -293,11 +426,11 @@ async function readExtensionBridgeDiagnostic(page) {
   });
 }
 
-function delay(ms) {
+function delay(ms: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-function assertOwnedProfile(root, profile) {
+function assertOwnedProfile(root: string, profile: string) {
   const resolvedRoot = resolve(root);
   const resolvedProfile = resolve(profile);
   if (
@@ -308,30 +441,37 @@ function assertOwnedProfile(root, profile) {
   }
 }
 
-export function readOwnedBrowserProcessId(response) {
-  const browsers = Array.isArray(response?.processInfo)
-    ? response.processInfo.filter(({ type }) => type === 'browser')
+export function readOwnedBrowserProcessId(response: unknown): number {
+  const processInfo =
+    response && typeof response === 'object' && 'processInfo' in response
+      ? response.processInfo
+      : undefined;
+  const browsers = Array.isArray(processInfo)
+    ? processInfo.filter(
+        (entry: unknown) =>
+          entry && typeof entry === 'object' && 'type' in entry && entry.type === 'browser'
+      )
     : [];
   if (browsers.length !== 1 || !Number.isSafeInteger(browsers[0]?.id) || browsers[0].id <= 0) {
     throw new Error('Browser CDP did not expose one task-owned browser process');
   }
-  return browsers[0].id;
+  return browsers[0].id as number;
 }
 
-async function isProcessAlive(processId) {
+async function isProcessAlive(processId: number) {
   try {
     process.kill(processId, 0);
     return true;
   } catch (error) {
-    if (error?.code === 'ESRCH') return false;
+    if ((error as NodeJS.ErrnoException)?.code === 'ESRCH') return false;
     throw error;
   }
 }
 
 async function waitForProcessExit(
-  processId,
-  checkAlive = isProcessAlive,
-  timeoutMs = PROCESS_EXIT_TIMEOUT_MS
+  processId: number,
+  checkAlive: (processId: number) => Promise<boolean> = isProcessAlive,
+  timeoutMs: number = PROCESS_EXIT_TIMEOUT_MS
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -341,7 +481,7 @@ async function waitForProcessExit(
   return !(await checkAlive(processId));
 }
 
-export async function removeOwnedChromeProfile(root, profile) {
+export async function removeOwnedChromeProfile(root: string, profile: string) {
   assertOwnedProfile(root, profile);
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   const removed = await stat(profile).then(
@@ -354,20 +494,26 @@ export async function removeOwnedChromeProfile(root, profile) {
   if (!removed) throw new Error('Task-owned Chrome profile remained after bounded cleanup');
 }
 
-export async function enableDeveloperMode(context, browserName) {
+export async function enableDeveloperMode(context: BrowserContext, browserName: string) {
   const page = await context.newPage();
   try {
     await page.goto(browserName === 'msedge' ? 'edge://extensions/' : 'chrome://extensions/');
     const toggle = page.locator(browserName === 'msedge' ? '#dev-switch:visible' : '#devMode');
     await toggle.waitFor({ state: 'visible' });
-    if (!(await toggle.evaluate((element) => element.checked))) await toggle.click();
-    assert(await toggle.evaluate((element) => element.checked), 'Developer mode is disabled');
+    if (
+      !(await toggle.evaluate((element) => (element as HTMLElement & { checked: boolean }).checked))
+    )
+      await toggle.click();
+    assert(
+      await toggle.evaluate((element) => (element as HTMLElement & { checked: boolean }).checked),
+      'Developer mode is disabled'
+    );
   } finally {
     await page.close();
   }
 }
 
-export function isOwnedManagerOptionsUrl(value, managerId) {
+export function isOwnedManagerOptionsUrl(value: string, managerId: string) {
   try {
     const url = new URL(value);
     return (
@@ -381,7 +527,7 @@ export function isOwnedManagerOptionsUrl(value, managerId) {
   }
 }
 
-export function requireManagerUiLabels(labels) {
+export function requireManagerUiLabels(labels: unknown) {
   assert(
     labels && typeof labels === 'object' && !Array.isArray(labels),
     'Manager returned invalid UI labels'
@@ -401,10 +547,10 @@ export function requireManagerUiLabels(labels) {
       'Manager returned an invalid UI label'
     );
   }
-  return labels;
+  return labels as { utilities: string; install: string; installedUserscripts: string };
 }
 
-export async function readManagerUiLabels(page, managerId) {
+export async function readManagerUiLabels(page: Page, managerId: string) {
   assert(
     isOwnedManagerOptionsUrl(page.url(), managerId),
     'Manager labels require its owned options page'
@@ -420,9 +566,21 @@ export async function readManagerUiLabels(page, managerId) {
       throw new Error('Manager options page navigated away');
     }
     return {
-      utilities: chrome.i18n.getMessage('Utilities'),
-      install: chrome.i18n.getMessage('Install'),
-      installedUserscripts: chrome.i18n.getMessage('Installed_userscripts'),
+      utilities: (
+        globalThis as typeof globalThis & {
+          chrome: { i18n: { getMessage: (key: string) => string } };
+        }
+      ).chrome.i18n.getMessage('Utilities'),
+      install: (
+        globalThis as typeof globalThis & {
+          chrome: { i18n: { getMessage: (key: string) => string } };
+        }
+      ).chrome.i18n.getMessage('Install'),
+      installedUserscripts: (
+        globalThis as typeof globalThis & {
+          chrome: { i18n: { getMessage: (key: string) => string } };
+        }
+      ).chrome.i18n.getMessage('Installed_userscripts'),
     };
   }, managerId);
   assert(
@@ -432,7 +590,7 @@ export async function readManagerUiLabels(page, managerId) {
   return requireManagerUiLabels(labels);
 }
 
-async function prepareUserscriptManager(context, id, root) {
+async function prepareUserscriptManager(context: BrowserContext, id: string, root: string) {
   const managerRoot = join(root, 'test-tools/userscript-manager');
   const managerManifest = JSON.parse(await readFile(join(managerRoot, 'manifest.json'), 'utf8'));
   assert.equal(managerManifest.version, '5.5.1', 'Unexpected userscript manager version');
@@ -441,9 +599,12 @@ async function prepareUserscriptManager(context, id, root) {
     await page.goto(`chrome://extensions/?id=${id}`);
     const toggle = page.locator('#allow-user-scripts cr-toggle');
     await toggle.waitFor({ state: 'visible' });
-    if (!(await toggle.evaluate((element) => element.checked))) await toggle.click();
+    if (
+      !(await toggle.evaluate((element) => (element as HTMLElement & { checked: boolean }).checked))
+    )
+      await toggle.click();
     assert(
-      await toggle.evaluate((element) => element.checked),
+      await toggle.evaluate((element) => (element as HTMLElement & { checked: boolean }).checked),
       'User scripts permission is disabled'
     );
     const keep = page.getByRole('button', { name: 'Keep', exact: true });
@@ -460,7 +621,12 @@ async function prepareUserscriptManager(context, id, root) {
   }
 }
 
-async function installUserscript(context, id, root, output) {
+async function installUserscript(
+  context: BrowserContext,
+  id: string,
+  root: string,
+  output: string
+) {
   const installed = await prepareUserscriptManager(context, id, root);
   const page = await context.newPage();
   try {
@@ -491,8 +657,8 @@ async function installUserscript(context, id, root, output) {
 
 /** Select an in-range move that differs materially from current playback. */
 export function selectPublicSeekTarget(
-  { currentTime, start, end },
-  { preferBackward = false } = {}
+  { currentTime, start, end }: { currentTime: number; start: number; end: number },
+  { preferBackward = false }: { preferBackward?: boolean } = {}
 ) {
   if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
   const backward = Math.max(start + 1, currentTime - 3);
@@ -502,25 +668,38 @@ export function selectPublicSeekTarget(
   return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
-export async function readPublicPageState(page) {
+export async function readPublicPageState(page: Page) {
   return page
     .evaluate(() => {
-      const initialData = window.ytInitialData;
-      let renderer =
-        initialData?.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
+      const initialData = window.ytInitialData as Record<string, unknown> | undefined;
+      const nestedRenderer = (
+        initialData?.contents as
+          | {
+              twoColumnWatchNextResults?: {
+                conversationBar?: {
+                  liveChatRenderer?: { isReplay?: boolean; continuations?: unknown };
+                };
+              };
+            }
+          | undefined
+      )?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
+      let renderer = nestedRenderer;
       if (!renderer && initialData && typeof initialData === 'object') {
-        const pending = [initialData];
-        const seen = new Set();
+        const pending: Record<string, unknown>[] = [initialData];
+        const seen = new Set<Record<string, unknown>>();
         for (let visited = 0; pending.length && visited < 1000; visited++) {
           const value = pending.pop();
           if (!value || typeof value !== 'object' || seen.has(value)) continue;
           seen.add(value);
-          if (value.liveChatRenderer?.continuations) {
-            renderer = value.liveChatRenderer;
+          const found = value.liveChatRenderer as
+            | { isReplay?: boolean; continuations?: unknown }
+            | undefined;
+          if (found?.continuations) {
+            renderer = found;
             break;
           }
           for (const child of Object.values(value)) {
-            if (child && typeof child === 'object') pending.push(child);
+            if (child && typeof child === 'object') pending.push(child as Record<string, unknown>);
           }
         }
       }
@@ -528,7 +707,12 @@ export async function readPublicPageState(page) {
       return {
         chatMode: renderer ? (renderer.isReplay === true ? 'replay' : 'live') : 'unknown',
         chatRendererFound: Boolean(renderer),
-        playabilityStatus: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
+        playabilityStatus:
+          (
+            window as Window & {
+              ytInitialPlayerResponse?: { playabilityStatus?: { status?: string } };
+            }
+          ).ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
         loginRedirect: hostname === 'accounts.google.com',
         consentRedirect: hostname === 'consent.youtube.com' || hostname === 'consent.google.com',
       };
@@ -544,19 +728,22 @@ export async function readPublicPageState(page) {
 
 /** Observe a real watch page without supplying application code or site responses. */
 async function inspectLivePage(
-  context,
-  url,
-  output,
-  index,
-  installation,
-  nextUrl = url,
-  extensionResources = null
+  context: BrowserContext,
+  url: string,
+  output: string,
+  index: number,
+  installation: 'extension' | 'userscript',
+  nextUrl: string = url,
+  extensionResources: {
+    extensionId: string;
+    expected: Record<string, ExpectedResource>;
+  } | null = null
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
-  const pageErrors = [];
-  const workerDiagnostics = [];
-  const consoleErrors = [];
+  const pageErrors: string[] = [];
+  const workerDiagnostics: { type: string; text: string; url: string }[] = [];
+  const consoleErrors: { type: string; text: string; url: string }[] = [];
   let consoleErrorOverflow = 0;
   page.on('pageerror', (error) => pageErrors.push(error.name));
   page.on('console', (message) => {
@@ -578,7 +765,7 @@ async function inspectLivePage(
       });
     }
   });
-  const observation = { url, status: 'not-run', mocked: false };
+  const observation: LiveObservation = { url, status: 'not-run', mocked: false };
   let activeNavigation = 'initial-watch';
   const finishResourceCapture = extensionResources
     ? beginOwnedExtensionResourceCapture(
@@ -589,7 +776,7 @@ async function inspectLivePage(
       )
     : null;
   let deadlineReached = false;
-  let deadlineCleanup;
+  let deadlineCleanup: Promise<unknown> | undefined;
   const screenshot = `live-${index}.png`;
   const deadline = setTimeout(() => {
     deadlineReached = true;
@@ -615,7 +802,8 @@ async function inspectLivePage(
     observation.video = await page
       .locator('video')
       .first()
-      .evaluate((video) => {
+      .evaluate((element) => {
+        const video = element as HTMLVideoElement;
         video.muted = true;
         void video.play().catch(() => {});
         return {
@@ -676,7 +864,8 @@ async function inspectLivePage(
     observation.workflow.pause = await page
       .locator('video')
       .first()
-      .evaluate((video) => {
+      .evaluate((element) => {
+        const video = element as HTMLVideoElement;
         video.pause();
         return { status: video.paused ? 'passed' : 'unverified', paused: video.paused };
       });
@@ -684,7 +873,8 @@ async function inspectLivePage(
     observation.workflow.resume = await page
       .locator('video')
       .first()
-      .evaluate(async (video) => {
+      .evaluate(async (element) => {
+        const video = element as HTMLVideoElement;
         try {
           await video.play();
         } catch {
@@ -696,7 +886,8 @@ async function inspectLivePage(
     const seekRange = await page
       .locator('video')
       .first()
-      .evaluate((video) => {
+      .evaluate((element) => {
+        const video = element as HTMLVideoElement;
         if (!video.seekable.length) return null;
         const last = video.seekable.length - 1;
         return {
@@ -718,7 +909,8 @@ async function inspectLivePage(
       observation.workflow.seek = await page
         .locator('video')
         .first()
-        .evaluate(async (video, seekTo) => {
+        .evaluate(async (element, seekTo: number) => {
+          const video = element as HTMLVideoElement;
           const preSeekTime = video.currentTime;
           const last = video.seekable.length - 1;
           const range =
@@ -745,7 +937,7 @@ async function inspectLivePage(
               seekedEvent: false,
             };
           }
-          const completed = new Promise((resolve) => {
+          const completed = new Promise<boolean>((resolve) => {
             const timeout = setTimeout(() => resolve(false), 8000);
             video.addEventListener(
               'seeked',
@@ -775,7 +967,9 @@ async function inspectLivePage(
             currentTime: afterTime,
           };
         }, target);
-      observation.workflow.seek.selectionRange = seekRange;
+      const seek = observation.workflow.seek;
+      assert(seek);
+      seek.selectionRange = seekRange;
     }
     observation.phase = 'navigation-transition';
     activeNavigation = 'next-watch';
@@ -814,12 +1008,14 @@ async function inspectLivePage(
       renderer: nextRenderer,
       installedBridgeReady: nextBridgeReady,
       extensionBridge: nextBridge,
-      ...nextRendererPolicy,
+      workerPolicyFallback: nextRendererPolicy.workerPolicyFallback,
       renderedMessages: await page.locator('.yt-live-chat-overlay-live-region > p').count(),
     };
     if (pageState.chatMode === 'unknown') {
-      observation.workflow.startup.status = 'unverified';
-      observation.workflow.startup.reason = 'chat-mode-unknown';
+      const startup = observation.workflow.startup;
+      assert(startup);
+      startup.status = 'unverified';
+      startup.reason = 'chat-mode-unknown';
     }
     const failedStage = Object.entries(observation.workflow).find(
       ([, stage]) => stage.status !== 'passed'
@@ -846,13 +1042,14 @@ async function inspectLivePage(
             ? 'provider-playability-unavailable'
             : !observation.provider.chatRendererFound && observation.phase === 'chat'
               ? 'provider-chat-renderer-unavailable'
-              : error.name === 'TimeoutError'
+              : error instanceof Error && error.name === 'TimeoutError'
                 ? `${observation.phase}-timeout`
                 : `${observation.phase}-error`;
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
     if (finishResourceCapture) {
+      assert(extensionResources);
       observation.extensionResources = {
         installedExtensionId: extensionResources.extensionId,
         ...(await finishResourceCapture()),
@@ -871,7 +1068,7 @@ async function inspectLivePage(
     observation.pageErrorTypes = [...new Set(pageErrors)];
     observation.unexpectedConsoleErrors =
       consoleErrorOverflow +
-      countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback);
+      countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback ?? false);
     observation.hostConsoleErrors = consoleErrors.filter(isYouTubeHostError).length;
     observation.consoleErrors = consoleErrors.map(({ type, text, url }) => ({
       type,
@@ -889,13 +1086,15 @@ async function inspectLivePage(
   return observation;
 }
 
-export function requireLiveSuccess(observations) {
+export function requireLiveSuccess(
+  observations: Array<Pick<LiveObservation, 'status'> & Partial<LiveObservation>>
+) {
   assert(
     observations.every(
       (item) =>
         item.status === 'passed' &&
         item.canvasAttached &&
-        item.renderedMessages > 0 &&
+        (item.renderedMessages ?? 0) > 0 &&
         (item.pageErrorTypes?.length ?? 0) === 0 &&
         (item.unexpectedConsoleErrors ?? 0) === 0
     ),
@@ -904,7 +1103,22 @@ export function requireLiveSuccess(observations) {
 }
 
 /** The installed fixture returns only after seven page-fetch callback assertions. */
-export function requireInstalledPageFetchEvidence(fixture) {
+export function requireInstalledPageFetchEvidence(
+  fixture: {
+    checks?: { sustainedViewingLifecycle?: boolean };
+    observations?: {
+      sustainedViewing?: {
+        firstSessionIngressIds?: unknown[];
+        firstSessionAccessibleIds?: unknown[];
+        secondSessionIds?: unknown[];
+        hiddenMessageSuppressed?: boolean;
+        oldCanvasDetached?: boolean;
+        videoPauseDropDelta?: number;
+      };
+      [key: string]: unknown;
+    };
+  } | null
+) {
   assert.equal(
     fixture?.checks?.sustainedViewingLifecycle,
     true,
@@ -928,9 +1142,9 @@ export function requireInstalledPageFetchEvidence(fixture) {
   assert.equal(sustained.hiddenMessageSuppressed, true);
   assert.equal(sustained.oldCanvasDetached, true);
   assert.equal(sustained.videoPauseDropDelta, 2);
+  const accessibleIds = sustained?.firstSessionAccessibleIds;
   assert(
-    Array.isArray(sustained.firstSessionAccessibleIds) &&
-      expectedFirstSession.every((id) => sustained.firstSessionAccessibleIds.includes(id)),
+    Array.isArray(accessibleIds) && expectedFirstSession.every((id) => accessibleIds.includes(id)),
     'Installed page-fetch messages were not accessible after the lifecycle phases'
   );
   return {
@@ -961,16 +1175,23 @@ export async function cleanupChromeInstallation(
     output,
     result,
     root,
-  },
+  }: CleanupOptions,
   {
     checkProcessAlive = isProcessAlive,
-    terminateProcessTree = () => terminateOwnedChromeProcess(browserProcessIdentity),
+    terminateProcessTree = () => {
+      assert(browserProcessIdentity, 'Owned browser process identity is unavailable');
+      return terminateOwnedChromeProcess(browserProcessIdentity);
+    },
     waitForExit,
+  }: {
+    checkProcessAlive?: (processId: number) => Promise<boolean>;
+    terminateProcessTree?: (processId: number) => Promise<unknown>;
+    waitForExit?: (processId: number, timeoutMs: number) => Promise<boolean>;
   } = {}
 ) {
-  const errors = [];
-  const errorTypes = [];
-  const recordError = (stage, error) => {
+  const errors: unknown[] = [];
+  const errorTypes: { stage: string; errorType: string }[] = [];
+  const recordError = (stage: string, error: unknown) => {
     errors.push(error);
     errorTypes.push({ stage, errorType: error instanceof Error ? error.name : typeof error });
   };
@@ -988,7 +1209,7 @@ export async function cleanupChromeInstallation(
   } catch (error) {
     recordError('context-close', error);
     try {
-      const ownedBrowser = context?.browser();
+      const ownedBrowser = context?.browser?.();
       if (!ownedBrowser) throw new Error('Owned browser cleanup handle is unavailable');
       await ownedBrowser.close();
       result.cleanup.browserClosed = true;
@@ -1068,7 +1289,7 @@ export async function runChromeInstallation({
   installation,
   liveUrls = [],
   liveObservation = null,
-}) {
+}: ChromeOptions) {
   assert(['chrome', 'msedge'].includes(browserName), 'Unsupported Chromium channel');
   assert(['extension', 'userscript'].includes(installation), 'Unknown installation mode');
   assert(
@@ -1092,13 +1313,13 @@ export async function runChromeInstallation({
   }
   const upgradeInputs = installation === 'userscript' ? await loadUpgradeInputs(root) : null;
   const profile = await mkdtemp(join(root, 'chrome-install-'));
-  let context;
-  let cdp;
-  let extensionId;
-  let browserProcessId;
-  let browserProcessIdentity;
-  let primaryError;
-  const result = {
+  let context: BrowserContext | undefined;
+  let cdp: CDPSession | undefined;
+  let extensionId: string | undefined;
+  let browserProcessId: number | undefined;
+  let browserProcessIdentity: ChromeProcessIdentity | undefined;
+  let primaryError: unknown;
+  const result: ChromeResult = {
     installation,
     fixture: null,
     placementTiming: null,
@@ -1117,22 +1338,25 @@ export async function runChromeInstallation({
       ignoreDefaultArgs: ['--disable-extensions'],
       args: ['--enable-unsafe-extension-debugging', '--mute-audio'],
     });
-    result.browserVersion = context.browser().version();
-    cdp = await context.browser().newBrowserCDPSession();
+    const browser = context.browser();
+    assert(browser);
+    result.browserVersion = browser.version();
+    cdp = await browser.newBrowserCDPSession();
     browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
     browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
     result.cleanup.browserProcessIdentified = true;
     await enableDeveloperMode(context, browserName);
     if (installation === 'extension') {
-      ({ id: extensionId } = await cdp.send('Extensions.loadUnpacked', {
+      ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'dist-extension'),
-      }));
+      })) as { id: string });
       assert.equal(typeof extensionId, 'string');
       result.installationMethod = 'cdp-unpacked-extension';
     } else {
-      ({ id: extensionId } = await cdp.send('Extensions.loadUnpacked', {
+      ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'test-tools/userscript-manager'),
-      }));
+      })) as { id: string });
+      assert(extensionId);
       if (upgradeInputs) {
         result.userscriptManager = await prepareUserscriptManager(context, extensionId, root);
         try {
@@ -1144,7 +1368,17 @@ export async function runChromeInstallation({
             output
           );
         } catch (error) {
-          result.userscriptUpgrade = error.upgradeObservation ?? { status: 'failed' };
+          const receipt =
+            error && typeof error === 'object' && 'upgradeObservation' in error
+              ? error.upgradeObservation
+              : null;
+          result.userscriptUpgrade =
+            receipt &&
+            typeof receipt === 'object' &&
+            'status' in receipt &&
+            typeof receipt.status === 'string'
+              ? (receipt as UpgradeResult)
+              : { status: 'failed' };
           throw error;
         }
         result.installationMethod = 'real-manager-ui-upgrade';
@@ -1154,7 +1388,7 @@ export async function runChromeInstallation({
       }
     }
     result.fixture = await runFixture({
-      browser: context.browser(),
+      browser,
       root,
       output,
       installedContext: context,
@@ -1162,12 +1396,14 @@ export async function runChromeInstallation({
       expectedRenderer: installation === 'extension' ? 'worker' : 'main',
     });
     if (result.userscriptUpgrade) {
+      assert(upgradeInputs && 'candidateUnsafeWindowGrant' in result.userscriptUpgrade);
       assert.equal(result.fixture.checks.installedApplicationDelivery, true);
       const pageFetch = requireInstalledPageFetchEvidence(result.fixture);
       result.userscriptUpgrade.effectiveGrantEvidence = {
         candidateMetadata: result.userscriptUpgrade.candidateUnsafeWindowGrant,
         exactManagerEditorBytes:
-          result.userscriptUpgrade.after.editorSha256 === upgradeInputs.candidateSha256,
+          (result.userscriptUpgrade.after as { editorSha256?: string } | undefined)
+            ?.editorSha256 === upgradeInputs.candidateSha256,
         actualPageFetchIngress: pageFetch.callbackAssertionsCompleted,
         pageFetch,
       };
@@ -1223,7 +1459,7 @@ export async function runChromeInstallation({
           item.workflow?.navigation?.kind === 'cross-watch' &&
           item.workflow.navigation.status === 'passed'
       );
-      result.liveWorkflowCoverage = {
+      const liveWorkflowCoverage = {
         observedModes,
         crossWatch,
         status:
@@ -1234,9 +1470,10 @@ export async function runChromeInstallation({
             ? 'complete'
             : 'partial',
       };
+      result.liveWorkflowCoverage = liveWorkflowCoverage;
       if (browserName === 'msedge' && installation === 'extension' && liveUrls.length >= 2) {
         assert.equal(
-          result.liveWorkflowCoverage.status,
+          liveWorkflowCoverage.status,
           'complete',
           'Public live and replay workflow coverage is incomplete'
         );
@@ -1275,15 +1512,17 @@ async function runChromeDurationInstallation({
   installation,
   liveUrls,
   liveObservation,
+}: Required<Pick<ChromeOptions, 'chromium' | 'root' | 'output' | 'installation' | 'liveUrls'>> & {
+  liveObservation: { mode: 'duration'; duration_seconds: 1200 };
 }) {
   const [{ launchOwnedNaturalChrome }, { runLiveDuration }] = await Promise.all([
-    import('./natural-chrome.mjs'),
+    import('./natural-chrome.ts'),
     import('./live-duration.ts'),
   ]);
-  let ownedChrome;
-  let extensionId;
-  let primaryError;
-  const result = {
+  let ownedChrome: Awaited<ReturnType<typeof launchOwnedNaturalChrome>> | undefined;
+  let extensionId: string | undefined;
+  let primaryError: unknown;
+  const result: ChromeResult<Awaited<ReturnType<typeof runLiveDuration>>> = {
     installation,
     fixture: null,
     live: [],
@@ -1297,9 +1536,9 @@ async function runChromeDurationInstallation({
     result.naturalChrome = ownedChrome.launchEvidence;
     result.cleanup.browserProcessIdentified = true;
     await enableDeveloperMode(context, 'chrome');
-    ({ id: extensionId } = await ownedChrome.cleanupCdp.send('Extensions.loadUnpacked', {
+    ({ id: extensionId } = (await ownedChrome.cleanupCdp.send('Extensions.loadUnpacked', {
       path: join(root, 'dist-extension'),
-    }));
+    })) as { id: string });
     assert.equal(typeof extensionId, 'string');
     result.installationMethod = 'cdp-unpacked-extension';
     result.fixture = await runFixture({
@@ -1310,11 +1549,13 @@ async function runChromeDurationInstallation({
       installedExtensionId: extensionId,
       expectedRenderer: 'worker',
     });
+    const liveUrl = liveUrls[0];
+    assert(liveUrl);
     const observation = await runLiveDuration({
       context,
-      url: liveUrls[0],
+      url: liveUrl,
       output,
-      installation,
+      installation: 'extension',
     });
     result.live.push(observation);
     assert.equal(

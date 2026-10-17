@@ -236,7 +236,7 @@ covered by the production-import source test. Neither allocation pitch nor
 historical ink bounds count as this clearance evidence.
 
 For a baseline comparison, make a baseline-only harness commit that changes
-`const comparisonOnly = false` to `true` in `chrome-install.mjs`. Keep the
+`const comparisonOnly = false` to `true` in `chrome-install.ts`. Keep the
 `placement-timing.ts` probe bytes identical to the candidate harness and
 record both source and bundle hashes with the receipts. The baseline receipt
 sets `comparisonOnly: true`; it still requires the real parser, renderer,
@@ -407,6 +407,13 @@ reader can be supplied by the portable host contract.
 Revisit the migration with adversarial archive and transport fixtures plus
 source-bound Windows validation; do not add a guest runtime just to change the
 helper's language.
+
+The Semgrep SARIF validator is a separate Python boundary in
+`.github/workflows/security.yaml`. It runs in the pinned Semgrep 1.178.0 scanner
+container under `sh`, immediately after the scan and before SARIF upload. That
+job has no reviewed Node setup in the scanner container. Keep its local Python
+validation and scan-exit gating until a qualified Node stage can preserve the
+same container trust boundary and SARIF checks without another runtime bootstrap.
 
 This tests Tampermonkey loaded as an unpacked package,
 not the Chrome Web Store installation confirmation. It enables Developer Mode

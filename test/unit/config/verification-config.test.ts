@@ -399,6 +399,7 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'check:test',
         'check:e2e',
         'check:scripts',
+        'check:windows',
         'test:ci',
         'check:i18n',
         'circular',

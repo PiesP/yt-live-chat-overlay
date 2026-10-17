@@ -9,7 +9,7 @@
     "scripts/ci/classify-workflow-changes.ts",
     "scripts/ci/pinned-tools.ts",
     "validation/windows/profile.ts",
-    "validation/windows/install-profile.mjs",
+    "validation/windows/install-profile.ts",
     "vite.config.*.ts"
   ],
   "project": [

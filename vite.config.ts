@@ -65,7 +65,7 @@ export default defineConfig((env) => ({
         files: [
           'src/chat/message-helpers.ts',
           'src/settings/schema.ts',
-          'validation/windows/chrome-install.mjs',
+          'validation/windows/chrome-install.ts',
         ],
         rules: { 'no-control-regex': 'off' },
       },
@@ -92,7 +92,7 @@ export default defineConfig((env) => ({
         rules: { 'no-constructor-return': 'off' },
       },
       {
-        files: ['validation/windows/chrome-install.mjs', 'validation/windows/natural-chrome.mjs'],
+        files: ['validation/windows/chrome-install.ts', 'validation/windows/natural-chrome.ts'],
         rules: { 'no-unsafe-finally': 'off' },
       },
     ],
