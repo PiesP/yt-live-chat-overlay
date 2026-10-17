@@ -24,11 +24,14 @@ import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
   redactDiagnosticText,
+  selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
+
+export { selectPublicSeekTarget };
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -653,19 +656,6 @@ async function installUserscript(
   } finally {
     await page.close();
   }
-}
-
-/** Select an in-range move that differs materially from current playback. */
-export function selectPublicSeekTarget(
-  { currentTime, start, end }: { currentTime: number; start: number; end: number },
-  { preferBackward = false }: { preferBackward?: boolean } = {}
-) {
-  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
-  const backward = Math.max(start + 1, currentTime - 3);
-  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
-  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
-  if (Math.abs(forward - currentTime) >= 1) return forward;
-  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
 export async function readPublicPageState(page: Page) {

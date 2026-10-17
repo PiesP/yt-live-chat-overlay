@@ -10,6 +10,19 @@ export interface LiveDiagnosticEntry {
   url?: string;
 }
 
+/** Select an in-range move that differs materially from current playback. */
+export function selectPublicSeekTarget(
+  { currentTime, start, end }: { currentTime: number; start: number; end: number },
+  { preferBackward = false }: { preferBackward?: boolean } = {}
+) {
+  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
+  const backward = Math.max(start + 1, currentTime - 3);
+  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
+  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
+  if (Math.abs(forward - currentTime) >= 1) return forward;
+  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
+}
+
 /** Accept the product's policy fallback only when the public page records it. */
 export function isTrustedTypesWorkerBlock(entry: LiveDiagnosticEntry): boolean {
   return (

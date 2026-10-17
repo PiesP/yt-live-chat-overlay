@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.ts';
 import * as firefoxInstallModule from '../../../validation/windows/firefox-install.ts';
+import * as liveRenderingModule from '../../../validation/windows/live-rendering.ts';
 
 const {
   categorizeErrors,
@@ -618,17 +619,7 @@ describe('Windows Firefox installation profile', () => {
         { level: 'info', text: 'private chat text', type: 'console' },
       ])
     ).toEqual({ 'content-security-policy': 1, worker: 1 });
-    expect(selectPublicSeekTarget({ currentTime: 30, start: 0, end: 120 })).toBe(33);
-    expect(
-      selectPublicSeekTarget({ currentTime: 30, start: 0, end: 120 }, { preferBackward: true })
-    ).toBe(27);
-    expect(
-      selectPublicSeekTarget({ currentTime: 1.5, start: 0, end: 120 }, { preferBackward: true })
-    ).toBe(4.5);
-    expect(
-      selectPublicSeekTarget({ currentTime: 30, start: 30, end: 32 }, { preferBackward: true })
-    ).toBeNull();
-    expect(selectPublicSeekTarget({ currentTime: 30, start: 30, end: 32 })).toBeNull();
+    expect(selectPublicSeekTarget).toBe(liveRenderingModule.selectPublicSeekTarget);
     expect(() => requireFirefoxPublicCoverage([{ provider: { chatMode: 'live' } }])).toThrow(
       'live/replay workflow coverage'
     );

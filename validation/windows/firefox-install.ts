@@ -10,8 +10,11 @@ import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
   redactDiagnosticText,
+  selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
+
+export { selectPublicSeekTarget };
 
 type FirefoxLog = { level: string; text: string; type: string };
 type FirefoxSession = {
@@ -264,18 +267,6 @@ export function categorizeErrors(logs: FirefoxLog[]) {
   return Object.fromEntries(
     Object.entries(categories).sort(([left], [right]) => left.localeCompare(right))
   );
-}
-
-export function selectPublicSeekTarget(
-  { currentTime, start, end }: { currentTime: number; start: number; end: number },
-  { preferBackward = false } = {}
-) {
-  if (![currentTime, start, end].every(Number.isFinite) || end - start < 5) return null;
-  const backward = Math.max(start + 1, currentTime - 3);
-  if (preferBackward && backward <= end - 1 && currentTime - backward >= 1) return backward;
-  const forward = Math.min(end - 1, Math.max(start + 1, currentTime + 3));
-  if (Math.abs(forward - currentTime) >= 1) return forward;
-  return backward <= end - 1 && Math.abs(backward - currentTime) >= 1 ? backward : null;
 }
 
 export function requireFirefoxPublicCoverage(observations: PublicObservation[]) {
