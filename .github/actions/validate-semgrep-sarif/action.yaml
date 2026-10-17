@@ -1,0 +1,23 @@
+name: Validate Semgrep SARIF
+description: Validate and normalize a Semgrep SARIF report before upload
+
+inputs:
+  sarif_path:
+    description: Path to the Semgrep SARIF report
+    required: true
+  category:
+    description: Admitted Semgrep category (semgrep/secrets or semgrep/full)
+    required: true
+  scanner_status:
+    description: Semgrep scanner exit status (0 or 1)
+    required: true
+
+outputs:
+  sarif-upload:
+    description: True only when the validated report can be uploaded
+  category:
+    description: Validated SARIF upload category
+
+runs:
+  using: node24
+  main: index.mjs
