@@ -15,7 +15,7 @@ import {
   redactDiagnosticText,
   validateLiveRenderer,
 } from './live-rendering.ts';
-import { runPlacementTimingFixture } from './placement-timing.mjs';
+import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
 

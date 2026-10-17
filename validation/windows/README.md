@@ -90,7 +90,7 @@ response. `profile.ts` records the fixture sizes and network-event tolerance;
 fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
 scenario uses intercepted fixture traffic rather than a live chat account.
 
-Installed Edge extension runs also execute `placement-timing.mjs` after the
+Installed Edge extension runs also execute `placement-timing.ts` after the
 ordinary fixture, in separate task-owned pages. Most placement pages select a
 32px font and full safe zone; the mixed-gap scenarios use the settings described
 below. Each page restores a cloned prior settings snapshot.
@@ -237,7 +237,7 @@ historical ink bounds count as this clearance evidence.
 
 For a baseline comparison, make a baseline-only harness commit that changes
 `const comparisonOnly = false` to `true` in `chrome-install.mjs`. Keep the
-`placement-timing.mjs` probe bytes identical to the candidate harness and
+`placement-timing.ts` probe bytes identical to the candidate harness and
 record both source and bundle hashes with the receipts. The baseline receipt
 sets `comparisonOnly: true`; it still requires the real parser, renderer,
 Backlog activation, unclamped geometry and source guards, while allowing the
