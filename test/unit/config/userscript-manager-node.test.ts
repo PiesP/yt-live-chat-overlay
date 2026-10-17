@@ -361,6 +361,17 @@ describe('pinned Node userscript manager preparation', () => {
     await expectCleanFailure(
       packageBytes([{ name: 'bad-size', content: 'payload', declaredSize: 6 }])
     );
+    const truncated = packageBytes([{ name: 'truncated', content: 'payload' }]);
+    const dataOffset = truncated.indexOf(Buffer.from('payload'));
+    const missingDataByte = Buffer.concat([
+      truncated.subarray(0, dataOffset + 3),
+      truncated.subarray(dataOffset + 4),
+    ]);
+    missingDataByte.writeUInt32LE(
+      truncated.readUInt32LE(truncated.length - 6) - 1,
+      missingDataByte.length - 6
+    );
+    await expectCleanFailure(missingDataByte);
     const compressed = packageBytes([
       { name: 'compressed', content: 'long'.repeat(1_000), method: 8 },
     ]);
