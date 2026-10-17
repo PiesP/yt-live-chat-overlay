@@ -17,6 +17,7 @@
       "validation/windows/chrome-process.ts",
       "validation/windows/live-duration.ts",
       "validation/windows/live-rendering.ts",
+      "validation/windows/visible-watch.ts",
       "validation/windows/natural-chrome.ts",
       "validation/windows/firefox-bidi.ts",
       "validation/windows/firefox-install.ts",
