@@ -44,8 +44,6 @@ declare global {
       sizeOf: (value: ImageBitmap) => number,
       dispose: (value: ImageBitmap) => void
     ) => BitmapCache;
-    ytcfg: object;
-    ytInitialData: object;
   }
 }
 

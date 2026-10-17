@@ -5,8 +5,7 @@ import { runInNewContext } from 'node:vm';
 
 import { describe, expect, it } from 'vite-plus/test';
 
-// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import * as profileModule from '../../../validation/windows/profile.mjs';
+import * as profileModule from '../../../validation/windows/profile.ts';
 
 const {
   exactDeclaredMessageIdsReady,

@@ -16,7 +16,7 @@ import {
   validateLiveRenderer,
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.mjs';
-import { run as runFixture } from './profile.mjs';
+import { run as runFixture } from './profile.ts';
 import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
@@ -945,7 +945,7 @@ export function requireInstalledPageFetchEvidence(fixture) {
       visible: 1,
       'second-video': 1,
     },
-    source: 'profile.mjs verifySustainedViewingLifecycle page-world fetch and product callbacks',
+    source: 'profile.ts verifySustainedViewingLifecycle page-world fetch and product callbacks',
   };
 }
 

@@ -5,6 +5,71 @@ import assert from 'node:assert/strict';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type {
+  Browser,
+  BrowserContext,
+  CDPSession,
+  ConsoleMessage,
+  Locator,
+  Page,
+  Request,
+} from '@playwright/test';
+
+type ChatRenderer = { id: string; [key: string]: unknown };
+type ChatAction = {
+  addChatItemAction: {
+    item: {
+      liveChatTextMessageRenderer?: ChatRenderer;
+      liveChatPaidMessageRenderer?: ChatRenderer;
+      liveChatMembershipItemRenderer?: ChatRenderer;
+    };
+  };
+};
+type AcceptanceWorkerRecord = {
+  url: string;
+  ready: boolean;
+  readyAtMs: number | null;
+  acknowledgements: number;
+  addedMessageIds: string[][];
+  recentReceipts: Record<string, unknown>[];
+  recentStats: Record<string, unknown>[];
+  terminated: boolean;
+  error?: string;
+};
+type AcceptanceReadiness = {
+  startedAtMs: number;
+  firstSeenAtMs: Record<string, number>;
+  exactReadyAtMs: number | null;
+};
+type PaidCardRect = { left: number; right: number; top: number; bottom: number };
+type LifecycleDiagnostic = {
+  activePhase: string | null;
+  consoleEvents: Promise<Awaited<ReturnType<typeof summarizeInterceptorConsoleMessage>> | null>[];
+  debugMessagesObserved: number;
+  contexts: Map<number, ExecutionContext>;
+  cdp: CDPSession | null;
+  setupErrorType: string | null;
+  managerId: string | undefined;
+};
+type PollSample = { startedAt: number; finishedAt: number | null; failed: string | null };
+type HighActivityProbe = { samples: PollSample[]; maxActive: number };
+type ConsoleEventMessage = {
+  type(): string;
+  text(): string;
+  args(): { jsonValue(): Promise<unknown> }[];
+  location(): { url: string };
+};
+
+declare global {
+  interface Window {
+    __ytAcceptanceReadiness?: AcceptanceReadiness;
+    __ytAcceptanceWorkers?: AcceptanceWorkerRecord[];
+    __ytAcceptanceSetPlaybackState?: (currentTime: number, paused: boolean) => void;
+    __ytAcceptanceOldCanvas?: Element;
+    __ytAcceptancePaidCardProbe?: { rects: PaidCardRect[]; cachedBitmapDraws: number };
+  }
+}
+
 const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=windowsAcceptance';
 const USERSCRIPT_PATH = 'dist/yt-live-chat-overlay.user.js';
 const PREVIEW_PATH = 'test/visual/preview.html';
@@ -36,7 +101,7 @@ const SUSTAINED_PHASE_ACTIONS = new Map([
   ],
 ]);
 
-const CHAT_ACTIONS = [
+const CHAT_ACTIONS: ChatAction[] = [
   messageAction('acceptance-korean', '한국어', [{ text: '안녕하세요 Windows 화면 검증입니다 🌙' }]),
   messageAction('acceptance-japanese', '日本語', [{ text: '日本語の描画を確認します ✨' }]),
   messageAction('acceptance-rtl', 'العربية', [{ text: 'مرحبا بكم — RTL + English 123' }]),
@@ -90,14 +155,14 @@ const EXPECTED_MESSAGE_IDS = CHAT_ACTIONS.map(({ addChatItemAction: { item } }) 
     item.liveChatTextMessageRenderer ??
     item.liveChatPaidMessageRenderer ??
     item.liveChatMembershipItemRenderer;
-  assert.equal(typeof renderer?.id, 'string', 'A declared fixture message has no ID');
+  assert(renderer && typeof renderer.id === 'string', 'A declared fixture message has no ID');
   return renderer.id;
 });
 assert.equal(EXPECTED_MESSAGE_IDS.length, EXPECTED_MESSAGE_COUNT);
 assert.equal(new Set(EXPECTED_MESSAGE_IDS).size, EXPECTED_MESSAGE_COUNT);
 
-export function exactDeclaredMessageIdsReady(expectedIds) {
-  const entries = document.querySelectorAll('.yt-live-chat-overlay-live-region > p');
+export function exactDeclaredMessageIdsReady(expectedIds: string[]) {
+  const entries = document.querySelectorAll<HTMLElement>('.yt-live-chat-overlay-live-region > p');
   const actual = Array.from(entries, (element) => element.dataset.messageId);
   const observedAtMs = Math.round(performance.now());
   window.__ytAcceptanceReadiness ??= {
@@ -107,22 +172,24 @@ export function exactDeclaredMessageIdsReady(expectedIds) {
   };
   const readiness = window.__ytAcceptanceReadiness;
   for (const id of actual) {
-    if (expectedIds.includes(id) && readiness.firstSeenAtMs[id] === undefined) {
+    if (id && expectedIds.includes(id) && readiness.firstSeenAtMs[id] === undefined) {
       readiness.firstSeenAtMs[id] = observedAtMs;
     }
   }
   const ready =
     actual.length === expectedIds.length &&
     new Set(actual).size === expectedIds.length &&
-    actual.every((id) => expectedIds.includes(id));
+    actual.every((id) => id !== undefined && expectedIds.includes(id));
   if (ready) readiness.exactReadyAtMs = observedAtMs;
   return ready;
 }
 
-export function readFixtureAdmissionDiagnostic(expectedIds) {
+export function readFixtureAdmissionDiagnostic(expectedIds: string[]) {
   const expected = new Set(expectedIds);
-  const entries = Array.from(document.querySelectorAll('.yt-live-chat-overlay-live-region > p'));
-  const declared = entries.filter((element) => expected.has(element.dataset.messageId));
+  const entries = Array.from(
+    document.querySelectorAll<HTMLElement>('.yt-live-chat-overlay-live-region > p')
+  );
+  const declared = entries.filter((element) => expected.has(element.dataset.messageId ?? ''));
   const readiness = window.__ytAcceptanceReadiness;
   return {
     observedAtMs: Math.round(performance.now()),
@@ -134,7 +201,7 @@ export function readFixtureAdmissionDiagnostic(expectedIds) {
       ),
       declared: declared.slice(0, expectedIds.length).map((element) => ({
         id: element.dataset.messageId,
-        firstSeenAtMs: readiness?.firstSeenAtMs?.[element.dataset.messageId] ?? null,
+        firstSeenAtMs: readiness?.firstSeenAtMs?.[element.dataset.messageId ?? ''] ?? null,
         snippet: (element.textContent ?? '').slice(0, 120),
       })),
     },
@@ -145,7 +212,7 @@ export function readFixtureAdmissionDiagnostic(expectedIds) {
         }
       : null,
     hasCanvas: Boolean(document.querySelector('#yt-live-chat-overlay canvas')),
-    paused: document.querySelector('video')?.paused ?? null,
+    paused: document.querySelector<HTMLVideoElement>('video')?.paused ?? null,
     workers: (window.__ytAcceptanceWorkers ?? []).slice(-2).map((worker) => ({
       urlKind: worker.url?.startsWith('blob:') ? 'blob' : 'other',
       ready: worker.ready,
@@ -173,10 +240,10 @@ export function readInstalledLifecycleDomDiagnostic() {
   );
   const received = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
   const dropped = /^Drop: (\d+) /u.exec(lines[1] ?? '');
-  const logLevel = document.querySelector('select[name="logLevel"]')?.value;
+  const logLevel = document.querySelector<HTMLSelectElement>('select[name="logLevel"]')?.value;
   return {
     pageAppHandleVisible: Boolean(window.__ytChatOverlay),
-    uiLogLevel: ['warn', 'info', 'debug'].includes(logLevel) ? logLevel : null,
+    uiLogLevel: ['warn', 'info', 'debug'].includes(logLevel ?? '') ? logLevel : null,
     debugCounts:
       received && dropped
         ? {
@@ -186,7 +253,9 @@ export function readInstalledLifecycleDomDiagnostic() {
           }
         : null,
     sustainedIds: Array.from(
-      document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+      document.querySelectorAll<HTMLElement>(
+        '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
+      ),
       (element) => element.dataset.messageId
     )
       .filter((id) => typeof id === 'string' && id.startsWith('windows-sustained-'))
@@ -194,7 +263,11 @@ export function readInstalledLifecycleDomDiagnostic() {
   };
 }
 
-export async function summarizeInterceptorConsoleMessage(message, phase, managerId) {
+export async function summarizeInterceptorConsoleMessage(
+  message: ConsoleEventMessage,
+  phase: string | null,
+  managerId: string
+) {
   if (
     !['debug', 'log', 'info'].includes(message.type()) ||
     !message.text().includes('[FetchInterceptor]')
@@ -219,7 +292,9 @@ export async function summarizeInterceptorConsoleMessage(message, phase, manager
   const count =
     detail &&
     typeof detail === 'object' &&
+    'count' in detail &&
     Number.isSafeInteger(detail.count) &&
+    typeof detail.count === 'number' &&
     detail.count >= 0 &&
     detail.count <= 1000
       ? detail.count
@@ -238,7 +313,17 @@ export async function summarizeInterceptorConsoleMessage(message, phase, manager
   };
 }
 
-async function readInstalledLifecycleWorlds(cdp, contexts) {
+type ExecutionContext = {
+  id: number;
+  name: string;
+  origin: string;
+  auxData?: { frameId?: string; type?: string; isDefault?: boolean };
+};
+
+async function readInstalledLifecycleWorlds(
+  cdp: CDPSession | null,
+  contexts: Map<number, ExecutionContext>
+) {
   if (!cdp) return { status: 'unavailable', contexts: [] };
   const frameTree = await cdp.send('Page.getFrameTree');
   const frameId = frameTree.frameTree.frame.id;
@@ -294,17 +379,18 @@ async function readInstalledLifecycleWorlds(cdp, contexts) {
   };
 }
 
-export function installFixtureWorkerProbe(expectedIds) {
-  const workers = [];
+export function installFixtureWorkerProbe(expectedIds: string[]) {
+  const workers: AcceptanceWorkerRecord[] = [];
   const expected = new Set(expectedIds);
-  const declaredIds = (value) =>
+  const declaredIds = (value: unknown): string[] =>
     Array.isArray(value)
       ? value
-          .filter((id) => typeof id === 'string' && expected.has(id))
+          .filter((id): id is string => typeof id === 'string' && expected.has(id))
           .slice(0, expectedIds.length)
       : [];
-  const boundedNumber = (value) => Number.isSafeInteger(value) && value >= 0;
-  const remember = (list, value) => {
+  const boundedNumber = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  const remember = (list: Record<string, unknown>[], value: Record<string, unknown>) => {
     list.push(value);
     if (list.length > 16) list.shift();
   };
@@ -312,7 +398,7 @@ export function installFixtureWorkerProbe(expectedIds) {
   const NativeWorker = window.Worker;
   window.Worker = new Proxy(NativeWorker, {
     construct(target, args) {
-      const record = {
+      const record: AcceptanceWorkerRecord = {
         url: String(args[0]),
         ready: false,
         readyAtMs: null,
@@ -325,7 +411,7 @@ export function installFixtureWorkerProbe(expectedIds) {
       if (workers.length < 16) workers.push(record);
       try {
         const worker = Reflect.construct(target, args);
-        worker.addEventListener('message', (event) => {
+        worker.addEventListener('message', (event: MessageEvent) => {
           const data = event.data;
           if (data?.type === 'ready') {
             record.ready = true;
@@ -365,14 +451,20 @@ export function installFixtureWorkerProbe(expectedIds) {
             });
           }
         });
-        worker.addEventListener('error', (event) => {
+        worker.addEventListener('error', (event: ErrorEvent) => {
           record.error = event.message;
         });
         const nativePostMessage = worker.postMessage.bind(worker);
-        worker.postMessage = (message, transfer) => {
-          if (message?.type === 'addMessages' && Array.isArray(message.messages)) {
+        worker.postMessage = (message: unknown, transfer?: Transferable[]) => {
+          const payload =
+            message && typeof message === 'object'
+              ? (message as { type?: string; messages?: { id?: string }[] })
+              : null;
+          if (payload?.type === 'addMessages' && Array.isArray(payload.messages)) {
             record.addedMessageIds.push(
-              message.messages.map((entry) => entry?.id).filter((id) => typeof id === 'string')
+              payload.messages
+                .map((entry) => entry?.id)
+                .filter((id): id is string => typeof id === 'string')
             );
           }
           if (transfer === undefined) nativePostMessage(message);
@@ -392,7 +484,7 @@ export function installFixtureWorkerProbe(expectedIds) {
   });
 }
 
-function chatResponse(actions, timeoutMs = 30_000) {
+function chatResponse(actions: ChatAction[], timeoutMs = 30_000) {
   return {
     continuationContents: {
       liveChatContinuation: {
@@ -410,7 +502,7 @@ function chatResponse(actions, timeoutMs = 30_000) {
   };
 }
 
-function messageAction(id, author, runs) {
+function messageAction(id: string, author: string, runs: unknown[]): ChatAction {
   return {
     addChatItemAction: {
       item: {
@@ -424,7 +516,7 @@ function messageAction(id, author, runs) {
   };
 }
 
-function createMockWatchHtml(previewHtml) {
+function createMockWatchHtml(previewHtml: string) {
   const withVideo = previewHtml.replace(
     '<div class="player-inner">Video Player Placeholder</div>',
     '<video aria-label="Acceptance fixture video" style="width:100%;height:100%"></video>'
@@ -444,7 +536,7 @@ function createMockWatchHtml(previewHtml) {
     .replace('</body>', `${chat}\n</body>`);
 }
 
-async function assertForcedColorsDisclosure(page, summary) {
+async function assertForcedColorsDisclosure(page: Page, summary: Locator) {
   await page.emulateMedia({ forcedColors: 'active' });
   try {
     const colors = await summary.evaluate((element) => {
@@ -475,7 +567,19 @@ async function assertForcedColorsDisclosure(page, summary) {
   }
 }
 
-async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoom) {
+type BrowserZoomSettings = { mode: string; scope: string };
+type BrowserZoom = { previous: number; settings: BrowserZoomSettings; observed: number };
+type SetBrowserZoom = (
+  factor: number,
+  restoreSettings?: BrowserZoomSettings
+) => Promise<BrowserZoom>;
+
+async function verifyFontGroupsAndPreferences(
+  page: Page,
+  modal: Locator,
+  output: string,
+  setBrowserZoom?: SetBrowserZoom
+) {
   const disclosure = modal.locator('#pane-comments details');
   const weight = disclosure.getByRole('group', { name: 'Font weight', exact: true });
   const family = disclosure.getByRole('group', { name: 'Font family', exact: true });
@@ -527,13 +631,20 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
   const previousViewport = page.viewportSize();
   const observations = [];
   try {
-    for (const scenario of [
+    const scenarios: {
+      id: string;
+      width: number;
+      language?: string;
+      zoom?: number;
+      media: Parameters<Page['emulateMedia']>[0];
+    }[] = [
       { id: 'dark', width: 1280, media: { colorScheme: 'dark' } },
       { id: 'forced-colors', width: 640, media: { forcedColors: 'active' } },
       { id: 'reduced-motion', width: 640, media: { reducedMotion: 'reduce' } },
       { id: 'narrow-rtl', width: 401, language: 'ar', media: {} },
       ...(setBrowserZoom ? [{ id: 'browser-zoom-200', width: 1280, zoom: 2, media: {} }] : []),
-    ]) {
+    ];
+    for (const scenario of scenarios) {
       await page.setViewportSize({ width: scenario.width, height: 720 });
       await page.emulateMedia({
         colorScheme: 'dark',
@@ -545,7 +656,7 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
       let previousLanguage;
       let previousModalLanguage;
       try {
-        if (scenario.zoom) zoom = await setBrowserZoom(scenario.zoom);
+        if (scenario.zoom && setBrowserZoom) zoom = await setBrowserZoom(scenario.zoom);
         if (scenario.language) {
           await modal.locator('#tab-translation').click();
           previousLanguage = await modal.locator('select[name="language"]').inputValue();
@@ -554,7 +665,8 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
           await modal.locator('select[name="language"]').selectOption(scenario.language);
           await page.waitForFunction(
             (language) =>
-              document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language,
+              document.querySelector<HTMLElement>('#yt-chat-overlay-settings-backdrop')?.lang ===
+              language,
             scenario.language
           );
           await modal.locator('#tab-comments').click();
@@ -565,7 +677,10 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         await customInput.focus();
         const geometry = await modal.evaluate((element) => {
           const box = element.getBoundingClientRect();
-          const field = element.querySelector('.yt-chat-overlay-settings-font-custom-input');
+          const field = element.querySelector<HTMLElement>(
+            '.yt-chat-overlay-settings-font-custom-input'
+          );
+          if (!field) throw new Error('Custom font input is unavailable');
           const control = field.getBoundingClientRect();
           return {
             left: box.left,
@@ -576,7 +691,7 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
             customLeft: control.left,
             customRight: control.right,
             focused: document.activeElement === field,
-            direction: element.dir,
+            direction: element.getAttribute('dir'),
             reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
             forcedColors: matchMedia('(forced-colors: active)').matches,
           };
@@ -595,7 +710,7 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         );
         assert(geometry.focused, `${scenario.id}: keyboard focus was lost`);
         if (scenario.language) assert.equal(geometry.direction, 'rtl');
-        if (scenario.zoom) assert.equal(zoom.observed, 2);
+        if (scenario.zoom) assert.equal(zoom?.observed, 2);
         // Page capture avoids element clipping coordinates at real tab zoom.
         await (scenario.zoom ? page : modal).screenshot({
           path: join(output, `yt-settings-${scenario.id}.png`),
@@ -603,7 +718,7 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
         });
         observations.push({ id: scenario.id, geometry, browserZoom: zoom?.observed ?? null });
       } finally {
-        if (zoom) await setBrowserZoom(zoom.previous, zoom.settings);
+        if (zoom) await setBrowserZoom?.(zoom.previous, zoom.settings);
         if (scenario.language && previousLanguage !== undefined && previousModalLanguage) {
           await modal.locator('#tab-translation').click();
           await modal.locator('select[name="language"]').selectOption(previousLanguage);
@@ -611,7 +726,8 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
           // language. Wait for the debounced rebuild before testing focus.
           await page.waitForFunction(
             (language) =>
-              document.querySelector('#yt-chat-overlay-settings-backdrop')?.lang === language,
+              document.querySelector<HTMLElement>('#yt-chat-overlay-settings-backdrop')?.lang ===
+              language,
             previousModalLanguage
           );
           await modal.locator('#tab-comments').click();
@@ -646,7 +762,7 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
   await page.keyboard.press('Space');
   assert.equal(await motionOverride.isChecked(), previousOverride);
   assert(
-    (await modal.locator('.yt-chat-overlay-settings-autosave-hint').textContent()).includes(
+    (await modal.locator('.yt-chat-overlay-settings-autosave-hint').textContent())?.includes(
       'saved when you close settings'
     )
   );
@@ -662,11 +778,11 @@ async function verifyFontGroupsAndPreferences(page, modal, output, setBrowserZoo
 }
 
 async function configureThroughSettingsUi(
-  page,
-  installed,
-  output,
-  inspectRenderer,
-  setBrowserZoom
+  page: Page,
+  installed: boolean,
+  output: string,
+  inspectRenderer: boolean,
+  setBrowserZoom?: SetBrowserZoom
 ) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
@@ -710,12 +826,13 @@ async function configureThroughSettingsUi(
     const paneRect = pane.getBoundingClientRect();
     const stageRect = stage.getBoundingClientRect();
     const textRect = text.getBoundingClientRect();
-    const containsVertically = (outer, inner) =>
+    const containsVertically = (outer: DOMRect, inner: DOMRect) =>
       inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
     const paneStyle = getComputedStyle(pane);
     return {
-      controlsVisible: requiredControls.every((control) =>
-        containsVertically(paneRect, control.getBoundingClientRect())
+      controlsVisible: requiredControls.every(
+        (control) =>
+          control != null && containsVertically(paneRect, control.getBoundingClientRect())
       ),
       maskImage: paneStyle.maskImage,
       modalHeight: modalRect.height,
@@ -865,7 +982,7 @@ async function configureThroughSettingsUi(
   await modal.locator('select[name="language"]').selectOption('es');
   await page.waitForFunction(() => {
     const dialog = document.querySelector('#yt-chat-overlay-settings-backdrop');
-    const language = dialog?.querySelector('select[name="language"]');
+    const language = dialog?.querySelector<HTMLSelectElement>('select[name="language"]');
     return dialog?.getAttribute('lang') === 'es' && language?.value === 'es';
   });
   await modal.locator('#tab-comments').click();
@@ -920,11 +1037,11 @@ async function configureThroughSettingsUi(
   await modal.locator('#tab-translation').click();
   await modal.locator('select[name="language"]').selectOption('auto');
   await page.waitForFunction(
-    () => document.querySelector('select[name="language"]')?.value === 'auto'
+    () => document.querySelector<HTMLSelectElement>('select[name="language"]')?.value === 'auto'
   );
 
   const capability = modal.locator('.yt-chat-overlay-settings-capability');
-  assert.match(await capability.getAttribute('data-supported'), /^(?:true|false)$/u);
+  assert.match((await capability.getAttribute('data-supported')) ?? '', /^(?:true|false)$/u);
   assert.equal(await capability.getAttribute('role'), 'note');
   assert((await capability.textContent())?.trim(), 'Translation capability status is empty');
   assert.equal(await modal.locator('input[name="translationEnabled"]').count(), 1);
@@ -963,7 +1080,7 @@ async function configureThroughSettingsUi(
   return { defaultPreviewState, localizedPreviewState, interactionState };
 }
 
-async function verifyIsolatedPaidCardInk(page, output) {
+async function verifyIsolatedPaidCardInk(page: Page, output: string) {
   const previousSettings = await page.evaluate(() => {
     const settings = window.__ytChatOverlay?.getSettings?.();
     if (!settings) throw new Error('Runtime settings are unavailable');
@@ -979,7 +1096,7 @@ async function verifyIsolatedPaidCardInk(page, output) {
       throw new Error('Runtime restart hook is unavailable');
     app.applySettings({
       danmakuMode: 'top',
-      showAuthor: { superChat: false },
+      showAuthor: { ...app.getSettings().showAuthor, superChat: false },
       showSuperChatAmount: false,
     });
     await app.restartRuntime();
@@ -1017,10 +1134,12 @@ async function verifyIsolatedPaidCardInk(page, output) {
         const y = Math.floor(rect.top) + 2;
         if (x < 0 || x >= element.width || y < 0 || y >= element.height) return false;
         const [red, green, blue, alpha] = context.getImageData(x, y, 1, 1).data;
-        return alpha >= 128 && blue > green + 10 && blue > red + 10;
+        return (
+          (alpha ?? 0) >= 128 && (blue ?? 0) > (green ?? 0) + 10 && (blue ?? 0) > (red ?? 0) + 10
+        );
       });
-      if (candidates.length !== 1) return null;
       const rect = candidates[0];
+      if (candidates.length !== 1 || !rect) return null;
       const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
       const startY = Math.max(0, Math.floor(rect.top));
       const endY = Math.min(element.height, Math.ceil(rect.bottom));
@@ -1032,7 +1151,7 @@ async function verifyIsolatedPaidCardInk(page, output) {
         endY - startY
       ).data;
       let outsideAlphaPixels = 0;
-      for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 8) outsideAlphaPixels++;
+      for (let i = 3; i < pixels.length; i += 4) if ((pixels[i] ?? 0) > 8) outsideAlphaPixels++;
       return { cachedBitmapDraws: probe.cachedBitmapDraws - before, outsideAlphaPixels, rect };
     },
     previousDraws,
@@ -1040,14 +1159,15 @@ async function verifyIsolatedPaidCardInk(page, output) {
   );
   const result = await resultHandle.jsonValue();
   await resultHandle.dispose();
+  assert(result, 'Isolated outlined Super Chat probe returned no result');
   assert.equal(result.outsideAlphaPixels, 0, 'Isolated outlined Super Chat ink escaped the card');
-  const accessibleMessageId = `${CHAT_ACTIONS[index].addChatItemAction.item.liveChatPaidMessageRenderer.id}-isolated-ink`;
+  const accessibleMessageId = `${CHAT_ACTIONS[index]?.addChatItemAction.item.liveChatPaidMessageRenderer?.id}-isolated-ink`;
   await page.waitForFunction(
     (messageId) => {
       const messages = document.querySelectorAll(
         '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
       );
-      return messages.length === 1 && messages[0].dataset.messageId === messageId;
+      return messages.length === 1 && messages[0]?.getAttribute('data-message-id') === messageId;
     },
     accessibleMessageId,
     { timeout: 10_000 }
@@ -1058,13 +1178,19 @@ async function verifyIsolatedPaidCardInk(page, output) {
   });
   await page.evaluate(async (settings) => {
     const app = window.__ytChatOverlay;
+    if (!app?.applySettings || !app.restartRuntime)
+      throw new Error('Runtime restart hook is unavailable');
     app.applySettings(settings);
     await app.restartRuntime();
   }, previousSettings);
   return { ...result, accessibleMessageId };
 }
 
-async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnostic) {
+async function verifySustainedViewingLifecycle(
+  page: Page,
+  expectedRenderer: string,
+  diagnostic: LifecycleDiagnostic | null
+) {
   const initialIds = [
     'windows-sustained-low-1',
     'windows-sustained-low-2',
@@ -1076,7 +1202,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     page
       .locator('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p')
       .evaluateAll((elements) => elements.map((element) => element.dataset.messageId));
-  const requestPhase = async (phase) => {
+  const requestPhase = async (phase: string) => {
     if (diagnostic) diagnostic.activePhase = phase;
     const expectedCounts = {
       'low-1': 1,
@@ -1087,15 +1213,15 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
       visible: 1,
       'second-video': 1,
     };
-    const expectedCount = expectedCounts[phase];
+    const expectedCount = expectedCounts[phase as keyof typeof expectedCounts];
     assert(Number.isSafeInteger(expectedCount), `Unexpected sustained-viewing phase: ${phase}`);
     // Register before the page fetch: the userscript logs from its own realm,
     // so a page-world console wrapper cannot count its interceptor batches.
-    let resolveReceived;
-    const received = new Promise((resolve) => {
+    let resolveReceived: (message: ConsoleMessage | null) => void = () => {};
+    const received = new Promise<ConsoleMessage | null>((resolve) => {
       resolveReceived = resolve;
     });
-    const onConsole = (message) => {
+    const onConsole = (message: ConsoleMessage) => {
       if (
         message.type() === 'debug' &&
         message.text().includes('[FetchInterceptor]') &&
@@ -1132,11 +1258,13 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
       resolveReceived(null);
     }
   };
-  const waitForExactIds = async (expected) => {
+  const waitForExactIds = async (expected: (string | undefined)[]) => {
     await page.waitForFunction(
       (ids) => {
         const actual = Array.from(
-          document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+          document.querySelectorAll<HTMLElement>(
+            '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
+          ),
           (element) => element.dataset.messageId
         );
         return (
@@ -1149,7 +1277,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
       { timeout: 15_000 }
     );
   };
-  const waitForWorkerIngress = async (workerIndex, expected) => {
+  const waitForWorkerIngress = async (workerIndex: number, expected: string[]) => {
     await page.waitForFunction(
       ({ index, ids }) => {
         const actual = window.__ytAcceptanceWorkers?.[index]?.addedMessageIds?.flat() ?? [];
@@ -1159,7 +1287,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
       { timeout: 15_000 }
     );
   };
-  const readDebugCounts = async (received, dropped) => {
+  const readDebugCounts = async (received: number, dropped: number) => {
     const handle = await page.waitForFunction(
       (expected) => {
         const lines = Array.from(
@@ -1203,7 +1331,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
       undefined,
       { timeout: 15_000 }
     );
-    initialWorkerIndex = (await readyWorker.jsonValue()).index;
+    initialWorkerIndex = (await readyWorker.jsonValue())?.index ?? null;
     await readyWorker.dispose();
   }
 
@@ -1223,7 +1351,8 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
   await waitForExactIds([...baselineIds, ...initialIds]);
 
   const beforePause = await readDebugCounts(baselineIds.length + initialIds.length, 0);
-  await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(12, true));
+  assert(beforePause, 'Pause baseline counters are unavailable');
+  await page.evaluate(() => window.__ytAcceptanceSetPlaybackState?.(12, true));
   await requestPhase('paused');
   if (initialWorkerIndex !== null) await waitForWorkerIngress(initialWorkerIndex, initialIds);
   await waitForExactIds([...baselineIds, ...initialIds]);
@@ -1235,7 +1364,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     video.dispatchEvent(new Event('seeked'));
   });
   await waitForExactIds([...baselineIds, ...initialIds]);
-  await page.evaluate(() => window.__ytAcceptanceSetPlaybackState(30, false));
+  await page.evaluate(() => window.__ytAcceptanceSetPlaybackState?.(30, false));
   if (initialWorkerIndex !== null) {
     await waitForWorkerIngress(initialWorkerIndex, [...initialIds, ...pausedIds]);
   }
@@ -1261,6 +1390,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
   }
   await waitForExactIds([...baselineIds, ...initialIds, ...pausedIds]);
   const afterHidden = await readDebugCounts(beforePause.received + 2, beforePause.dropped + 2);
+  assert(afterHidden, 'Hidden phase counters are unavailable');
   assert.equal(afterHidden.received, beforePause.received + 2);
   assert.equal(afterHidden.dropped, beforePause.dropped + 2);
   const hiddenMessageSuppressed = !(await readIds()).includes('windows-sustained-hidden');
@@ -1282,7 +1412,11 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
     const canvas = document.querySelector('#yt-live-chat-overlay canvas');
     if (!canvas) throw new Error('Acceptance canvas is missing before SPA navigation');
     window.__ytAcceptanceOldCanvas = canvas;
-    window.ytInitialData.currentVideoEndpoint.watchEndpoint.videoId = 'windows-sustained-second';
+    const data = window.ytInitialData as
+      | { currentVideoEndpoint: { watchEndpoint: { videoId: string } } }
+      | undefined;
+    if (!data) throw new Error('Fixture video data is unavailable');
+    data.currentVideoEndpoint.watchEndpoint.videoId = 'windows-sustained-second';
     history.pushState({}, '', '/watch?v=windows-sustained-second');
     window.dispatchEvent(new Event('yt-navigate-finish'));
   });
@@ -1303,7 +1437,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
         const oldWorker = workers[previousCount - 1];
         const replacement = workers[previousCount];
         return (
-          oldWorker?.acknowledgements >= 1 &&
+          (oldWorker?.acknowledgements ?? 0) >= 1 &&
           oldWorker?.terminated === true &&
           replacement?.ready === true
         );
@@ -1320,6 +1454,7 @@ async function verifySustainedViewingLifecycle(page, expectedRenderer, diagnosti
   await waitForExactIds(['windows-sustained-second-video']);
 
   const finalCounts = await readDebugCounts(1, 0);
+  assert(finalCounts, 'Second session counters are unavailable');
   assert.equal(finalCounts.received, 1);
   assert.equal(finalCounts.dropped, 0);
   return {
@@ -1340,6 +1475,13 @@ export async function run({
   installedContext,
   installedExtensionId,
   expectedRenderer = 'main',
+}: {
+  browser: Browser;
+  root: string;
+  output: string;
+  installedContext?: BrowserContext;
+  installedExtensionId?: string;
+  expectedRenderer?: string;
 }) {
   assert(
     browser && typeof browser.newContext === 'function',
@@ -1360,20 +1502,20 @@ export async function run({
   const mockWatchHtml = createMockWatchHtml(previewHtml);
   await mkdir(output, { recursive: true });
 
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
   let chatApiRequests = 0;
   let explicitChatRequests = 0;
   let backgroundChatRequests = 0;
   let sustainedChatRequests = 0;
-  const backgroundRequestTimes = [];
+  const backgroundRequestTimes: number[] = [];
   let customEmojiAssetRequests = 0;
   let deliverInstalledFixture = false;
   let installedFixtureDelivered = false;
   let installedFixtureCursor = 0;
-  let highActivityProbe = null;
-  const highActivityRequests = new Map();
-  const lifecycleDiagnostic = installedContext
+  let highActivityProbe: HighActivityProbe | null = null;
+  const highActivityRequests = new Map<Request, PollSample>();
+  const lifecycleDiagnostic: LifecycleDiagnostic | null = installedContext
     ? {
         activePhase: null,
         consoleEvents: [],
@@ -1392,7 +1534,7 @@ export async function run({
       viewport: { width: 1280, height: 720 },
     }));
 
-  let page;
+  let page: Page | undefined;
   try {
     page = await context.newPage();
     // Geometry assertions use a fixed CSS viewport, including native CDP contexts.
@@ -1412,7 +1554,7 @@ export async function run({
             summarizeInterceptorConsoleMessage(
               message,
               lifecycleDiagnostic.activePhase,
-              installedExtensionId
+              installedExtensionId ?? ''
             ).catch(() => null)
           );
           if (lifecycleDiagnostic.consoleEvents.length > 32)
@@ -1427,7 +1569,8 @@ export async function run({
         cdp.on('Runtime.executionContextCreated', ({ context: entry }) => {
           lifecycleDiagnostic.contexts.set(entry.id, entry);
           if (lifecycleDiagnostic.contexts.size > 16) {
-            lifecycleDiagnostic.contexts.delete(lifecycleDiagnostic.contexts.keys().next().value);
+            const oldest = lifecycleDiagnostic.contexts.keys().next().value;
+            if (oldest !== undefined) lifecycleDiagnostic.contexts.delete(oldest);
           }
         });
         cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
@@ -1436,7 +1579,8 @@ export async function run({
         cdp.on('Runtime.executionContextsCleared', () => lifecycleDiagnostic.contexts.clear());
         await cdp.send('Runtime.enable');
       } catch (setupError) {
-        lifecycleDiagnostic.setupErrorType = setupError?.name ?? 'Error';
+        lifecycleDiagnostic.setupErrorType =
+          setupError instanceof Error ? setupError.name : 'Error';
         await lifecycleDiagnostic.cdp?.detach().catch(() => {});
         lifecycleDiagnostic.cdp = null;
       }
@@ -1472,7 +1616,7 @@ export async function run({
       ) {
         chatApiRequests++;
         const sustainedActions = SUSTAINED_PHASE_ACTIONS.get(
-          url.searchParams.get('sustained-phase')
+          url.searchParams.get('sustained-phase') ?? ''
         );
         if (sustainedActions) {
           sustainedChatRequests++;
@@ -1509,7 +1653,11 @@ export async function run({
             highActivityProbe.samples.length < 9
           ) {
             const index = highActivityProbe.samples.length;
-            const sample = { startedAt: performance.now(), finishedAt: null, failed: null };
+            const sample: PollSample = {
+              startedAt: performance.now(),
+              finishedAt: null,
+              failed: null,
+            };
             highActivityProbe.samples.push(sample);
             highActivityRequests.set(route.request(), sample);
             highActivityProbe.maxActive = Math.max(
@@ -1533,10 +1681,11 @@ export async function run({
             });
             return;
           }
-          const actions =
+          const nextAction =
             deliverInstalledFixture && !installedFixtureDelivered
-              ? [CHAT_ACTIONS[installedFixtureCursor++]]
-              : [];
+              ? CHAT_ACTIONS[installedFixtureCursor++]
+              : undefined;
+          const actions = nextAction ? [nextAction] : [];
           if (actions.length)
             installedFixtureDelivered = installedFixtureCursor === CHAT_ACTIONS.length;
           await route.fulfill({
@@ -1594,8 +1743,8 @@ export async function run({
             throw new Error('Select the main renderer for fixture pixel inspection');
           },
         });
-        const rects = [];
-        let paintedCanvas = null;
+        const rects: PaidCardRect[] = [];
+        let paintedCanvas: HTMLCanvasElement | null = null;
         let cachedBitmapDraws = 0;
         const originalClearRect = CanvasRenderingContext2D.prototype.clearRect;
         CanvasRenderingContext2D.prototype.clearRect = function (x, y, width, height) {
@@ -1620,7 +1769,10 @@ export async function run({
           originalRoundRect.call(this, x, y, width, height, radii);
         };
         const originalDrawImage = CanvasRenderingContext2D.prototype.drawImage;
-        CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+        CanvasRenderingContext2D.prototype.drawImage = function (
+          this: CanvasRenderingContext2D,
+          ...args: Parameters<CanvasRenderingContext2D['drawImage']>
+        ) {
           if (
             args.length >= 5 &&
             typeof OffscreenCanvas !== 'undefined' &&
@@ -1629,7 +1781,7 @@ export async function run({
             cachedBitmapDraws++;
           }
           Reflect.apply(originalDrawImage, this, args);
-        };
+        } as CanvasRenderingContext2D['drawImage'];
         window.__ytAcceptancePaidCardProbe = {
           rects,
           get cachedBitmapDraws() {
@@ -1682,6 +1834,7 @@ export async function run({
         return Boolean(handle && typeof handle.getSettings === 'function');
       });
 
+    const fixturePage = page;
     const settingsUiState = await configureThroughSettingsUi(
       page,
       Boolean(installedContext),
@@ -1700,22 +1853,40 @@ export async function run({
             );
             return worker.evaluate(
               async ({ url, zoomFactor, restore }) => {
-                const tabs = await chrome.tabs.query({ url });
-                if (tabs.length !== 1 || !Number.isInteger(tabs[0].id))
+                const chromeTabs = (
+                  globalThis as typeof globalThis & {
+                    chrome: {
+                      tabs: {
+                        query: (query: { url: string }) => Promise<{ id?: number }[]>;
+                        getZoom: (id: number) => Promise<number>;
+                        getZoomSettings: (id: number) => Promise<BrowserZoomSettings>;
+                        setZoomSettings: (
+                          id: number,
+                          settings: BrowserZoomSettings
+                        ) => Promise<void>;
+                        setZoom: (id: number, factor: number) => Promise<void>;
+                      };
+                    };
+                  }
+                ).chrome.tabs;
+                const tabs = await chromeTabs.query({ url });
+                const tab = tabs[0];
+                if (tabs.length !== 1 || !tab || !Number.isInteger(tab.id))
                   throw new Error('Browser zoom requires one exact fixture tab');
-                const id = tabs[0].id;
-                const previous = await chrome.tabs.getZoom(id);
-                const settings = await chrome.tabs.getZoomSettings(id);
-                await chrome.tabs.setZoomSettings(id, { mode: 'automatic', scope: 'per-tab' });
-                await chrome.tabs.setZoom(id, zoomFactor);
+                const id = tab.id;
+                if (id === undefined) throw new Error('Browser zoom tab has no ID');
+                const previous = await chromeTabs.getZoom(id);
+                const settings = await chromeTabs.getZoomSettings(id);
+                await chromeTabs.setZoomSettings(id, { mode: 'automatic', scope: 'per-tab' });
+                await chromeTabs.setZoom(id, zoomFactor);
                 if (restore)
-                  await chrome.tabs.setZoomSettings(id, {
+                  await chromeTabs.setZoomSettings(id, {
                     mode: restore.mode,
                     scope: restore.scope,
                   });
-                return { previous, settings, observed: await chrome.tabs.getZoom(id) };
+                return { previous, settings, observed: await chromeTabs.getZoom(id) };
               },
-              { url: page.url(), zoomFactor: factor, restore: restoreSettings }
+              { url: fixturePage.url(), zoomFactor: factor, restore: restoreSettings }
             );
           }
         : undefined
@@ -1727,7 +1898,7 @@ export async function run({
     const apiStatuses = installedContext
       ? []
       : await page.evaluate(async (count) => {
-          const statuses = [];
+          const statuses: number[] = [];
           for (let index = 0; index < count; index++) {
             const response = await fetch(
               `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${index}`
@@ -1885,23 +2056,24 @@ export async function run({
       assert.equal(probe.maxActive, 1, 'Live polls overlapped');
       const waits = probe.samples
         .slice(1)
-        .map((sample, index) => sample.startedAt - probe.samples[index].finishedAt);
+        .map((sample, index) => sample.startedAt - (probe.samples[index]?.finishedAt ?? NaN));
       // Browser network-event timestamps can straddle response processing.
       // Exact floor boundaries are covered separately with fake-time loop tests.
       const eventToleranceMs = 25;
       assert(
-        waits[4] >= 500 - eventToleranceMs && waits[5] >= 500 - eventToleranceMs,
+        (waits[4] ?? -Infinity) >= 500 - eventToleranceMs &&
+          (waits[5] ?? -Infinity) >= 500 - eventToleranceMs,
         `Extreme density bypassed the polling floor: ${waits[4]}, ${waits[5]}`
       );
       assert(
-        waits[7] >= 1000 - eventToleranceMs,
+        (waits[7] ?? -Infinity) >= 1000 - eventToleranceMs,
         `Empty response did not restore ordinary polling: ${waits[7]}`
       );
       assert.equal(await page.locator('#yt-live-chat-overlay canvas').count(), 1);
       const deliveredCount = await page.evaluate(
         () =>
           new Set(
-            window.__ytAcceptanceWorkers
+            (window.__ytAcceptanceWorkers ?? [])
               .filter((worker) => !worker.terminated)
               .flatMap((worker) => worker.addedMessageIds.flat())
               .filter((id) => id.startsWith('windows-poll-floor-'))
@@ -1928,22 +2100,25 @@ export async function run({
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
     const backgroundObservationMs = backgroundRequestTimes.length
-      ? performance.now() - backgroundRequestTimes[0]
+      ? performance.now() - (backgroundRequestTimes[0] ?? 0)
       : 0;
     const minimumPollInterval = installedContext
       ? null
       : await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().minPollIntervalMs);
     if (!installedContext) {
       assert(
-        Number.isFinite(minimumPollInterval) && minimumPollInterval > 0,
+        typeof minimumPollInterval === 'number' &&
+          Number.isFinite(minimumPollInterval) &&
+          minimumPollInterval > 0,
         'The runtime minimum polling interval is unavailable'
       );
     }
     // Longer settings interactions permit more polls, but never a faster
     // average request rate than the configured minimum polling interval.
-    const backgroundRequestBudget = installedContext
-      ? 100
-      : 1 + Math.floor(backgroundObservationMs / minimumPollInterval);
+    const backgroundRequestBudget =
+      typeof minimumPollInterval === 'number'
+        ? 1 + Math.floor(backgroundObservationMs / minimumPollInterval)
+        : 100;
     assert(
       backgroundChatRequests <= backgroundRequestBudget,
       `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`
@@ -1995,7 +2170,7 @@ export async function run({
         highActivityPolling,
         backgroundRequestIntervalsMs: backgroundRequestTimes
           .slice(1)
-          .map((time, index) => time - backgroundRequestTimes[index]),
+          .map((time, index) => time - (backgroundRequestTimes[index] ?? 0)),
       },
     };
   } catch (error) {

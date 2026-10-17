@@ -86,7 +86,7 @@ The installed Chrome/Edge Worker fixture also checks sustained high-activity
 polling. It saves a positive minimum through the settings UI, delivers enough
 unique batches to fill the density window, records request/response timestamps
 and concurrent requests, then verifies ordinary polling resumes after an empty
-response. `profile.mjs` records the fixture sizes and network-event tolerance;
+response. `profile.ts` records the fixture sizes and network-event tolerance;
 fake-time `source-live.test.ts` assertions cover exact timer boundaries. This
 scenario uses intercepted fixture traffic rather than a live chat account.
 

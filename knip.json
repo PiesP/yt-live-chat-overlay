@@ -8,7 +8,7 @@
     "scripts/ci/check-pinned-tools.ts",
     "scripts/ci/classify-workflow-changes.ts",
     "scripts/ci/pinned-tools.ts",
-    "validation/windows/profile.mjs",
+    "validation/windows/profile.ts",
     "validation/windows/install-profile.mjs",
     "vite.config.*.ts"
   ],
