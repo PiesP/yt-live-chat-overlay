@@ -15,6 +15,26 @@ This validation has four separate evidence tiers. None substitutes for another.
    YouTube pages after the deterministic fixture and can remain unverified when
    chat is unavailable.
 
+## Retained acceptance evidence
+
+The historical migration review is recorded in
+[#261](https://github.com/PiesP/yt-live-chat-overlay/issues/261). Its private
+evidence reference is
+`piesp-windows-acceptance/20261017-migration-review/yt-live-chat-overlay-261`.
+PiesP is the custodian; authorized reviewers obtain the index through the
+maintainer's configured local Windows-controller workspace and owner-account
+storage, not a public upload. The original and failed receipts are retained
+until the maintainer explicitly authorizes cleanup, without automatic expiry.
+
+The private index maps original attempts, source/core and controller/profile
+identities, local migration transcripts, and artifact sizes and SHA-256 digests.
+It labels newly recomputed hashes separately from historical review addenda.
+Reviewers record their role, date, inspected files, discrepancies and limits in
+an additive disposition; they do not rewrite an original `visual_review` field.
+Keep executed, input-matched reuse, intentional skips, failures, not-run and
+access-blocked results distinct. The linked review records the hosted job steps
+and the precise scope of the existing installed Edge fixture.
+
 ## Artifact-only smoke
 
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
