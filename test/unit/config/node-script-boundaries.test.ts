@@ -299,4 +299,18 @@ describe('Node script boundaries', () => {
     expect(result.stderr).toContain('RELEASE_VERSION must be a semantic version in X.Y.Z form');
     expect(existsSync(join(directory, 'release-bundle'))).toBe(false);
   });
+
+  it('rejects a direct publication check without trusted release inputs', () => {
+    const directory = fixtureRoot();
+    const env = { ...process.env };
+    delete env.GITHUB_REPOSITORY;
+    delete env.GITHUB_TOKEN;
+    delete env.GITHUB_OUTPUT;
+
+    const result = runCli(join(root, 'scripts/release/verify-publication.ts'), [], directory, env);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Expected repository, token and output are required');
+    expect(existsSync(join(directory, 'release-bundle'))).toBe(false);
+  });
 });
