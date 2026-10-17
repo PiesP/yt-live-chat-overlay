@@ -8,6 +8,7 @@
     "scripts/ci/classify-workflow-changes.ts",
     "validation/windows/profile.ts",
     "validation/windows/install-profile.ts",
+    "validation/windows/prepare-userscript-manager.ts",
     "vite.config.*.ts"
   ],
   "project": [
