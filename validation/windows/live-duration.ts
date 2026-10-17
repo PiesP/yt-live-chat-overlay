@@ -85,6 +85,7 @@ type DurationResult = {
   observation?: { plannedMs: number; elapsedMs: number; sampleCount: number };
   evidenceStatusReasons?: string[];
   failureState?: Awaited<ReturnType<typeof publicState>> | null;
+  failurePlayerDom?: Awaited<ReturnType<typeof captureFailurePlayerDom>> | null;
 };
 
 declare global {
@@ -376,6 +377,99 @@ async function publicState(page: Page) {
           : null,
     };
   });
+}
+
+/** Capture bounded player-error structure without page, account, or chat content. */
+export async function captureFailurePlayerDom(page: Page) {
+  const snapshot = await page.evaluate(() => {
+    const player = document.querySelector('#movie_player');
+    const providerRoots = [
+      ...document.querySelectorAll(
+        'yt-playability-error-supported-renderers, ytd-player-error-message-renderer'
+      ),
+    ];
+    const elements = [
+      ...(player ? [player, ...player.querySelectorAll('*')] : []),
+      ...providerRoots.flatMap((root) => [root, ...root.querySelectorAll('*')]),
+    ];
+    const markerPattern = /error|unavailable|playability|message|alert|status/iu;
+    const textPattern =
+      /video unavailable|live stream recording is not available|an error occurred/iu;
+    const boundedAttribute = (value: string | null) =>
+      value?.replace(/[^a-z0-9_-]/giu, '_').slice(0, 64) ?? null;
+    const describe = (element: Element) => {
+      const style = getComputedStyle(element);
+      const rectangle = element.getBoundingClientRect();
+      const rectCount = element.getClientRects().length;
+      return {
+        tag: element.tagName.toLowerCase(),
+        id: boundedAttribute(element.id),
+        classes: [...element.classList].slice(0, 8).map((value) => boundedAttribute(value)),
+        role: boundedAttribute(element.getAttribute('role')),
+        ariaHidden: element.getAttribute('aria-hidden')?.slice(0, 8) ?? null,
+        hidden: element.hasAttribute('hidden'),
+        display: style.display.slice(0, 32),
+        visibility: style.visibility.slice(0, 32),
+        rectCount: Math.min(rectCount, 999),
+        width: Math.round(rectangle.width),
+        height: Math.round(rectangle.height),
+        visible: style.display !== 'none' && style.visibility !== 'hidden' && rectCount > 0,
+      };
+    };
+    const candidates = elements
+      .filter((element) => {
+        const structural = [
+          element.tagName,
+          element.id,
+          ...element.classList,
+          element.getAttribute('role') ?? '',
+        ].some((value) => markerPattern.test(value));
+        const leafText = element.children.length === 0 ? (element.textContent ?? '') : '';
+        return structural || textPattern.test(leafText);
+      })
+      .map((element) => {
+        const path = [];
+        for (let current: Element | null = element; current && path.length < 6;) {
+          path.push(describe(current));
+          current = current.parentElement;
+        }
+        const leafText = element.children.length === 0 ? (element.textContent ?? '') : '';
+        return {
+          path,
+          errorText: textPattern.test(leafText)
+            ? leafText.replace(/\s+/gu, ' ').trim().slice(0, 160)
+            : null,
+        };
+      })
+      .sort((first, second) => Number(second.path[0]?.visible) - Number(first.path[0]?.visible))
+      .slice(0, 24);
+    const response = (
+      globalThis as typeof globalThis & {
+        ytInitialPlayerResponse?: {
+          playabilityStatus?: { status?: unknown; reason?: unknown };
+        };
+      }
+    ).ytInitialPlayerResponse;
+    const status = response?.playabilityStatus?.status;
+    const reason = response?.playabilityStatus?.reason;
+    const media = document.querySelector('video');
+    return {
+      playerFound: Boolean(player),
+      providerStatus: typeof status === 'string' ? boundedAttribute(status) : null,
+      providerReason: typeof reason === 'string' ? reason.slice(0, 160) : null,
+      mediaNetworkState: media instanceof HTMLVideoElement ? media.networkState : null,
+      mediaErrorCode: media instanceof HTMLVideoElement ? (media.error?.code ?? null) : null,
+      candidates,
+    };
+  });
+  return {
+    ...snapshot,
+    providerReason: snapshot.providerReason ? redactDiagnosticText(snapshot.providerReason) : null,
+    candidates: snapshot.candidates.map((candidate) => ({
+      ...candidate,
+      errorText: candidate.errorText ? redactDiagnosticText(candidate.errorText) : null,
+    })),
+  };
 }
 
 export function isInitialObservationReady(state: Partial<HealthSample> | null) {
@@ -791,6 +885,9 @@ export async function runLiveDuration({
     result.diagnostics = captureDiagnostics(false);
     if (page && !page.isClosed()) {
       result.failureState = await publicState(page).catch(() => null);
+      if (stage.startsWith('preflight:')) {
+        result.failurePlayerDom = await captureFailurePlayerDom(page).catch(() => null);
+      }
       await page
         .screenshot({
           path: join(output, 'live-duration-failure.png'),
