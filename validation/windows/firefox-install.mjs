@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
-import { launchFirefoxBidi } from './firefox-bidi.mjs';
+
+import { launchFirefoxBidi } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,

@@ -2,10 +2,45 @@
 // Copyright (c) 2026 PiesP
 
 import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
+
+type FirefoxProcess = {
+  pid: number;
+  parentPid: number;
+  commandLine: string;
+  executablePath: string;
+  createdUtc: string;
+  startTicks: string;
+};
+
+type FirefoxInspection = { processes: FirefoxProcess[]; listenerPids: number[] };
+type FirefoxOwnership = {
+  executablePath: string;
+  profileDir: string;
+  spawnedAt: number;
+  childPid?: number | undefined;
+  expectedProcesses?: FirefoxProcess[];
+  browserPid?: number;
+  snapshotFailed?: boolean;
+};
+
+type ProcessChild = {
+  pid?: number | undefined;
+  exitCode?: number | null;
+  signalCode?: NodeJS.Signals | null;
+  kill?: (signal?: NodeJS.Signals) => boolean;
+  once?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+  on?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+};
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}
 
 const STARTUP_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 20_000;
@@ -20,30 +55,32 @@ const ENDPOINT_FILE_MAX_BYTES = 1024;
 const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 5_000;
 const execFileAsync = promisify(execFile);
 
-function errorMessage(reason) {
+function errorMessage(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
 }
 
-function delay(ms) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+function delay(ms: number) {
+  return new Promise<void>((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-function waitForProcessExit(child, timeoutMs) {
+function waitForProcessExit(child: ProcessChild, timeoutMs: number) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  return new Promise((resolveExit) => {
+  if (!child.once || !child.removeListener)
+    throw new Error('Firefox launcher event hooks unavailable');
+  return new Promise<boolean>((resolveExit) => {
     const timeout = setTimeout(() => {
-      child.removeListener('exit', onExit);
+      child.removeListener?.('exit', onExit);
       resolveExit(false);
     }, timeoutMs);
     const onExit = () => {
       clearTimeout(timeout);
       resolveExit(true);
     };
-    child.once('exit', onExit);
+    child.once?.('exit', onExit);
   });
 }
 
-function assertOwnedProfile(root, profileDir) {
+function assertOwnedProfile(root: string, profileDir: string) {
   const resolvedRoot = resolve(root);
   const resolvedProfile = resolve(profileDir);
   if (
@@ -54,7 +91,7 @@ function assertOwnedProfile(root, profileDir) {
   }
 }
 
-export async function removeOwnedProfile(root, profileDir, rmProfile = rm) {
+export async function removeOwnedProfile(root: string, profileDir: string, rmProfile = rm) {
   assertOwnedProfile(root, profileDir);
   await rmProfile(profileDir, {
     force: true,
@@ -72,7 +109,7 @@ function windowsPowerShellPath() {
   return win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-async function inspectWindowsFirefox(port = 0) {
+async function inspectWindowsFirefox(port = 0): Promise<FirefoxInspection> {
   const script = `$ErrorActionPreference = 'Stop'
 $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'firefox.exe'" | ForEach-Object {
   $handle = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
@@ -105,14 +142,18 @@ ConvertTo-Json -Compress -Depth 3 -InputObject ([pscustomobject]@{ processes = $
     ['-NoProfile', '-NonInteractive', '-Command', script],
     { timeout: WINDOWS_PROCESS_QUERY_TIMEOUT_MS, maxBuffer: 65_536, windowsHide: true }
   );
-  const result = JSON.parse(stdout);
-  if (!Array.isArray(result?.processes) || !Array.isArray(result?.listenerPids)) {
+  const result: unknown = JSON.parse(stdout);
+  if (!result || typeof result !== 'object') {
     throw new Error('Firefox process inspection returned invalid data');
   }
-  return result;
+  const inspection = result as Partial<FirefoxInspection>;
+  if (!Array.isArray(inspection.processes) || !Array.isArray(inspection.listenerPids)) {
+    throw new Error('Firefox process inspection returned invalid data');
+  }
+  return inspection as FirefoxInspection;
 }
 
-function ownsProfileCommand(commandLine, profileDir) {
+function ownsProfileCommand(commandLine: unknown, profileDir: string) {
   if (typeof commandLine !== 'string') return false;
   const argument = /(?:^|\s)-{1,2}profile\s+(?:"([^"]+)"|(\S+))/iu.exec(commandLine);
   const actual = argument?.[1] ?? argument?.[2];
@@ -123,10 +164,16 @@ function ownsProfileCommand(commandLine, profileDir) {
 }
 
 export function selectOwnedFirefoxProcesses(
-  processes,
-  { childPid, executablePath, expectedProcesses, profileDir, spawnedAt }
+  processes: FirefoxProcess[],
+  { childPid, executablePath, expectedProcesses, profileDir, spawnedAt }: FirefoxOwnership
 ) {
-  if (!Array.isArray(processes) || !Number.isSafeInteger(childPid) || childPid <= 0) return [];
+  if (
+    !Array.isArray(processes) ||
+    !Number.isSafeInteger(childPid) ||
+    childPid === undefined ||
+    childPid <= 0
+  )
+    return [];
   const expectedByPid = new Map((expectedProcesses ?? []).map((entry) => [entry.pid, entry]));
   const candidates = processes.filter(
     (entry) =>
@@ -141,11 +188,11 @@ export function selectOwnedFirefoxProcesses(
       typeof entry.startTicks === 'string' &&
       /^\d+$/u.test(entry.startTicks) &&
       (!expectedByPid.has(entry.pid) ||
-        (expectedByPid.get(entry.pid).createdUtc === entry.createdUtc &&
-          expectedByPid.get(entry.pid).startTicks === entry.startTicks))
+        (expectedByPid.get(entry.pid)?.createdUtc === entry.createdUtc &&
+          expectedByPid.get(entry.pid)?.startTicks === entry.startTicks))
   );
   const byPid = new Map(candidates.map((entry) => [entry.pid, entry]));
-  const selected = new Map();
+  const selected = new Map<number, FirefoxProcess>();
   for (const entry of candidates) {
     if (expectedByPid.has(entry.pid)) {
       selected.set(entry.pid, entry);
@@ -157,7 +204,8 @@ export function selectOwnedFirefoxProcesses(
     }
     if (!ownsProfileCommand(entry.commandLine, profileDir)) continue;
     const lineage = [entry];
-    const seen = new Set([entry.pid]);
+    const seen: Set<number> = new Set();
+    seen.add(entry.pid);
     let parentPid = entry.parentPid;
     while (parentPid !== childPid && !seen.has(parentPid)) {
       seen.add(parentPid);
@@ -181,7 +229,7 @@ export function selectOwnedFirefoxProcesses(
   return [...selected.values()];
 }
 
-export function parseFirefoxProfileEndpoint(data) {
+export function parseFirefoxProfileEndpoint(data: unknown) {
   if (typeof data !== 'string' || Buffer.byteLength(data) > ENDPOINT_FILE_MAX_BYTES) {
     throw new Error('Firefox BiDi endpoint metadata is oversized or invalid');
   }
@@ -195,7 +243,7 @@ export function parseFirefoxProfileEndpoint(data) {
   return { host: parsed.ws_host, port: parsed.ws_port };
 }
 
-export async function readOwnedFirefoxEndpoint(profileDir, spawnedAt) {
+export async function readOwnedFirefoxEndpoint(profileDir: string, spawnedAt: number) {
   const path = join(profileDir, ENDPOINT_FILE);
   let file;
   try {
@@ -204,14 +252,14 @@ export async function readOwnedFirefoxEndpoint(profileDir, spawnedAt) {
       constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW)
     );
   } catch (error) {
-    if (error?.code === 'ELOOP') {
+    if (isNodeError(error) && error.code === 'ELOOP') {
       throw new Error('Firefox BiDi endpoint metadata is not a fresh ordinary file');
     }
-    if (error?.code === 'ENOENT') {
+    if (isNodeError(error) && error.code === 'ENOENT') {
       try {
         await lstat(path);
       } catch (pathError) {
-        if (pathError?.code === 'ENOENT') return null;
+        if (isNodeError(pathError) && pathError.code === 'ENOENT') return null;
         throw pathError;
       }
       throw new Error('Firefox BiDi endpoint metadata path is not readable');
@@ -252,7 +300,11 @@ export async function readOwnedFirefoxEndpoint(profileDir, spawnedAt) {
   }
 }
 
-export function selectOwnedFirefoxListener(inspected, ownership, port) {
+export function selectOwnedFirefoxListener(
+  inspected: FirefoxInspection,
+  ownership: FirefoxOwnership,
+  port: number
+) {
   const owned = selectOwnedFirefoxProcesses(inspected.processes, ownership);
   const listeners = [
     ...new Set(inspected.listenerPids.filter((pid) => Number.isSafeInteger(pid) && pid > 0)),
@@ -264,7 +316,7 @@ export function selectOwnedFirefoxListener(inspected, ownership, port) {
   return owner;
 }
 
-async function rememberOwnedWindowsFirefox(child, ownership) {
+async function rememberOwnedWindowsFirefox(child: ProcessChild, ownership: FirefoxOwnership) {
   const processes = (await inspectWindowsFirefox()).processes;
   const owned = selectOwnedFirefoxProcesses(processes, { ...ownership, childPid: child.pid });
   if (
@@ -284,7 +336,7 @@ async function rememberOwnedWindowsFirefox(child, ownership) {
   ];
 }
 
-async function stopVerifiedWindowsFirefox(entry, ownership) {
+async function stopVerifiedWindowsFirefox(entry: FirefoxProcess, ownership: FirefoxOwnership) {
   const script = `$ErrorActionPreference = 'Stop'
 $item = Get-CimInstance Win32_Process -Filter 'ProcessId = ${entry.pid}'
 if ($null -eq $item) { return }
@@ -310,16 +362,25 @@ if (-not $process.WaitForExit(${CLOSE_TIMEOUT_MS})) { throw 'Firefox process did
 }
 
 export async function terminateOwnedProcessTree(
-  child,
-  ownership,
+  child: ProcessChild,
+  ownership: FirefoxOwnership,
   {
     platform = process.platform,
     inspect = inspectWindowsFirefox,
     stop = stopVerifiedWindowsFirefox,
+  }: {
+    platform?: NodeJS.Platform;
+    inspect?: (port?: number) => Promise<{ processes: FirefoxProcess[] }>;
+    stop?: typeof stopVerifiedWindowsFirefox;
   } = {}
 ) {
   if (platform === 'win32') {
-    if (!ownership || !Number.isSafeInteger(child.pid) || child.pid <= 0) {
+    if (
+      !ownership ||
+      typeof child.pid !== 'number' ||
+      !Number.isSafeInteger(child.pid) ||
+      child.pid <= 0
+    ) {
       throw new Error('Task-owned Firefox process identity is unavailable');
     }
     if (ownership.snapshotFailed) {
@@ -344,13 +405,13 @@ export async function terminateOwnedProcessTree(
       ),
     ];
     const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
-    const depth = (entry) => {
+    const depth = (entry: FirefoxProcess) => {
       let count = 0;
       let parentPid = entry.parentPid;
       const seen = new Set([entry.pid]);
       while (byPid.has(parentPid) && !seen.has(parentPid)) {
         seen.add(parentPid);
-        parentPid = byPid.get(parentPid).parentPid;
+        parentPid = byPid.get(parentPid)?.parentPid ?? parentPid;
         count++;
       }
       return count;
@@ -386,7 +447,9 @@ export async function terminateOwnedProcessTree(
       while (Number.isSafeInteger(parentPid) && !seen.has(parentPid)) {
         if (remembered.has(parentPid)) return true;
         seen.add(parentPid);
-        parentPid = liveByPid.get(parentPid)?.parentPid;
+        const parent = liveByPid.get(parentPid);
+        if (!parent) break;
+        parentPid = parent.parentPid;
       }
       return false;
     });
@@ -399,7 +462,7 @@ export async function terminateOwnedProcessTree(
       child.signalCode === null &&
       !(await waitForProcessExit(child, GRACEFUL_EXIT_TIMEOUT_MS))
     ) {
-      child.kill('SIGTERM');
+      child.kill?.('SIGTERM');
       if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
         throw new Error('Task-owned Firefox launcher did not terminate');
       }
@@ -408,9 +471,9 @@ export async function terminateOwnedProcessTree(
   }
   if (child.exitCode !== null || child.signalCode !== null) return;
   if (await waitForProcessExit(child, GRACEFUL_EXIT_TIMEOUT_MS)) return;
-  child.kill('SIGTERM');
+  child.kill?.('SIGTERM');
   if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
-    child.kill('SIGKILL');
+    child.kill?.('SIGKILL');
     if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
       throw new Error('Task-owned Firefox process did not terminate');
     }
@@ -419,10 +482,30 @@ export async function terminateOwnedProcessTree(
 
 /** Run every cleanup phase and remove the profile only after process termination. */
 export async function cleanupFirefoxResources(
-  { child, detachSocket = () => {}, ownership, profileDir, root, socket },
-  { removeProfile = removeOwnedProfile, terminateProcessTree = terminateOwnedProcessTree } = {}
+  {
+    child,
+    detachSocket = () => {},
+    ownership,
+    profileDir,
+    root,
+    socket,
+  }: {
+    child: ProcessChild;
+    detachSocket?: () => void;
+    ownership?: FirefoxOwnership;
+    profileDir: string;
+    root: string;
+    socket: Pick<WebSocket, 'close'> | null;
+  },
+  {
+    removeProfile = removeOwnedProfile,
+    terminateProcessTree = terminateOwnedProcessTree,
+  }: {
+    removeProfile?: (root: string, profileDir: string) => Promise<void>;
+    terminateProcessTree?: (child: ProcessChild, ownership: FirefoxOwnership) => Promise<void>;
+  } = {}
 ) {
-  const errors = [];
+  const errors: Error[] = [];
   try {
     detachSocket();
   } catch (error) {
@@ -437,7 +520,7 @@ export async function cleanupFirefoxResources(
   }
   let processTerminated = false;
   try {
-    await terminateProcessTree(child, ownership);
+    await terminateProcessTree(child, ownership as FirefoxOwnership);
     processTerminated = true;
   } catch (error) {
     errors.push(
@@ -456,7 +539,7 @@ export async function cleanupFirefoxResources(
   if (errors.length > 0) throw new AggregateError(errors, 'Firefox resource cleanup failed');
 }
 
-export function combineFirefoxCloseFailures(shutdownError, cleanupError) {
+export function combineFirefoxCloseFailures(shutdownError: unknown, cleanupError: unknown) {
   if (shutdownError && cleanupError) {
     return new AggregateError(
       [shutdownError, cleanupError],
@@ -470,6 +553,10 @@ export function buildFirefoxLaunchArguments({
   profileDir,
   headless = false,
   platform = process.platform,
+}: {
+  profileDir: string;
+  headless?: boolean;
+  platform?: NodeJS.Platform;
 }) {
   if (typeof profileDir !== 'string' || profileDir.length === 0) {
     throw new TypeError('profileDir must be a non-empty string');
@@ -488,20 +575,22 @@ export function buildFirefoxLaunchArguments({
   ];
 }
 
-export function extensionInstallParameters(extensionPath) {
+export function extensionInstallParameters(extensionPath: string) {
   return {
     extensionData: { type: 'path', path: extensionPath },
     'moz:permanent': false,
   };
 }
 
-export function extensionUninstallParameters(extensionId) {
+export function extensionUninstallParameters(extensionId: string) {
   return { extension: extensionId };
 }
 
-function waitForEndpoint(child, readOutput) {
-  return new Promise((resolveEndpoint, rejectEndpoint) => {
-    const streams = [child.stdout, child.stderr].filter(Boolean);
+function waitForEndpoint(child: ChildProcess, readOutput: () => string) {
+  return new Promise<string>((resolveEndpoint, rejectEndpoint) => {
+    const streams = [child.stdout, child.stderr].filter(
+      (stream): stream is NonNullable<typeof stream> => stream !== null
+    );
     if (streams.length === 0) {
       rejectEndpoint(new Error('Firefox output streams are unavailable'));
       return;
@@ -526,11 +615,11 @@ function waitForEndpoint(child, readOutput) {
       cleanup();
       resolveEndpoint(`${match[1]}/session`);
     };
-    const onError = (error) => {
+    const onError = (error: Error) => {
       cleanup();
       rejectEndpoint(error);
     };
-    const onExit = (code, signal) => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       cleanup();
       rejectEndpoint(
         new Error(
@@ -547,17 +636,23 @@ function waitForEndpoint(child, readOutput) {
 }
 
 export async function waitForWindowsEndpoint(
-  child,
-  ownership,
-  { inspect = inspectWindowsFirefox, readEndpoint = readOwnedFirefoxEndpoint } = {}
+  child: ProcessChild,
+  ownership: FirefoxOwnership,
+  {
+    inspect = inspectWindowsFirefox,
+    readEndpoint = readOwnedFirefoxEndpoint,
+  }: {
+    inspect?: typeof inspectWindowsFirefox;
+    readEndpoint?: typeof readOwnedFirefoxEndpoint;
+  } = {}
 ) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   let spawnError = null;
   let lastMetadataError = null;
-  const onError = (error) => {
-    spawnError = error;
+  const onError = (error: unknown) => {
+    spawnError = error instanceof Error ? error : new Error(String(error));
   };
-  child.on('error', onError);
+  child.on?.('error', onError);
   try {
     while (Date.now() < deadline) {
       if (spawnError) throw spawnError;
@@ -597,12 +692,12 @@ export async function waitForWindowsEndpoint(
         : 'Timed out waiting for a verified task-owned Firefox BiDi endpoint'
     );
   } finally {
-    child.removeListener('error', onError);
+    child.removeListener?.('error', onError);
   }
 }
 
-function connectWebSocket(endpoint) {
-  return new Promise((resolveSocket, rejectSocket) => {
+function connectWebSocket(endpoint: string) {
+  return new Promise<WebSocket>((resolveSocket, rejectSocket) => {
     const socket = new WebSocket(endpoint);
     const timeout = setTimeout(() => {
       cleanup();
@@ -628,25 +723,47 @@ function connectWebSocket(endpoint) {
 }
 
 class FirefoxBidiSession {
-  pageErrors = [];
-  pageLogs = [];
+  pageErrors: { level: string; text: string; type: string }[] = [];
+  pageLogs: { level: string; text: string; type: string }[] = [];
   browserName = 'Firefox';
   browserVersion = 'unknown';
   platformName = 'unknown';
   context = 'pending';
-  #child;
+  #child: ChildProcess;
   #closed = false;
   #commandId = 0;
-  #eventErrors = [];
-  #eventListeners = new Map();
+  #eventErrors: string[] = [];
+  #eventListeners = new Map<
+    string,
+    Set<(params: Record<string, unknown>) => void | Promise<void>>
+  >();
   #logSubscribed = false;
-  #pendingCommands = new Map();
-  #profileDir;
-  #ownership;
-  #root;
-  #socket;
+  #pendingCommands = new Map<
+    number,
+    {
+      reject: (error: Error) => void;
+      resolve: (value: unknown) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
+  #profileDir: string;
+  #ownership: FirefoxOwnership;
+  #root: string;
+  #socket: WebSocket;
 
-  constructor({ child, socket, root, profileDir, ownership }) {
+  constructor({
+    child,
+    socket,
+    root,
+    profileDir,
+    ownership,
+  }: {
+    child: ChildProcess;
+    socket: WebSocket;
+    root: string;
+    profileDir: string;
+    ownership: FirefoxOwnership;
+  }) {
     this.#child = child;
     this.#socket = socket;
     this.#root = root;
@@ -656,7 +773,7 @@ class FirefoxBidiSession {
     socket.addEventListener('close', this.#handleClose);
   }
 
-  #handleMessage = (event) => {
+  #handleMessage = (event: MessageEvent) => {
     if (typeof event.data !== 'string') return;
     let message;
     try {
@@ -705,13 +822,13 @@ class FirefoxBidiSession {
     this.#pendingCommands.clear();
   };
 
-  #on(method, listener) {
-    const listeners = this.#eventListeners.get(method) ?? new Set();
+  #on(method: string, listener: (params: Record<string, unknown>) => void | Promise<void>) {
+    const listeners = this.#eventListeners.get(method) ?? new Set<typeof listener>();
     listeners.add(listener);
     this.#eventListeners.set(method, listeners);
   }
 
-  #off(method, listener) {
+  #off(method: string, listener: (params: Record<string, unknown>) => void | Promise<void>) {
     const listeners = this.#eventListeners.get(method);
     listeners?.delete(listener);
     if (listeners?.size === 0) this.#eventListeners.delete(method);
@@ -726,7 +843,11 @@ class FirefoxBidiSession {
     this.pageLogs.length = 0;
   }
 
-  command(method, params = {}, timeoutMs = COMMAND_TIMEOUT_MS) {
+  command<T = Record<string, unknown>>(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = COMMAND_TIMEOUT_MS
+  ): Promise<T> {
     try {
       this.#assertHealthy();
     } catch (error) {
@@ -737,14 +858,14 @@ class FirefoxBidiSession {
     }
 
     const id = ++this.#commandId;
-    return new Promise((resolveCommand, rejectCommand) => {
+    return new Promise<T>((resolveCommand, rejectCommand) => {
       const timeout = setTimeout(() => {
         this.#pendingCommands.delete(id);
         rejectCommand(new Error(`Firefox BiDi command timed out: ${method}`));
       }, timeoutMs);
       this.#pendingCommands.set(id, {
         reject: rejectCommand,
-        resolve: resolveCommand,
+        resolve: (value) => resolveCommand(value as T),
         timeout,
       });
       try {
@@ -757,8 +878,12 @@ class FirefoxBidiSession {
     });
   }
 
-  async evaluateJson(expression) {
-    const response = await this.command('script.evaluate', {
+  async evaluateJson(expression: string): Promise<unknown> {
+    const response = await this.command<{
+      type?: string;
+      exceptionDetails?: { text?: string };
+      result?: { type?: string; value?: string };
+    }>('script.evaluate', {
       awaitPromise: true,
       expression: `Promise.resolve(${expression}).then((value) => JSON.stringify(value))`,
       target: { context: this.context },
@@ -776,7 +901,7 @@ class FirefoxBidiSession {
     return JSON.parse(remote.value);
   }
 
-  async waitFor(expression, description, timeoutMs = COMMAND_TIMEOUT_MS) {
+  async waitFor(expression: string, description: string, timeoutMs = COMMAND_TIMEOUT_MS) {
     const deadline = Date.now() + timeoutMs;
     let lastError = null;
     while (Date.now() < deadline) {
@@ -810,15 +935,24 @@ class FirefoxBidiSession {
     this.#logSubscribed = true;
   }
 
-  async startMockYouTube({ chatResponseJson, nonWatchHtml, watchHtml }) {
-    const beforeRequest = async (params) => {
+  async startMockYouTube({
+    chatResponseJson,
+    nonWatchHtml,
+    watchHtml,
+  }: {
+    chatResponseJson: string;
+    nonWatchHtml: string;
+    watchHtml: string;
+  }) {
+    const beforeRequest = async (params: Record<string, unknown>) => {
       if (params.isBlocked !== true) return;
       const request = params.request;
       if (typeof request !== 'object' || request === null) {
         throw new Error('network.beforeRequestSent omitted request data');
       }
-      const requestId = request.request;
-      const requestUrl = request.url;
+      const requestData = request as Record<string, unknown>;
+      const requestId = requestData.request;
+      const requestUrl = requestData.url;
       if (typeof requestId !== 'string' || typeof requestUrl !== 'string') {
         throw new Error('network.beforeRequestSent contained malformed request data');
       }
@@ -864,7 +998,7 @@ class FirefoxBidiSession {
     await this.subscribeLogs();
     this.#on('network.beforeRequestSent', beforeRequest);
     await this.command('session.subscribe', { events: ['network.beforeRequestSent'] });
-    const result = await this.command('network.addIntercept', {
+    const result = await this.command<{ intercept?: string }>('network.addIntercept', {
       phases: ['beforeRequestSent'],
       urlPatterns: [{ type: 'pattern', protocol: 'https', hostname: 'www.youtube.com' }],
     });
@@ -881,8 +1015,8 @@ class FirefoxBidiSession {
     };
   }
 
-  async installExtension(extensionPath) {
-    const result = await this.command(
+  async installExtension(extensionPath: string) {
+    const result = await this.command<{ extension?: string }>(
       'webExtension.install',
       extensionInstallParameters(extensionPath)
     );
@@ -892,11 +1026,17 @@ class FirefoxBidiSession {
     return result.extension;
   }
 
-  async uninstallExtension(extensionId) {
+  async uninstallExtension(extensionId: string) {
     await this.command('webExtension.uninstall', extensionUninstallParameters(extensionId));
   }
 
-  async navigate(url, { wait = 'complete', timeoutMs = COMMAND_TIMEOUT_MS } = {}) {
+  async navigate(
+    url: string,
+    {
+      wait = 'complete',
+      timeoutMs = COMMAND_TIMEOUT_MS,
+    }: { wait?: string; timeoutMs?: number } = {}
+  ) {
     await this.command(
       'browsingContext.navigate',
       {
@@ -916,7 +1056,7 @@ class FirefoxBidiSession {
   }
 
   async captureScreenshot() {
-    const result = await this.command(
+    const result = await this.command<{ data: string }>(
       'browsingContext.captureScreenshot',
       { context: this.context, origin: 'viewport' },
       10_000
@@ -969,7 +1109,15 @@ class FirefoxBidiSession {
   }
 }
 
-export async function launchFirefoxBidi({ root, executablePath, headless = false }) {
+export async function launchFirefoxBidi({
+  root,
+  executablePath,
+  headless = false,
+}: {
+  root: string;
+  executablePath: string;
+  headless?: boolean;
+}) {
   if (typeof root !== 'string' || root.length === 0) {
     throw new TypeError('root must be a non-empty string');
   }
@@ -983,19 +1131,19 @@ export async function launchFirefoxBidi({ root, executablePath, headless = false
   await mkdir(taskRoot, { recursive: true });
   const profileDir = await mkdtemp(join(taskRoot, PROFILE_PREFIX));
   assertOwnedProfile(taskRoot, profileDir);
-  const ownership = { executablePath, profileDir, spawnedAt: Date.now() };
+  const ownership: FirefoxOwnership = { executablePath, profileDir, spawnedAt: Date.now() };
   const child = spawn(executablePath, buildFirefoxLaunchArguments({ profileDir, headless }), {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: headless,
   });
   let output = '';
-  const captureOutput = (chunk) => {
+  const captureOutput = (chunk: Buffer) => {
     output = `${output}${chunk.toString('utf8')}`.slice(-32_768);
   };
   child.stdout?.on('data', captureOutput);
   child.stderr?.on('data', captureOutput);
 
-  let session = null;
+  let session: FirefoxBidiSession | null = null;
   try {
     const endpoint =
       process.platform === 'win32'
@@ -1003,13 +1151,18 @@ export async function launchFirefoxBidi({ root, executablePath, headless = false
         : await waitForEndpoint(child, () => output);
     const socket = await connectWebSocket(endpoint);
     session = new FirefoxBidiSession({ child, socket, root: taskRoot, profileDir, ownership });
-    const created = await session.command('session.new', { capabilities: {} });
+    const created = await session.command<{
+      capabilities?: { browserName?: string; browserVersion?: string; platformName?: string };
+    }>('session.new', { capabilities: {} });
     const capabilities = created?.capabilities ?? {};
     session.browserName = String(capabilities.browserName ?? 'Firefox');
     session.browserVersion = String(capabilities.browserVersion ?? 'unknown');
     session.platformName = String(capabilities.platformName ?? 'unknown');
 
-    const tree = await session.command('browsingContext.getTree', { maxDepth: 0 });
+    const tree = await session.command<{ contexts?: { url?: string; context?: string }[] }>(
+      'browsingContext.getTree',
+      { maxDepth: 0 }
+    );
     const contexts = Array.isArray(tree?.contexts) ? tree.contexts : [];
     const initialContext =
       contexts.find((entry) => entry?.url === 'about:blank') ?? contexts.find(Boolean);

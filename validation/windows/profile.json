@@ -16,7 +16,7 @@
       "validation/windows/live-duration.ts",
       "validation/windows/live-rendering.ts",
       "validation/windows/natural-chrome.mjs",
-      "validation/windows/firefox-bidi.mjs",
+      "validation/windows/firefox-bidi.ts",
       "validation/windows/firefox-install.mjs",
       "dist-extension",
       "dist-extension-firefox"

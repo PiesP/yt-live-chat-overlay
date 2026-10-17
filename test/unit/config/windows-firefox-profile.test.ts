@@ -9,8 +9,7 @@ import { Script } from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
-// @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
-import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.mjs';
+import * as firefoxBidiModule from '../../../validation/windows/firefox-bidi.ts';
 // @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
 import * as firefoxInstallModule from '../../../validation/windows/firefox-install.mjs';
 
@@ -405,7 +404,7 @@ describe('Windows Firefox installation profile', () => {
     const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [owned] };
     const child = { pid: 10, exitCode: 0, signalCode: null };
     const stop = vi.fn(
-      async (_entry: { pid: number }, _bound: { expectedProcesses: unknown[] }) => {}
+      async (_entry: { pid: number }, _bound: { expectedProcesses?: unknown[] }) => {}
     );
     const inspect = vi
       .fn()
@@ -448,7 +447,7 @@ describe('Windows Firefox installation profile', () => {
     const ownership = { executablePath, profileDir, spawnedAt, expectedProcesses: [root] };
     const child = { pid: 10, exitCode: 0, signalCode: null };
     const stop = vi.fn(
-      async (_entry: { pid: number }, _bound: { expectedProcesses: unknown[] }) => {}
+      async (_entry: { pid: number }, _bound: { expectedProcesses?: unknown[] }) => {}
     );
     const inspect = vi
       .fn()
@@ -1326,6 +1325,7 @@ describe('Windows Firefox installation profile', () => {
     );
     const failure = combineFirefoxCloseFailures(snapshotError, cleanupError);
     expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) throw new Error('Expected aggregate cleanup failure');
     expect(failure.errors).toEqual([snapshotError, cleanupError]);
     expect(combineFirefoxCloseFailures(snapshotError, undefined)).toBe(snapshotError);
     expect(combineFirefoxCloseFailures(undefined, cleanupError)).toBe(cleanupError);
