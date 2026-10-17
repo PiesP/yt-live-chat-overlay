@@ -145,6 +145,25 @@ versions together on updates; never widen this to `allowAny`. Validate a fresh
 dependency resolution as well as the frozen install, since a migration lockfile
 can otherwise hide peer metadata conflicts.
 
+Update the managed toolchain as one unit. Select an exact stable Vite+ release
+that has cleared the 24-hour window, then run from the repository root:
+Replace `VERSION` in both commands with that selected exact release.
+
+```sh
+pnpm dlx --package=vite-plus@VERSION vp help migrate
+pnpm dlx --package=vite-plus@VERSION vp migrate --no-interactive --no-agent --no-editor --no-hooks
+```
+
+Review the managed Vite alias, bundled Vitest/coverage catalogs, lockfile and
+exact peer entries together. Preserve Node/pnpm and hook ownership; finish with
+fresh resolution, frozen installation and the maintained quality, build and test
+gates. Dependabot keeps Vite+ updates visible for manual alignment review and
+excludes only normal version updates of its bundled components. Security alerts
+and security updates retain their existing handling. A package-only Vite+ bump
+is not an aligned migration and is ineligible for normal automatic merge.
+See [project updates](https://viteplus.dev/guide/upgrade-project); global
+`vp upgrade` alone does not update the project.
+
 Use `import type` for type-only statements and inline `type` specifiers when
 the same module supplies values. Keep side-effect import order and direct-Node
 `.ts`/ESM extension requirements. Prefer relative imports within a cohesive
