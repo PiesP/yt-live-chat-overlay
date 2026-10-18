@@ -35,6 +35,28 @@ Keep executed, input-matched reuse, intentional skips, failures, not-run and
 access-blocked results distinct. The linked review records the hosted job steps
 and the precise scope of the existing installed Edge fixture.
 
+The dated private addendum for [#266](https://github.com/PiesP/yt-live-chat-overlay/issues/266)
+and [#268](https://github.com/PiesP/yt-live-chat-overlay/issues/268) is registered as
+`piesp-windows-acceptance/20261017-migration-review/yt-live-chat-overlay-261/addenda/20261018-266-268`,
+SHA-256 `5a1d7242af2a5f118e38262c39589e53b1c10fc1daec8bd824c7d862f562f109`.
+It links six attempts in total through the original #261 index: both #266
+attempts, the #268 prerequisite, two failed 20-minute observations and the earlier
+short control.
+Original failed transport fields, retained failed roots and pending visual-review
+fields remain unchanged; later cleanup and selected-frame reviews are separate.
+
+A subsequent 120-second control at source
+`d78f3022dc9397005627c7ccc1c0721fa2c95b9b` reused the maintained native Chrome
+launcher and cleanup without an extension. Its separate private reference is
+`piesp-windows-acceptance/20261017-migration-review/yt-live-chat-overlay-261/addenda/20261018-native-control`,
+SHA-256 `36b1aa1b48b8a24916bdfe8011c2d19b67c572e1a6f4deb80779c445ba0e8ae0`.
+Native visible-hidden-visible preflight and collection/cleanup succeeded, but
+the 60-, 90- and 120-second checkpoints showed stopped media and YouTube error UI.
+The outer diagnostic completed successfully; healthy media and the required
+20-minute installed-extension acceptance remain unverified. This control does
+not establish the cause of the earlier failures. Authorized reviewers use the
+same PiesP custodian route and retention policy above for both addenda.
+
 ## Artifact-only smoke
 
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
