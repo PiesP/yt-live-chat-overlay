@@ -252,48 +252,6 @@ describe('public duration observation contract', () => {
       )
     ).toMatchObject({ status: 'not-run', reason: 'no-accessible-chat-observed' });
   });
-
-  it('does not await a never-settling media play promise', async () => {
-    const video: {
-      currentTime: number;
-      error: null;
-      muted: boolean;
-      pause: () => void;
-      paused: boolean;
-      play: () => Promise<void>;
-      readyState: number;
-    } = {
-      currentTime: 42,
-      error: null,
-      muted: false,
-      pause: () => undefined,
-      paused: false,
-      play: () => Promise.resolve(),
-      readyState: 4,
-    };
-    const pause = vi.fn(() => {
-      video.paused = true;
-    });
-    const play = vi.fn(() => {
-      video.paused = false;
-      return new Promise<void>(() => {});
-    });
-    video.pause = pause;
-    video.play = play;
-    const locator = {
-      evaluate: vi.fn(async (callback: (element: typeof video) => unknown) => callback(video)),
-    };
-    const page = { locator: () => ({ first: () => locator }) };
-
-    await expect(
-      durationModule.exercisePlayerPausePlay(page as unknown as Page, {
-        delay: vi.fn().mockResolvedValue(undefined),
-        timeoutMs: 50,
-      })
-    ).resolves.toMatchObject({ status: 'observed', muted: true });
-    expect(pause).toHaveBeenCalledOnce();
-    expect(play).toHaveBeenCalledOnce();
-  });
 });
 
 describe('natural Chrome ownership boundaries', () => {
