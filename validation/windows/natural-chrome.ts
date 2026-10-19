@@ -2,9 +2,10 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtemp, open, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
+import { join, win32 } from 'node:path';
 
 import type { Browser, BrowserContext, BrowserType, CDPSession } from '@playwright/test';
 
@@ -14,7 +15,11 @@ import {
   removeOwnedChromeProfile,
 } from './chrome-install.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
-import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
+import {
+  captureOwnedChromeProcess,
+  isOwnedChromeProcess,
+  terminateOwnedChromeProcess,
+} from './chrome-process.ts';
 
 const VIEWPORT = { width: 1280, height: 720 };
 const DEVTOOLS_WAIT_MS = 30_000;
@@ -22,7 +27,10 @@ const CHILD_EXIT_MS = 8_000;
 const STDERR_LIMIT_BYTES = 64 * 1024;
 const PROTOCOL_TIMEOUT_MS = 15_000;
 const IDENTITY_WAIT_MS = 8_000;
-const DEVTOOLS_FILE_MAX_BYTES = 4096;
+const FIXED_DEBUG_PORT = 27_683;
+const VERSION_MAX_BYTES = 4096;
+const VERSION_TIMEOUT_MS = 3_000;
+const PORT_INSPECT_TIMEOUT_MS = 3_000;
 type ChildState = { spawnError: Error | null };
 type ChildStatus = {
   exitCode: number | null;
@@ -66,7 +74,7 @@ async function boundedProtocolOperation<T>(operation: () => Promise<T>, label: s
 export function naturalChromeArguments(profile: string) {
   return [
     `--user-data-dir=${profile}`,
-    '--remote-debugging-port=0',
+    '--remote-debugging-port=27683',
     '--remote-debugging-address=127.0.0.1',
     '--no-first-run',
     '--no-default-browser-check',
@@ -89,65 +97,268 @@ async function waitForChildExit(child: OwnedChild, timeoutMs = CHILD_EXIT_MS): P
   });
 }
 
-export async function readDevToolsEndpoint(
-  profile: string,
+type WindowsProcessRecord = {
+  ProcessId: unknown;
+  CreationDate: unknown;
+  ExecutablePath: unknown;
+  CommandLine: unknown;
+};
+type PortListener = {
+  localAddress: unknown;
+  localPort: unknown;
+  state: unknown;
+  owningProcess: unknown;
+};
+type PortInspection = {
+  listeners: PortListener[];
+  process: WindowsProcessRecord | null;
+};
+type InspectPort = (processId?: number) => Promise<PortInspection>;
+
+function powershellExecutable(): string {
+  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+  assert(win32.isAbsolute(systemRoot), 'Windows SystemRoot must be absolute');
+  return win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+/** Inspect one declared port without making a network connection. */
+function inspectFixedPort(processId?: number): Promise<PortInspection> {
+  if (processId !== undefined)
+    assert(Number.isSafeInteger(processId) && processId > 0, 'Invalid owned Chrome process id');
+  const script = [
+    "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'",
+    `$listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | ` +
+      `Where-Object { [int]$_.LocalPort -eq ${FIXED_DEBUG_PORT} } | ` +
+      `ForEach-Object { @{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;` +
+      `state=[string]$_.State;owningProcess=[int]$_.OwningProcess} })`,
+    processId === undefined
+      ? '$record=$null'
+      : `$record=Get-CimInstance Win32_Process -Filter 'ProcessId = ${processId}' ` +
+        '-ErrorAction Stop | Select-Object ProcessId,CreationDate,ExecutablePath,CommandLine',
+    '@{listeners=$listeners;process=$record}|ConvertTo-Json -Compress -Depth 4',
+  ].join(';');
+  return new Promise((resolveInspection, rejectInspection) => {
+    execFile(
+      powershellExecutable(),
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-EncodedCommand',
+        Buffer.from(script, 'utf16le').toString('base64'),
+      ],
+      { encoding: 'utf8', maxBuffer: 65_536, timeout: PORT_INSPECT_TIMEOUT_MS, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          rejectInspection(error);
+          return;
+        }
+        try {
+          const parsed: unknown = JSON.parse(stdout.trim().replace(/^\uFEFF/u, ''));
+          assert(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+          assert('listeners' in parsed && Array.isArray(parsed.listeners));
+          assert(
+            'process' in parsed &&
+              (parsed.process === null ||
+                (typeof parsed.process === 'object' && !Array.isArray(parsed.process)))
+          );
+          resolveInspection(parsed as PortInspection);
+        } catch (parseError) {
+          rejectInspection(parseError);
+        }
+      }
+    );
+  });
+}
+
+function assertChildLive(child: ChildStatus, childState: ChildState): void {
+  if (childState.spawnError) throw childState.spawnError;
+  if (child.exitCode !== null || child.signalCode !== null)
+    throw new Error('Owned Chrome exited before its DevTools endpoint was ready');
+}
+
+export async function assertFixedPortUnused({
+  inspectPort = inspectFixedPort,
+}: { inspectPort?: InspectPort } = {}): Promise<void> {
+  const snapshot = await inspectPort();
+  assert(Array.isArray(snapshot?.listeners), 'Fixed DevTools port inspection unavailable');
+  assert.equal(snapshot.listeners.length, 0, 'Fixed DevTools port is already in use');
+}
+
+export async function verifyOwnedFixedPort(
   child: ChildStatus,
   childState: ChildState,
-  { sleep = delay }: { sleep?: (ms: number) => Promise<void> } = {}
-) {
-  const portFile = join(profile, 'DevToolsActivePort');
-  const deadline = Date.now() + DEVTOOLS_WAIT_MS;
-  while (Date.now() < deadline) {
-    if (childState.spawnError) throw childState.spawnError;
-    if (child.exitCode !== null || child.signalCode !== null) {
-      throw new Error('Owned Chrome exited before its DevTools endpoint was ready');
-    }
-    let portHandle;
-    try {
-      portHandle = await open(portFile, 'r');
-      const portStat = await portHandle.stat();
-      assert(
-        portStat.isFile() && portStat.size >= 3 && portStat.size <= DEVTOOLS_FILE_MAX_BYTES,
-        'DevToolsActivePort has an invalid file shape'
-      );
-      // Keep reads on the checked handle and bound growth after the size check.
-      const buffer = Buffer.alloc(DEVTOOLS_FILE_MAX_BYTES + 1);
-      let totalBytes = 0;
-      while (totalBytes < buffer.length) {
-        const { bytesRead } = await portHandle.read(
-          buffer,
-          totalBytes,
-          buffer.length - totalBytes,
-          totalBytes
-        );
-        if (bytesRead === 0) break;
-        totalBytes += bytesRead;
+  identity: ChromeProcessIdentity,
+  { inspectPort = inspectFixedPort }: { inspectPort?: InspectPort } = {}
+): Promise<boolean> {
+  assertChildLive(child, childState);
+  assert.equal(
+    child.pid,
+    identity.processId,
+    'Spawned Chrome PID changed before port verification'
+  );
+  const snapshot = await inspectPort(identity.processId);
+  assertChildLive(child, childState);
+  assert(Array.isArray(snapshot?.listeners), 'Fixed DevTools port inspection unavailable');
+  assert(
+    isOwnedChromeProcess(snapshot.process, identity),
+    'Owned Chrome CIM identity changed before DevTools access'
+  );
+  if (snapshot.listeners.length === 0) return false;
+  assert.equal(snapshot.listeners.length, 1, 'Fixed DevTools port has ambiguous listeners');
+  const [listener] = snapshot.listeners;
+  assert(
+    listener &&
+      listener.localAddress === '127.0.0.1' &&
+      listener.localPort === FIXED_DEBUG_PORT &&
+      listener.state === 'Listen' &&
+      listener.owningProcess === identity.processId,
+    'Fixed DevTools listener is not exact owned IPv4 loopback'
+  );
+  return true;
+}
+
+/** The only HTTP request is the fixed IPv4 loopback JSON version endpoint. */
+export function fetchFixedVersion({
+  requestVersion = request,
+}: { requestVersion?: typeof request } = {}): Promise<Buffer> {
+  return new Promise((resolveVersion, rejectVersion) => {
+    let settled = false;
+    const timer: { handle?: ReturnType<typeof setTimeout> } = {};
+    const finish = (error: Error | null, bytes?: Buffer) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer.handle);
+      if (error) rejectVersion(error);
+      else if (bytes) resolveVersion(bytes);
+      else rejectVersion(new Error('Fixed DevTools JSON response unavailable'));
+    };
+    const client = requestVersion(
+      {
+        protocol: 'http:',
+        hostname: '127.0.0.1',
+        family: 4,
+        port: FIXED_DEBUG_PORT,
+        path: '/json/version',
+        method: 'GET',
+        agent: false,
+      },
+      (response) => {
+        if (response.statusCode !== 200) {
+          client.destroy(new Error('Fixed DevTools JSON response was not HTTP 200'));
+          return;
+        }
+        const length = Number(response.headers['content-length']);
+        if (Number.isFinite(length) && length > VERSION_MAX_BYTES) {
+          client.destroy(new Error('Fixed DevTools JSON response exceeded byte cap'));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let total = 0;
+        response.on('data', (chunk: Buffer) => {
+          total += chunk.length;
+          if (total > VERSION_MAX_BYTES) {
+            client.destroy(new Error('Fixed DevTools JSON response exceeded byte cap'));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.once('end', () => finish(null, Buffer.concat(chunks, total)));
+        response.once('error', (error) => finish(error));
+        response.once('close', () => {
+          if (!response.complete) finish(new Error('Fixed DevTools JSON response ended early'));
+        });
       }
-      assert(
-        totalBytes >= 3 && totalBytes <= DEVTOOLS_FILE_MAX_BYTES,
-        'DevToolsActivePort has an invalid file shape'
-      );
-      const [portText, webSocketPath, ...extra] = buffer
-        .toString('utf8', 0, totalBytes)
-        .trim()
-        .split(/\r?\n/u);
-      assert.equal(extra.length, 0, 'DevToolsActivePort has extra records');
-      assert.match(portText ?? '', /^[0-9]{1,5}$/u);
-      const port = Number(portText);
-      assert(
-        Number.isInteger(port) && port >= 1 && port <= 65_535,
-        'DevToolsActivePort has an invalid port'
-      );
-      assert.match(webSocketPath ?? '', /^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u);
-      return `ws://127.0.0.1:${port}${webSocketPath}`;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
-    } finally {
-      await portHandle?.close();
-    }
-    await sleep(100);
-  }
-  throw new Error('Timed out waiting for the owned Chrome DevTools endpoint');
+    );
+    client.once('error', (error) => finish(error));
+    timer.handle = setTimeout(
+      () => client.destroy(new Error('Fixed DevTools JSON deadline exceeded')),
+      VERSION_TIMEOUT_MS
+    );
+    client.end();
+  });
+}
+
+export function parseFixedVersion(bytes: Buffer): string {
+  assert(
+    Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= VERSION_MAX_BYTES,
+    'Fixed DevTools JSON response has invalid size'
+  );
+  const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+  assert(
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed),
+    'Fixed DevTools JSON response has invalid shape'
+  );
+  const raw = 'webSocketDebuggerUrl' in parsed ? parsed.webSocketDebuggerUrl : null;
+  assert(
+    typeof raw === 'string' &&
+      /^ws:\/\/127\.0\.0\.1:27683\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u.test(raw),
+    'Fixed DevTools Browser endpoint is not literal owned loopback'
+  );
+  const endpoint = new URL(raw);
+  assert(
+    endpoint.href === raw &&
+      endpoint.protocol === 'ws:' &&
+      endpoint.hostname === '127.0.0.1' &&
+      endpoint.port === String(FIXED_DEBUG_PORT) &&
+      endpoint.username === '' &&
+      endpoint.password === '' &&
+      endpoint.search === '' &&
+      endpoint.hash === '',
+    'Fixed DevTools Browser endpoint was normalized'
+  );
+  return raw;
+}
+
+export async function readOwnedFixedPortEndpoint(
+  child: ChildStatus,
+  childState: ChildState,
+  identity: ChromeProcessIdentity,
+  {
+    inspectPort = inspectFixedPort,
+    fetchVersion = fetchFixedVersion,
+    sleep = delay,
+    timeoutMs = DEVTOOLS_WAIT_MS,
+  }: {
+    inspectPort?: InspectPort;
+    fetchVersion?: () => Promise<Buffer>;
+    sleep?: (ms: number) => Promise<void>;
+    timeoutMs?: number;
+  } = {}
+): Promise<string> {
+  assert(Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= DEVTOOLS_WAIT_MS);
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const ready = await verifyOwnedFixedPort(child, childState, identity, { inspectPort });
+    if (ready) return parseFixedVersion(await fetchVersion());
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await sleep(Math.min(100, remaining));
+  } while (Date.now() < deadline);
+  throw new Error('Timed out waiting for the exact owned IPv4 DevTools listener');
+}
+
+export async function connectOwnedFixedPort(
+  chromium: BrowserType,
+  endpoint: string,
+  child: ChildStatus,
+  childState: ChildState,
+  identity: ChromeProcessIdentity,
+  { inspectPort = inspectFixedPort }: { inspectPort?: InspectPort } = {}
+): Promise<Browser> {
+  // Validate the raw string again before any WebSocket connection.
+  assert.equal(
+    parseFixedVersion(Buffer.from(JSON.stringify({ webSocketDebuggerUrl: endpoint }))),
+    endpoint
+  );
+  assert(
+    await verifyOwnedFixedPort(child, childState, identity, { inspectPort }),
+    'Owned IPv4 DevTools listener disappeared before connect'
+  );
+  return chromium.connectOverCDP(endpoint, {
+    noDefaults: true,
+    isLocal: true,
+    timeout: 10_000,
+  });
 }
 
 async function discoverInstalledChrome(
@@ -374,6 +585,7 @@ export async function launchOwnedNaturalChrome({
   checkpoint?: Checkpoint;
 }) {
   const discovered = await discoverInstalledChrome(chromium, root, output, checkpoint);
+  await assertFixedPortUnused();
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let child: ReturnType<typeof spawn>;
   try {
@@ -416,13 +628,15 @@ export async function launchOwnedNaturalChrome({
     browserProcessId = browserProcessIdentity.processId;
     await checkpoint('natural-launch:process-identity', 'after');
     await checkpoint('natural-launch:devtools-endpoint', 'before');
-    const endpoint = await readDevToolsEndpoint(profile, child, childState);
+    const endpoint = await readOwnedFixedPortEndpoint(child, childState, browserProcessIdentity);
     await checkpoint('natural-launch:connect', 'before');
-    browser = await chromium.connectOverCDP(endpoint, {
-      noDefaults: true,
-      isLocal: true,
-      timeout: 10_000,
-    });
+    browser = await connectOwnedFixedPort(
+      chromium,
+      endpoint,
+      child,
+      childState,
+      browserProcessIdentity
+    );
     await checkpoint('natural-launch:connect', 'after');
     const contexts = browser.contexts();
     assert.equal(contexts.length, 1, 'Owned Chrome did not expose one default context');
@@ -446,6 +660,10 @@ export async function launchOwnedNaturalChrome({
       currentIdentity,
       browserProcessIdentity,
       'Owned Chrome process identity changed between spawn and CDP verification'
+    );
+    assert(
+      await verifyOwnedFixedPort(child, childState, browserProcessIdentity),
+      'Owned IPv4 DevTools listener changed after CDP verification'
     );
     const cleanupCdp: Protocol = {
       send: (method, parameters) =>
@@ -473,6 +691,8 @@ export async function launchOwnedNaturalChrome({
         browserVersion: browser.version(),
         discoveryBrowserVersion: discovered.browserVersion,
         loopbackDevTools: true,
+        remoteDebuggingPort: FIXED_DEBUG_PORT,
+        endpointDiscovery: 'owned-loopback-json-version',
         noDefaults: true,
         spawnedProcessMatchedCdp: true,
         stderrBytes,
