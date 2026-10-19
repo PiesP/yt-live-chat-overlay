@@ -16,6 +16,7 @@
       "validation/windows/bitmap-lifecycle.ts",
       "validation/windows/chrome-process.ts",
       "validation/windows/live-duration.ts",
+      "validation/windows/native-player-mute.ts",
       "validation/windows/live-rendering.ts",
       "validation/windows/visible-watch.ts",
       "validation/windows/natural-chrome.ts",

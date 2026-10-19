@@ -364,13 +364,26 @@ process with muted audio and fixed IPv4 loopback DevTools port 27683. It verifie
 the exact port listener and process identity before fetching the browser endpoint
 and again before connecting with Playwright launch defaults disabled. Duration
 runs are serial; an existing listener on port 27683 fails the run without a port
-fallback. The run observes five minutes visible, ten minutes natively hidden
-behind a second real tab, and five minutes visible after resume. Thirty-second
+fallback. After binding one public player and video, it hovers the player and
+uses the single native Mute button at most once. It records the click intent
+before clicking, then requires the same button to show Unmute and the same video
+to remain muted. A paused video is played through its retained handle only
+after that proof. The native setup and subsequent media and overlay readiness
+share one 90-second deadline within the five-minute preflight; an unknown player,
+ad, error, replaced control, mute drift, or timed-out action fails the run. The
+run observes five minutes visible, ten minutes natively hidden behind a second
+real tab, and five minutes visible after resume. Thirty-second
 checkpoints retain media, Canvas, bridge, renderer, native visibility, normalized
 player-error UI, and accessible-render fingerprint evidence. Public chat volume is
 uncontrolled, so a stream with no accessible chat is recorded as unverified. The
 structured observation records only chat counts and fingerprints. It does not
 retain raw chat text.
+
+Conditional fixture fields need their execution context: `paidCardInkContained:
+false` does not itself mean the installed Worker fixture failed when the
+main-renderer-only pixel probe was not run and its observation is `null`.
+A captured `TrustedScriptURL` error at failure time is diagnostic evidence, not
+proof of cause; renderer validation follows the observed main or Worker state.
 
 Phase summaries report `mediaTimeRangeSeconds`, the difference between the largest
 and smallest finite sampled media positions, or `null` with fewer than two positions.

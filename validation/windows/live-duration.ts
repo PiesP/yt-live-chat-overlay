@@ -16,6 +16,13 @@ import {
   validateLiveRenderer,
 } from './live-rendering.ts';
 import type { LiveDiagnosticEntry } from './live-rendering.ts';
+import {
+  createNativeMuteBoundary,
+  establishOwnedMute,
+  playOwnedMutedVideo,
+} from './native-player-mute.ts';
+import type { NativeMuteBoundary } from './native-player-mute.ts';
+import type { BoundedNativeAction } from './native-player-mute.ts';
 
 type HealthSample = {
   phase: string;
@@ -56,7 +63,13 @@ type DurationResult = {
   preflight: {
     consentBarrier?: { visible: boolean; actionTaken: boolean };
     mediaReadiness?: Awaited<ReturnType<typeof waitForInitialMedia>>;
-    startupControl?: Awaited<ReturnType<typeof actOnPublicVideo>>;
+    startupControl?: Awaited<ReturnType<typeof establishOwnedMute>>;
+    nativeMuteClickIntent?: {
+      status: 'recorded-before-click';
+      before: Awaited<ReturnType<typeof establishOwnedMute>>['before'];
+    };
+    nativeMuteBoundary?: NativeMuteBoundary;
+    initialOwnedPlay?: ReturnType<typeof playOwnedMutedVideo>;
     initialState?: Awaited<ReturnType<typeof publicState>>;
     visibilityProof?: string[];
     elapsedMs?: number;
@@ -104,6 +117,10 @@ const PREFLIGHT_LIMIT_MS = 300_000;
 const RESULT_FILE = 'live-duration-result.json';
 const MAX_CONSOLE_ERRORS = 64;
 const MAX_PAGE_ERRORS = 32;
+
+export function initialMediaDeadline(setupStartedMs: number, preflightStartedMs: number) {
+  return Math.min(setupStartedMs + 90_000, preflightStartedMs + PREFLIGHT_LIMIT_MS);
+}
 
 const sleep = (ms: number) => new Promise<void>((resolveSleep) => setTimeout(resolveSleep, ms));
 
@@ -248,6 +265,19 @@ export function validateDurationLiveUrl(value: unknown) {
   return url.href;
 }
 
+export function requiredDurationVideoId(liveUrl: string): string {
+  const url = new URL(validateDurationLiveUrl(liveUrl));
+  const ids =
+    url.pathname === '/watch'
+      ? url.searchParams.getAll('v')
+      : [url.pathname.slice('/live/'.length)];
+  assert.equal(ids.length, 1, 'Duration URL must identify exactly one public video');
+  const [id] = ids;
+  assert(id);
+  assert.match(id ?? '', /^[A-Za-z0-9_-]{1,64}$/u, 'Duration URL must identify one public video');
+  return id;
+}
+
 async function waitUntil(target: number) {
   while (performance.now() < target) {
     await sleep(Math.min(1_000, Math.max(1, target - performance.now())));
@@ -277,7 +307,7 @@ type VideoState = {
   paused: boolean;
   readyState: number;
 };
-type PublicVideoAction = 'read' | 'mute-play' | 'pause' | 'play';
+type PublicVideoAction = 'read' | 'pause' | 'play';
 type PublicPlayerBinding = {
   player: ElementHandle<Element>;
   video: ElementHandle<HTMLVideoElement>;
@@ -311,10 +341,7 @@ export function observePublicVideo(
     readyState: video.readyState,
   });
   const before = state();
-  if (action === 'mute-play') {
-    video.muted = true;
-    void video.play().catch(() => {});
-  } else if (action === 'pause') {
+  if (action === 'pause') {
     video.pause();
   } else if (action === 'play') {
     // Some public-player promises remain pending. Playback state is checked separately.
@@ -330,10 +357,7 @@ function evaluatePublicVideo(binding: PublicPlayerBinding, action: PublicVideoAc
   >(observePublicVideo, { player: binding.player, action });
 }
 
-async function actOnPublicVideo(
-  binding: PublicPlayerBinding,
-  action: 'mute-play' | 'pause' | 'play'
-) {
+async function actOnPublicVideo(binding: PublicPlayerBinding, action: 'pause' | 'play') {
   return evaluatePublicVideo(binding, action);
 }
 
@@ -417,8 +441,15 @@ export function readPublicDurationPageState(owned?: { player: unknown; video: un
       );
     })
   );
+  const playerWithData = player as
+    | (Element & { getVideoData?: () => { video_id?: unknown } })
+    | null;
+  const playerData =
+    typeof playerWithData?.getVideoData === 'function' ? playerWithData.getVideoData() : null;
   return {
     visibility: document.visibilityState,
+    playerVideoId: typeof playerData?.video_id === 'string' ? playerData.video_id : null,
+    adShowing: player ? player.classList.contains('ad-showing') : null,
     hud:
       document.querySelector('#yt-chat-overlay-debug')?.textContent?.replace(/\s+/gu, ' ').trim() ??
       null,
@@ -576,14 +607,27 @@ export function isInitialObservationReady(state: Partial<HealthSample> | null) {
   );
 }
 
-async function waitForInitialMedia(page: Page, binding: PublicPlayerBinding, timeoutMs: number) {
+async function waitForInitialMedia(
+  page: Page,
+  binding: PublicPlayerBinding,
+  expectedVideoId: string,
+  deadlineMs: number,
+  bounded: BoundedNativeAction
+) {
   const started = performance.now();
-  const deadline = started + timeoutMs;
   let first = null;
   let latest = null;
-  do {
-    latest = await publicState(page, binding);
+  while (performance.now() < deadlineMs) {
+    latest = await bounded(() => publicState(page, binding), 'read-initial-media', 3_000);
     first ??= latest;
+    assert(
+      latest.playerVideoId === expectedVideoId &&
+        latest.adShowing === false &&
+        latest.playerErrorUi.visible === false &&
+        latest.video?.errorCode === null &&
+        latest.video?.muted === true,
+      'Owned player lost native mute, main identity, or error-free state during readiness'
+    );
     if (isInitialObservationReady(latest)) {
       return {
         status: 'observed',
@@ -592,8 +636,8 @@ async function waitForInitialMedia(page: Page, binding: PublicPlayerBinding, tim
         latest,
       };
     }
-    await sleep(Math.min(500, Math.max(1, deadline - performance.now())));
-  } while (performance.now() < deadline);
+    await sleep(Math.min(500, Math.max(1, deadlineMs - performance.now())));
+  }
   return {
     status: 'unverified',
     reason: 'healthy-public-media-and-overlay-readiness-timeout',
@@ -674,6 +718,7 @@ export async function runLiveDuration({
   assert(context && typeof context.newPage === 'function', 'A caller-owned context is required');
   assert.equal(installation, 'extension');
   const liveUrl = validateDurationLiveUrl(url);
+  const expectedVideoId = requiredDurationVideoId(liveUrl);
   const progressStarted = performance.now();
   const result: DurationResult = {
     schemaVersion: 1,
@@ -796,14 +841,84 @@ export async function runLiveDuration({
       timeout: remainingPreflight(30_000),
     })) as ElementHandle<HTMLVideoElement>;
     ownedBinding = { player: ownedPlayer, video: ownedVideo };
-    await publicState(page, ownedBinding);
+    const mediaReadinessDeadline = initialMediaDeadline(performance.now(), progressStarted);
+    const setupPage = page;
+    const setupBinding = ownedBinding;
+    const nativeBoundary: NativeMuteBoundary = {
+      timedOut: false,
+      pendingUncertain: 0,
+      lateSettlements: 0,
+    };
+    result.preflight.nativeMuteBoundary = nativeBoundary;
+    const bounded = createNativeMuteBoundary({
+      deadlineMs: mediaReadinessDeadline,
+      controller: nativeBoundary,
+    });
+    stage = 'preflight:wait-native-mute-precondition';
+    while (true) {
+      const state = await bounded(
+        () => publicState(setupPage, setupBinding),
+        'read-native-mute-precondition',
+        3_000
+      );
+      assert(
+        state.adShowing === false &&
+          state.playerErrorUi.visible === false &&
+          state.video?.errorCode === null,
+        'Public player ad or error blocks native mute setup'
+      );
+      if (state.playerVideoId !== null && state.playerVideoId !== expectedVideoId) {
+        throw new Error('Public player video identity differs from the admitted URL');
+      }
+      if (state.playerVideoId === expectedVideoId && state.video && state.video.readyState > 0)
+        break;
+      await sleep(Math.min(300, Math.max(1, mediaReadinessDeadline - performance.now())));
+    }
     stage = 'preflight:start-public-media';
-    result.preflight.startupControl = await actOnPublicVideo(ownedBinding, 'mute-play');
+    result.preflight.startupControl = await establishOwnedMute({
+      page: setupPage,
+      binding: setupBinding,
+      expectedVideoId,
+      bounded,
+      beforeClick: async (before) => {
+        assert.equal(
+          result.preflight.nativeMuteClickIntent,
+          undefined,
+          'Native mute click already intended'
+        );
+        result.preflight.nativeMuteClickIntent = { status: 'recorded-before-click', before };
+        await persist('preflight:native-mute-before-click', 'before');
+      },
+    });
+    await bounded(
+      () => persist('preflight:native-mute-verified', 'after'),
+      'persist-native-mute-proof',
+      3_000
+    );
+    if (result.preflight.startupControl.after.paused) {
+      result.preflight.initialOwnedPlay = await bounded(
+        () =>
+          setupBinding.video.evaluate(playOwnedMutedVideo, {
+            player: setupBinding.player,
+            expectedVideoId,
+          }),
+        'initial-owned-play',
+        3_000
+      );
+      assert(
+        result.preflight.initialOwnedPlay.before.muted === true &&
+          result.preflight.initialOwnedPlay.after.muted === true,
+        'Owned play lost verified native mute state'
+      );
+      await bounded(() => persist('preflight:owned-play', 'after'), 'persist-owned-play', 3_000);
+    }
     stage = 'preflight:wait-media-ready';
     result.preflight.mediaReadiness = await waitForInitialMedia(
-      page,
-      ownedBinding,
-      remainingPreflight(90_000)
+      setupPage,
+      setupBinding,
+      expectedVideoId,
+      mediaReadinessDeadline,
+      bounded
     );
     assert.equal(
       result.preflight.mediaReadiness.status,
