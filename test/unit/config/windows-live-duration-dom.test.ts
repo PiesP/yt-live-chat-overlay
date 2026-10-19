@@ -182,7 +182,7 @@ describe('public duration player-error DOM probe', () => {
     expect(setter).not.toHaveBeenCalled();
   });
 
-  it('uses the owned player video even when another video comes first', async () => {
+  it('reads the owned player video without muting or playing another video', async () => {
     document.body.innerHTML = `<video id="unrelated"></video>${fixture}`;
     const video = ownedVideo();
     video.muted = false;
@@ -191,9 +191,9 @@ describe('public duration player-error DOM probe', () => {
     const otherPlay = vi.spyOn(unrelated, 'play').mockResolvedValue();
 
     expect(readPublicDurationPageState(domBinding(video)).video?.muted).toBe(false);
-    const action = observePublicVideo(video, { player: ownedPlayer(), action: 'mute-play' });
-    expect(action).toMatchObject({ before: { muted: false }, after: { muted: true } });
-    expect(play).toHaveBeenCalledOnce();
+    const action = observePublicVideo(video, { player: ownedPlayer(), action: 'read' });
+    expect(action).toMatchObject({ before: { muted: false }, after: { muted: false } });
+    expect(play).not.toHaveBeenCalled();
     expect(otherPlay).not.toHaveBeenCalled();
     expect(unrelated.muted).toBe(false);
   });
@@ -260,9 +260,9 @@ describe('public duration player-error DOM probe', () => {
     expect(() => observePublicVideo(video, { player: originalPlayer, action: 'read' })).toThrow(
       /ambiguous|replaced/u
     );
-    expect(() =>
-      observePublicVideo(video, { player: originalPlayer, action: 'mute-play' })
-    ).toThrow(/ambiguous|replaced/u);
+    expect(() => observePublicVideo(video, { player: originalPlayer, action: 'read' })).toThrow(
+      /ambiguous|replaced/u
+    );
     expect(play).not.toHaveBeenCalled();
     const captured = await captureFailurePlayerDom(
       mockPage(),
@@ -418,7 +418,9 @@ describe('public duration player-error DOM probe', () => {
       try {
         await expect(
           runLiveDuration({ context, url: 'https://www.youtube.com/watch?v=public', output })
-        ).rejects.toThrow('Duration observation failed during preflight:bind-public-player');
+        ).rejects.toThrow(
+          'Duration observation failed during preflight:wait-native-mute-precondition'
+        );
         const result = JSON.parse(
           await readFile(join(output, 'live-duration-result.json'), 'utf8')
         );
@@ -429,7 +431,7 @@ describe('public duration player-error DOM probe', () => {
           failurePlayerDom: { mediaIdentity: 'unavailable', mediaNetworkState: null },
           failures: [
             {
-              stage: 'preflight:bind-public-player',
+              stage: 'preflight:wait-native-mute-precondition',
               reason: 'owned-public-video-lost',
             },
           ],

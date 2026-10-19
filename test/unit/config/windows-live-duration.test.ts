@@ -65,6 +65,29 @@ describe('public duration observation contract', () => {
     }
   });
 
+  it('derives one required media identity from either admitted public URL form', () => {
+    expect(durationModule.requiredDurationVideoId('https://www.youtube.com/watch?v=abc_123')).toBe(
+      'abc_123'
+    );
+    expect(durationModule.requiredDurationVideoId('https://www.youtube.com/live/abc-123')).toBe(
+      'abc-123'
+    );
+    for (const url of [
+      'https://www.youtube.com/watch',
+      'https://www.youtube.com/watch?v=one&v=two',
+      'https://www.youtube.com/watch?v=bad%20id',
+    ]) {
+      expect(() => durationModule.requiredDurationVideoId(url)).toThrow();
+    }
+  });
+
+  it('counts native UI setup and subsequent readiness within one 90-second cap', () => {
+    expect(durationModule.initialMediaDeadline(10_000, 0)).toBe(100_000);
+    expect(durationModule.initialMediaDeadline(250_000, 0)).toBe(300_000);
+    // UI mute setup consumes this same deadline; it cannot start a fresh 90-second wait.
+    expect(durationModule.initialMediaDeadline(10_000, 0) - 35_000).toBe(65_000);
+  });
+
   it('does not accept duration evidence without a native hidden transition', () => {
     const reasons = durationModule.durationEvidenceReasons({
       visibilityProof: ['visible', 'visible'],
