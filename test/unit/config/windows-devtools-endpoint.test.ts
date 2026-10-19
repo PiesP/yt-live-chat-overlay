@@ -6,8 +6,8 @@ import { promisify } from 'node:util';
 
 import { expect, it } from 'vite-plus/test';
 
-it('enforces the DevTools file boundary with native Node filesystem operations', async () => {
-  // A subprocess keeps native ESM filesystem mocks isolated from the Vitest loader.
+it('enforces owned fixed-port DevTools discovery and connection boundaries', async () => {
+  // A subprocess keeps native Node HTTP and VM behavior isolated from the Vitest loader.
   const fixture = resolve(import.meta.dirname, 'fixtures/devtools-endpoint.ts');
   const { stdout } = await promisify(execFile)(
     process.execPath,

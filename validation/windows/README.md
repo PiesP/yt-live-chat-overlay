@@ -360,8 +360,11 @@ the unpacked extension, one existing public `https://www.youtube.com/watch?v=...
 or `https://www.youtube.com/live/VIDEO_ID` URL admitted by the controller, and
 `{ "mode": "duration", "duration_seconds": 1200 }`. It runs the
 deterministic installed-extension fixture first. It then starts a task-owned Chrome
-process with muted audio and loopback DevTools, attaches with Playwright launch
-defaults disabled, and observes five minutes visible, ten minutes natively hidden
+process with muted audio and fixed IPv4 loopback DevTools port 27683. It verifies
+the exact port listener and process identity before fetching the browser endpoint
+and again before connecting with Playwright launch defaults disabled. Duration
+runs are serial; an existing listener on port 27683 fails the run without a port
+fallback. The run observes five minutes visible, ten minutes natively hidden
 behind a second real tab, and five minutes visible after resume. Thirty-second
 checkpoints retain media, Canvas, bridge, renderer, native visibility, normalized
 player-error UI, and accessible-render fingerprint evidence. Public chat volume is

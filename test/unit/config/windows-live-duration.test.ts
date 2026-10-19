@@ -389,7 +389,7 @@ describe('natural Chrome ownership boundaries', () => {
       expect.arrayContaining([
         '--mute-audio',
         '--remote-debugging-address=127.0.0.1',
-        '--remote-debugging-port=0',
+        '--remote-debugging-port=27683',
         '--user-data-dir=C:\\owned-profile',
       ])
     );
