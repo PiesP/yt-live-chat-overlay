@@ -199,6 +199,9 @@ describe('installed public rendering observations', () => {
     expect(readSurvivors()).toHaveLength(1);
     context.pixels.set('24,24', [10, 20, 30, 255]);
     expect(readSurvivors()).toHaveLength(0);
+    context.drawImage(offscreen.canvas, 96, 0, 48, 48);
+    expect(probeWindow.__ytPublicImageDraws).toHaveLength(1);
+    expect(readSurvivors()).toHaveLength(1);
     const direct = new Image();
     direct.currentSrc = 'https://yt3.ggpht.com/direct-avatar=s88';
     context.drawImage(direct, 48, 0, 48, 48);
@@ -209,7 +212,7 @@ describe('installed public rendering observations', () => {
         naturalWidth: 48,
         naturalHeight: 48,
         pixelAlpha: 255,
-        pixelX: 24,
+        pixelX: 120,
         pixelY: 24,
         pixelRgba: [80, 90, 100, 255],
       },
@@ -224,6 +227,6 @@ describe('installed public rendering observations', () => {
         pixelRgba: [80, 90, 100, 255],
       },
     ]);
-    expect(readSurvivors()).toHaveLength(1);
+    expect(readSurvivors()).toHaveLength(2);
   });
 });

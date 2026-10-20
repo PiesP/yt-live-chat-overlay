@@ -723,38 +723,33 @@ async function observePublicUserscriptMedia(
       const imageScreenshot = 'live-' + index + '-public-image.png';
       await page.screenshot({ path: join(output, imageScreenshot) });
       const afterScreenshot = await page.evaluate(readSurvivingPublicImageDraws);
-      const survivedScreenshot = afterScreenshot.some(
-        (draw) =>
-          draw.url === assessed.draw.url &&
-          draw.pixelX === assessed.draw.pixelX &&
-          draw.pixelY === assessed.draw.pixelY &&
-          draw.pixelRgba.every((value, pixelIndex) => value === assessed.draw.pixelRgba[pixelIndex])
-      );
-      image = survivedScreenshot
-        ? {
-            status: 'passed',
-            probeCapability: 'overlay-image-draw-observed',
-            productVerdict: 'visible-public-image-observed',
-            sourceType: assessed.draw.sourceType,
-            sourceHost: new URL(assessed.draw.url).hostname,
-            sourceSha256: createHash('sha256').update(assessed.draw.url).digest('hex'),
-            naturalWidth: assessed.draw.naturalWidth,
-            naturalHeight: assessed.draw.naturalHeight,
-            pixelAlpha: assessed.draw.pixelAlpha,
-            pixelX: assessed.draw.pixelX,
-            pixelY: assessed.draw.pixelY,
-            pixelRgba: assessed.draw.pixelRgba,
-            responseStatus: assessed.response.status,
-            responseContentType: assessed.response.contentType,
-            screenshot: imageScreenshot,
-          }
-        : {
-            status: 'unverified',
-            reason: 'public-image-final-frame-unverified',
-            probeCapability: 'overlay-image-draw-observed',
-            productVerdict: 'unverified',
-            screenshot: imageScreenshot,
-          };
+      const finalAssessed = assessPublicImage(afterScreenshot, imageResponses);
+      image =
+        finalAssessed.status === 'passed' && finalAssessed.draw.url === assessed.draw.url
+          ? {
+              status: 'passed',
+              probeCapability: 'overlay-image-draw-observed',
+              productVerdict: 'visible-public-image-observed',
+              sourceType: finalAssessed.draw.sourceType,
+              sourceHost: new URL(finalAssessed.draw.url).hostname,
+              sourceSha256: createHash('sha256').update(finalAssessed.draw.url).digest('hex'),
+              naturalWidth: finalAssessed.draw.naturalWidth,
+              naturalHeight: finalAssessed.draw.naturalHeight,
+              pixelAlpha: finalAssessed.draw.pixelAlpha,
+              pixelX: finalAssessed.draw.pixelX,
+              pixelY: finalAssessed.draw.pixelY,
+              pixelRgba: finalAssessed.draw.pixelRgba,
+              responseStatus: finalAssessed.response.status,
+              responseContentType: finalAssessed.response.contentType,
+              screenshot: imageScreenshot,
+            }
+          : {
+              status: 'unverified',
+              reason: 'public-image-final-frame-unverified',
+              probeCapability: 'overlay-image-draw-observed',
+              productVerdict: 'unverified',
+              screenshot: imageScreenshot,
+            };
     } else {
       image = {
         status: 'unverified',

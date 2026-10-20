@@ -91,9 +91,9 @@ export function installPublicImageDrawProbe(): void {
         }
       | undefined;
     try {
-      if (this.canvas.closest('#yt-live-chat-overlay') && draws.length < 16) {
+      if (this.canvas.closest('#yt-live-chat-overlay')) {
         const url = sourceUrl(image);
-        if (url && !draws.some((draw) => draw.url === url)) {
+        if (url && (draws.length < 16 || draws.some((draw) => draw.url === url))) {
           const naturalWidth =
             image instanceof HTMLImageElement
               ? image.naturalWidth
@@ -157,7 +157,7 @@ export function installPublicImageDrawProbe(): void {
       const pixelAlpha = pixelRgba[3];
       if (pixelAlpha <= 8) return;
       if (pixelRgba.every((value, index) => value === candidate.before[index])) return;
-      draws.push({
+      const observedDraw: PublicImageDraw = {
         url: candidate.url,
         sourceType: candidate.sourceType,
         naturalWidth: candidate.naturalWidth,
@@ -166,7 +166,10 @@ export function installPublicImageDrawProbe(): void {
         pixelX: candidate.pixelX,
         pixelY: candidate.pixelY,
         pixelRgba,
-      });
+      };
+      const existingIndex = draws.findIndex((draw) => draw.url === candidate.url);
+      if (existingIndex >= 0) draws[existingIndex] = observedDraw;
+      else draws.push(observedDraw);
     } catch {
       // A tainted or unavailable canvas cannot establish image contribution.
     }
