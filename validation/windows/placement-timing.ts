@@ -260,7 +260,11 @@ type WorkerExact = ProbeExact & {
   collisionRejects: number;
   placementMisses: number;
 };
-type CanvasExact = ProbeExact & { peaks: { pending: number; active: number } };
+type CanvasExact = ProbeExact & {
+  peaks: { pending: number; active: number };
+  reflows?: unknown[];
+  reflowOverflow?: number;
+};
 type WorkerRecord = {
   ready: boolean;
   stats: Record<string, unknown>[];
@@ -1820,13 +1824,76 @@ export function instrumentCanvasPageScript(
   if (
     !source.includes('var CanvasRenderer = class CanvasRenderer extends RendererBase {') ||
     !source.includes('function getRegularCardInsets(') ||
+    !source.includes('function reconcileMessagePlacements(') ||
     source.split(marker).length !== 2
   )
     return null;
   return source.replace(
     marker,
-    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);${marker}`
+    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);` +
+      `\n\treconcileMessagePlacements = (${attachReflowDiagnostic.toString()})(reconcileMessagePlacements);${marker}`
   );
+}
+
+function attachReflowDiagnostic(
+  original: (
+    candidates: readonly {
+      message: { id?: string; message?: { id?: string } };
+      laneIndex: number;
+      height: number;
+      motion: { viewportEntryTime: number; visibleExitTime: number };
+    }[],
+    options: { now: number; laneCount: number; laneHeight: number; viewportHeight: number }
+  ) => {
+    placements: { message: { id?: string; message?: { id?: string } } }[];
+    dropped: { message: { id?: string; message?: { id?: string } }; reason: string }[];
+  }
+) {
+  const state = (globalThis as typeof globalThis & { __ytPlacementProbe?: ProbeState })
+    .__ytPlacementProbe;
+  const exact = state?.exact as CanvasExact | undefined;
+  const target = 'WINDOWS195_BACKLOG_LONG';
+  const idOf = (message: { id?: string; message?: { id?: string } }) =>
+    message.message?.id ?? message.id ?? null;
+  return (candidates: Parameters<typeof original>[0], options: Parameters<typeof original>[1]) => {
+    const actual = original(candidates, options);
+    if (!exact || !candidates.some((candidate) => idOf(candidate.message) === target))
+      return actual;
+    exact.reflows ??= [];
+    if (exact.reflows.length >= 8) {
+      exact.reflowOverflow = (exact.reflowOverflow ?? 0) + 1;
+      return actual;
+    }
+    const reordered = [
+      ...candidates.filter((candidate) => idOf(candidate.message) === target),
+      ...candidates.filter((candidate) => idOf(candidate.message) !== target),
+    ];
+    const longFirst = original(reordered, options);
+    const summarize = (result: typeof actual) => ({
+      placedIds: result.placements.map((placement) => idOf(placement.message)),
+      dropped: result.dropped.map((entry) => ({ id: idOf(entry.message), reason: entry.reason })),
+    });
+    exact.reflows.push({
+      atEpochMs: performance.timeOrigin + performance.now(),
+      options: {
+        now: options.now,
+        laneCount: options.laneCount,
+        laneHeight: options.laneHeight,
+        viewportHeight: options.viewportHeight,
+      },
+      candidates: candidates.map((candidate) => ({
+        id: idOf(candidate.message),
+        laneIndex: candidate.laneIndex,
+        height: candidate.height,
+        visibleAtReflow:
+          candidate.motion.viewportEntryTime <= options.now &&
+          candidate.motion.visibleExitTime > options.now,
+      })),
+      actual: summarize(actual),
+      longFirst: summarize(longFirst),
+    });
+    return actual;
+  };
 }
 
 function attachCanvasRendererProbe(
@@ -1856,6 +1923,8 @@ function attachCanvasRendererProbe(
     peaks: { pending: 0, active: 0 },
     drops: {},
     overflow: 0,
+    reflows: [],
+    reflowOverflow: 0,
   };
   state.exact = exact;
   const queuedAt = new Map<string, number>();

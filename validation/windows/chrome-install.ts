@@ -1370,6 +1370,8 @@ export async function runChromeInstallation({
         output,
         extensionId,
         comparisonOnly,
+        // Issue #282 diagnostic: attribute the existing long-message reflow failure.
+        selectedScenarios: ['main-spacing-speed'],
       });
       assert.equal(
         result.placementTiming.status,
