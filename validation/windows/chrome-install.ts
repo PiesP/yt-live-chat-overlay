@@ -45,6 +45,7 @@ import type {
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
+import { readExtensionUpgradeInput, runExtensionUpgrade } from './release-upgrade/extension.ts';
 import {
   loadUpgradeInputs,
   readUserscriptMetadata,
@@ -172,6 +173,7 @@ type ChromeResult<Live = LiveObservation> = {
   placementTiming?: Awaited<ReturnType<typeof runPlacementTimingFixture>> | null;
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
+  extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
   liveWorkflowCoverage?: {
     observedModes: (string | undefined)[];
@@ -2223,6 +2225,8 @@ export async function runChromeInstallation({
     });
   }
   const upgradeInputs = installation === 'userscript' ? await loadUpgradeInputs(root) : null;
+  const extensionUpgradeInput =
+    installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let context: BrowserContext | undefined;
   let cdp: CDPSession | undefined;
@@ -2258,11 +2262,43 @@ export async function runChromeInstallation({
     result.cleanup.browserProcessIdentified = true;
     await enableDeveloperMode(context, browserName);
     if (installation === 'extension') {
-      ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
-        path: join(root, 'dist-extension'),
-      })) as { id: string });
-      assert.equal(typeof extensionId, 'string');
-      result.installationMethod = 'cdp-unpacked-extension';
+      if (extensionUpgradeInput) {
+        try {
+          const upgraded = await runExtensionUpgrade({
+            context,
+            cdp,
+            root,
+            profile,
+            verified: extensionUpgradeInput,
+            onLoaded: (id) => {
+              extensionId = id;
+            },
+          });
+          extensionId = upgraded.extensionId;
+          result.extensionUpgrade = upgraded.receipt;
+        } catch (error) {
+          result.extensionUpgrade =
+            error &&
+            typeof error === 'object' &&
+            'extensionUpgrade' in error &&
+            error.extensionUpgrade &&
+            typeof error.extensionUpgrade === 'object'
+              ? (error.extensionUpgrade as Record<string, unknown>)
+              : { status: 'failed', transition: 'public-0.45.7-to-candidate-0.45.8' };
+          throw error;
+        }
+        result.installationMethod = 'same-path-unpacked-extension-upgrade';
+      } else {
+        ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
+          path: join(root, 'dist-extension'),
+        })) as { id: string });
+        assert.equal(typeof extensionId, 'string');
+        result.extensionUpgrade = {
+          status: 'not-requested',
+          transition: 'fresh-candidate-install',
+        };
+        result.installationMethod = 'cdp-unpacked-extension';
+      }
     } else {
       ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'test-tools/userscript-manager'),
