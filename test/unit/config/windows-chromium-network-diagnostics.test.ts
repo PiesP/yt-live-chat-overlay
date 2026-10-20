@@ -217,6 +217,19 @@ describe('native Chromium warning and policy diagnostics', () => {
     ).toEqual(['unknown', 'unknown', 'unknown']);
   });
 
+  it('does not call a redirected warning successful from the final hop', async () => {
+    const session = new FakeSession();
+    const capture = await beginChromiumNetworkDiagnostics(options(session));
+    request(session, 'reused', owned, 'main', 'loader');
+    warning(session, 'reused');
+    request(session, 'reused', owned, 'main', 'loader');
+    response(session, 'reused', 'loader', 200);
+    session.emit('Network.loadingFinished', { requestId: 'reused' });
+    const result = await capture.finish();
+    expect(result.warnings).toMatchObject([{ join: 'unknown', committedMainFrame: null }]);
+    expect(result.requests).toMatchObject([{ redirectCount: 1, responseStatus: 200 }]);
+  });
+
   it('bounds setup and detach, and cannot mutate a finished snapshot', async () => {
     vi.useFakeTimers();
     const pending = beginChromiumNetworkDiagnostics({

@@ -410,7 +410,7 @@ export async function beginChromiumNetworkDiagnostics(options: Options): Promise
           const linked = warning.requestId ? requests.get(warning.requestId) : null;
           const matching = linked?.path === warning.path ? linked : null;
           const committedMainFrame =
-            matching && warning.reportedWatchSha
+            matching && matching.redirectCount === 0 && warning.reportedWatchSha
               ? commits.some(
                   (commit) =>
                     commit.watchSha === warning.reportedWatchSha &&
@@ -425,7 +425,7 @@ export async function beginChromiumNetworkDiagnostics(options: Options): Promise
             requestIdSha256: warning.requestId ? digest(warning.requestId) : null,
             join: !warning.requestId
               ? 'unknown'
-              : !matching
+              : !matching || matching.redirectCount > 0
                 ? 'unknown'
                 : matching.failed
                   ? 'linked-failure'
