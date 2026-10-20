@@ -342,6 +342,7 @@ export function installConnectionAllowlistObserver(extensionId: string) {
       const ownedResourcePath =
         !connection.username &&
         !connection.password &&
+        !connection.port &&
         !connection.search &&
         !connection.hash &&
         ['workers/renderer.js', 'page-script.js'].includes(path)

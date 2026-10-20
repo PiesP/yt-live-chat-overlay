@@ -131,6 +131,10 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(JSON.stringify(first)).not.toContain('secret-policy');
     expect(JSON.stringify(first)).not.toContain('secret=1');
     expect(drain()?.records).toHaveLength(0);
+    instances[0]?.callback([report(`chrome-extension://${id}:123/page-script.js`)]);
+    expect(drain()?.records).toMatchObject([
+      { ownedResourcePath: null, ownedExtensionOriginOnly: true },
+    ]);
     instances[0]?.callback(
       Array.from({ length: 18 }, () => report(`chrome-extension://${id}/page-script.js`))
     );
