@@ -29,6 +29,10 @@ const {
   redactChromeDiagnosticText,
   compareOwnedExtensionResourceBody,
   beginOwnedExtensionResourceCapture,
+  beginConnectionAllowlistReportCapture,
+  beginCommittedPolicyNavigation,
+  installConnectionAllowlistObserver,
+  drainConnectionAllowlistObserver,
   readBoundedPackagedResource,
   readBundledUserscriptVersion,
 } = chromeInstallModule;
@@ -50,6 +54,272 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('observes only the public top watch frame and drains callback and pending reports once', () => {
+    const id = 'a'.repeat(32);
+    const instances: Array<{
+      callback: (reports: unknown[]) => void;
+      options: unknown;
+      pending: unknown[];
+    }> = [];
+    class FakeReportingObserver {
+      pending: unknown[] = [];
+      constructor(
+        readonly callback: (reports: unknown[]) => void,
+        readonly options: unknown
+      ) {
+        instances.push(this);
+      }
+      observe() {}
+      takeRecords() {
+        return this.pending.splice(0);
+      }
+    }
+    const window: { top?: unknown; __ytPolicyReportState?: unknown } = {};
+    window.top = window;
+    const sandbox = {
+      window,
+      location: { protocol: 'https:', hostname: 'www.youtube.com', pathname: '/watch' },
+      ReportingObserver: FakeReportingObserver,
+      URL,
+      performance: { now: () => 12.7 },
+    };
+    const install = () =>
+      runInNewContext(
+        `(${installConnectionAllowlistObserver.toString()})(${JSON.stringify(id)})`,
+        sandbox
+      );
+    const drain = () =>
+      runInNewContext(`(${drainConnectionAllowlistObserver.toString()})()`, sandbox) as {
+        status: string;
+        records: Array<Record<string, unknown>>;
+        overflow: number;
+      } | null;
+    window.top = {};
+    install();
+    expect(instances).toHaveLength(0);
+    window.top = window;
+    sandbox.location.pathname = '/feed';
+    install();
+    expect(instances).toHaveLength(0);
+    sandbox.location.pathname = '/watch';
+    install();
+    expect(instances[0]?.options).toEqual({ types: ['connection-allowlist'], buffered: true });
+    const report = (connection: string) => ({
+      type: 'connection-allowlist',
+      body: {
+        connection,
+        url: 'https://www.youtube.com/watch?v=secret&token=private',
+        disposition: 'report',
+        allowlist: ['secret-policy'],
+      },
+    });
+    instances[0]?.callback([report(`chrome-extension://${id}/page-script.js`)]);
+    instances[0]?.pending.push(report(`chrome-extension://${id}/workers/renderer.js?secret=1`));
+    instances[0]?.pending.push(report('https://other.example/secret'));
+    const first = drain();
+    expect(first).toMatchObject({ status: 'supported', overflow: 0 });
+    expect(first?.records).toHaveLength(2);
+    expect(first?.records[0]).toMatchObject({
+      documentElapsedMs: 13,
+      ownedResourcePath: 'page-script.js',
+      ownedExtensionOriginOnly: false,
+    });
+    expect(first?.records[1]).toMatchObject({
+      ownedResourcePath: null,
+      ownedExtensionOriginOnly: true,
+    });
+    expect(JSON.stringify(first)).not.toContain('secret-policy');
+    expect(JSON.stringify(first)).not.toContain('secret=1');
+    expect(drain()?.records).toHaveLength(0);
+    instances[0]?.callback([report(`chrome-extension://${id}:123/page-script.js`)]);
+    expect(drain()?.records).toMatchObject([
+      { ownedResourcePath: null, ownedExtensionOriginOnly: true },
+    ]);
+    instances[0]?.callback(
+      Array.from({ length: 18 }, () => report(`chrome-extension://${id}/page-script.js`))
+    );
+    expect(drain()).toMatchObject({ overflow: 2 });
+  });
+
+  it('distinguishes an unavailable page observer from a supported empty observer', () => {
+    const window: { top?: unknown } = {};
+    window.top = window;
+    const sandbox = {
+      window,
+      location: { protocol: 'https:', hostname: 'www.youtube.com', pathname: '/watch' },
+      URL,
+      performance: { now: () => 0 },
+    };
+    runInNewContext(
+      `(${installConnectionAllowlistObserver.toString()})(${JSON.stringify('a'.repeat(32))})`,
+      sandbox
+    );
+    expect(
+      runInNewContext(`(${drainConnectionAllowlistObserver.toString()})()`, sandbox)
+    ).toMatchObject({ status: 'unsupported', records: [], overflow: 0 });
+  });
+
+  it('bounds policy report output across navigations without exposing report URLs', async () => {
+    const id = 'a'.repeat(32);
+    const record = {
+      documentUrl: 'https://www.youtube.com/watch?v=secret&token=private',
+      documentElapsedMs: 10,
+      ownedResourcePath: 'page-script.js',
+      ownedExtensionOriginOnly: false,
+      disposition: 'enforce' as const,
+    };
+    const states = [
+      { status: 'supported', records: Array.from({ length: 12 }, () => record), overflow: 0 },
+      { status: 'supported', records: Array.from({ length: 7 }, () => record), overflow: 2 },
+    ];
+    const page = {
+      addInitScript: vi.fn(async () => {}),
+      evaluate: vi.fn(async () => states.shift()),
+    } as unknown as Page;
+    const capture = await beginConnectionAllowlistReportCapture(page, id);
+    await capture.drain('initial-watch');
+    await capture.drain('next-watch');
+    const result = capture.finish();
+    expect(result).toMatchObject({ status: 'observed', overflow: 5 });
+    expect(result.records).toHaveLength(16);
+    expect(result.records[0]?.documentUrlSha256).toBe(
+      createHash('sha256').update(record.documentUrl).digest('hex')
+    );
+    expect(result.records[12]?.navigation).toBe('next-watch');
+    expect(JSON.stringify(result)).not.toContain('secret');
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
+
+  it.each([
+    [undefined, 'observer-missing', 'unverified'],
+    [{ status: 'unsupported', records: [], overflow: 0 }, 'unsupported', 'unsupported'],
+    [{ status: 'supported', records: [], overflow: 0 }, 'supported', 'supported-no-records'],
+  ])('keeps absent policy reports diagnostic-only: %s', async (state, drainStatus, status) => {
+    const page = {
+      addInitScript: vi.fn(async () => {}),
+      evaluate: vi.fn(async () => state),
+    } as unknown as Page;
+    const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+    await capture.drain('initial-watch');
+    expect(capture.finish()).toMatchObject({
+      status,
+      records: [],
+      drains: [{ navigation: 'initial-watch', status: drainStatus }],
+    });
+  });
+
+  it('rejects a malformed page report before it reaches the saved receipt', async () => {
+    const page = {
+      addInitScript: vi.fn(async () => {}),
+      evaluate: vi.fn(async () => ({
+        status: 'supported',
+        overflow: 0,
+        records: [
+          {
+            documentUrl: 'https://www.youtube.com/watch?v=private',
+            documentElapsedMs: 2,
+            ownedResourcePath: 'private-resource.js',
+            ownedExtensionOriginOnly: false,
+            disposition: 'enforce',
+          },
+        ],
+      })),
+    } as unknown as Page;
+    const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+    await capture.drain('initial-watch');
+    expect(capture.finish()).toMatchObject({ status: 'unverified', records: [] });
+    expect(JSON.stringify(capture.finish())).not.toContain('private');
+  });
+
+  it('bounds a never-settling policy drain and marks its evidence unverified', async () => {
+    vi.useFakeTimers();
+    try {
+      const page = {
+        addInitScript: vi.fn(async () => {}),
+        evaluate: vi.fn(() => new Promise(() => {})),
+      } as unknown as Page;
+      const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+      const draining = capture.drain('initial-watch');
+      await vi.advanceTimersByTimeAsync(3_000);
+      await draining;
+      expect(capture.finish()).toMatchObject({
+        status: 'unverified',
+        drains: [{ navigation: 'initial-watch', status: 'drain-timeout' }],
+        records: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a policy drain that resolves after its bounded result was saved', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveEvaluate!: (value: unknown) => void;
+      const page = {
+        addInitScript: vi.fn(async () => {}),
+        evaluate: vi.fn(
+          () =>
+            new Promise((resolve) => {
+              resolveEvaluate = resolve;
+            })
+        ),
+      } as unknown as Page;
+      const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+      const draining = capture.drain('initial-watch');
+      await vi.advanceTimersByTimeAsync(3_000);
+      await draining;
+      const before = JSON.stringify(capture.finish());
+      resolveEvaluate({
+        status: 'supported',
+        overflow: 0,
+        records: [
+          {
+            documentUrl: 'https://www.youtube.com/watch?v=private',
+            documentElapsedMs: 1,
+            ownedResourcePath: 'page-script.js',
+            ownedExtensionOriginOnly: false,
+            disposition: 'report',
+          },
+        ],
+      });
+      await Promise.resolve();
+      expect(JSON.stringify(capture.finish())).toBe(before);
+      expect(before).not.toContain('private');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('attributes reports to the last committed main-frame document after navigation failure', async () => {
+    const page = new EventEmitter();
+    const mainFrame = { url: () => 'https://www.youtube.com/watch?v=next' };
+    Object.assign(page, { mainFrame: () => mainFrame });
+    const navigation = beginCommittedPolicyNavigation(page as unknown as Page);
+    navigation.beginNextNavigation('https://www.youtube.com/watch?v=next');
+    const failedGoto = async (committed: boolean) => {
+      if (committed) page.emit('framenavigated', mainFrame);
+      throw new Error('navigation failed');
+    };
+    await expect(failedGoto(false)).rejects.toThrow('navigation failed');
+    page.emit('framenavigated', {});
+    expect(navigation.current()).toBe('initial-watch');
+    await expect(failedGoto(true)).rejects.toThrow('navigation failed');
+    expect(navigation.current()).toBe('next-watch');
+    navigation.stop();
+    expect(page.listenerCount('framenavigated')).toBe(0);
+  });
+
+  it('leaves a committed unexpected document unattributed', () => {
+    const page = new EventEmitter();
+    const mainFrame = { url: () => 'https://www.youtube.com/watch?v=unrelated' };
+    Object.assign(page, { mainFrame: () => mainFrame });
+    const navigation = beginCommittedPolicyNavigation(page as unknown as Page);
+    navigation.beginNextNavigation('https://www.youtube.com/watch?v=next');
+    page.emit('framenavigated', mainFrame);
+    expect(navigation.current()).toBe('unknown');
+    navigation.stop();
+  });
   it('reads the installed script version from a bounded bundle without a source package manifest', async () => {
     const { root } = await fixture();
     await mkdir(join(root, 'dist'));
@@ -214,7 +484,12 @@ describe('installed Chrome acceptance outcomes', () => {
           url: () => `chrome-extension://${id}/${path}`,
           frame: () => ({ url: () => `https://www.youtube.com/watch?v=${navigation}&sig=private` }),
           resourceType: () => (path === 'page-script.js' ? 'script' : 'fetch'),
-          headers: () => ({ 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'script' }),
+          headers: () => ({ 'sec-fetch-mode': 'private-mode', authorization: 'private' }),
+          allHeaders: async () => ({
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'script',
+            authorization: 'private',
+          }),
           sizes: async () => ({ responseBodySize: body.length }),
           response: async () => response,
         };
@@ -284,7 +559,9 @@ describe('installed Chrome acceptance outcomes', () => {
       frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
       failure: () => ({ errorText: 'net::ERR_CONNECTION_RESET' }),
       resourceType: () => 'untrusted-type',
-      headers: () => ({ 'sec-fetch-mode': 'private-mode', 'sec-fetch-dest': 'private-dest' }),
+      allHeaders: async () => {
+        throw new Error('headers unavailable');
+      },
     };
     page.emit('request', request);
     page.emit('requestfailed', request);
@@ -298,6 +575,38 @@ describe('installed Chrome acceptance outcomes', () => {
       fetchMode: null,
       fetchDest: null,
     });
+  });
+
+  it('does not let late allHeaders metadata mutate a completed resource receipt', async () => {
+    const page = new EventEmitter();
+    const id = 'a'.repeat(32);
+    let resolveHeaders!: (headers: Record<string, string>) => void;
+    const finish = beginOwnedExtensionResourceCapture(
+      page as unknown as Page,
+      id,
+      { 'page-script.js': { maxBytes: 1, bytes: 1, sha256: 'a'.repeat(64) } },
+      () => ({ navigation: 'initial-watch' })
+    );
+    page.emit('request', {
+      url: () => `chrome-extension://${id}/page-script.js`,
+      frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+      resourceType: () => 'script',
+      allHeaders: () =>
+        new Promise<Record<string, string>>((resolve) => {
+          resolveHeaders = resolve;
+        }),
+    });
+    const result = await finish();
+    expect(result.requests[0]).toMatchObject({ fetchMode: null, fetchDest: null });
+    resolveHeaders({
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'script',
+      authorization: 'private-secret',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(result.requests[0]).toMatchObject({ fetchMode: null, fetchDest: null });
+    expect(JSON.stringify(result)).not.toContain('private-secret');
   });
 
   it('keeps the owned request inventory capped when a page repeats one resource', async () => {

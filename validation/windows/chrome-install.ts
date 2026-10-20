@@ -60,6 +60,7 @@ const GRACEFUL_PROCESS_EXIT_MS = 2_000;
 const PROCESS_EXIT_TIMEOUT_MS = 5_000;
 const RESOURCE_BODY_TIMEOUT_MS = 3_000;
 const RESOURCE_REQUEST_LIMIT = 16;
+const POLICY_REPORT_LIMIT = 16;
 const OWNED_EXTENSION_RESOURCES = {
   'workers/renderer.js': 524_288,
   'page-script.js': 2_097_152,
@@ -99,6 +100,27 @@ type ConsoleErrorEntry = {
   ownedResourcePath: string | null;
   reportedFrameDocumentSha256: string | null;
 };
+type PolicyReportEntry = {
+  navigation: string;
+  documentElapsedMs: number;
+  documentUrlSha256: string | null;
+  ownedResourcePath: string | null;
+  ownedExtensionOriginOnly: boolean;
+  disposition: 'report' | 'enforce';
+};
+type PolicyReportState = {
+  status: 'supported' | 'unsupported' | 'error';
+  records: Array<{
+    documentUrl: string;
+    documentElapsedMs: number;
+    ownedResourcePath: string | null;
+    ownedExtensionOriginOnly: boolean;
+    disposition: 'report' | 'enforce';
+  }>;
+  overflow: number;
+  observer?: ReportingObserver;
+  append?: (reports: readonly Report[]) => void;
+};
 type WorkflowStep = {
   status: string;
   kind?: string;
@@ -130,6 +152,12 @@ type LiveObservation = {
   unexpectedConsoleErrors?: number;
   hostConsoleErrors?: number;
   consoleErrors?: unknown[];
+  policyReports?: {
+    status: 'observed' | 'supported-no-records' | 'unsupported' | 'unverified';
+    records: PolicyReportEntry[];
+    overflow: number;
+    drains: Array<{ navigation: string; status: string }>;
+  };
   workerPolicyFallback?: boolean;
   [key: string]: unknown;
 };
@@ -271,23 +299,235 @@ function boundedObservationMs(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(180_000, Math.round(value))) : 0;
 }
 
-function safeRequestMetadata(request: Request) {
+/** Runs in the public page before its scripts; it records no policy text or full connection URL. */
+export function installConnectionAllowlistObserver(extensionId: string) {
+  if (window !== window.top) return;
+  if (
+    location.protocol !== 'https:' ||
+    !['www.youtube.com', 'youtube.com'].includes(location.hostname) ||
+    location.pathname !== '/watch'
+  )
+    return;
+  const owner = window as Window & { __ytPolicyReportState?: PolicyReportState };
+  const state: PolicyReportState = {
+    status: 'unsupported',
+    records: [],
+    overflow: 0,
+  };
+  owner.__ytPolicyReportState = state;
+  if (typeof ReportingObserver !== 'function') return;
+  const append = (reports: readonly Report[]) => {
+    for (const report of reports) {
+      if (report.type !== 'connection-allowlist') continue;
+      const body = report.body as {
+        connection?: unknown;
+        disposition?: unknown;
+        url?: unknown;
+      } | null;
+      if (typeof body?.connection !== 'string' || body.connection.length > 2048) continue;
+      if (body.disposition !== 'report' && body.disposition !== 'enforce') continue;
+      let connection: URL;
+      try {
+        connection = new URL(body.connection);
+      } catch {
+        continue;
+      }
+      if (connection.protocol !== 'chrome-extension:' || connection.hostname !== extensionId)
+        continue;
+      if (state.records.length >= 16) {
+        state.overflow++;
+        continue;
+      }
+      const path = connection.pathname.slice(1);
+      const ownedResourcePath =
+        !connection.username &&
+        !connection.password &&
+        !connection.port &&
+        !connection.search &&
+        !connection.hash &&
+        ['workers/renderer.js', 'page-script.js'].includes(path)
+          ? path
+          : null;
+      const documentUrl = typeof body.url === 'string' && body.url.length <= 2048 ? body.url : '';
+      state.records.push({
+        documentUrl,
+        documentElapsedMs: Math.max(0, Math.min(180_000, Math.round(performance.now()))),
+        ownedResourcePath,
+        ownedExtensionOriginOnly: ownedResourcePath === null,
+        disposition: body.disposition,
+      });
+    }
+  };
+  try {
+    const observer = new ReportingObserver(append, {
+      types: ['connection-allowlist'],
+      buffered: true,
+    });
+    observer.observe();
+    state.observer = observer;
+    state.append = append;
+    state.status = 'supported';
+  } catch {
+    state.status = 'error';
+  }
+}
+
+export function drainConnectionAllowlistObserver() {
+  if (window !== window.top) return null;
+  const owner = window as Window & { __ytPolicyReportState?: PolicyReportState };
+  const state = owner.__ytPolicyReportState;
+  if (!state) return null;
+  if (state.observer) {
+    // takeRecords returns only records still pending callback delivery.
+    const pending = state.observer.takeRecords();
+    state.append?.(pending);
+  }
+  const result = { status: state.status, records: state.records, overflow: state.overflow };
+  state.records = [];
+  state.overflow = 0;
+  return result;
+}
+
+export async function beginConnectionAllowlistReportCapture(page: Page, extensionId: string) {
+  assert(/^[a-p]{32}$/u.test(extensionId), 'Invalid installed extension ID');
+  const records: PolicyReportEntry[] = [];
+  const drains: Array<{ navigation: string; status: string }> = [];
+  let overflow = 0;
+  let installed = false;
+  try {
+    await page.addInitScript(installConnectionAllowlistObserver, extensionId);
+    installed = true;
+  } catch {
+    drains.push({ navigation: 'initial-watch', status: 'install-error' });
+  }
+  const drain = async (navigation: string) => {
+    if (!installed) return;
+    let state: ReturnType<typeof drainConnectionAllowlistObserver>;
+    try {
+      const outcome = await Promise.race([
+        page
+          .evaluate(drainConnectionAllowlistObserver)
+          .then((value) => ({ kind: 'result' as const, value })),
+        delay(RESOURCE_BODY_TIMEOUT_MS).then(() => ({ kind: 'timeout' as const })),
+      ]);
+      if (outcome.kind === 'timeout') {
+        drains.push({ navigation, status: 'drain-timeout' });
+        return;
+      }
+      state = outcome.value;
+    } catch {
+      drains.push({ navigation, status: 'drain-error' });
+      return;
+    }
+    if (!state) {
+      drains.push({ navigation, status: 'observer-missing' });
+      return;
+    }
+    if (
+      !['supported', 'unsupported', 'error'].includes(state.status) ||
+      !Array.isArray(state.records) ||
+      !Number.isSafeInteger(state.overflow) ||
+      state.overflow < 0
+    ) {
+      drains.push({ navigation, status: 'observer-invalid' });
+      return;
+    }
+    drains.push({ navigation, status: state.status });
+    overflow = Math.min(65_535, overflow + state.overflow);
+    for (const record of state.records.slice(0, POLICY_REPORT_LIMIT)) {
+      if (
+        typeof record.documentUrl !== 'string' ||
+        record.documentUrl.length > 2048 ||
+        !Number.isFinite(record.documentElapsedMs) ||
+        (record.ownedResourcePath !== null &&
+          !Object.hasOwn(OWNED_EXTENSION_RESOURCES, record.ownedResourcePath)) ||
+        record.ownedExtensionOriginOnly !== (record.ownedResourcePath === null) ||
+        !['report', 'enforce'].includes(record.disposition)
+      ) {
+        drains.push({ navigation, status: 'record-invalid' });
+        continue;
+      }
+      if (records.length >= POLICY_REPORT_LIMIT) {
+        overflow = Math.min(65_535, overflow + 1);
+        continue;
+      }
+      records.push({
+        navigation,
+        documentElapsedMs: boundedObservationMs(record.documentElapsedMs),
+        documentUrlSha256: publicWatchDocumentSha256(record.documentUrl),
+        ownedResourcePath: record.ownedResourcePath,
+        ownedExtensionOriginOnly: record.ownedExtensionOriginOnly,
+        disposition: record.disposition,
+      });
+    }
+    overflow = Math.min(65_535, overflow + Math.max(0, state.records.length - POLICY_REPORT_LIMIT));
+  };
+  const finish = () => ({
+    status: drains.some((item) => /error|missing|invalid|timeout/u.test(item.status))
+      ? ('unverified' as const)
+      : records.length > 0
+        ? ('observed' as const)
+        : drains.some((item) => item.status === 'supported')
+          ? ('supported-no-records' as const)
+          : ('unsupported' as const),
+    records,
+    overflow,
+    drains,
+  });
+  return { drain, finish };
+}
+
+/** Attribute policy reports to the document only after its main-frame navigation commits. */
+export function beginCommittedPolicyNavigation(page: Page) {
+  let navigating = false;
+  let current = 'initial-watch';
+  let expectedDocumentSha256: string | null = null;
+  const onFrameNavigated = (frame: ReturnType<Page['mainFrame']>) => {
+    if (navigating && frame === page.mainFrame()) {
+      let committedDocumentSha256: string | null = null;
+      try {
+        committedDocumentSha256 = publicWatchDocumentSha256(frame.url());
+      } catch {
+        // A committed document without a valid public watch identity remains unknown.
+      }
+      current =
+        expectedDocumentSha256 && committedDocumentSha256 === expectedDocumentSha256
+          ? 'next-watch'
+          : 'unknown';
+    }
+  };
+  page.on('framenavigated', onFrameNavigated);
+  return {
+    beginNextNavigation: (expectedUrl: string) => {
+      expectedDocumentSha256 = publicWatchDocumentSha256(expectedUrl);
+      navigating = true;
+    },
+    current: () => current,
+    stop: () => page.off('framenavigated', onFrameNavigated),
+  };
+}
+
+function safeRequestResourceType(request: Request) {
   let resourceType: string | null = null;
-  let fetchMode: string | null = null;
-  let fetchDest: string | null = null;
   try {
     const value = request.resourceType();
     if (['document', 'script', 'fetch', 'xhr', 'other'].includes(value)) resourceType = value;
-    const headers = request.headers();
-    const mode = headers['sec-fetch-mode'];
-    const dest = headers['sec-fetch-dest'];
-    if (mode && ['cors', 'no-cors', 'same-origin', 'navigate'].includes(mode)) fetchMode = mode;
-    if (dest && ['empty', 'script', 'worker', 'sharedworker', 'document'].includes(dest))
-      fetchDest = dest;
   } catch {
     // Missing browser metadata remains unknown; it does not change the resource verdict.
   }
-  return { resourceType, fetchMode, fetchDest };
+  return resourceType;
+}
+
+function safeRequestFetchMetadata(headers: Record<string, string>) {
+  const mode = headers['sec-fetch-mode'];
+  const dest = headers['sec-fetch-dest'];
+  return {
+    fetchMode: mode && ['cors', 'no-cors', 'same-origin', 'navigate'].includes(mode) ? mode : null,
+    fetchDest:
+      dest && ['empty', 'script', 'worker', 'sharedworker', 'document'].includes(dest)
+        ? dest
+        : null,
+  };
 }
 
 export function compareOwnedExtensionResourceBody(body: unknown, expected: ExpectedResource) {
@@ -441,7 +681,9 @@ export function beginOwnedExtensionResourceCapture(
       respondedAtMs: null,
       finishedAtMs: null,
       failedAtMs: null,
-      ...safeRequestMetadata(request),
+      resourceType: safeRequestResourceType(request),
+      fetchMode: null,
+      fetchDest: null,
       status: 'unverified',
       reason: 'request-incomplete',
       responseStatus: null,
@@ -451,6 +693,16 @@ export function beginOwnedExtensionResourceCapture(
     };
     requests.push(entry);
     entries.set(request, entry);
+    const readHeaders = Promise.resolve()
+      .then(() => request.allHeaders())
+      .then((headers) => {
+        Object.assign(entry, safeRequestFetchMetadata(headers));
+      })
+      .catch(() => {
+        // Security headers can be unavailable even through allHeaders().
+      });
+    pending.add(readHeaders);
+    void readHeaders.finally(() => pending.delete(readHeaders));
   };
   const recordResponse = (entry: ResourceEntry, response: Response) => {
     entry.respondedAtMs = nowMs();
@@ -1393,6 +1645,10 @@ async function inspectLivePage(
         observedAtMs
       )
     : null;
+  const policyReportCapture = extensionResources
+    ? await beginConnectionAllowlistReportCapture(page, extensionResources.extensionId)
+    : null;
+  const policyNavigation = policyReportCapture ? beginCommittedPolicyNavigation(page) : null;
   let deadlineReached = false;
   let deadlineCleanup: Promise<unknown> | undefined;
   const screenshot = `live-${index}.png`;
@@ -1597,6 +1853,9 @@ async function inspectLivePage(
       seek.selectionRange = seekRange;
     }
     observation.phase = 'navigation-transition';
+    if (policyReportCapture && policyNavigation)
+      await policyReportCapture.drain(policyNavigation.current());
+    policyNavigation?.beginNextNavigation(nextUrl);
     activeNavigation = 'next-watch';
     const diagnosticStart = workerDiagnostics.length;
     await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
@@ -1673,6 +1932,11 @@ async function inspectLivePage(
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
+    policyNavigation?.stop();
+    if (policyReportCapture) {
+      await policyReportCapture.drain(policyNavigation?.current() ?? 'initial-watch');
+      observation.policyReports = policyReportCapture.finish();
+    }
     if (finishResourceCapture) {
       assert(extensionResources);
       observation.extensionResources = {
