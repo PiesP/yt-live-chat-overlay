@@ -29,6 +29,9 @@ const {
   redactChromeDiagnosticText,
   compareOwnedExtensionResourceBody,
   beginOwnedExtensionResourceCapture,
+  beginConnectionAllowlistReportCapture,
+  installConnectionAllowlistObserver,
+  drainConnectionAllowlistObserver,
   readBoundedPackagedResource,
   readBundledUserscriptVersion,
 } = chromeInstallModule;
@@ -50,6 +53,178 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('observes only the public top watch frame and drains callback and pending reports once', () => {
+    const id = 'a'.repeat(32);
+    const instances: Array<{
+      callback: (reports: unknown[]) => void;
+      options: unknown;
+      pending: unknown[];
+    }> = [];
+    class FakeReportingObserver {
+      pending: unknown[] = [];
+      constructor(
+        readonly callback: (reports: unknown[]) => void,
+        readonly options: unknown
+      ) {
+        instances.push(this);
+      }
+      observe() {}
+      takeRecords() {
+        return this.pending.splice(0);
+      }
+    }
+    const window: { top?: unknown; __ytPolicyReportState?: unknown } = {};
+    window.top = window;
+    const sandbox = {
+      window,
+      location: { protocol: 'https:', hostname: 'www.youtube.com', pathname: '/watch' },
+      ReportingObserver: FakeReportingObserver,
+      URL,
+      performance: { now: () => 12.7 },
+    };
+    const install = () =>
+      runInNewContext(
+        `(${installConnectionAllowlistObserver.toString()})(${JSON.stringify(id)})`,
+        sandbox
+      );
+    const drain = () =>
+      runInNewContext(`(${drainConnectionAllowlistObserver.toString()})()`, sandbox) as {
+        status: string;
+        records: Array<Record<string, unknown>>;
+        overflow: number;
+      } | null;
+    window.top = {};
+    install();
+    expect(instances).toHaveLength(0);
+    window.top = window;
+    sandbox.location.pathname = '/feed';
+    install();
+    expect(instances).toHaveLength(0);
+    sandbox.location.pathname = '/watch';
+    install();
+    expect(instances[0]?.options).toEqual({ types: ['connection-allowlist'], buffered: true });
+    const report = (connection: string) => ({
+      type: 'connection-allowlist',
+      body: {
+        connection,
+        url: 'https://www.youtube.com/watch?v=secret&token=private',
+        disposition: 'report',
+        allowlist: ['secret-policy'],
+      },
+    });
+    instances[0]?.callback([report(`chrome-extension://${id}/page-script.js`)]);
+    instances[0]?.pending.push(report(`chrome-extension://${id}/workers/renderer.js?secret=1`));
+    instances[0]?.pending.push(report('https://other.example/secret'));
+    const first = drain();
+    expect(first).toMatchObject({ status: 'supported', overflow: 0 });
+    expect(first?.records).toHaveLength(2);
+    expect(first?.records[0]).toMatchObject({
+      documentElapsedMs: 13,
+      ownedResourcePath: 'page-script.js',
+      ownedExtensionOriginOnly: false,
+    });
+    expect(first?.records[1]).toMatchObject({
+      ownedResourcePath: null,
+      ownedExtensionOriginOnly: true,
+    });
+    expect(JSON.stringify(first)).not.toContain('secret-policy');
+    expect(JSON.stringify(first)).not.toContain('secret=1');
+    expect(drain()?.records).toHaveLength(0);
+    instances[0]?.callback(
+      Array.from({ length: 18 }, () => report(`chrome-extension://${id}/page-script.js`))
+    );
+    expect(drain()).toMatchObject({ overflow: 2 });
+  });
+
+  it('distinguishes an unavailable page observer from a supported empty observer', () => {
+    const window: { top?: unknown } = {};
+    window.top = window;
+    const sandbox = {
+      window,
+      location: { protocol: 'https:', hostname: 'www.youtube.com', pathname: '/watch' },
+      URL,
+      performance: { now: () => 0 },
+    };
+    runInNewContext(
+      `(${installConnectionAllowlistObserver.toString()})(${JSON.stringify('a'.repeat(32))})`,
+      sandbox
+    );
+    expect(
+      runInNewContext(`(${drainConnectionAllowlistObserver.toString()})()`, sandbox)
+    ).toMatchObject({ status: 'unsupported', records: [], overflow: 0 });
+  });
+
+  it('bounds policy report output across navigations without exposing report URLs', async () => {
+    const id = 'a'.repeat(32);
+    const record = {
+      documentUrl: 'https://www.youtube.com/watch?v=secret&token=private',
+      documentElapsedMs: 10,
+      ownedResourcePath: 'page-script.js',
+      ownedExtensionOriginOnly: false,
+      disposition: 'enforce' as const,
+    };
+    const states = [
+      { status: 'supported', records: Array.from({ length: 12 }, () => record), overflow: 0 },
+      { status: 'supported', records: Array.from({ length: 7 }, () => record), overflow: 2 },
+    ];
+    const page = {
+      addInitScript: vi.fn(async () => {}),
+      evaluate: vi.fn(async () => states.shift()),
+    } as unknown as Page;
+    const capture = await beginConnectionAllowlistReportCapture(page, id);
+    await capture.drain('initial-watch');
+    await capture.drain('next-watch');
+    const result = capture.finish();
+    expect(result).toMatchObject({ status: 'observed', overflow: 5 });
+    expect(result.records).toHaveLength(16);
+    expect(result.records[0]?.documentUrlSha256).toBe(
+      createHash('sha256').update(record.documentUrl).digest('hex')
+    );
+    expect(result.records[12]?.navigation).toBe('next-watch');
+    expect(JSON.stringify(result)).not.toContain('secret');
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
+
+  it.each([
+    [undefined, 'observer-missing', 'unverified'],
+    [{ status: 'unsupported', records: [], overflow: 0 }, 'unsupported', 'unsupported'],
+    [{ status: 'supported', records: [], overflow: 0 }, 'supported', 'supported-no-records'],
+  ])('keeps absent policy reports diagnostic-only: %s', async (state, drainStatus, status) => {
+    const page = {
+      addInitScript: vi.fn(async () => {}),
+      evaluate: vi.fn(async () => state),
+    } as unknown as Page;
+    const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+    await capture.drain('initial-watch');
+    expect(capture.finish()).toMatchObject({
+      status,
+      records: [],
+      drains: [{ navigation: 'initial-watch', status: drainStatus }],
+    });
+  });
+
+  it('rejects a malformed page report before it reaches the saved receipt', async () => {
+    const page = {
+      addInitScript: vi.fn(async () => {}),
+      evaluate: vi.fn(async () => ({
+        status: 'supported',
+        overflow: 0,
+        records: [
+          {
+            documentUrl: 'https://www.youtube.com/watch?v=private',
+            documentElapsedMs: 2,
+            ownedResourcePath: 'private-resource.js',
+            ownedExtensionOriginOnly: false,
+            disposition: 'enforce',
+          },
+        ],
+      })),
+    } as unknown as Page;
+    const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+    await capture.drain('initial-watch');
+    expect(capture.finish()).toMatchObject({ status: 'unverified', records: [] });
+    expect(JSON.stringify(capture.finish())).not.toContain('private');
+  });
   it('reads the installed script version from a bounded bundle without a source package manifest', async () => {
     const { root } = await fixture();
     await mkdir(join(root, 'dist'));
