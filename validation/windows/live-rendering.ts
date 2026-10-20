@@ -18,6 +18,14 @@ export type PublicCanvasFrame = {
   visiblePixels: number;
 };
 
+export type PublicCanvasRead = {
+  frame: PublicCanvasFrame | null;
+  reason: string | null;
+  width: number | null;
+  height: number | null;
+  dpr: number;
+};
+
 export type PublicImageDraw = {
   url: string;
   sourceType: 'image' | 'derived-canvas';
@@ -202,31 +210,45 @@ export function readSurvivingPublicImageDraws(): PublicImageDraw[] {
 }
 
 /** Read actual overlay backing pixels and debug counters without injecting messages. */
-export function readPublicCanvasFrame(): PublicCanvasFrame | null {
+export function readPublicCanvasFrame(): PublicCanvasRead {
   const canvas = document.querySelector('#yt-live-chat-overlay canvas');
-  const debug = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
-  const active = /\bActive:\s*(\d+)\b/u.exec(debug)?.[1];
-  const dropped = /\bDrop:\s*(\d+)\b/u.exec(debug)?.[1];
-  if (!(canvas instanceof HTMLCanvasElement) || active === undefined || dropped === undefined)
-    return null;
+  const dimensions = {
+    width: canvas instanceof HTMLCanvasElement ? canvas.width : null,
+    height: canvas instanceof HTMLCanvasElement ? canvas.height : null,
+    dpr: window.devicePixelRatio,
+  };
+  if (!(canvas instanceof HTMLCanvasElement))
+    return { frame: null, reason: 'canvas-missing', ...dimensions };
+  const lines = Array.from(
+    document.querySelectorAll('#yt-chat-overlay-debug > div'),
+    (line) => line.textContent ?? ''
+  );
+  const active = lines.flatMap((line) => /^Active:\s*(\d+)\b/u.exec(line)?.[1] ?? []).at(0);
+  const dropped = lines.flatMap((line) => /^Drop:\s*(\d+)\b/u.exec(line)?.[1] ?? []).at(0);
+  if (active === undefined || dropped === undefined)
+    return { frame: null, reason: 'debug-counters-missing', ...dimensions };
   if (canvas.width < 1 || canvas.height < 1 || canvas.width * canvas.height > 4_194_304)
-    return null;
+    return { frame: null, reason: 'canvas-size-invalid', ...dimensions };
   let visiblePixels = 0;
   try {
     const context = canvas.getContext('2d');
-    if (!context) return null;
+    if (!context) return { frame: null, reason: 'canvas-context-unavailable', ...dimensions };
     const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
     for (let index = 3; index < pixels.length && visiblePixels < 16; index += 4)
       if ((pixels[index] ?? 0) > 8) visiblePixels++;
   } catch {
-    return null;
+    return { frame: null, reason: 'canvas-pixel-read-failed', ...dimensions };
   }
   return {
-    width: canvas.width,
-    height: canvas.height,
-    active: Number(active),
-    dropped: Number(dropped),
-    visiblePixels,
+    frame: {
+      width: canvas.width,
+      height: canvas.height,
+      active: Number(active),
+      dropped: Number(dropped),
+      visiblePixels,
+    },
+    reason: null,
+    ...dimensions,
   };
 }
 

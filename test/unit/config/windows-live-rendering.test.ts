@@ -4,11 +4,13 @@ import { runInNewContext } from 'node:vm';
 
 import { describe, expect, it } from 'vite-plus/test';
 
+import { PublicUserscriptRealm } from '../../../validation/windows/chrome-install.ts';
 import {
   assessPublicImage,
   assessPublicResize,
   installPublicImageDrawProbe,
   isPublicImageUrl,
+  readPublicCanvasFrame,
   readSurvivingPublicImageDraws,
   selectPublicSeekTarget,
 } from '../../../validation/windows/live-rendering.ts';
@@ -53,6 +55,75 @@ describe('shared public-media seek calculation', () => {
   });
 });
 
+describe('public userscript realm authentication', () => {
+  it.each([
+    { names: ['YouTube Live Chat Overlay'], version: '1.2.3', expected: 'ready', installs: 1 },
+    {
+      names: ['YouTube Live Chat Overlay', 'YouTube Live Chat Overlay'],
+      version: '1.2.3',
+      expected: 'ambiguous',
+      installs: 0,
+    },
+    { names: ['Other Script'], version: '1.2.3', expected: 'unproven', installs: 0 },
+    { names: ['YouTube Live Chat Overlay'], version: 'older', expected: 'unproven', installs: 0 },
+  ])(
+    'installs only for a unique matching main-frame realm: $expected',
+    async ({ names, version, expected, installs }) => {
+      const handlers = new Map<string, (value: unknown) => void>();
+      let installed = 0;
+      const session = {
+        on: (event: string, listener: (value: unknown) => void) => handlers.set(event, listener),
+        send: async (
+          method: string,
+          params?: { uniqueContextId?: string; expression?: string }
+        ) => {
+          if (method === 'Runtime.enable') {
+            names.forEach((_, index) =>
+              handlers.get('Runtime.executionContextCreated')?.({
+                context: {
+                  id: index + 1,
+                  uniqueId: `main-${index + 1}`,
+                  auxData: { frameId: 'main' },
+                },
+              })
+            );
+            handlers.get('Runtime.executionContextCreated')?.({
+              context: { id: 99, uniqueId: 'child-99', auxData: { frameId: 'child' } },
+            });
+            return {};
+          }
+          if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } };
+          if (method === 'Runtime.evaluate') {
+            if (params?.expression?.includes('GM_info'))
+              return {
+                result: {
+                  value: {
+                    name: names[Number(params.uniqueContextId?.split('-')[1]) - 1],
+                    version,
+                    callable: true,
+                  },
+                },
+              };
+            installed++;
+            return { result: { value: undefined } };
+          }
+          throw new Error('Unexpected CDP command');
+        },
+        detach: async () => {},
+      };
+      const realm = new PublicUserscriptRealm(
+        { newCDPSession: async () => session } as never,
+        {} as never,
+        '1.2.3'
+      );
+      await realm.start();
+      expect((await realm.selectAndInstall()).status).toBe(expected);
+      expect(installed).toBe(installs);
+      await realm.close();
+    }
+  );
+});
+
 describe('installed public rendering observations', () => {
   const before = {
     width: 1280,
@@ -62,6 +133,58 @@ describe('installed public rendering observations', () => {
     visiblePixels: 16,
   };
   const after = { ...before, width: 1600, height: 900 };
+
+  it('reads separate HUD children even when parent text concatenates labels', () => {
+    class Canvas {
+      width = 1280;
+      height = 720;
+      getContext() {
+        return { getImageData: () => ({ data: [0, 0, 0, 255] }) };
+      }
+    }
+    const lines = ['Rcvd: 4 | Rndr: 4', 'Active: 2', 'Drop: 0'];
+    const realm = {
+      window: { devicePixelRatio: 1.25 },
+      HTMLCanvasElement: Canvas,
+      document: {
+        querySelector: (selector: string) =>
+          selector === '#yt-live-chat-overlay canvas'
+            ? new Canvas()
+            : { textContent: lines.join('') },
+        querySelectorAll: () => lines.map((textContent) => ({ textContent })),
+      },
+    };
+    const read = () => runInNewContext('(' + readPublicCanvasFrame.toString() + ')()', realm);
+    expect(read()).toEqual({
+      frame: { width: 1280, height: 720, active: 2, dropped: 0, visiblePixels: 1 },
+      reason: null,
+      width: 1280,
+      height: 720,
+      dpr: 1.25,
+    });
+    lines.splice(0, lines.length, 'Active: 2Drop: 0');
+    expect(read().reason).toBe('debug-counters-missing');
+    lines.splice(0, lines.length, 'Drop: 0', 'Active: 2');
+    realm.document.querySelector = (selector: string) =>
+      selector === '#yt-live-chat-overlay canvas'
+        ? new (class extends Canvas {
+            override getContext() {
+              return {
+                getImageData: () => {
+                  throw new Error('tainted');
+                },
+              };
+            }
+          })()
+        : { textContent: lines.join('') };
+    expect(read()).toMatchObject({
+      frame: null,
+      reason: 'canvas-pixel-read-failed',
+      width: 1280,
+      height: 720,
+      dpr: 1.25,
+    });
+  });
 
   it('requires changed backing geometry and still-visible paused comments', () => {
     expect(assessPublicResize(before, after)).toBeNull();
