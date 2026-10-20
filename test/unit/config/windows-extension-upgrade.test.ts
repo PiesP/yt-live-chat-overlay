@@ -2,7 +2,16 @@
 // Copyright (c) 2026 PiesP
 
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +19,7 @@ import type { Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import {
+  boundedFile,
   extensionInventory,
   readExtensionStoredFontSize,
   readExtensionUpgradeInput,
@@ -129,6 +139,33 @@ afterEach(async () => {
 });
 
 describe('optional public Chrome extension update inputs', () => {
+  it('stops reading a file that grows after opening beyond its admitted size', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'yt-extension-bounded-file-'));
+    roots.push(root);
+    const file = join(root, 'input.json');
+    await writeFile(file, 'old!');
+    await expect(
+      boundedFile(file, 4, {
+        onOpened: () => appendFile(file, Buffer.alloc(1024 * 1024)),
+      })
+    ).rejects.toThrow('Extension file changed size while reading');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects replacement of the admitted file at the same path',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'yt-extension-replaced-file-'));
+      roots.push(root);
+      const file = join(root, 'input.json');
+      const replacement = join(root, 'replacement.json');
+      await writeFile(file, 'old!');
+      await writeFile(replacement, 'new!');
+      await expect(
+        boundedFile(file, 4, { onOpened: () => rename(replacement, file) })
+      ).rejects.toThrow('Extension file changed during inspection');
+    }
+  );
+
   it('stays optional and pins both exact inventories to the public ZIP bytes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'yt-extension-no-input-'));
     roots.push(root);

@@ -107,31 +107,48 @@ function sameFile(before: BigIntStats, after: BigIntStats): boolean {
   );
 }
 
-async function boundedFile(path: string, maximum: number): Promise<Buffer> {
-  const before = await lstat(path, { bigint: true });
-  assert(
-    before.isFile() &&
-      !before.isSymbolicLink() &&
-      before.size > 0n &&
-      before.size <= BigInt(maximum),
-    'Extension input must be a bounded regular file'
-  );
+export async function boundedFile(
+  path: string,
+  maximum: number,
+  { onOpened }: { onOpened?: () => Promise<void> } = {}
+): Promise<Buffer> {
   const flags =
     process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
   const handle = await open(path, flags);
   try {
+    const opened = await handle.stat({ bigint: true });
     assert(
-      sameFile(before, await handle.stat({ bigint: true })),
-      'Extension file changed during inspection'
+      opened.isFile() && opened.size > 0n && opened.size <= BigInt(maximum),
+      'Extension input must be a bounded regular file'
     );
-    const bytes = await handle.readFile();
+    const requirePathIdentity = async () => {
+      let entry: BigIntStats;
+      try {
+        entry = await lstat(path, { bigint: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT')
+          assert.fail('Extension file changed during inspection');
+        throw error;
+      }
+      assert(sameFile(opened, entry), 'Extension file changed during inspection');
+    };
+    await requirePathIdentity();
+    await onOpened?.();
+    const expected = Number(opened.size);
+    const bounded = Buffer.alloc(expected + 1);
+    let offset = 0;
+    while (offset < bounded.length) {
+      const { bytesRead } = await handle.read(bounded, offset, bounded.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    assert.equal(offset, expected, 'Extension file changed size while reading');
     assert(
-      bytes.length === Number(before.size) &&
-        sameFile(before, await handle.stat({ bigint: true })) &&
-        sameFile(before, await lstat(path, { bigint: true })),
+      sameFile(opened, await handle.stat({ bigint: true })),
       'Extension file changed during read'
     );
-    return bytes;
+    await requirePathIdentity();
+    return bounded.subarray(0, offset);
   } finally {
     await handle.close();
   }
