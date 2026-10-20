@@ -21,6 +21,7 @@ import type {
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
+import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
 import {
   assessPublicImage,
   assessPublicResize,
@@ -158,6 +159,7 @@ type LiveObservation = {
     overflow: number;
     drains: Array<{ navigation: string; status: string }>;
   };
+  nativeNetworkDiagnostics?: Record<string, unknown>;
   workerPolicyFallback?: boolean;
   [key: string]: unknown;
 };
@@ -1664,7 +1666,21 @@ async function inspectLivePage(
       )
       .finally(() => page.close().catch(() => {}));
   }, 120_000);
+  let nativeNetworkCapture: Awaited<ReturnType<typeof beginChromiumNetworkDiagnostics>> | null =
+    null;
   try {
+    if (extensionResources) {
+      nativeNetworkCapture = await beginChromiumNetworkDiagnostics({
+        createSession: () => context.newCDPSession(page),
+        classifyUrl: (value) => ({
+          ownedResourcePath: ownedExtensionResourcePath(value, extensionResources.extensionId),
+          watchDocumentSha256: publicWatchDocumentSha256(value),
+        }),
+        classifyWarning: (text) =>
+          diagnoseUnsafeOriginConsole(text, '', extensionResources.extensionId),
+        extensionId: extensionResources.extensionId,
+      });
+    }
     observation.phase = 'navigation';
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     observation.finalUrl = page.url();
@@ -1932,6 +1948,9 @@ async function inspectLivePage(
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
+    if (nativeNetworkCapture) {
+      observation.nativeNetworkDiagnostics = await nativeNetworkCapture.finish();
+    }
     policyNavigation?.stop();
     if (policyReportCapture) {
       await policyReportCapture.drain(policyNavigation?.current() ?? 'initial-watch');
