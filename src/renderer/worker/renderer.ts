@@ -34,6 +34,7 @@
 
 import type { FontWeight } from '@app-types';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
+import { MAX_WORKER_IMAGE_BYTES, readBoundedImageBlob } from '@media/bounded-image-response';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
@@ -2468,11 +2469,12 @@ export class WorkerRenderer {
       );
       const response = await fetch(url, { signal: controller.signal });
       if (this.isPrefetchStale(generation, controller.signal)) return;
-      if (!response.ok) {
+      if (!response.ok || !isAllowedImageUrl(response.url)) {
+        void response.body?.cancel().catch(() => {});
         this.recordFailedImageFetch(url);
         return;
       }
-      const blob = await response.blob();
+      const blob = await readBoundedImageBlob(response, MAX_WORKER_IMAGE_BYTES);
       if (this.isPrefetchStale(generation, controller.signal)) return;
       const bitmap = await createImageBitmap(blob);
       if (this.isPrefetchStale(generation, controller.signal)) {

@@ -99,7 +99,18 @@ import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
 import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
 import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
 
+vi.mock('@media/bounded-image-response', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@media/bounded-image-response')>()),
+  MAX_WORKER_IMAGE_BYTES: 16,
+}));
+
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+function imageResponse(ok = true, finalUrl = 'https://yt3.ggpht.com/image'): Response {
+  const response = new Response(new Blob(['image']), { status: ok ? 200 : 404 });
+  Object.defineProperty(response, 'url', { value: finalUrl });
+  return response;
+}
 
 function makeMinimalConfig(): Record<string, unknown> {
   return {
@@ -1572,15 +1583,80 @@ describe('Worker message protocol', () => {
       expect(internals.emojiCache.delete(url)).toBe(true);
       const fetchedBitmap = { width: 10, height: 10, close: vi.fn() };
       vi.mocked(createImageBitmap).mockResolvedValueOnce(fetchedBitmap as unknown as ImageBitmap);
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-        ok: true,
-        blob: async () => new Blob(['image']),
-      } as Response);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse());
 
       await internals.prefetchImages([url], internals.emojiCache);
 
       expect(fetchSpy).toHaveBeenCalledOnce();
       expect(internals.emojiCache.has(url)).toBe(true);
+    });
+
+    it('rejects an over-limit stream before decode, then frees the queue slot', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const largeUrl = 'https://yt3.ggpht.com/over-limit';
+      const nextUrl = 'https://yt3.ggpht.com/after-rejection';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        if (input === largeUrl) {
+          const response = new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new Uint8Array(10));
+                controller.enqueue(new Uint8Array(10));
+                controller.close();
+              },
+            })
+          );
+          Object.defineProperty(response, 'url', { value: largeUrl });
+          return response;
+        }
+        return imageResponse(true, nextUrl);
+      });
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+      decoder.mockResolvedValue({ width: 1, height: 1, close: vi.fn() } as unknown as ImageBitmap);
+
+      await internals.prefetchImages([largeUrl], internals.emojiCache);
+      await internals.prefetchImages([largeUrl, nextUrl], internals.emojiCache);
+
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([largeUrl, nextUrl]);
+      expect(internals.failedImageFetches.has(largeUrl)).toBe(true);
+      expect(internals.emojiCache.has(largeUrl)).toBe(false);
+      expect(internals.emojiCache.has(nextUrl)).toBe(true);
+      expect(decoder).toHaveBeenCalledOnce();
+    });
+
+    it('accepts allowed final redirects and rejects an off-allowlist final URL before reading', async () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const allowedUrl = 'https://yt3.ggpht.com/allowed-redirect';
+      const rejectedUrl = 'https://yt3.ggpht.com/rejected-redirect';
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (input) =>
+          input === allowedUrl
+            ? imageResponse(true, 'https://yt4.ggpht.com/image')
+            : imageResponse(true, 'https://example.test/image')
+        );
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+      decoder.mockResolvedValue({ width: 1, height: 1, close: vi.fn() } as unknown as ImageBitmap);
+
+      await internals.prefetchImages([allowedUrl, rejectedUrl], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(internals.emojiCache.has(allowedUrl)).toBe(true);
+      expect(internals.emojiCache.has(rejectedUrl)).toBe(false);
+      expect(internals.failedImageFetches.has(rejectedUrl)).toBe(true);
+      expect(decoder).toHaveBeenCalledOnce();
     });
 
     it.each([
@@ -1595,10 +1671,7 @@ describe('Worker message protocol', () => {
       };
       const url = 'https://yt3.ggpht.com/broken-emoji';
       const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-        ok,
-        blob: async () => new Blob(['image']),
-      } as Response);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse(ok));
       if (ok) vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('decode failed'));
 
       await internals.prefetchImages([url], internals.emojiCache);
@@ -1635,6 +1708,86 @@ describe('Worker message protocol', () => {
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(internals.failedImageFetches.has(url)).toBe(true);
+    });
+
+    it('aborts a stalled image body on timeout and settles its fetch task', async () => {
+      vi.useFakeTimers();
+      const renderer = initializeRenderer({ emojiFetchTimeoutMs: 5_000 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        failedImageFetches: Map<string, number>;
+        fetching: Set<string>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/stalled-body';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+        const response = new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () =>
+                controller.error(new DOMException('Aborted', 'AbortError'))
+              );
+            },
+          })
+        );
+        Object.defineProperty(response, 'url', { value: url });
+        return response;
+      });
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await prefetch;
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(internals.failedImageFetches.has(url)).toBe(true);
+      expect(internals.fetching.size).toBe(0);
+      expect(internals.emojiCache.has(url)).toBe(false);
+      expect(decoder).not.toHaveBeenCalled();
+    });
+
+    it('aborts a pending image body on destroy without decoding or retaining the task', async () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        fetchControllers: Set<AbortController>;
+        fetching: Set<string>;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/teardown-body';
+      let bodyReader: ReturnType<typeof vi.spyOn> | undefined;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+        const response = new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () =>
+                controller.error(new DOMException('Aborted', 'AbortError'))
+              );
+            },
+          })
+        );
+        Object.defineProperty(response, 'url', { value: url });
+        if (response.body) bodyReader = vi.spyOn(response.body, 'getReader');
+        return response;
+      });
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.waitFor(() => expect(bodyReader).toHaveBeenCalledOnce());
+      const signal = fetchSpy.mock.calls[0]?.[1]?.signal;
+
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      await prefetch;
+
+      expect(signal?.aborted).toBe(true);
+      expect(internals.emojiCache.has(url)).toBe(false);
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      expect(decoder).not.toHaveBeenCalled();
     });
 
     it('shares one global fetch limit across concurrent worker prefetch calls', async () => {
@@ -1680,7 +1833,7 @@ describe('Worker message protocol', () => {
             maxActive = Math.max(maxActive, active);
             releases.push(() => {
               active--;
-              resolve({ ok: true, blob: async () => new Blob(['image']) } as Response);
+              resolve(imageResponse());
             });
           })
       );
@@ -1732,10 +1885,7 @@ describe('Worker message protocol', () => {
       const url = 'https://yt3.ggpht.com/too-large-for-cache';
       const bitmap = { width: 1_000, height: 1_000, close: vi.fn() };
       vi.mocked(createImageBitmap).mockResolvedValue(bitmap as unknown as ImageBitmap);
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-        ok: true,
-        blob: async () => new Blob(['image']),
-      } as Response);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse());
 
       await internals.prefetchImages([url], internals.emojiCache);
       await internals.prefetchImages([url], internals.emojiCache);
@@ -1758,9 +1908,7 @@ describe('Worker message protocol', () => {
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
         () =>
           new Promise<Response>((resolve) => {
-            releases.push(() =>
-              resolve({ ok: true, blob: async () => new Blob(['image']) } as Response)
-            );
+            releases.push(() => resolve(imageResponse()));
           })
       );
       vi.mocked(createImageBitmap).mockImplementation(
@@ -1779,9 +1927,7 @@ describe('Worker message protocol', () => {
       internals.releaseQueuedAssetsForOwner('expired');
       await obsolete;
       releases.shift()?.();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
       expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([firstUrl, liveUrl]);
       releases.shift()?.();
       await Promise.all([first, live]);
@@ -1824,10 +1970,7 @@ describe('Worker message protocol', () => {
       });
       const createBitmapMock = vi.mocked(createImageBitmap);
       createBitmapMock.mockImplementationOnce(() => bitmapPromise as Promise<ImageBitmap>);
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-        ok: true,
-        blob: async () => new Blob(['image']),
-      } as Response);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse());
 
       const prefetch = internals.prefetchImages([url], internals.emojiCache);
       await vi.waitFor(() => expect(createBitmapMock).toHaveBeenCalled());
