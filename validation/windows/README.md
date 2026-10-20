@@ -460,9 +460,9 @@ the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
 
 The historical issue #227 receipt covers public v0.45.5 to v0.45.6 and retains
-those source identities. For the v0.45.6 to v0.45.7 update qualification, place
+those source identities. For the v0.45.7 to v0.45.8 update qualification, place
 the downloaded public `yt-live-chat-overlay.user.js` at
-`validation/windows/release-upgrade/public-v0.45.6.user.js` after independently
+`validation/windows/release-upgrade/public-v0.45.7.user.js` after independently
 verifying it against the published release checksum. Place an ignored
 `validation/windows/release-upgrade/input.json` beside it with exactly:
 
@@ -470,13 +470,14 @@ verifying it against the published release checksum. Place an ignored
 {
   "schemaVersion": 1,
   "baselineSha256": "<64 lowercase hexadecimal characters from the published checksum>",
-  "candidateVersion": "0.45.7",
-  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.6/yt-live-chat-overlay.user.js"
+  "candidateVersion": "0.45.8",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay.user.js"
 }
 ```
 
-The public baseline must retain its versioned `@downloadURL`, while the candidate
-must use the Latest userscript download URL. The existing
+The `publishedAssetUrl` identifies the version-specific URL used to retrieve
+the public baseline; it is not that file's `@downloadURL`. Public v0.45.7
+already has a Latest `@downloadURL`, which the candidate must retain. The existing
 `--installation userscript` invocation then uses the same fresh, owned
 Tampermonkey profile for both versions. It verifies fixed paths, public
 bytes, metadata identity and the candidate's `unsafeWindow` grant before launch;

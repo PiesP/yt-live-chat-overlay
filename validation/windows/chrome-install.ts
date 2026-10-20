@@ -21,13 +21,20 @@ import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import {
+  assessPublicImage,
+  assessPublicResize,
   countUnexpectedLiveErrors,
+  installPublicImageDrawProbe,
+  isPublicImageUrl,
   isYouTubeHostError,
+  readPublicCanvasFrame,
   readPublicPageBrowserState,
+  readSurvivingPublicImageDraws,
   redactDiagnosticText,
   selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
+import type { PublicImageDraw, PublicImageResponse } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
@@ -669,6 +676,207 @@ export async function readPublicPageState(page: Page) {
   }));
 }
 
+/** Exercise actual installed userscript output on public chat without changing site responses. */
+async function observePublicUserscriptMedia(
+  page: Page,
+  output: string,
+  index: number,
+  imageResponses: PublicImageResponse[]
+): Promise<{ image: WorkflowStep; resize: WorkflowStep }> {
+  let image: WorkflowStep = {
+    status: 'unverified',
+    reason: 'public-image-not-observed',
+    probeCapability: 'unproven',
+    productVerdict: 'unverified',
+  };
+  const originalShowAuthor = await page.evaluate(
+    () => window.__ytChatOverlay?.getSettings().showAuthor
+  );
+  try {
+    if (!originalShowAuthor) throw new Error('Installed userscript settings unavailable');
+    await page.evaluate((showAuthor) => {
+      window.__ytChatOverlay?.applySettings({ showAuthor: { ...showAuthor, normal: true } });
+    }, originalShowAuthor);
+    await page
+      .waitForFunction(
+        () =>
+          (
+            window as Window & {
+              __ytPublicImageDraws?: PublicImageDraw[];
+            }
+          ).__ytPublicImageDraws?.length,
+        undefined,
+        { timeout: 15_000 }
+      )
+      .catch(() => null);
+    const draws = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __ytPublicImageDraws?: PublicImageDraw[];
+          }
+        ).__ytPublicImageDraws?.slice(0, 16) ?? []
+    );
+    const survivingDraws = await page.evaluate(readSurvivingPublicImageDraws);
+    const assessed = assessPublicImage(survivingDraws, imageResponses);
+    if (assessed.status === 'passed') {
+      const imageScreenshot = 'live-' + index + '-public-image.png';
+      await page.screenshot({ path: join(output, imageScreenshot) });
+      const afterScreenshot = await page.evaluate(readSurvivingPublicImageDraws);
+      const finalAssessed = assessPublicImage(afterScreenshot, imageResponses);
+      image =
+        finalAssessed.status === 'passed' && finalAssessed.draw.url === assessed.draw.url
+          ? {
+              status: 'passed',
+              probeCapability: 'overlay-image-draw-observed',
+              productVerdict: 'visible-public-image-observed',
+              sourceType: finalAssessed.draw.sourceType,
+              sourceHost: new URL(finalAssessed.draw.url).hostname,
+              sourceSha256: createHash('sha256').update(finalAssessed.draw.url).digest('hex'),
+              naturalWidth: finalAssessed.draw.naturalWidth,
+              naturalHeight: finalAssessed.draw.naturalHeight,
+              pixelAlpha: finalAssessed.draw.pixelAlpha,
+              pixelX: finalAssessed.draw.pixelX,
+              pixelY: finalAssessed.draw.pixelY,
+              pixelRgba: finalAssessed.draw.pixelRgba,
+              responseStatus: finalAssessed.response.status,
+              responseContentType: finalAssessed.response.contentType,
+              screenshot: imageScreenshot,
+            }
+          : {
+              status: 'unverified',
+              reason: 'public-image-final-frame-unverified',
+              probeCapability: 'overlay-image-draw-observed',
+              productVerdict: 'unverified',
+              screenshot: imageScreenshot,
+            };
+    } else {
+      image = {
+        status: 'unverified',
+        reason: assessed.reason,
+        probeCapability: draws.length > 0 ? 'overlay-draw-observed' : 'unproven',
+        productVerdict: 'unverified',
+        drawCount: draws.length,
+        survivingDrawCount: survivingDraws.length,
+        imageResponseCount: imageResponses.length,
+      };
+    }
+  } catch {
+    image = {
+      status: 'unverified',
+      reason: 'public-image-probe-error',
+      probeCapability: 'unproven',
+      productVerdict: 'unverified',
+    };
+  } finally {
+    if (originalShowAuthor) {
+      const restored = await page.evaluate((showAuthor) => {
+        window.__ytChatOverlay?.applySettings({ showAuthor });
+        const current = window.__ytChatOverlay?.getSettings().showAuthor;
+        return Object.entries(showAuthor).every(
+          ([key, value]) => current?.[key as keyof typeof current] === value
+        );
+      }, originalShowAuthor);
+      if (!restored) {
+        image = {
+          status: 'unverified',
+          reason: 'public-image-setting-restore-unverified',
+          probeCapability: image.probeCapability,
+          productVerdict: 'unverified',
+        };
+      }
+    }
+  }
+
+  const originalViewport = page.viewportSize();
+  if (!originalViewport) {
+    return { image, resize: { status: 'unverified', reason: 'viewport-unavailable' } };
+  }
+  const originalVideoPaused = await page
+    .locator('video')
+    .first()
+    .evaluate((element) => (element as HTMLVideoElement).paused);
+  let resized = false;
+  let overlayPaused = false;
+  let resize: WorkflowStep;
+  try {
+    await page
+      .locator('video')
+      .first()
+      .evaluate((element) => (element as HTMLVideoElement).pause());
+    await page.keyboard.press('Control+Space');
+    overlayPaused = true;
+    await page
+      .waitForFunction(
+        () =>
+          /\bActive:\s*[1-9]\d*\b/u.test(
+            document.querySelector('#yt-chat-overlay-debug')?.textContent ?? ''
+          ),
+        undefined,
+        { timeout: 10_000 }
+      )
+      .catch(() => null);
+    const before = await page.evaluate(readPublicCanvasFrame);
+    const beforeScreenshot = 'live-' + index + '-before-resize.png';
+    await page.screenshot({ path: join(output, beforeScreenshot) });
+    const nextViewport = {
+      width:
+        originalViewport.width > 1200 ? originalViewport.width - 320 : originalViewport.width + 320,
+      height:
+        originalViewport.height > 720
+          ? originalViewport.height - 160
+          : originalViewport.height + 160,
+    };
+    await page.setViewportSize(nextViewport);
+    resized = true;
+    if (before) {
+      await page
+        .waitForFunction(
+          ({ width, height }) => {
+            const canvas = document.querySelector('#yt-live-chat-overlay canvas');
+            return (
+              canvas instanceof HTMLCanvasElement &&
+              (Math.abs(canvas.width - width) >= 32 || Math.abs(canvas.height - height) >= 32)
+            );
+          },
+          { width: before.width, height: before.height },
+          { timeout: 8_000 }
+        )
+        .catch(() => null);
+    }
+    const after = await page.evaluate(readPublicCanvasFrame);
+    const afterScreenshot = 'live-' + index + '-after-resize.png';
+    await page.screenshot({ path: join(output, afterScreenshot) });
+    const reason = assessPublicResize(before, after);
+    resize = {
+      status: reason === null ? 'passed' : 'unverified',
+      reason,
+      before,
+      after,
+      viewportBefore: originalViewport,
+      viewportAfter: nextViewport,
+      beforeScreenshot,
+      afterScreenshot,
+      scope: 'one paused public resize; no capacity-exhaustion or message-identity claim',
+      observation: 'backing geometry and nonempty canvas after actual resize',
+      messagePreservationVerdict: 'unverified',
+      messagePreservationReason: 'visible-message-identity-not-observed',
+    };
+  } catch {
+    resize = { status: 'unverified', reason: 'public-resize-probe-error' };
+  } finally {
+    if (resized) await page.setViewportSize(originalViewport);
+    if (overlayPaused) await page.keyboard.press('Control+Space');
+    if (!originalVideoPaused)
+      await page
+        .locator('video')
+        .first()
+        .evaluate((element) => (element as HTMLVideoElement).play())
+        .catch(() => {});
+  }
+  return { image, resize };
+}
+
 /** Observe a real watch page without supplying application code or site responses. */
 async function inspectLivePage(
   context: BrowserContext,
@@ -684,6 +892,19 @@ async function inspectLivePage(
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
+  if (installation === 'userscript') await page.addInitScript(installPublicImageDrawProbe);
+  const imageResponses: PublicImageResponse[] = [];
+  page.on('response', (response) => {
+    if (installation !== 'userscript') return;
+    const contentType = response.headers()['content-type'] ?? '';
+    if (!/^image\//iu.test(contentType) || !isPublicImageUrl(response.request().url())) return;
+    imageResponses.push({
+      url: response.request().url(),
+      status: response.status(),
+      contentType,
+    });
+    if (imageResponses.length > 64) imageResponses.shift();
+  });
   const pageErrors: string[] = [];
   const workerDiagnostics: { type: string; text: string; url: string }[] = [];
   const consoleErrors: { type: string; text: string; url: string }[] = [];
@@ -803,6 +1024,12 @@ async function inspectLivePage(
         renderedMessages: observation.renderedMessages,
       },
     };
+    if (installation === 'userscript') {
+      observation.phase = 'public-media';
+      const media = await observePublicUserscriptMedia(page, output, index, imageResponses);
+      observation.workflow.image = media.image;
+      observation.workflow.resize = media.resize;
+    }
     observation.phase = 'pause';
     observation.workflow.pause = await page
       .locator('video')

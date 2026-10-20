@@ -4,7 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.45.7] - 2026-10-15 (prepared; unpublished)
+## [0.45.8] - 2026-10-20 (prepared; unpublished)
+
+### Fixed
+
+- **Visible comments during reflow** — Preserve already visible comments when a resize or layout change reconciles their positions, subject to the existing capacity policy. Saved settings remain compatible.
+- **Worker image input** — Reject image responses exceeding 4 MiB of encoded data before Worker decoding. This limit does not bound decoded dimensions or peak native memory; the main-thread Image path remains a compatibility exception.
+
+## [0.45.7] - 2026-10-15
 
 ### Fixed
 
