@@ -26,6 +26,21 @@ export type PublicCanvasRead = {
   dpr: number;
 };
 
+/** Public pause indicator mirrors the overlay's Ctrl+Space state. */
+export function readPublicOverlayPauseState(): boolean | null {
+  const overlay = document.querySelector('#yt-live-chat-overlay');
+  if (!(overlay instanceof HTMLElement)) return null;
+  return Array.from(overlay.children).some(
+    (child) =>
+      child instanceof HTMLDivElement &&
+      child.style.position === 'absolute' &&
+      child.style.top === '8px' &&
+      child.style.right === '8px' &&
+      child.style.zIndex === '100' &&
+      child.style.display === 'block'
+  );
+}
+
 export type PublicImageDraw = {
   url: string;
   sourceType: 'image' | 'derived-canvas';

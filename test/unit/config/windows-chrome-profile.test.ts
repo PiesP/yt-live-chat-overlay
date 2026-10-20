@@ -28,6 +28,7 @@ const {
   compareOwnedExtensionResourceBody,
   beginOwnedExtensionResourceCapture,
   readBoundedPackagedResource,
+  readBundledUserscriptVersion,
 } = chromeInstallModule;
 
 const roots: string[] = [];
@@ -47,6 +48,24 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('reads the installed script version from a bounded bundle without a source package manifest', async () => {
+    const { root } = await fixture();
+    await mkdir(join(root, 'dist'));
+    const script = join(root, 'dist', 'yt-live-chat-overlay.user.js');
+    const metadata = (version: string, grant = 'unsafeWindow') =>
+      `// ==UserScript==\n// @name YouTube Live Chat Overlay\n// @namespace https://github.com/PiesP\n// @version ${version}\n// @updateURL https://example.invalid/meta.js\n// @downloadURL https://example.invalid/script.js\n// @grant ${grant}\n// ==/UserScript==\n(() => {})();`;
+    await writeFile(script, metadata('0.45.8'));
+    expect(await readBundledUserscriptVersion(root)).toBe('0.45.8');
+    await writeFile(script, metadata('0.45.8', 'GM_getValue'));
+    await expect(readBundledUserscriptVersion(root)).rejects.toThrow(/unsafeWindow/u);
+    await writeFile(script, metadata('unknown'));
+    await expect(readBundledUserscriptVersion(root)).rejects.toThrow();
+    await writeFile(
+      script,
+      metadata('0.45.8').replace('// @version 0.45.8', '// @version 0.45.8\n// @version 9.9.9')
+    );
+    await expect(readBundledUserscriptVersion(root)).rejects.toThrow(/one @version/u);
+  });
   it('reads a packaged file at the size cap and rejects empty or oversized files', async () => {
     const { root } = await fixture();
     const file = join(root, 'resource.js');

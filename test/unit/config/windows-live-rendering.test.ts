@@ -4,13 +4,17 @@ import { runInNewContext } from 'node:vm';
 
 import { describe, expect, it } from 'vite-plus/test';
 
-import { PublicUserscriptRealm } from '../../../validation/windows/chrome-install.ts';
+import {
+  observePublicResize,
+  PublicUserscriptRealm,
+} from '../../../validation/windows/chrome-install.ts';
 import {
   assessPublicImage,
   assessPublicResize,
   installPublicImageDrawProbe,
   isPublicImageUrl,
   readPublicCanvasFrame,
+  readPublicOverlayPauseState,
   readSurvivingPublicImageDraws,
   selectPublicSeekTarget,
 } from '../../../validation/windows/live-rendering.ts';
@@ -133,6 +137,96 @@ describe('installed public rendering observations', () => {
     visiblePixels: 16,
   };
   const after = { ...before, width: 1600, height: 900 };
+
+  it.each([false, true])(
+    'samples resize ink after resume and restores original pause states (initially paused=%s)',
+    async (initiallyPaused) => {
+      const state = {
+        overlayPaused: initiallyPaused,
+        videoPaused: initiallyPaused,
+        resized: false,
+        backingClearedWhilePaused: false,
+      };
+      const screenshots: { path: string; overlayPaused: boolean; videoPaused: boolean }[] = [];
+      const video = {
+        get paused() {
+          return state.videoPaused;
+        },
+        pause() {
+          state.videoPaused = true;
+        },
+        async play() {
+          state.videoPaused = false;
+        },
+      };
+      const page = {
+        locator: () => ({
+          first: () => ({
+            evaluate: async (
+              fn: (element: typeof video, wasPaused?: boolean) => unknown,
+              arg?: boolean
+            ) => fn(video, arg),
+          }),
+        }),
+        evaluate: async (fn: unknown) => {
+          if (fn === readPublicOverlayPauseState) return state.overlayPaused;
+          if (fn === readPublicCanvasFrame)
+            return {
+              frame: {
+                width: state.resized ? 960 : 1280,
+                height: state.resized ? 560 : 720,
+                active: 2,
+                dropped: 1,
+                visiblePixels: state.resized && (state.overlayPaused || state.videoPaused) ? 0 : 16,
+              },
+              reason: null,
+              width: state.resized ? 960 : 1280,
+              height: state.resized ? 560 : 720,
+              dpr: 1,
+            };
+          throw new Error('Unexpected browser evaluation');
+        },
+        waitForFunction: async () => {},
+        keyboard: {
+          press: async () => {
+            state.overlayPaused = !state.overlayPaused;
+          },
+        },
+        screenshot: async ({ path }: { path: string }) => {
+          screenshots.push({
+            path,
+            overlayPaused: state.overlayPaused,
+            videoPaused: state.videoPaused,
+          });
+        },
+        setViewportSize: async ({ width }: { width: number }) => {
+          state.resized = width !== 1280;
+          if (state.resized && state.overlayPaused && state.videoPaused)
+            state.backingClearedWhilePaused = true;
+        },
+      };
+      const result = await observePublicResize(page as never, '/evidence', 0, {
+        width: 1280,
+        height: 720,
+      });
+      expect(state.backingClearedWhilePaused).toBe(true);
+      expect(result).toMatchObject({
+        status: 'passed',
+        before: { visiblePixels: 16 },
+        after: { visiblePixels: 16 },
+        samplingPhase: 'resumed-after-resize',
+        restoredOriginalState: true,
+      });
+      expect(
+        screenshots.map(({ overlayPaused, videoPaused }) => [overlayPaused, videoPaused])
+      ).toEqual([
+        [true, true],
+        [false, false],
+      ]);
+      expect(state.overlayPaused).toBe(initiallyPaused);
+      expect(state.videoPaused).toBe(initiallyPaused);
+    }
+  );
 
   it('reads separate HUD children even when parent text concatenates labels', () => {
     class Canvas {

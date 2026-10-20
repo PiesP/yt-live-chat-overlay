@@ -28,6 +28,7 @@ import {
   isPublicImageUrl,
   isYouTubeHostError,
   readPublicCanvasFrame,
+  readPublicOverlayPauseState,
   readPublicPageBrowserState,
   readSurvivingPublicImageDraws,
   redactDiagnosticText,
@@ -37,11 +38,17 @@ import {
 import type { PublicImageDraw, PublicImageResponse } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
-import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
+import {
+  loadUpgradeInputs,
+  readUserscriptMetadata,
+  runManagerUpgrade,
+} from './release-upgrade/upgrade.ts';
 
 export { selectPublicSeekTarget };
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
+const SCRIPT_NAMESPACE = 'https://github.com/PiesP';
+const USER_SCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
 const GRACEFUL_PROCESS_EXIT_MS = 2_000;
 const PROCESS_EXIT_TIMEOUT_MS = 5_000;
@@ -243,6 +250,20 @@ export async function readBoundedPackagedResource(
   } finally {
     await handle.close();
   }
+}
+
+export async function readBundledUserscriptVersion(root: string): Promise<string> {
+  const bytes = await readBoundedPackagedResource(
+    join(root, 'dist/yt-live-chat-overlay.user.js'),
+    'userscript',
+    USER_SCRIPT_MAX_BYTES
+  );
+  const metadata = readUserscriptMetadata(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  assert.equal(metadata.name, SCRIPT_NAME, 'Bundled userscript name changed');
+  assert.equal(metadata.namespace, SCRIPT_NAMESPACE, 'Bundled userscript namespace changed');
+  assert.match(metadata.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u);
+  assert(metadata.grants.includes('unsafeWindow'), 'Bundled userscript lacks unsafeWindow grant');
+  return metadata.version;
 }
 
 async function readExpectedExtensionResources(root: string) {
@@ -961,7 +982,7 @@ async function observePublicUserscriptMedia(
   return { image, resize };
 }
 
-async function observePublicResize(
+export async function observePublicResize(
   page: Page,
   output: string,
   index: number,
@@ -971,9 +992,13 @@ async function observePublicResize(
     .locator('video')
     .first()
     .evaluate((element) => (element as HTMLVideoElement).paused);
+  const originalOverlayPaused = await page.evaluate(readPublicOverlayPauseState);
+  if (originalOverlayPaused === null)
+    return { status: 'unverified', reason: 'overlay-pause-state-unavailable' };
   let resized = false;
-  let overlayPaused = false;
-  let resize: WorkflowStep;
+  let overlayPaused = originalOverlayPaused;
+  let videoPaused = originalVideoPaused;
+  let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
   try {
     await page
       .waitForFunction(
@@ -985,12 +1010,24 @@ async function observePublicResize(
         { timeout: 20_000 }
       )
       .catch(() => null);
-    await page
+    if (!videoPaused) {
+      await page
+        .locator('video')
+        .first()
+        .evaluate((element) => (element as HTMLVideoElement).pause());
+      videoPaused = true;
+    }
+    if (!overlayPaused) {
+      await page.keyboard.press('Control+Space');
+      overlayPaused = true;
+    }
+    if ((await page.evaluate(readPublicOverlayPauseState)) !== true)
+      throw new Error('Overlay pause did not engage');
+    const heldVideoPaused = await page
       .locator('video')
       .first()
-      .evaluate((element) => (element as HTMLVideoElement).pause());
-    await page.keyboard.press('Control+Space');
-    overlayPaused = true;
+      .evaluate((element) => (element as HTMLVideoElement).paused);
+    if (!heldVideoPaused) throw new Error('Video pause did not engage');
     const before = await page.evaluate(readPublicCanvasFrame);
     const beforeScreenshot = 'live-' + index + '-before-resize.png';
     await page.screenshot({ path: join(output, beforeScreenshot) });
@@ -1004,6 +1041,22 @@ async function observePublicResize(
     };
     await page.setViewportSize(nextViewport);
     resized = true;
+    await page.keyboard.press('Control+Space');
+    overlayPaused = false;
+    if ((await page.evaluate(readPublicOverlayPauseState)) !== false)
+      throw new Error('Overlay pause did not disengage');
+    const videoResumed = await page
+      .locator('video')
+      .first()
+      .evaluate(async (element) => {
+        const video = element as HTMLVideoElement;
+        try {
+          await video.play();
+          return !video.paused;
+        } catch {
+          return false;
+        }
+      });
     if (before.frame) {
       await page
         .waitForFunction(
@@ -1019,10 +1072,17 @@ async function observePublicResize(
         )
         .catch(() => null);
     }
-    const after = await page.evaluate(readPublicCanvasFrame);
+    let after = await page.evaluate(readPublicCanvasFrame);
+    const paintDeadline = Date.now() + 8_000;
+    while (videoResumed && (after.frame?.visiblePixels ?? 0) < 1 && Date.now() < paintDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      after = await page.evaluate(readPublicCanvasFrame);
+    }
     const afterScreenshot = 'live-' + index + '-after-resize.png';
     await page.screenshot({ path: join(output, afterScreenshot) });
-    const reason = before.reason ?? after.reason ?? assessPublicResize(before.frame, after.frame);
+    const reason = !videoResumed
+      ? 'video-resume-unavailable'
+      : (before.reason ?? after.reason ?? assessPublicResize(before.frame, after.frame));
     resize = {
       status: reason === null ? 'passed' : 'unverified',
       reason,
@@ -1044,22 +1104,51 @@ async function observePublicResize(
       viewportAfter: nextViewport,
       beforeScreenshot,
       afterScreenshot,
-      scope: 'one paused public resize; no capacity-exhaustion or message-identity claim',
-      observation: 'backing geometry and nonempty canvas after actual resize',
+      samplingPhase: 'resumed-after-resize',
+      beforeHeld: { overlayPaused: true, videoPaused: heldVideoPaused },
+      afterResumed: { overlayPaused: false, videoPaused: !videoResumed },
+      scope:
+        'one held-before and resumed-after public resize; no capacity-exhaustion or message-identity claim',
+      observation: 'backing geometry and nonempty canvas after resumed repaint',
       messagePreservationVerdict: 'unverified',
       messagePreservationReason: 'visible-message-identity-not-observed',
     };
   } catch {
     resize = { status: 'unverified', reason: 'public-resize-probe-error' };
   } finally {
-    if (resized) await page.setViewportSize(originalViewport);
-    if (overlayPaused) await page.keyboard.press('Control+Space');
-    if (!originalVideoPaused)
-      await page
-        .locator('video')
-        .first()
-        .evaluate((element) => (element as HTMLVideoElement).play())
-        .catch(() => {});
+    let restored = true;
+    if (resized)
+      await page.setViewportSize(originalViewport).catch(() => {
+        restored = false;
+      });
+    if (overlayPaused !== originalOverlayPaused) {
+      await page.keyboard.press('Control+Space').then(
+        () => {
+          overlayPaused = originalOverlayPaused;
+        },
+        () => {
+          restored = false;
+        }
+      );
+    }
+    const finalOverlayPaused = await page.evaluate(readPublicOverlayPauseState).catch(() => null);
+    if (finalOverlayPaused !== originalOverlayPaused) restored = false;
+    const finalVideoPaused = await page
+      .locator('video')
+      .first()
+      .evaluate(async (element, wasPaused) => {
+        const video = element as HTMLVideoElement;
+        if (wasPaused) video.pause();
+        else await video.play().catch(() => {});
+        return video.paused;
+      }, originalVideoPaused)
+      .catch(() => null);
+    if (finalVideoPaused !== originalVideoPaused) restored = false;
+    resize.restoredOriginalState = restored;
+    if (!restored) {
+      resize.status = 'unverified';
+      resize.reason = 'public-resize-state-restore-unverified';
+    }
   }
   return resize;
 }
@@ -1798,6 +1887,10 @@ export async function runChromeInstallation({
       installation === 'extension' && liveUrls.length > 0
         ? { extensionId, expected: await readExpectedExtensionResources(root) }
         : null;
+    const userscriptVersion =
+      installation === 'userscript' && liveUrls.length > 0
+        ? (upgradeInputs?.candidate.version ?? (await readBundledUserscriptVersion(root)))
+        : '';
     for (const [index, url] of liveUrls.entries()) {
       const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
       result.live.push(
@@ -1807,7 +1900,7 @@ export async function runChromeInstallation({
           output,
           index,
           installation,
-          JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version as string,
+          userscriptVersion,
           nextUrl,
           extensionResources
         )
