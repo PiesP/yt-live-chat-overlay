@@ -7,6 +7,10 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Route } from '@playwright/test';
 
+import {
+  installNativePageScriptProbe,
+  type NativePageScriptProbe,
+} from './native-page-script-probe.ts';
 import { buildVisibleWatchHtml } from './visible-watch.ts';
 
 type BitmapCache = {
@@ -172,19 +176,14 @@ export async function runBitmapLifecycleFixture({
     });
   };
   let routeRegistered = false;
+  let nativePageProbe: NativePageScriptProbe | undefined;
+  let pageScriptProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
   try {
     await context.route(SELF_FETCH_URL, selfFetchRoute);
     routeRegistered = true;
     await page.route('**/*', (route) => {
       const url = new URL(route.request().url());
       if (url.href === SELF_FETCH_URL) return selfFetchRoute(route);
-      if (
-        url.protocol === 'chrome-extension:' &&
-        url.hostname === extensionId &&
-        url.pathname === '/page-script.js'
-      ) {
-        return route.fulfill({ status: 200, contentType: 'text/javascript', body: instrumented });
-      }
       if (url.protocol === 'chrome-extension:' && url.hostname === extensionId)
         return route.continue();
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
@@ -304,10 +303,23 @@ export async function runBitmapLifecycleFixture({
         },
       };
     }, attachWorkerBitmapProbe.toString());
+    nativePageProbe = await installNativePageScriptProbe({
+      context,
+      root,
+      extensionId,
+      fixtureUrl: FIXTURE_URL,
+      instrumentedSource: instrumented,
+    });
+    pageScriptProbeProvenance = nativePageProbe.provenance;
+    await nativePageProbe.assertReady();
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page
       .locator('#yt-live-chat-overlay canvas')
       .waitFor({ state: 'attached', timeout: 15_000 });
+    await nativePageProbe.assertInjected();
+    await page.waitForFunction(() => typeof window.__ytBitmapCacheClass === 'function');
+    await nativePageProbe.restore();
+    nativePageProbe = undefined;
     await page.waitForFunction(
       () => window.__ytBitmapWorkers.some((record) => record.ready && record.attached),
       undefined,
@@ -495,12 +507,17 @@ export async function runBitmapLifecycleFixture({
       consoleErrors,
       consoleErrorOverflow,
       probeOverflow,
+      pageScriptProbeProvenance,
     };
   } finally {
     try {
-      await page.close();
+      if (nativePageProbe) await nativePageProbe.restore();
     } finally {
-      if (routeRegistered) await context.unroute(SELF_FETCH_URL, selfFetchRoute);
+      try {
+        await page.close();
+      } finally {
+        if (routeRegistered) await context.unroute(SELF_FETCH_URL, selfFetchRoute);
+      }
     }
   }
 }

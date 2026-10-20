@@ -7,6 +7,10 @@ import { join } from 'node:path';
 
 import type { BrowserContext } from '@playwright/test';
 
+import {
+  installNativePageScriptProbe,
+  type NativePageScriptProbe,
+} from './native-page-script-probe.ts';
 import { buildVisibleWatchHtml } from './visible-watch.ts';
 
 type CanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -2227,6 +2231,8 @@ async function runScenario({
         )
       : null;
   if (spacingSpeed || mixedGap) assert(canvasScript, 'Packaged Canvas page script shape changed');
+  let nativePageProbe: NativePageScriptProbe | undefined;
+  let pageScriptProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
   const screenshot = `placement-${name}.png`;
   let screenshotCaptured = false;
   const sendBatch = async (batch: string | string[]) => {
@@ -2421,14 +2427,6 @@ async function runScenario({
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
-      if (
-        canvasScript &&
-        url.protocol === 'chrome-extension:' &&
-        url.hostname === extensionId &&
-        url.pathname === '/page-script.js'
-      ) {
-        return route.fulfill({ status: 200, contentType: 'text/javascript', body: canvasScript });
-      }
       if (url.protocol === 'chrome-extension:' && url.hostname === extensionId)
         return route.continue();
       if (
@@ -2517,10 +2515,27 @@ async function runScenario({
         },
       };
     }, replay);
+    if (canvasScript) {
+      nativePageProbe = await installNativePageScriptProbe({
+        context,
+        root,
+        extensionId,
+        fixtureUrl: FIXTURE_URL,
+        instrumentedSource: canvasScript,
+      });
+      pageScriptProbeProvenance = nativePageProbe.provenance;
+      await nativePageProbe.assertReady();
+    }
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page
       .locator('#yt-live-chat-overlay canvas')
       .waitFor({ state: 'attached', timeout: 15_000 });
+    if (nativePageProbe) {
+      await nativePageProbe.assertInjected();
+      await page.waitForFunction(() => window.__ytPlacementProbe.canvasSourceHooked === true);
+      await nativePageProbe.restore();
+      nativePageProbe = undefined;
+    }
     await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings), undefined, {
       timeout: 15_000,
     });
@@ -3488,7 +3503,7 @@ async function runScenario({
         `${mode} active messages overlapped`
       );
     }
-    return { status: 'passed', ...probeResult(raw) };
+    return { status: 'passed', pageScriptProbeProvenance, ...probeResult(raw) };
   } catch (error) {
     if (!screenshotCaptured && !page.isClosed()) {
       screenshotCaptured = await page
@@ -3501,6 +3516,7 @@ async function runScenario({
     const raw = await captureProbe().catch(() => null);
     return {
       status: 'failed',
+      pageScriptProbeProvenance,
       ...probeResult(raw),
       errorType: error instanceof Error ? error.name : typeof error,
       errorMessage:
@@ -3508,18 +3524,22 @@ async function runScenario({
       assertion: error instanceof assert.AssertionError ? error.message.slice(0, 300) : null,
     };
   } finally {
-    if (mixedGap && !page.isClosed()) {
-      await page
-        .evaluate(() => document.fullscreenElement && document.exitFullscreen())
-        .catch(() => {});
+    try {
+      if (nativePageProbe) await nativePageProbe.restore();
+    } finally {
+      if (mixedGap && !page.isClosed()) {
+        await page
+          .evaluate(() => document.fullscreenElement && document.exitFullscreen())
+          .catch(() => {});
+      }
+      if (originalSettings && !page.isClosed()) {
+        await page
+          .evaluate((settings) => window.__ytChatOverlay?.applySettings(settings), originalSettings)
+          .catch(() => {});
+        await page.waitForTimeout(350).catch(() => {});
+      }
+      await page.close();
     }
-    if (originalSettings && !page.isClosed()) {
-      await page
-        .evaluate((settings) => window.__ytChatOverlay?.applySettings(settings), originalSettings)
-        .catch(() => {});
-      await page.waitForTimeout(350).catch(() => {});
-    }
-    await page.close();
   }
 }
 

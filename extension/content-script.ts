@@ -20,6 +20,8 @@
  * explicitly instead of silently dropping a required relay operation.
  */
 
+import { createLogger } from '@util/logging';
+
 import { loadPackagedWorkerSource } from './worker-source-loader';
 
 declare const __CHROME_NATIVE_BOOTSTRAP__: boolean;
@@ -47,7 +49,7 @@ if (typeof __CHROME_NATIVE_BOOTSTRAP__ !== 'undefined' && __CHROME_NATIVE_BOOTST
       }
     })
     .catch((error: unknown) => {
-      console.error('Native page bootstrap failed', error);
+      createLogger('ExtensionContent').error('Native page bootstrap failed', error);
     });
 } else {
   // Firefox uses an external script element. Read only fixed packaged worker
