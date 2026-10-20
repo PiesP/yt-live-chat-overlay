@@ -1747,6 +1747,49 @@ describe('Worker message protocol', () => {
       expect(decoder).not.toHaveBeenCalled();
     });
 
+    it('aborts a pending image body on destroy without decoding or retaining the task', async () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        fetchControllers: Set<AbortController>;
+        fetching: Set<string>;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/teardown-body';
+      let bodyReader: ReturnType<typeof vi.spyOn> | undefined;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+        const response = new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () =>
+                controller.error(new DOMException('Aborted', 'AbortError'))
+              );
+            },
+          })
+        );
+        Object.defineProperty(response, 'url', { value: url });
+        if (response.body) bodyReader = vi.spyOn(response.body, 'getReader');
+        return response;
+      });
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.waitFor(() => expect(bodyReader).toHaveBeenCalledOnce());
+      const signal = fetchSpy.mock.calls[0]?.[1]?.signal;
+
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      await prefetch;
+
+      expect(signal?.aborted).toBe(true);
+      expect(internals.emojiCache.has(url)).toBe(false);
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      expect(decoder).not.toHaveBeenCalled();
+    });
+
     it('shares one global fetch limit across concurrent worker prefetch calls', async () => {
       const renderer = initializeRenderer({ emojiFetchLimit: 2 });
       const internals = renderer as unknown as {
