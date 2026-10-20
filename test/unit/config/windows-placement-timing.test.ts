@@ -687,93 +687,21 @@ describe('Windows placement timing probe', () => {
   it('adds a Canvas probe only at the expected packaged app entry', () => {
     const source =
       'function getRegularCardInsets() { return { vertical: 1 }; }\n' +
-      'function reconcileMessagePlacements() { return { placements: [], dropped: [] }; }\n' +
       'var CanvasRenderer = class CanvasRenderer extends RendererBase {};' +
       '\n\tmain();\n})();';
     const instrumented = instrumentCanvasPageScript(source, 'function probe() {}');
     expect(instrumented).toContain(';(function probe() {})(CanvasRenderer, getRegularCardInsets);');
-    expect(instrumented).toContain(
-      'reconcileMessagePlacements = (function attachReflowDiagnostic('
-    );
-    expect(instrumented?.startsWith(source.split('\n\tmain();\n')[0] ?? '')).toBe(true);
-    expect(instrumented?.endsWith('\n\tmain();\n})();')).toBe(true);
-    expect(instrumentCanvasPageScript(source.replace('RendererBase', 'OtherBase'))).toBeNull();
     expect(
-      instrumentCanvasPageScript(source.replace('reconcileMessagePlacements', 'missing'))
-    ).toBeNull();
+      instrumented?.replace('\n\t;(function probe() {})(CanvasRenderer, getRegularCardInsets);', '')
+    ).toBe(source);
+    expect(instrumentCanvasPageScript(source.replace('RendererBase', 'OtherBase'))).toBeNull();
     expect(instrumentCanvasPageScript(source.replace('})();', '\n\tmain();\n})();'))).toBeNull();
-  });
-
-  it('records a bounded reflow counterfactual without changing the accepted result', () => {
-    const source = `(() => {
-      function getRegularCardInsets() {}
-      function reconcileMessagePlacements(candidates) {
-        globalThis.reflowCalls = (globalThis.reflowCalls ?? 0) + 1;
-        return {
-          placements: [candidates[0]],
-          dropped: candidates.slice(1).map((candidate) => ({
-            message: candidate.message, reason: 'reflow_capacity'
-          }))
-        };
-      }
-      var CanvasRenderer = class CanvasRenderer extends RendererBase {};
-      function main() {
-        globalThis.accepted = reconcileMessagePlacements([
-          { message: { message: { id: 'WINDOWS195_LOAD_00' } }, laneIndex: 0,
-            height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } },
-          { message: { message: { id: 'WINDOWS195_BACKLOG_LONG' } }, laneIndex: 0,
-            height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } }
-        ], { now: 200, laneCount: 1, laneHeight: 44, viewportHeight: 44 });
-        globalThis.acceptedRetained = reconcileMessagePlacements([
-          { message: { message: { id: 'WINDOWS195_BACKLOG_LONG' } }, laneIndex: 0,
-            height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } },
-          { message: { message: { id: 'WINDOWS195_LOAD_00' } }, laneIndex: 0,
-            height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } }
-        ], { now: 200, laneCount: 1, laneHeight: 44, viewportHeight: 44 });
-      }
-\tmain();
-    })();`;
-    const probe = 'function probe() { globalThis.__ytPlacementProbe.exact = { reflows: [] }; }';
-    const state = { exact: null as unknown };
-    const sandbox = {
-      RendererBase: class {},
-      __ytPlacementProbe: state,
-      performance: { timeOrigin: 1000, now: () => 1 },
-      accepted: null as unknown,
-      acceptedRetained: null as unknown,
-      reflowCalls: 0,
-    };
-    const script = instrumentCanvasPageScript(source, probe);
-    expect(script).not.toBeNull();
-    runInNewContext(script!, sandbox);
-    const accepted = sandbox.accepted as {
-      placements: { message: { message: { id: string } } }[];
-      dropped: { message: { message: { id: string } } }[];
-    };
-    expect(accepted.placements[0]?.message.message.id).toBe('WINDOWS195_LOAD_00');
-    expect(accepted.dropped[0]?.message.message.id).toBe('WINDOWS195_BACKLOG_LONG');
-    const exact = state.exact as {
-      reflows: {
-        actual: { dropped: { id: string }[] };
-        longFirst: { placedIds: string[] } | null;
-      }[];
-      reflowOverflow: number;
-    };
-    expect(exact.reflows).toHaveLength(2);
-    expect(exact.reflows[0]?.actual.dropped).toEqual([
-      { id: 'WINDOWS195_BACKLOG_LONG', reason: 'reflow_capacity' },
-    ]);
-    expect(exact.reflows[0]?.longFirst?.placedIds).toEqual(['WINDOWS195_BACKLOG_LONG']);
-    expect(exact.reflows[1]?.longFirst).toBeNull();
-    expect(sandbox.reflowCalls).toBe(3);
-    expect(exact.reflowOverflow).toBeUndefined();
   });
 
   it('observes Canvas queue and committed motion from an emitted-script-shaped closure', () => {
     const source = `(() => {
       class RendererBase {}
       function getRegularCardInsets() { return { vertical: 1 }; }
-      function reconcileMessagePlacements() { return { placements: [], dropped: [] }; }
       var CanvasRenderer = class CanvasRenderer extends RendererBase {
         constructor() {
           super(); this.settings = { fontSize: 32, laneSpacing: 0 }; this.activeMessages = [];
@@ -908,7 +836,6 @@ describe('Windows placement timing probe', () => {
         const source = `(() => {
         class RendererBase {}
         function getRegularCardInsets() { return { vertical: 1 }; }
-        function reconcileMessagePlacements() { return { placements: [], dropped: [] }; }
         var CanvasRenderer = class CanvasRenderer extends RendererBase {
           constructor() {
             super(); this.ctx = new FakeContext(overlay); this.canvas = overlay;

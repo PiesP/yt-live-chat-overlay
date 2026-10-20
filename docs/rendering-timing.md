@@ -62,8 +62,11 @@ permanently oversized messages are removed; transient failures remain in the
 existing bounded queue. The anti-block gate retains its priority bypass, replay
 policy, and forced retry deadline.
 
-Reflow first retains legal placements, then searches legal blocks for displaced
-messages. It preserves future entry deadlines and normalized elapsed progress.
+Reflow gives messages currently crossing the viewport priority over future or
+offscreen entries. It first retains legal placements, then searches legal blocks
+for displaced messages within each group before admitting the next group.
+Existing order is preserved within each group. It preserves future entry
+deadlines and normalized elapsed progress.
 All accepted reservations rebuild the indexes and conservative lane summaries.
 Messages too tall for the viewport receive `oversized`; messages without a
 collision-free block receive `reflow_capacity`. Capacity loss is a permanent
