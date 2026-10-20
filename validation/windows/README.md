@@ -512,6 +512,30 @@ show an identifiable update confirmation, the upgrade check fails and records
 the prompt as unobserved. It does not prove an automatic public update or
 publication.
 
+For Chrome or Edge manual extension-update qualification, provide the separate
+ignored `validation/windows/release-upgrade/extension-input.json`. The exact
+schema, fixed baseline paths and supported version pair are defined by
+`validateExtensionUpgradeInput` in [release-upgrade/extension.ts](release-upgrade/extension.ts).
+Place the checksum-verified public ZIP and its unpacked files at those paths.
+Use `extensionInventory` from the same module to compute the baseline and
+production `dist-extension` inventory digests for the input.
+
+The existing `--installation extension` invocation then loads the public
+baseline into a fresh profile, saves a font-size preference through its UI and
+checks real extension storage. It replaces the same unpacked directory with the
+candidate and calls the installed extension's runtime reload. The check requires
+the same extension ID, the candidate runtime version, retained storage and a
+fresh page showing the saved preference, then restores the original setting.
+The receipt records this separately as `extensionUpgrade`. Without the input it
+records `not-requested` and installs the candidate directly; an invalid supplied
+input retains a failed preflight receipt before browser launch.
+
+Remove the task's `extension-input.json` and baseline directory from the
+checkout after qualification, retaining the verified inputs and receipts in
+restricted evidence storage. This procedure covers the documented manual
+unpacked update. Store updates and Firefox temporary-add-on updates require
+their own evidence.
+
 After committing a clean named checkout and running the repository gates, use
 the configured controller in the prepared Windows validation environment. Run
 the Chrome or Edge extension, userscript-manager, and Firefox extension profiles
