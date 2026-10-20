@@ -15,6 +15,7 @@ import {
   selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
+import { admitNativePublicAd } from './native-ad-skip.ts';
 
 export { selectPublicSeekTarget };
 
@@ -28,6 +29,7 @@ type FirefoxSession = {
   pageLogs: FirefoxLog[];
   captureScreenshot: () => Promise<Buffer>;
   clearPageLogs: () => void;
+  abandonAfterAdmissionTimeout?: () => void;
   close: () => Promise<void>;
   command: (
     method: string,
@@ -35,7 +37,7 @@ type FirefoxSession = {
     timeoutMs?: number
   ) => Promise<unknown>;
   probeAfterTimeout: () => Promise<FirefoxBidiTimeoutProbe>;
-  evaluateJson: (expression: string) => Promise<unknown>;
+  evaluateJson: (expression: string, timeoutMs?: number) => Promise<unknown>;
   installExtension: (extensionPath: string) => Promise<string>;
   navigate: (url: string, options?: { wait?: string; timeoutMs?: number }) => Promise<void>;
   reload: () => Promise<void>;
@@ -69,6 +71,7 @@ type PlayerObservation = {
   finalState?: unknown;
   inputMethod?: string;
   playbackStarted?: boolean;
+  adAdmission?: 'no-ad' | 'natural-end' | 'native-skip';
 };
 type FailureDescription = {
   name: string;
@@ -679,6 +682,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
   const observations: PublicObservation[] = [];
   let firstTimeout: FirefoxBidiCommandTimeout | undefined;
   let timeoutProbe: FirefoxBidiTimeoutProbe | undefined;
+  let admissionUnresponsive = false;
   let previousMarker = null;
   let previousUrl = null;
   for (const [index, entry] of liveEntries.entries()) {
@@ -723,6 +727,8 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
       phase = 'playback';
       player = { status: 'unverified', reason: 'playback-not-observed' };
       await admitPublicPlayback(session, player, 'public video playback to start');
+      phase = 'ad-admission';
+      player.adAdmission = await admitNativePublicAd(session, entry.url, expectedVideoId);
       phase = 'render';
       await session.waitFor(
         `Boolean(${publicContentStateExpression(expectedVideoId, provider.chatMode === 'replay')}.status === 'passed' &&
@@ -1029,11 +1035,17 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
       });
     } catch (error) {
       const commandTimeout = error instanceof FirefoxBidiCommandTimeout;
+      const admissionTimeout = commandTimeout && phase === 'ad-admission';
+      if (admissionTimeout) {
+        admissionUnresponsive = true;
+        session.abandonAfterAdmissionTimeout?.();
+      }
       if (commandTimeout && !firstTimeout) {
         firstTimeout = error;
-        timeoutProbe = await session.probeAfterTimeout().catch(() => undefined);
+        if (!admissionTimeout)
+          timeoutProbe = await session.probeAfterTimeout().catch(() => undefined);
       }
-      const unresponsive = timeoutProbe?.unresponsive === true;
+      const unresponsive = admissionUnresponsive || timeoutProbe?.unresponsive === true;
       if (!unresponsive && phase === 'render' && player && !player.content) {
         player.content = await readPublicContentState(
           session,
@@ -1073,7 +1085,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         workflow,
         phase,
         status: 'unverified',
-        ...(commandTimeout && timeoutProbe
+        ...(commandTimeout && (timeoutProbe || admissionTimeout)
           ? {
               timeoutDiagnostic: {
                 command: {
@@ -1081,7 +1093,9 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
                   id: error.id,
                   elapsedMs: error.elapsedMs,
                 },
-                ...timeoutProbe,
+                ...(admissionTimeout
+                  ? { status: 'admission-command-timeout' }
+                  : (timeoutProbe ?? { status: 'probe-unavailable' })),
               },
             }
           : {}),
@@ -1123,7 +1137,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
       }
     }
   }
-  return { observations, firstTimeout, timeoutProbe };
+  return { observations, firstTimeout, timeoutProbe, admissionUnresponsive };
 }
 
 export async function runFirefoxInstallation(
@@ -1210,6 +1224,9 @@ export async function runFirefoxInstallation(
     stopMock = undefined;
     const liveResult = await runLivePhase(session, liveEntries, output);
     live = liveResult.observations;
+    if (liveResult.admissionUnresponsive) {
+      channelUnresponsive = true;
+    }
     if (liveResult.timeoutProbe) {
       diagnostics.bidiTimeout = {
         command: liveResult.firstTimeout
@@ -1221,7 +1238,8 @@ export async function runFirefoxInstallation(
           : null,
         ...liveResult.timeoutProbe,
       };
-      channelUnresponsive = liveResult.timeoutProbe.unresponsive;
+      channelUnresponsive =
+        liveResult.admissionUnresponsive || liveResult.timeoutProbe.unresponsive;
     } else if (liveResult.firstTimeout) {
       diagnostics.bidiTimeout = {
         command: {
@@ -1229,7 +1247,9 @@ export async function runFirefoxInstallation(
           id: liveResult.firstTimeout.id,
           elapsedMs: liveResult.firstTimeout.elapsedMs,
         },
-        status: 'probe-unavailable',
+        status: liveResult.admissionUnresponsive
+          ? 'admission-command-timeout'
+          : 'probe-unavailable',
       };
     }
     if (liveResult.firstTimeout) throw liveResult.firstTimeout;

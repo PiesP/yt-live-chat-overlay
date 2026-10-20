@@ -70,6 +70,10 @@ Playwright and its native WebDriver BiDi endpoint to install the temporary add-o
 It checks content-script injection, settings storage across reload, API chat
 rendering, Worker failure recovery, and SPA cleanup on a deterministic YouTube
 fixture. A separate Firefox userscript smoke test covers the userscript path.
+The Windows Firefox installed-extension check also admits a public YouTube ad
+before its content and rendering checks: it may use one native pointer action on
+a visible, hit-tested Skip button for the expected watch video, then waits for
+the ad to end. An unavailable or changed target remains unverified.
 
 The browser projects and assertions are defined in
 [`playwright.config.ts`](../test/e2e/playwright.config.ts) and

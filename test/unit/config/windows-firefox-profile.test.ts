@@ -40,6 +40,20 @@ const {
 
 const temporaryDirectories: string[] = [];
 
+it('forwards a bounded page-evaluation timeout to the BiDi command', async () => {
+  const { session } = createBidiSession(() => undefined);
+  const command = vi.spyOn(session, 'command').mockResolvedValue({
+    type: 'success',
+    result: { type: 'string', value: 'true' },
+  });
+  expect(await session.evaluateJson('true', 123)).toBe(true);
+  expect(command).toHaveBeenCalledWith(
+    'script.evaluate',
+    expect.objectContaining({ target: { context: session.context } }),
+    123
+  );
+});
+
 function createBidiSession(onSend: (message: { id: number; method: string }) => void) {
   const listeners = new Map<string, (event: { data: string }) => void>();
   const socket = {
@@ -89,6 +103,7 @@ function createSession(
     timeoutOnFirstLive?: boolean;
     probeUnresponsive?: boolean;
     timeoutFixture?: boolean;
+    adAdmissionTimeout?: boolean;
   } = {}
 ) {
   const calls: string[] = [];
@@ -99,6 +114,7 @@ function createSession(
   let contentReads = 0;
   const session = {
     context: 'owned-context',
+    abandonAfterAdmissionTimeout: vi.fn(),
     command: vi.fn(async (_method: string, _params?: unknown) => ({})),
     probeAfterTimeout: vi.fn(async () => {
       calls.push('probe');
@@ -140,6 +156,17 @@ function createSession(
     evaluateJson: vi.fn(async (expression: string) => {
       if (publicPage >= 0) calls.push('evaluate-public');
       new Script(expression);
+      if (expression.includes('const responseIdentityMatched =')) {
+        if (options.adAdmissionTimeout) {
+          throw new FirefoxBidiCommandTimeout('script.evaluate', 99, 20_000);
+        }
+        return {
+          routeMatched: true,
+          responseIdentityMatched: true,
+          adShowing: false,
+          skipPoint: null,
+        };
+      }
       if (expression.includes('video.muted = true')) return { paused: false, readyState: 4 };
       if (expression.includes('getBoundingClientRect')) return { x: 300, y: 200 };
       if (expression.includes('const initialData = window.ytInitialData'))
@@ -1183,6 +1210,94 @@ describe('Windows Firefox installation profile', () => {
       failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' },
     });
     expect(await readdir(output)).toEqual(['firefox-installation-result.json']);
+  });
+
+  it('stops all later BiDi work after a public ad-admission command timeout', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({ adAdmissionTimeout: true });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: ['https://www.youtube.com/watch?v=public-live'],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toMatchObject({ name: 'FirefoxBidiCommandTimeout', method: 'script.evaluate' });
+    expect(session.abandonAfterAdmissionTimeout).toHaveBeenCalledOnce();
+    expect(session.probeAfterTimeout).not.toHaveBeenCalled();
+    expect(session.uninstallExtension).not.toHaveBeenCalled();
+    expect(session.captureScreenshot).not.toHaveBeenCalled();
+    expect(calls.at(-1)).toBe('close');
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live[0]).toMatchObject({
+      status: 'unverified',
+      failureCategory: 'ad-admission-timeout',
+      failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' },
+    });
+    expect(receipt.observations.diagnostics.bidiTimeout).toMatchObject({
+      command: { method: 'script.evaluate' },
+      status: 'admission-command-timeout',
+    });
+  });
+
+  it('quarantines a later ad timeout even after an earlier responsive timeout probe', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({
+      timeoutOnFirstLive: true,
+      adAdmissionTimeout: true,
+    });
+    let commandCountAtAbandon = -1;
+    let evaluationCountAtAbandon = -1;
+    session.abandonAfterAdmissionTimeout.mockImplementation(() => {
+      calls.push('abandon-admission');
+      commandCountAtAbandon = session.command.mock.calls.length;
+      evaluationCountAtAbandon = session.evaluateJson.mock.calls.length;
+    });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public-live',
+            'https://www.youtube.com/watch?v=public-replay',
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toMatchObject({
+      name: 'FirefoxBidiCommandTimeout',
+      method: 'browsingContext.navigate',
+      id: 41,
+    });
+    expect(session.probeAfterTimeout).toHaveBeenCalledOnce();
+    expect(session.abandonAfterAdmissionTimeout).toHaveBeenCalledOnce();
+    expect(session.command).toHaveBeenCalledTimes(commandCountAtAbandon);
+    expect(session.evaluateJson).toHaveBeenCalledTimes(evaluationCountAtAbandon);
+    expect(calls.slice(calls.indexOf('abandon-admission'))).toEqual(['abandon-admission', 'close']);
+    expect(session.uninstallExtension).not.toHaveBeenCalled();
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live).toMatchObject([
+      { failureCategory: 'navigation-timeout' },
+      {
+        failureCategory: 'ad-admission-timeout',
+        timeoutDiagnostic: { status: 'admission-command-timeout' },
+        failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' },
+      },
+    ]);
+    expect(receipt.observations.diagnostics).toMatchObject({
+      bidiTimeout: { command: { method: 'browsingContext.navigate', id: 41 }, unresponsive: false },
+      extensionUninstall: { status: 'not-run', reason: 'bidi-unresponsive' },
+      failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' },
+    });
   });
 
   it('skips fixture BiDi teardown after an unresponsive deterministic timeout but closes ownership', async () => {
