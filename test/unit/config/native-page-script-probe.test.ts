@@ -18,7 +18,7 @@ import {
 
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
 const fixtureUrl = 'https://www.youtube.com/watch?v=probeFixture';
-const documentId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const documentId = '0123456789abcdef0123456789abcdef';
 const marker = '\n\tmain();\n';
 const base = `(function() {
   function main() { window.appStarted = true; }${marker}})();\n`;
@@ -184,6 +184,12 @@ describe('native page-script fixture adapter', () => {
     harness.setTabUrl(fixtureUrl);
     await expect(
       harness.scripting.executeScript({ ...request, world: 'ISOLATED' })
+    ).rejects.toThrow('injection contract changed');
+    await expect(
+      harness.scripting.executeScript({
+        ...request,
+        target: { ...request.target, documentIds: ['aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'] },
+      })
     ).rejects.toThrow('injection contract changed');
     expect(harness.original).not.toHaveBeenCalled();
     await probe.restore();

@@ -102,7 +102,7 @@ function workerExpression({
           Object.keys(target).sort().join(',') !== 'documentIds,tabId' ||
           !Array.isArray(target.documentIds) || target.documentIds.length !== 1 ||
           typeof target.documentIds[0] !== 'string' ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target.documentIds[0]) ||
+          !/^[0-9a-f]{32}$/i.test(target.documentIds[0]) ||
           'frameIds' in target || 'allFrames' in target ||
           injection.args !== undefined || injection.func !== undefined)
         throw new Error('Native page-script injection contract changed');
@@ -288,7 +288,7 @@ export async function installNativePageScriptProbe({
         'Native page-script probe did not replace exactly one injection'
       );
       assert.equal(current.completed, 1, 'Native page-script probe injection did not complete');
-      assert.match(current.documentId ?? '', /^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+      assert.match(current.documentId ?? '', /^[0-9a-f]{32}$/i);
     },
     async restore() {
       const receipt = await worker.evaluate<RestoreReceipt>(restoreExpression(token, generation));

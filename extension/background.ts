@@ -66,11 +66,8 @@ function authenticatedDocument(
   const tabId = sender.tab?.id;
   const documentId = sender.documentId;
   if (!Number.isSafeInteger(tabId) || !tabId || tabId < 0) return;
-  if (
-    !documentId ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId)
-  )
-    return;
+  // Chromium serializes its document token as 32 hexadecimal characters.
+  if (!documentId || !/^[0-9a-f]{32}$/i.test(documentId)) return;
   return { tabId, documentId };
 }
 

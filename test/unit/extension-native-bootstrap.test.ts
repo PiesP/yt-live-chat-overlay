@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { claimNativePageBootstrap } from '../../extension/native-bootstrap';
 
 const nonce = '12345678-1234-1234-1234-123456789abc';
-const documentId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const documentId = '0123456789abcdef0123456789abcdef';
 
 type MessageListener = (
   message: unknown,
@@ -68,24 +68,27 @@ describe('Chrome native page bootstrap', () => {
     delete window.__ytExtensionBridge;
   });
 
-  it('claims and injects only the authenticated top-level document', async () => {
-    executeScript
-      .mockResolvedValueOnce([{ documentId, frameId: 0, result: 'claimed' }])
-      .mockResolvedValueOnce([{ documentId, frameId: 0 }]);
+  it.each([documentId, documentId.toUpperCase()])(
+    'claims and injects only the authenticated top-level document %s',
+    async (documentId) => {
+      executeScript
+        .mockResolvedValueOnce([{ documentId, frameId: 0, result: 'claimed' }])
+        .mockResolvedValueOnce([{ documentId, frameId: 0 }]);
 
-    expect(await send()).toEqual({ ok: true });
-    expect(executeScript).toHaveBeenCalledTimes(2);
-    expect(executeScript.mock.calls[0]?.[0]).toMatchObject({
-      target: { tabId: 42, documentIds: [documentId] },
-      world: 'MAIN',
-      args: [nonce, 'self.onmessage = () => {};'],
-    });
-    expect(executeScript.mock.calls[1]?.[0]).toEqual({
-      target: { tabId: 42, documentIds: [documentId] },
-      world: 'MAIN',
-      files: ['page-script.js'],
-    });
-  });
+      expect(await send({ ...validSender, documentId })).toEqual({ ok: true });
+      expect(executeScript).toHaveBeenCalledTimes(2);
+      expect(executeScript.mock.calls[0]?.[0]).toMatchObject({
+        target: { tabId: 42, documentIds: [documentId] },
+        world: 'MAIN',
+        args: [nonce, 'self.onmessage = () => {};'],
+      });
+      expect(executeScript.mock.calls[1]?.[0]).toEqual({
+        target: { tabId: 42, documentIds: [documentId] },
+        world: 'MAIN',
+        files: ['page-script.js'],
+      });
+    }
+  );
 
   it.each([
     { ...validSender, id: 'other-extension' },
@@ -93,6 +96,10 @@ describe('Chrome native page bootstrap', () => {
     { ...validSender, url: 'https://evil.example/watch' },
     { ...validSender, frameId: 1 },
     { ...validSender, documentId: undefined },
+    { ...validSender, documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+    { ...validSender, documentId: documentId.slice(1) },
+    { ...validSender, documentId: `${documentId}0` },
+    { ...validSender, documentId: `${documentId.slice(0, -1)}g` },
     { ...validSender, tab: {} },
   ])('rejects unauthenticated documents before native injection', async (sender) => {
     expect(await send(sender)).toEqual({ ok: false, reason: 'unauthorized-document' });
@@ -107,7 +114,7 @@ describe('Chrome native page bootstrap', () => {
 
   it('rejects a mismatched result before injecting the page bundle', async () => {
     executeScript.mockResolvedValueOnce([
-      { documentId: crypto.randomUUID(), frameId: 0, result: 'claimed' },
+      { documentId: 'fedcba9876543210fedcba9876543210', frameId: 0, result: 'claimed' },
     ]);
     expect(await send()).toEqual({
       ok: false,
