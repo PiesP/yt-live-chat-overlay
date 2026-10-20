@@ -132,8 +132,9 @@ describe('installed Chrome acceptance outcomes', () => {
       reportedFrameDocumentSha256: createHash('sha256').update(frame).digest('hex'),
     });
     expect(JSON.stringify(link)).not.toMatch(/private|secret/u);
-    expect(diagnoseUnsafeOriginConsole(warning.replace('. Domains,', ' Domains,'), frame, id))
-      .toMatchObject({ reportedFrameDocumentSha256: null });
+    expect(
+      diagnoseUnsafeOriginConsole(warning.replace('. Domains,', ' Domains,'), frame, id)
+    ).toMatchObject({ reportedFrameDocumentSha256: null });
     expect(
       diagnoseUnsafeOriginConsole(
         warning.replace('workers/renderer.js', 'workers/other.js'),
