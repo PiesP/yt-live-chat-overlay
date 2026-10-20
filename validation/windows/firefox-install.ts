@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
 
-import { launchFirefoxBidi } from './firefox-bidi.ts';
+import { FirefoxBidiCommandTimeout, launchFirefoxBidi } from './firefox-bidi.ts';
+import type { FirefoxBidiTimeoutProbe } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
@@ -33,6 +34,7 @@ type FirefoxSession = {
     params?: Record<string, unknown>,
     timeoutMs?: number
   ) => Promise<unknown>;
+  probeAfterTimeout: () => Promise<FirefoxBidiTimeoutProbe>;
   evaluateJson: (expression: string) => Promise<unknown>;
   installExtension: (extensionPath: string) => Promise<string>;
   navigate: (url: string, options?: { wait?: string; timeoutMs?: number }) => Promise<void>;
@@ -675,6 +677,8 @@ async function readPublicContentState(
 
 async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], output: string) {
   const observations: PublicObservation[] = [];
+  let firstTimeout: FirefoxBidiCommandTimeout | undefined;
+  let timeoutProbe: FirefoxBidiTimeoutProbe | undefined;
   let previousMarker = null;
   let previousUrl = null;
   for (const [index, entry] of liveEntries.entries()) {
@@ -1024,14 +1028,20 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
       });
     } catch (error) {
-      if (phase === 'render' && player && !player.content) {
+      const commandTimeout = error instanceof FirefoxBidiCommandTimeout;
+      if (commandTimeout && !firstTimeout) {
+        firstTimeout = error;
+        timeoutProbe = await session.probeAfterTimeout().catch(() => undefined);
+      }
+      const unresponsive = timeoutProbe?.unresponsive === true;
+      if (!unresponsive && phase === 'render' && player && !player.content) {
         player.content = await readPublicContentState(
           session,
           expectedVideoId,
           provider?.chatMode === 'replay'
         ).catch(() => null);
       }
-      if (loaded && player) {
+      if (!unresponsive && loaded && player) {
         player.finalState = await session
           .evaluateJson(`(() => {
           const video = document.querySelector('video');
@@ -1046,11 +1056,12 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         })()`)
           .catch(() => null);
       }
-      await writeFailureScreenshot(
-        session,
-        output,
-        `firefox-live-${String(index + 1).padStart(2, '0')}-failure.png`
-      );
+      if (!unresponsive)
+        await writeFailureScreenshot(
+          session,
+          output,
+          `firefox-live-${String(index + 1).padStart(2, '0')}-failure.png`
+        );
       observations.push({
         index,
         kind: entry.kind,
@@ -1062,6 +1073,21 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         workflow,
         phase,
         status: 'unverified',
+        ...(commandTimeout && timeoutProbe
+          ? {
+              timeoutDiagnostic: {
+                command: {
+                  method: error.method,
+                  id: error.id,
+                  elapsedMs: error.elapsedMs,
+                },
+                ...timeoutProbe,
+              },
+            }
+          : {}),
+        ...(unresponsive
+          ? { failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' } }
+          : {}),
         failureCategory: provider?.loginRedirect
           ? 'provider-login-redirect'
           : provider?.consentRedirect
@@ -1081,9 +1107,23 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
           .slice(0, 20)
           .map(({ level, text }) => ({ level, text: redactDiagnosticText(text) })),
       });
+      if (unresponsive) {
+        for (let skipped = index + 1; skipped < liveEntries.length; skipped++) {
+          const remaining = liveEntries[skipped];
+          if (!remaining) continue;
+          observations.push({
+            index: skipped,
+            kind: remaining.kind,
+            loaded: false,
+            status: 'not-run',
+            reason: 'bidi-unresponsive',
+          });
+        }
+        break;
+      }
     }
   }
-  return observations;
+  return { observations, firstTimeout, timeoutProbe };
 }
 
 export async function runFirefoxInstallation(
@@ -1149,6 +1189,7 @@ export async function runFirefoxInstallation(
   const cleanupErrors: Error[] = [];
   let deterministic: Awaited<ReturnType<typeof runDeterministicPhase>> | undefined;
   let live: PublicObservation[] = [];
+  let channelUnresponsive = false;
 
   try {
     session = await launch({ root, executablePath: resolvedExecutable, headless });
@@ -1167,7 +1208,31 @@ export async function runFirefoxInstallation(
 
     await stopMock();
     stopMock = undefined;
-    live = await runLivePhase(session, liveEntries, output);
+    const liveResult = await runLivePhase(session, liveEntries, output);
+    live = liveResult.observations;
+    if (liveResult.timeoutProbe) {
+      diagnostics.bidiTimeout = {
+        command: liveResult.firstTimeout
+          ? {
+              method: liveResult.firstTimeout.method,
+              id: liveResult.firstTimeout.id,
+              elapsedMs: liveResult.firstTimeout.elapsedMs,
+            }
+          : null,
+        ...liveResult.timeoutProbe,
+      };
+      channelUnresponsive = liveResult.timeoutProbe.unresponsive;
+    } else if (liveResult.firstTimeout) {
+      diagnostics.bidiTimeout = {
+        command: {
+          method: liveResult.firstTimeout.method,
+          id: liveResult.firstTimeout.id,
+          elapsedMs: liveResult.firstTimeout.elapsedMs,
+        },
+        status: 'probe-unavailable',
+      };
+    }
+    if (liveResult.firstTimeout) throw liveResult.firstTimeout;
     if (liveEntries.length > 0) {
       checks.livePagesLoaded =
         live.length === liveEntries.length && live.every(({ loaded }) => loaded);
@@ -1186,16 +1251,28 @@ export async function runFirefoxInstallation(
   } catch (error) {
     caught = true;
     primaryError = error;
+    if (error instanceof FirefoxBidiCommandTimeout && session && !diagnostics.bidiTimeout) {
+      const probe = await session.probeAfterTimeout().catch(() => undefined);
+      diagnostics.bidiTimeout = {
+        command: { method: error.method, id: error.id, elapsedMs: error.elapsedMs },
+        ...(probe ?? { status: 'probe-unavailable' }),
+      };
+      channelUnresponsive = probe?.unresponsive === true;
+    }
     if (!checks.deterministicErrorsAbsent && session)
       diagnostics.errorLogs = session.pageLogs
         .filter((entry) => entry.level === 'error' || /worker/i.test(entry.text))
         .slice(0, 20)
         .map((entry) => ({ level: entry.level, text: entry.text.slice(0, 1000) }));
-    if (session) {
+    if (session && !channelUnresponsive) {
       await writeFailureScreenshot(session, output, 'firefox-extension-failure.png');
+    } else if (session) {
+      diagnostics.failureScreenshot = { status: 'not-run', reason: 'bidi-unresponsive' };
     }
   } finally {
-    if (stopMock) {
+    if (stopMock && channelUnresponsive) {
+      diagnostics.fixtureInterceptRemoval = { status: 'not-run', reason: 'bidi-unresponsive' };
+    } else if (stopMock) {
       try {
         await stopMock();
       } catch (error) {
@@ -1204,7 +1281,9 @@ export async function runFirefoxInstallation(
         );
       }
     }
-    if (session && extensionId) {
+    if (session && extensionId && channelUnresponsive) {
+      diagnostics.extensionUninstall = { status: 'not-run', reason: 'bidi-unresponsive' };
+    } else if (session && extensionId) {
       try {
         await session.uninstallExtension(extensionId);
         checks.extensionUninstalled = true;

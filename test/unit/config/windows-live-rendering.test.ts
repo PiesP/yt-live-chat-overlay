@@ -5,10 +5,18 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vite-plus/test';
 
 import {
+  observePublicUserscriptMedia,
+  observePublicResize,
+  openPublicSettingsDialog,
+  PublicUserscriptRealm,
+} from '../../../validation/windows/chrome-install.ts';
+import {
   assessPublicImage,
   assessPublicResize,
   installPublicImageDrawProbe,
   isPublicImageUrl,
+  readPublicCanvasFrame,
+  readPublicOverlayPauseState,
   readSurvivingPublicImageDraws,
   selectPublicSeekTarget,
 } from '../../../validation/windows/live-rendering.ts';
@@ -53,7 +61,170 @@ describe('shared public-media seek calculation', () => {
   });
 });
 
+describe('public userscript realm authentication', () => {
+  it.each([
+    { names: ['YouTube Live Chat Overlay'], version: '1.2.3', expected: 'ready', installs: 1 },
+    {
+      names: ['YouTube Live Chat Overlay', 'YouTube Live Chat Overlay'],
+      version: '1.2.3',
+      expected: 'ambiguous',
+      installs: 0,
+    },
+    { names: ['Other Script'], version: '1.2.3', expected: 'unproven', installs: 0 },
+    { names: ['YouTube Live Chat Overlay'], version: 'older', expected: 'unproven', installs: 0 },
+  ])(
+    'installs only for a unique matching main-frame realm: $expected',
+    async ({ names, version, expected, installs }) => {
+      const handlers = new Map<string, (value: unknown) => void>();
+      let installed = 0;
+      const session = {
+        on: (event: string, listener: (value: unknown) => void) => handlers.set(event, listener),
+        send: async (
+          method: string,
+          params?: { uniqueContextId?: string; expression?: string }
+        ) => {
+          if (method === 'Runtime.enable') {
+            names.forEach((_, index) =>
+              handlers.get('Runtime.executionContextCreated')?.({
+                context: {
+                  id: index + 1,
+                  uniqueId: `main-${index + 1}`,
+                  auxData: { frameId: 'main' },
+                },
+              })
+            );
+            handlers.get('Runtime.executionContextCreated')?.({
+              context: { id: 99, uniqueId: 'child-99', auxData: { frameId: 'child' } },
+            });
+            return {};
+          }
+          if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } };
+          if (method === 'Runtime.evaluate') {
+            if (params?.expression?.includes('GM_info'))
+              return {
+                result: {
+                  value: {
+                    name: names[Number(params.uniqueContextId?.split('-')[1]) - 1],
+                    version,
+                    callable: true,
+                  },
+                },
+              };
+            installed++;
+            return { result: { value: undefined } };
+          }
+          throw new Error('Unexpected CDP command');
+        },
+        detach: async () => {},
+      };
+      const realm = new PublicUserscriptRealm(
+        { newCDPSession: async () => session } as never,
+        {} as never,
+        '1.2.3'
+      );
+      await realm.start();
+      expect((await realm.selectAndInstall()).status).toBe(expected);
+      expect(installed).toBe(installs);
+      await realm.close();
+    }
+  );
+});
+
 describe('installed public rendering observations', () => {
+  it.each([false, true])(
+    'keeps the settings failure and its open-dialog screenshot when restore fails=%s',
+    async (restoreFails) => {
+      let visible = false;
+      let tabClicks = 0;
+      const screenshots: { path: string; dialogVisible: boolean }[] = [];
+      const checkbox = {
+        isChecked: async () => false,
+        check: async () => {
+          throw new Error('Checkbox interaction failed');
+        },
+        setChecked: async () => {},
+      };
+      const modal = {
+        waitFor: async ({ state }: { state: string }) => {
+          expect(visible).toBe(state === 'visible');
+        },
+        isVisible: async () => visible,
+        locator: (selector: string) => {
+          if (selector === '#tab-colors')
+            return {
+              click: async () => {
+                tabClicks++;
+                if (restoreFails && tabClicks === 2) throw new Error('Restore tab failed');
+              },
+            };
+          if (selector === 'input[name="showAuthor-normal"]') return checkbox;
+          throw new Error(`Unexpected selector: ${selector}`);
+        },
+      };
+      const button = {
+        waitFor: async () => {},
+        focus: async () => {},
+      };
+      const page = {
+        locator: (selector: string) =>
+          selector === '#yt-chat-overlay-settings-button' ? button : modal,
+        keyboard: {
+          press: async (key: string) => {
+            if (key === 'Enter') visible = true;
+            else if (key === 'Escape') visible = false;
+            else throw new Error(`Unexpected key: ${key}`);
+          },
+        },
+        screenshot: async ({ path }: { path: string }) => {
+          screenshots.push({ path, dialogVisible: visible });
+        },
+      };
+      const result = await observePublicUserscriptMedia(
+        page as never,
+        '/evidence',
+        0,
+        [],
+        {} as never
+      );
+      expect(result.image).toMatchObject({
+        status: 'unverified',
+        reason: 'public-image-settings-ui-failed',
+        settingsAction: 'enable-author-display',
+        errorType: 'Error',
+        settingsErrorScreenshot: 'live-0-settings-error.png',
+        settingRestore: restoreFails
+          ? { status: 'unverified', phase: 'select-appearance', errorType: 'Error' }
+          : { status: 'passed' },
+      });
+      expect(result.resize.reason).toBe('public-resize-not-observed');
+      expect(screenshots).toEqual([
+        { path: '/evidence/live-0-settings-error.png', dialogVisible: true },
+      ]);
+      expect(visible).toBe(false);
+    }
+  );
+
+  it('opens the hover-hidden settings control through its keyboard path', async () => {
+    const actions: string[] = [];
+    const modal = {
+      waitFor: async ({ state }: { state: string }) => actions.push(`modal:${state}`),
+    };
+    const button = {
+      waitFor: async ({ state }: { state: string }) => actions.push(`button:${state}`),
+      focus: async () => actions.push('button:focus'),
+      click: async () => {
+        throw new Error('pointer click cannot reach the hidden control');
+      },
+    };
+    const page = {
+      locator: (selector: string) =>
+        selector === '#yt-chat-overlay-settings-button' ? button : modal,
+      keyboard: { press: async (key: string) => actions.push(`keyboard:${key}`) },
+    };
+    expect(await openPublicSettingsDialog(page as never)).toBe(modal);
+    expect(actions).toEqual(['button:visible', 'button:focus', 'keyboard:Enter', 'modal:visible']);
+  });
+
   const before = {
     width: 1280,
     height: 720,
@@ -62,6 +233,179 @@ describe('installed public rendering observations', () => {
     visiblePixels: 16,
   };
   const after = { ...before, width: 1600, height: 900 };
+
+  it.each([
+    { initiallyPaused: false, restoreReadFails: false },
+    { initiallyPaused: true, restoreReadFails: false },
+    { initiallyPaused: false, restoreReadFails: true },
+    { initiallyPaused: true, restoreReadFails: true },
+  ])(
+    'restores viewport paint before pause (paused=$initiallyPaused, read fails=$restoreReadFails)',
+    async ({ initiallyPaused, restoreReadFails }) => {
+      const state = {
+        overlayPaused: initiallyPaused,
+        videoPaused: initiallyPaused,
+        resized: false,
+        backingClearedWhilePaused: false,
+        backingClearCount: 0,
+        paintReads: 0,
+      };
+      const restoreReadStates: { overlayPaused: boolean; videoPaused: boolean }[] = [];
+      const screenshots: { path: string; overlayPaused: boolean; videoPaused: boolean }[] = [];
+      const video = {
+        get paused() {
+          return state.videoPaused;
+        },
+        pause() {
+          state.videoPaused = true;
+        },
+        async play() {
+          state.videoPaused = false;
+        },
+      };
+      const page = {
+        locator: () => ({
+          first: () => ({
+            evaluate: async (
+              fn: (element: typeof video, wasPaused?: boolean) => unknown,
+              arg?: boolean
+            ) => fn(video, arg),
+          }),
+        }),
+        evaluate: async (fn: unknown) => {
+          if (fn === readPublicOverlayPauseState) return state.overlayPaused;
+          if (fn === readPublicCanvasFrame) {
+            if (state.backingClearCount === 2) {
+              restoreReadStates.push({
+                overlayPaused: state.overlayPaused,
+                videoPaused: state.videoPaused,
+              });
+              if (restoreReadFails) throw new Error('Canvas read unavailable');
+            }
+            if (state.backingClearCount > 0 && !state.overlayPaused && !state.videoPaused)
+              state.paintReads++;
+            return {
+              frame: {
+                width: state.resized ? 960 : 1280,
+                height: state.resized ? 560 : 720,
+                active: 2,
+                dropped: 1,
+                visiblePixels: state.backingClearCount === 0 || state.paintReads >= 2 ? 16 : 0,
+              },
+              reason: null,
+              width: state.resized ? 960 : 1280,
+              height: state.resized ? 560 : 720,
+              dpr: 1,
+            };
+          }
+          throw new Error('Unexpected browser evaluation');
+        },
+        waitForFunction: async () => {},
+        keyboard: {
+          press: async () => {
+            state.overlayPaused = !state.overlayPaused;
+          },
+        },
+        screenshot: async ({ path }: { path: string }) => {
+          screenshots.push({
+            path,
+            overlayPaused: state.overlayPaused,
+            videoPaused: state.videoPaused,
+          });
+        },
+        setViewportSize: async ({ width }: { width: number }) => {
+          state.resized = width !== 1280;
+          state.backingClearCount++;
+          state.paintReads = 0;
+          if (state.resized && state.overlayPaused && state.videoPaused)
+            state.backingClearedWhilePaused = true;
+        },
+      };
+      const result = await observePublicResize(page as never, '/evidence', 0, {
+        width: 1280,
+        height: 720,
+      });
+      expect(state.backingClearedWhilePaused).toBe(true);
+      expect(state.backingClearCount).toBe(2);
+      expect(restoreReadStates).toHaveLength(restoreReadFails ? 1 : 2);
+      expect(restoreReadStates).toEqual(
+        Array.from({ length: restoreReadFails ? 1 : 2 }, () => ({
+          overlayPaused: false,
+          videoPaused: false,
+        }))
+      );
+      expect(result).toMatchObject({
+        status: restoreReadFails ? 'unverified' : 'passed',
+        before: { visiblePixels: 16 },
+        after: { visiblePixels: 16 },
+        samplingPhase: 'resumed-after-resize',
+        restoredOriginalState: !restoreReadFails,
+        canvasReadRestored: restoreReadFails
+          ? { reason: 'canvas-evaluation-failed' }
+          : { width: 1280, height: 720, visiblePixels: 16 },
+      });
+      expect(
+        screenshots.map(({ overlayPaused, videoPaused }) => [overlayPaused, videoPaused])
+      ).toEqual([
+        [true, true],
+        [false, false],
+      ]);
+      expect(state.overlayPaused).toBe(initiallyPaused);
+      expect(state.videoPaused).toBe(initiallyPaused);
+    }
+  );
+
+  it('reads separate HUD children even when parent text concatenates labels', () => {
+    class Canvas {
+      width = 1280;
+      height = 720;
+      getContext() {
+        return { getImageData: () => ({ data: [0, 0, 0, 255] }) };
+      }
+    }
+    const lines = ['Rcvd: 4 | Rndr: 4', 'Active: 2', 'Drop: 0'];
+    const realm = {
+      window: { devicePixelRatio: 1.25 },
+      HTMLCanvasElement: Canvas,
+      document: {
+        querySelector: (selector: string) =>
+          selector === '#yt-live-chat-overlay canvas'
+            ? new Canvas()
+            : { textContent: lines.join('') },
+        querySelectorAll: () => lines.map((textContent) => ({ textContent })),
+      },
+    };
+    const read = () => runInNewContext('(' + readPublicCanvasFrame.toString() + ')()', realm);
+    expect(read()).toEqual({
+      frame: { width: 1280, height: 720, active: 2, dropped: 0, visiblePixels: 1 },
+      reason: null,
+      width: 1280,
+      height: 720,
+      dpr: 1.25,
+    });
+    lines.splice(0, lines.length, 'Active: 2Drop: 0');
+    expect(read().reason).toBe('debug-counters-missing');
+    lines.splice(0, lines.length, 'Drop: 0', 'Active: 2');
+    realm.document.querySelector = (selector: string) =>
+      selector === '#yt-live-chat-overlay canvas'
+        ? new (class extends Canvas {
+            override getContext() {
+              return {
+                getImageData: () => {
+                  throw new Error('tainted');
+                },
+              };
+            }
+          })()
+        : { textContent: lines.join('') };
+    expect(read()).toMatchObject({
+      frame: null,
+      reason: 'canvas-pixel-read-failed',
+      width: 1280,
+      height: 720,
+      dpr: 1.25,
+    });
+  });
 
   it('requires changed backing geometry and still-visible paused comments', () => {
     expect(assessPublicResize(before, after)).toBeNull();

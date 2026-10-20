@@ -12,6 +12,7 @@ import type {
   BrowserContext,
   BrowserType,
   CDPSession,
+  Locator,
   Page,
   Request,
   Response,
@@ -28,20 +29,32 @@ import {
   isPublicImageUrl,
   isYouTubeHostError,
   readPublicCanvasFrame,
+  readPublicOverlayPauseState,
   readPublicPageBrowserState,
   readSurvivingPublicImageDraws,
   redactDiagnosticText,
   selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
-import type { PublicImageDraw, PublicImageResponse } from './live-rendering.ts';
+import type {
+  PublicCanvasFrame,
+  PublicCanvasRead,
+  PublicImageDraw,
+  PublicImageResponse,
+} from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
-import { loadUpgradeInputs, runManagerUpgrade } from './release-upgrade/upgrade.ts';
+import {
+  loadUpgradeInputs,
+  readUserscriptMetadata,
+  runManagerUpgrade,
+} from './release-upgrade/upgrade.ts';
 
 export { selectPublicSeekTarget };
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
+const SCRIPT_NAMESPACE = 'https://github.com/PiesP';
+const USER_SCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
 const GRACEFUL_PROCESS_EXIT_MS = 2_000;
 const PROCESS_EXIT_TIMEOUT_MS = 5_000;
@@ -243,6 +256,20 @@ export async function readBoundedPackagedResource(
   } finally {
     await handle.close();
   }
+}
+
+export async function readBundledUserscriptVersion(root: string): Promise<string> {
+  const bytes = await readBoundedPackagedResource(
+    join(root, 'dist/yt-live-chat-overlay.user.js'),
+    'userscript',
+    USER_SCRIPT_MAX_BYTES
+  );
+  const metadata = readUserscriptMetadata(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  assert.equal(metadata.name, SCRIPT_NAME, 'Bundled userscript name changed');
+  assert.equal(metadata.namespace, SCRIPT_NAMESPACE, 'Bundled userscript namespace changed');
+  assert.match(metadata.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u);
+  assert(metadata.grants.includes('unsafeWindow'), 'Bundled userscript lacks unsafeWindow grant');
+  return metadata.version;
 }
 
 async function readExpectedExtensionResources(root: string) {
@@ -676,12 +703,170 @@ export async function readPublicPageState(page: Page) {
   }));
 }
 
+type RealmContext = { id: number; uniqueId: string; auxData?: { frameId?: string } };
+
+export class PublicUserscriptRealm {
+  private readonly contexts = new Map<number, RealmContext>();
+  private session: CDPSession | null = null;
+  private selectedId: string | null = null;
+  private selectedSandboxMode: string | null = null;
+  private setupReason: string | null = null;
+  private readonly browserContext: BrowserContext;
+  private readonly page: Page;
+  private readonly version: string;
+
+  constructor(browserContext: BrowserContext, page: Page, version: string) {
+    this.browserContext = browserContext;
+    this.page = page;
+    this.version = version;
+  }
+
+  async start(): Promise<void> {
+    try {
+      const session = await this.browserContext.newCDPSession(this.page);
+      this.session = session;
+      session.on('Runtime.executionContextCreated', ({ context }) => {
+        this.contexts.set(context.id, context);
+        if (this.contexts.size > 32) {
+          const oldest = this.contexts.keys().next().value;
+          if (oldest !== undefined) this.contexts.delete(oldest);
+        }
+      });
+      session.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
+        this.contexts.delete(executionContextId);
+      });
+      session.on('Runtime.executionContextsCleared', () => this.contexts.clear());
+      await session.send('Runtime.enable');
+    } catch {
+      this.setupReason = 'public-image-cdp-unavailable';
+      await this.close();
+    }
+  }
+
+  private async evaluate<T>(id: string, expression: string): Promise<T> {
+    if (!this.session) throw new Error('CDP session unavailable');
+    const result = await this.session.send('Runtime.evaluate', {
+      uniqueContextId: id,
+      expression,
+      returnByValue: true,
+    });
+    if (result.exceptionDetails) throw new Error('CDP evaluation failed');
+    return result.result.value as T;
+  }
+
+  get sandboxMode(): string | null {
+    return this.selectedSandboxMode;
+  }
+
+  async selectAndInstall(): Promise<{ status: string; reason: string }> {
+    if (!this.session)
+      return { status: 'unproven', reason: this.setupReason ?? 'public-image-cdp-unavailable' };
+    let frameId: string;
+    try {
+      frameId = (await this.session.send('Page.getFrameTree')).frameTree.frame.id;
+    } catch {
+      return { status: 'unproven', reason: 'public-image-main-frame-unavailable' };
+    }
+    const candidates: { id: string; sandboxMode: string | null }[] = [];
+    const expression = `(() => {
+      const info = typeof GM_info === 'undefined' ? null : GM_info;
+      const handle = window.__ytChatOverlay;
+      return {
+        name: info?.script?.name ?? null,
+        version: info?.script?.version ?? null,
+        sandboxMode: info?.sandboxMode ?? null,
+        callable: typeof handle?.getSettings === 'function' && typeof handle?.applySettings === 'function'
+      };
+    })()`;
+    for (const entry of this.contexts.values()) {
+      if (entry.auxData?.frameId !== frameId) continue;
+      try {
+        const candidate = await this.evaluate<{
+          name: unknown;
+          version: unknown;
+          sandboxMode: unknown;
+          callable: unknown;
+        }>(entry.uniqueId, expression);
+        if (
+          candidate.name === SCRIPT_NAME &&
+          candidate.version === this.version &&
+          candidate.callable === true
+        )
+          candidates.push({
+            id: entry.uniqueId,
+            sandboxMode:
+              typeof candidate.sandboxMode === 'string' ? candidate.sandboxMode.slice(0, 32) : null,
+          });
+      } catch {
+        // Navigation may destroy a context between discovery and evaluation.
+      }
+    }
+    if (candidates.length !== 1)
+      return {
+        status: candidates.length ? 'ambiguous' : 'unproven',
+        reason: candidates.length ? 'public-image-realm-ambiguous' : 'public-image-realm-unproven',
+      };
+    const candidate = candidates[0];
+    if (candidate === undefined)
+      return { status: 'unproven', reason: 'public-image-realm-unproven' };
+    try {
+      await this.evaluate(candidate.id, `(${installPublicImageDrawProbe.toString()})()`);
+      this.selectedId = candidate.id;
+      this.selectedSandboxMode = candidate.sandboxMode;
+      return { status: 'ready', reason: 'public-image-realm-authenticated' };
+    } catch {
+      return { status: 'unproven', reason: 'public-image-probe-install-failed' };
+    }
+  }
+
+  async readDraws(): Promise<PublicImageDraw[]> {
+    if (this.selectedId === null) return [];
+    return this.evaluate<PublicImageDraw[]>(
+      this.selectedId,
+      'window.__ytPublicImageDraws?.slice(0, 16) ?? []'
+    );
+  }
+
+  async readSurvivors(): Promise<PublicImageDraw[]> {
+    if (this.selectedId === null) return [];
+    return this.evaluate<PublicImageDraw[]>(
+      this.selectedId,
+      `(${readSurvivingPublicImageDraws.toString()})()`
+    );
+  }
+
+  async close(): Promise<void> {
+    await this.session?.detach().catch(() => {});
+    this.session = null;
+    this.contexts.clear();
+    this.selectedId = null;
+    this.selectedSandboxMode = null;
+  }
+}
+
+/** Open the player-hover settings control through its keyboard-accessible path. */
+export async function openPublicSettingsDialog(page: Page): Promise<Locator> {
+  const button = page.locator('#yt-chat-overlay-settings-button');
+  await button.waitFor({ state: 'visible', timeout: 20_000 });
+  await button.focus();
+  await page.keyboard.press('Enter');
+  const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+  await modal.waitFor({ state: 'visible' });
+  return modal;
+}
+
+export async function closePublicSettingsDialog(page: Page, modal: Locator): Promise<void> {
+  await page.keyboard.press('Escape');
+  await modal.waitFor({ state: 'hidden' });
+}
+
 /** Exercise actual installed userscript output on public chat without changing site responses. */
-async function observePublicUserscriptMedia(
+export async function observePublicUserscriptMedia(
   page: Page,
   output: string,
   index: number,
-  imageResponses: PublicImageResponse[]
+  imageResponses: PublicImageResponse[],
+  realm: PublicUserscriptRealm
 ): Promise<{ image: WorkflowStep; resize: WorkflowStep }> {
   let image: WorkflowStep = {
     status: 'unverified',
@@ -689,134 +874,211 @@ async function observePublicUserscriptMedia(
     probeCapability: 'unproven',
     productVerdict: 'unverified',
   };
-  const originalShowAuthor = await page.evaluate(
-    () => window.__ytChatOverlay?.getSettings().showAuthor
-  );
+  let originalShowAuthor: boolean | undefined;
+  let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
+  let imagePhase: 'settings-ui' | 'resize' | 'realm-probe' | 'realm-read' | 'screenshot' =
+    'settings-ui';
+  let settingsAction = 'open';
   try {
-    if (!originalShowAuthor) throw new Error('Installed userscript settings unavailable');
-    await page.evaluate((showAuthor) => {
-      window.__ytChatOverlay?.applySettings({ showAuthor: { ...showAuthor, normal: true } });
-    }, originalShowAuthor);
-    await page
-      .waitForFunction(
-        () =>
-          (
-            window as Window & {
-              __ytPublicImageDraws?: PublicImageDraw[];
-            }
-          ).__ytPublicImageDraws?.length,
-        undefined,
-        { timeout: 15_000 }
-      )
-      .catch(() => null);
-    const draws = await page.evaluate(
-      () =>
-        (
-          window as Window & {
-            __ytPublicImageDraws?: PublicImageDraw[];
-          }
-        ).__ytPublicImageDraws?.slice(0, 16) ?? []
-    );
-    const survivingDraws = await page.evaluate(readSurvivingPublicImageDraws);
-    const assessed = assessPublicImage(survivingDraws, imageResponses);
-    if (assessed.status === 'passed') {
-      const imageScreenshot = 'live-' + index + '-public-image.png';
-      await page.screenshot({ path: join(output, imageScreenshot) });
-      const afterScreenshot = await page.evaluate(readSurvivingPublicImageDraws);
-      const finalAssessed = assessPublicImage(afterScreenshot, imageResponses);
-      image =
-        finalAssessed.status === 'passed' && finalAssessed.draw.url === assessed.draw.url
-          ? {
-              status: 'passed',
-              probeCapability: 'overlay-image-draw-observed',
-              productVerdict: 'visible-public-image-observed',
-              sourceType: finalAssessed.draw.sourceType,
-              sourceHost: new URL(finalAssessed.draw.url).hostname,
-              sourceSha256: createHash('sha256').update(finalAssessed.draw.url).digest('hex'),
-              naturalWidth: finalAssessed.draw.naturalWidth,
-              naturalHeight: finalAssessed.draw.naturalHeight,
-              pixelAlpha: finalAssessed.draw.pixelAlpha,
-              pixelX: finalAssessed.draw.pixelX,
-              pixelY: finalAssessed.draw.pixelY,
-              pixelRgba: finalAssessed.draw.pixelRgba,
-              responseStatus: finalAssessed.response.status,
-              responseContentType: finalAssessed.response.contentType,
-              screenshot: imageScreenshot,
-            }
-          : {
-              status: 'unverified',
-              reason: 'public-image-final-frame-unverified',
-              probeCapability: 'overlay-image-draw-observed',
-              productVerdict: 'unverified',
-              screenshot: imageScreenshot,
-            };
+    const modal = await openPublicSettingsDialog(page);
+    settingsAction = 'select-appearance';
+    await modal.locator('#tab-colors').click();
+    settingsAction = 'read-author-display';
+    const checkbox = modal.locator('input[name="showAuthor-normal"]');
+    originalShowAuthor = await checkbox.isChecked();
+    settingsAction = 'enable-author-display';
+    if (!originalShowAuthor) await checkbox.check();
+    settingsAction = 'save-author-display';
+    await closePublicSettingsDialog(page, modal);
+    imagePhase = 'resize';
+    const originalViewport = page.viewportSize();
+    if (originalViewport) {
+      resize = await observePublicResize(page, output, index, originalViewport);
     } else {
-      image = {
-        status: 'unverified',
-        reason: assessed.reason,
-        probeCapability: draws.length > 0 ? 'overlay-draw-observed' : 'unproven',
-        productVerdict: 'unverified',
-        drawCount: draws.length,
-        survivingDrawCount: survivingDraws.length,
-        imageResponseCount: imageResponses.length,
-      };
+      resize = { status: 'unverified', reason: 'viewport-unavailable' };
     }
-  } catch {
-    image = {
-      status: 'unverified',
-      reason: 'public-image-probe-error',
-      probeCapability: 'unproven',
-      productVerdict: 'unverified',
-    };
-  } finally {
-    if (originalShowAuthor) {
-      const restored = await page.evaluate((showAuthor) => {
-        window.__ytChatOverlay?.applySettings({ showAuthor });
-        const current = window.__ytChatOverlay?.getSettings().showAuthor;
-        return Object.entries(showAuthor).every(
-          ([key, value]) => current?.[key as keyof typeof current] === value
-        );
-      }, originalShowAuthor);
-      if (!restored) {
+    imagePhase = 'realm-probe';
+    const selected = await realm.selectAndInstall();
+    if (selected.status !== 'ready') {
+      image.reason = selected.reason;
+      image.probeCapability = selected.status;
+    } else {
+      imagePhase = 'realm-read';
+      const deadline = Date.now() + 20_000;
+      let draws: PublicImageDraw[] = [];
+      let survivingDraws: PublicImageDraw[] = [];
+      let assessed = assessPublicImage(survivingDraws, imageResponses);
+      do {
+        draws = await realm.readDraws();
+        survivingDraws = await realm.readSurvivors();
+        assessed = assessPublicImage(survivingDraws, imageResponses);
+        if (assessed.status === 'passed') break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } while (Date.now() < deadline);
+      if (assessed.status === 'passed') {
+        const imageScreenshot = 'live-' + index + '-public-image.png';
+        imagePhase = 'screenshot';
+        await page.screenshot({ path: join(output, imageScreenshot) });
+        imagePhase = 'realm-read';
+        const afterScreenshot = await realm.readSurvivors();
+        const finalAssessed = assessPublicImage(afterScreenshot, imageResponses);
+        image =
+          finalAssessed.status === 'passed' && finalAssessed.draw.url === assessed.draw.url
+            ? {
+                status: 'passed',
+                probeCapability: 'overlay-image-draw-observed',
+                sandboxMode: realm.sandboxMode,
+                productVerdict: 'visible-public-image-observed',
+                sourceType: finalAssessed.draw.sourceType,
+                sourceHost: new URL(finalAssessed.draw.url).hostname,
+                sourceSha256: createHash('sha256').update(finalAssessed.draw.url).digest('hex'),
+                naturalWidth: finalAssessed.draw.naturalWidth,
+                naturalHeight: finalAssessed.draw.naturalHeight,
+                pixelAlpha: finalAssessed.draw.pixelAlpha,
+                pixelX: finalAssessed.draw.pixelX,
+                pixelY: finalAssessed.draw.pixelY,
+                pixelRgba: finalAssessed.draw.pixelRgba,
+                responseStatus: finalAssessed.response.status,
+                responseContentType: finalAssessed.response.contentType,
+                screenshot: imageScreenshot,
+              }
+            : {
+                status: 'unverified',
+                reason: 'public-image-final-frame-unverified',
+                probeCapability: 'overlay-image-draw-observed',
+                sandboxMode: realm.sandboxMode,
+                productVerdict: 'unverified',
+                screenshot: imageScreenshot,
+              };
+      } else {
         image = {
           status: 'unverified',
-          reason: 'public-image-setting-restore-unverified',
-          probeCapability: image.probeCapability,
+          reason: assessed.reason,
+          probeCapability: draws.length > 0 ? 'overlay-draw-observed' : 'unproven',
+          sandboxMode: realm.sandboxMode,
           productVerdict: 'unverified',
+          drawCount: draws.length,
+          survivingDrawCount: survivingDraws.length,
+          imageResponseCount: imageResponses.length,
         };
       }
     }
+  } catch (error) {
+    image = {
+      status: 'unverified',
+      reason: `public-image-${imagePhase}-failed`,
+      probeCapability: 'unproven',
+      productVerdict: 'unverified',
+      errorType: error instanceof Error ? error.name : 'Error',
+      ...(imagePhase === 'settings-ui' ? { settingsAction } : {}),
+    };
+    if (imagePhase === 'settings-ui') {
+      const settingsErrorScreenshot = `live-${index}-settings-error.png`;
+      await page.screenshot({ path: join(output, settingsErrorScreenshot), timeout: 3_000 }).then(
+        () => {
+          image.settingsErrorScreenshot = settingsErrorScreenshot;
+        },
+        () => {}
+      );
+    }
+  } finally {
+    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+    let restorePhase = 'close-active-dialog';
+    let restoreErrorType: string | null = null;
+    let restored = originalShowAuthor === undefined;
+    try {
+      if (await modal.isVisible()) await closePublicSettingsDialog(page, modal);
+      if (originalShowAuthor !== undefined) {
+        restorePhase = 'open';
+        await openPublicSettingsDialog(page);
+        restorePhase = 'select-appearance';
+        await modal.locator('#tab-colors').click();
+        const checkbox = modal.locator('input[name="showAuthor-normal"]');
+        restorePhase = 'restore-author-display';
+        if ((await checkbox.isChecked()) !== originalShowAuthor)
+          await checkbox.setChecked(originalShowAuthor);
+        restorePhase = 'save-author-display';
+        await closePublicSettingsDialog(page, modal);
+        restorePhase = 'reopen';
+        await openPublicSettingsDialog(page);
+        restorePhase = 'verify-author-display';
+        await modal.locator('#tab-colors').click();
+        const saved = (await checkbox.isChecked()) === originalShowAuthor;
+        restorePhase = 'close-verification-dialog';
+        await closePublicSettingsDialog(page, modal);
+        restored = saved;
+      }
+    } catch (error) {
+      restored = false;
+      restoreErrorType = error instanceof Error ? error.name : 'Error';
+      if (await modal.isVisible().catch(() => false))
+        await closePublicSettingsDialog(page, modal).catch(() => {});
+    }
+    if (originalShowAuthor !== undefined || !restored) {
+      image.settingRestore = {
+        status: restored ? 'passed' : 'unverified',
+        ...(restored ? {} : { phase: restorePhase, errorType: restoreErrorType }),
+      };
+      if (!restored && image.status === 'passed') {
+        image.primaryObservation = { status: image.status, productVerdict: image.productVerdict };
+        image.status = 'unverified';
+        image.reason = 'public-image-setting-restore-unverified';
+        image.productVerdict = 'unverified';
+      }
+    }
   }
+  return { image, resize };
+}
 
-  const originalViewport = page.viewportSize();
-  if (!originalViewport) {
-    return { image, resize: { status: 'unverified', reason: 'viewport-unavailable' } };
-  }
+export async function observePublicResize(
+  page: Page,
+  output: string,
+  index: number,
+  originalViewport: { width: number; height: number }
+): Promise<WorkflowStep> {
   const originalVideoPaused = await page
     .locator('video')
     .first()
     .evaluate((element) => (element as HTMLVideoElement).paused);
+  const originalOverlayPaused = await page.evaluate(readPublicOverlayPauseState);
+  if (originalOverlayPaused === null)
+    return { status: 'unverified', reason: 'overlay-pause-state-unavailable' };
   let resized = false;
-  let overlayPaused = false;
-  let resize: WorkflowStep;
+  let overlayPaused = originalOverlayPaused;
+  let videoPaused = originalVideoPaused;
+  let originalCanvasFrame: PublicCanvasFrame | null = null;
+  let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
   try {
     await page
-      .locator('video')
-      .first()
-      .evaluate((element) => (element as HTMLVideoElement).pause());
-    await page.keyboard.press('Control+Space');
-    overlayPaused = true;
-    await page
       .waitForFunction(
-        () =>
-          /\bActive:\s*[1-9]\d*\b/u.test(
-            document.querySelector('#yt-chat-overlay-debug')?.textContent ?? ''
-          ),
+        () => {
+          const lines = Array.from(document.querySelectorAll('#yt-chat-overlay-debug > div'));
+          return lines.some((line) => /^Active:\s*[1-9]\d*\b/u.test(line.textContent ?? ''));
+        },
         undefined,
-        { timeout: 10_000 }
+        { timeout: 20_000 }
       )
       .catch(() => null);
+    if (!videoPaused) {
+      await page
+        .locator('video')
+        .first()
+        .evaluate((element) => (element as HTMLVideoElement).pause());
+      videoPaused = true;
+    }
+    if (!overlayPaused) {
+      await page.keyboard.press('Control+Space');
+      overlayPaused = true;
+    }
+    if ((await page.evaluate(readPublicOverlayPauseState)) !== true)
+      throw new Error('Overlay pause did not engage');
+    const heldVideoPaused = await page
+      .locator('video')
+      .first()
+      .evaluate((element) => (element as HTMLVideoElement).paused);
+    if (!heldVideoPaused) throw new Error('Video pause did not engage');
     const before = await page.evaluate(readPublicCanvasFrame);
+    originalCanvasFrame = before.frame;
     const beforeScreenshot = 'live-' + index + '-before-resize.png';
     await page.screenshot({ path: join(output, beforeScreenshot) });
     const nextViewport = {
@@ -829,7 +1091,23 @@ async function observePublicUserscriptMedia(
     };
     await page.setViewportSize(nextViewport);
     resized = true;
-    if (before) {
+    await page.keyboard.press('Control+Space');
+    overlayPaused = false;
+    if ((await page.evaluate(readPublicOverlayPauseState)) !== false)
+      throw new Error('Overlay pause did not disengage');
+    const videoResumed = await page
+      .locator('video')
+      .first()
+      .evaluate(async (element) => {
+        const video = element as HTMLVideoElement;
+        try {
+          await video.play();
+          return !video.paused;
+        } catch {
+          return false;
+        }
+      });
+    if (before.frame) {
       await page
         .waitForFunction(
           ({ width, height }) => {
@@ -839,42 +1117,156 @@ async function observePublicUserscriptMedia(
               (Math.abs(canvas.width - width) >= 32 || Math.abs(canvas.height - height) >= 32)
             );
           },
-          { width: before.width, height: before.height },
+          { width: before.frame.width, height: before.frame.height },
           { timeout: 8_000 }
         )
         .catch(() => null);
     }
-    const after = await page.evaluate(readPublicCanvasFrame);
+    let after = await page.evaluate(readPublicCanvasFrame);
+    const paintDeadline = Date.now() + 8_000;
+    while (videoResumed && (after.frame?.visiblePixels ?? 0) < 1 && Date.now() < paintDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      after = await page.evaluate(readPublicCanvasFrame);
+    }
     const afterScreenshot = 'live-' + index + '-after-resize.png';
     await page.screenshot({ path: join(output, afterScreenshot) });
-    const reason = assessPublicResize(before, after);
+    const reason = !videoResumed
+      ? 'video-resume-unavailable'
+      : (before.reason ?? after.reason ?? assessPublicResize(before.frame, after.frame));
     resize = {
       status: reason === null ? 'passed' : 'unverified',
       reason,
-      before,
-      after,
+      before: before.frame,
+      after: after.frame,
+      canvasReadBefore: {
+        reason: before.reason,
+        width: before.width,
+        height: before.height,
+        dpr: before.dpr,
+      },
+      canvasReadAfter: {
+        reason: after.reason,
+        width: after.width,
+        height: after.height,
+        dpr: after.dpr,
+      },
       viewportBefore: originalViewport,
       viewportAfter: nextViewport,
       beforeScreenshot,
       afterScreenshot,
-      scope: 'one paused public resize; no capacity-exhaustion or message-identity claim',
-      observation: 'backing geometry and nonempty canvas after actual resize',
+      samplingPhase: 'resumed-after-resize',
+      beforeHeld: { overlayPaused: true, videoPaused: heldVideoPaused },
+      afterResumed: { overlayPaused: false, videoPaused: !videoResumed },
+      scope:
+        'one held-before and resumed-after public resize; no capacity-exhaustion or message-identity claim',
+      observation: 'backing geometry and nonempty canvas after resumed repaint',
       messagePreservationVerdict: 'unverified',
       messagePreservationReason: 'visible-message-identity-not-observed',
     };
   } catch {
     resize = { status: 'unverified', reason: 'public-resize-probe-error' };
   } finally {
-    if (resized) await page.setViewportSize(originalViewport);
-    if (overlayPaused) await page.keyboard.press('Control+Space');
-    if (!originalVideoPaused)
-      await page
+    let restored = true;
+    if (resized)
+      await page.setViewportSize(originalViewport).catch(() => {
+        restored = false;
+      });
+    let restoredCanvas: PublicCanvasRead | null = null;
+    let restoredCanvasReadFailed = false;
+    if (resized && restored) {
+      // Both viewport changes clear the canvas backing. Repaint while the
+      // renderer and video run, before restoring an originally paused page.
+      if (overlayPaused) {
+        await page.keyboard.press('Control+Space').then(
+          () => {
+            overlayPaused = false;
+          },
+          () => {
+            restored = false;
+          }
+        );
+      }
+      const videoRunning = await page
         .locator('video')
         .first()
-        .evaluate((element) => (element as HTMLVideoElement).play())
-        .catch(() => {});
+        .evaluate(async (element) => {
+          const video = element as HTMLVideoElement;
+          if (video.paused) await video.play().catch(() => {});
+          return !video.paused;
+        })
+        .catch(() => false);
+      const expectedFrame = originalCanvasFrame;
+      if (!videoRunning || !expectedFrame) restored = false;
+      if (restored && expectedFrame) {
+        const deadline = Date.now() + 8_000;
+        do {
+          restoredCanvas = await page.evaluate(readPublicCanvasFrame).catch(() => {
+            restoredCanvasReadFailed = true;
+            return null;
+          });
+          if (!restoredCanvas) break;
+          const frame = restoredCanvas.frame;
+          if (
+            frame?.width === expectedFrame.width &&
+            frame.height === expectedFrame.height &&
+            frame.visiblePixels > 0
+          )
+            break;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        } while (Date.now() < deadline);
+        const frame = restoredCanvas?.frame;
+        if (
+          frame?.width !== expectedFrame.width ||
+          frame.height !== expectedFrame.height ||
+          frame.visiblePixels < 1
+        )
+          restored = false;
+      }
+    }
+    if (overlayPaused !== originalOverlayPaused) {
+      await page.keyboard.press('Control+Space').then(
+        () => {
+          overlayPaused = originalOverlayPaused;
+        },
+        () => {
+          restored = false;
+        }
+      );
+    }
+    const finalOverlayPaused = await page.evaluate(readPublicOverlayPauseState).catch(() => null);
+    if (finalOverlayPaused !== originalOverlayPaused) restored = false;
+    const finalVideoPaused = await page
+      .locator('video')
+      .first()
+      .evaluate(async (element, wasPaused) => {
+        const video = element as HTMLVideoElement;
+        if (wasPaused) video.pause();
+        else await video.play().catch(() => {});
+        return video.paused;
+      }, originalVideoPaused)
+      .catch(() => null);
+    if (finalVideoPaused !== originalVideoPaused) restored = false;
+    if (resized)
+      resize.canvasReadRestored = restoredCanvas
+        ? {
+            reason: restoredCanvas.reason,
+            width: restoredCanvas.width,
+            height: restoredCanvas.height,
+            dpr: restoredCanvas.dpr,
+            visiblePixels: restoredCanvas.frame?.visiblePixels ?? null,
+          }
+        : {
+            reason: restoredCanvasReadFailed
+              ? 'canvas-evaluation-failed'
+              : 'canvas-repaint-unverified',
+          };
+    resize.restoredOriginalState = restored;
+    if (!restored) {
+      resize.status = 'unverified';
+      resize.reason = 'public-resize-state-restore-unverified';
+    }
   }
-  return { image, resize };
+  return resize;
 }
 
 /** Observe a real watch page without supplying application code or site responses. */
@@ -884,6 +1276,7 @@ async function inspectLivePage(
   output: string,
   index: number,
   installation: 'extension' | 'userscript',
+  userscriptVersion: string,
   nextUrl: string = url,
   extensionResources: {
     extensionId: string;
@@ -892,7 +1285,8 @@ async function inspectLivePage(
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
-  if (installation === 'userscript') await page.addInitScript(installPublicImageDrawProbe);
+  const realm = new PublicUserscriptRealm(context, page, userscriptVersion);
+  if (installation === 'userscript') await realm.start();
   const imageResponses: PublicImageResponse[] = [];
   page.on('response', (response) => {
     if (installation !== 'userscript') return;
@@ -977,12 +1371,7 @@ async function inspectLivePage(
         };
       });
     observation.phase = 'settings';
-    const settingsButton = page.locator('#yt-chat-overlay-settings-button');
-    await settingsButton.waitFor({ state: 'visible', timeout: 20_000 });
-    await settingsButton.focus();
-    await page.keyboard.press('Enter');
-    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
-    await modal.waitFor({ state: 'visible' });
+    const modal = await openPublicSettingsDialog(page);
     const fontSize = modal.locator('input[name="fontSize"]');
     observation.fontSize = Number(await fontSize.inputValue());
     await page.keyboard.press('Escape');
@@ -1026,7 +1415,7 @@ async function inspectLivePage(
     };
     if (installation === 'userscript') {
       observation.phase = 'public-media';
-      const media = await observePublicUserscriptMedia(page, output, index, imageResponses);
+      const media = await observePublicUserscriptMedia(page, output, index, imageResponses, realm);
       observation.workflow.image = media.image;
       observation.workflow.resize = media.resize;
     }
@@ -1217,6 +1606,7 @@ async function inspectLivePage(
                 : `${observation.phase}-error`;
   } finally {
     clearTimeout(deadline);
+    await realm.close();
     if (deadlineCleanup) await deadlineCleanup;
     if (finishResourceCapture) {
       assert(extensionResources);
@@ -1608,6 +1998,10 @@ export async function runChromeInstallation({
       installation === 'extension' && liveUrls.length > 0
         ? { extensionId, expected: await readExpectedExtensionResources(root) }
         : null;
+    const userscriptVersion =
+      installation === 'userscript' && liveUrls.length > 0
+        ? (upgradeInputs?.candidate.version ?? (await readBundledUserscriptVersion(root)))
+        : '';
     for (const [index, url] of liveUrls.entries()) {
       const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
       result.live.push(
@@ -1617,6 +2011,7 @@ export async function runChromeInstallation({
           output,
           index,
           installation,
+          userscriptVersion,
           nextUrl,
           extensionResources
         )
