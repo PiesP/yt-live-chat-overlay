@@ -39,6 +39,48 @@ const options = {
 };
 
 describe('collision-aware message reflow', () => {
+  it.each([
+    ['top', 1000],
+    ['scroll', 200],
+    ['reverse', 200],
+  ] as const)(
+    'keeps an on-screen %s message when an earlier future reservation conflicts at capacity',
+    (mode, placementWaitMs) => {
+      const visible = computeMessageMotionPlan({ ...input, mode });
+      const future = computeMessageMotionPlan({ ...input, mode, placementWaitMs });
+      expect(visible.viewportEntryTime).toBeLessThanOrEqual(options.now);
+      expect(visible.visibleExitTime).toBeGreaterThan(options.now);
+      expect(future.viewportEntryTime).toBeGreaterThan(options.now);
+      const result = reconcileMessagePlacements(
+        [
+          { message: 'future', laneIndex: 0, height: 20, motion: future },
+          { message: 'visible', laneIndex: 0, height: 20, motion: visible },
+        ],
+        { ...options, mode, laneCount: 1, viewportHeight: 20 }
+      );
+      expect(result.placements.map(({ message }) => message)).toEqual(['visible']);
+      expect(result.dropped).toEqual([{ message: 'future', reason: 'reflow_capacity' }]);
+    }
+  );
+
+  it('moves a displaced on-screen message before admitting a legal future reservation', () => {
+    const visible = computeMessageMotionPlan({ ...input, mode: 'top' });
+    const future = computeMessageMotionPlan({ ...input, mode: 'top', placementWaitMs: 1000 });
+    const result = reconcileMessagePlacements(
+      [
+        { message: 'visible-retained', laneIndex: 0, height: 20, motion: visible },
+        { message: 'visible-displaced', laneIndex: 2, height: 20, motion: visible },
+        { message: 'future', laneIndex: 1, height: 20, motion: future },
+      ],
+      { ...options, laneCount: 2, viewportHeight: 40 }
+    );
+    expect(result.placements.map(({ message, laneIndex }) => ({ message, laneIndex }))).toEqual([
+      { message: 'visible-retained', laneIndex: 0 },
+      { message: 'visible-displaced', laneIndex: 1 },
+    ]);
+    expect(result.dropped).toEqual([{ message: 'future', reason: 'reflow_capacity' }]);
+  });
+
   it('retains exact adjacent rows at a fractional safe-zone origin', () => {
     const motion = computeMessageMotionPlan({ ...input, mode: 'top' });
     const result = reconcileMessagePlacements(

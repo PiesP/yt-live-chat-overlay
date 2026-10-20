@@ -107,7 +107,6 @@ export function reconcileMessagePlacements<T>(
   const occupants = new Map<number, ReflowPlacement<T>[]>();
   const scratch = new Set<ReflowPlacement<T>>();
   const dropped: Array<{ message: T; reason: 'oversized' | 'reflow_capacity' }> = [];
-  const displaced: ReflowCandidate<T>[] = [];
   const tryLane = (
     candidate: ReflowCandidate<T>,
     laneIndex: number,
@@ -154,29 +153,42 @@ export function reconcileMessagePlacements<T>(
     }
     return true;
   };
-  for (const candidate of candidates) {
-    const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
-    if (slotCount > options.laneCount) {
-      dropped.push({ message: candidate.message, reason: 'oversized' });
-    } else if (!tryLane(candidate, candidate.laneIndex, slotCount)) {
-      displaced.push(candidate);
-    }
-  }
-  for (const candidate of displaced) {
-    const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
-    const maxLane = options.laneCount - slotCount;
-    let placed = false;
-    // Scan every actual lane before declaring capacity unavailable. Indexed
-    // occupants bound pair checks to each candidate's vertical block.
-    for (let offset = 0; offset <= maxLane; offset++) {
-      const lane = options.mode === 'bottom' ? maxLane - offset : offset;
-      if (tryLane(candidate, lane, slotCount)) {
-        placed = true;
-        break;
+  const placeGroup = (group: readonly ReflowCandidate<T>[]) => {
+    const displaced: ReflowCandidate<T>[] = [];
+    for (const candidate of group) {
+      const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
+      if (slotCount > options.laneCount) {
+        dropped.push({ message: candidate.message, reason: 'oversized' });
+      } else if (!tryLane(candidate, candidate.laneIndex, slotCount)) {
+        displaced.push(candidate);
       }
     }
-    if (!placed) dropped.push({ message: candidate.message, reason: 'reflow_capacity' });
-  }
+    for (const candidate of displaced) {
+      const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
+      const maxLane = options.laneCount - slotCount;
+      let placed = false;
+      // Scan every actual lane before declaring capacity unavailable. Indexed
+      // occupants bound pair checks to each candidate's vertical block.
+      for (let offset = 0; offset <= maxLane; offset++) {
+        const lane = options.mode === 'bottom' ? maxLane - offset : offset;
+        if (tryLane(candidate, lane, slotCount)) {
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) dropped.push({ message: candidate.message, reason: 'reflow_capacity' });
+    }
+  };
+  // Give already on-screen messages their legal lanes and alternatives before
+  // reserving space for entries outside the viewport. Each group stays ordered.
+  const visible = candidates.filter(
+    ({ motion }) => motion.viewportEntryTime <= options.now && motion.visibleExitTime > options.now
+  );
+  const notVisible = candidates.filter(
+    ({ motion }) => motion.viewportEntryTime > options.now || motion.visibleExitTime <= options.now
+  );
+  placeGroup(visible);
+  placeGroup(notVisible);
   return { placements, dropped };
 }
 
