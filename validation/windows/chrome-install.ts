@@ -229,7 +229,7 @@ export function diagnoseUnsafeOriginConsole(
 ) {
   const match =
     text.length <= 4096
-      ? /^Unsafe attempt to load URL (\S{1,2048}) from frame with URL (\S{1,2048}) Domains, protocols and ports must match\./u.exec(
+      ? /^Unsafe attempt to load URL (\S{1,2048}) from frame with URL (\S{1,2048})\. Domains, protocols and ports must match\./u.exec(
           text
         )
       : null;

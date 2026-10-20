@@ -124,7 +124,7 @@ describe('installed Chrome acceptance outcomes', () => {
   it('correlates only bounded owned-resource warnings without recording URL secrets', () => {
     const id = 'a'.repeat(32);
     const frame = 'https://www.youtube.com/watch?v=private&sig=secret';
-    const warning = `Unsafe attempt to load URL chrome-extension://${id}/workers/renderer.js from frame with URL ${frame} Domains, protocols and ports must match.`;
+    const warning = `Unsafe attempt to load URL chrome-extension://${id}/workers/renderer.js from frame with URL ${frame}. Domains, protocols and ports must match.\n`;
     const link = diagnoseUnsafeOriginConsole(warning, frame, id);
     expect(link).toEqual({
       currentDocumentSha256: createHash('sha256').update(frame).digest('hex'),
@@ -132,6 +132,8 @@ describe('installed Chrome acceptance outcomes', () => {
       reportedFrameDocumentSha256: createHash('sha256').update(frame).digest('hex'),
     });
     expect(JSON.stringify(link)).not.toMatch(/private|secret/u);
+    expect(diagnoseUnsafeOriginConsole(warning.replace('. Domains,', ' Domains,'), frame, id))
+      .toMatchObject({ reportedFrameDocumentSha256: null });
     expect(
       diagnoseUnsafeOriginConsole(
         warning.replace('workers/renderer.js', 'workers/other.js'),
