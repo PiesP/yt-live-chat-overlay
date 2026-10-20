@@ -403,7 +403,17 @@ export async function beginConnectionAllowlistReportCapture(page: Page, extensio
     if (!installed) return;
     let state: ReturnType<typeof drainConnectionAllowlistObserver>;
     try {
-      state = await page.evaluate(drainConnectionAllowlistObserver);
+      const outcome = await Promise.race([
+        page
+          .evaluate(drainConnectionAllowlistObserver)
+          .then((value) => ({ kind: 'result' as const, value })),
+        delay(RESOURCE_BODY_TIMEOUT_MS).then(() => ({ kind: 'timeout' as const })),
+      ]);
+      if (outcome.kind === 'timeout') {
+        drains.push({ navigation, status: 'drain-timeout' });
+        return;
+      }
+      state = outcome.value;
     } catch {
       drains.push({ navigation, status: 'drain-error' });
       return;
@@ -452,7 +462,7 @@ export async function beginConnectionAllowlistReportCapture(page: Page, extensio
     overflow = Math.min(65_535, overflow + Math.max(0, state.records.length - POLICY_REPORT_LIMIT));
   };
   const finish = () => ({
-    status: drains.some((item) => /error|missing|invalid/u.test(item.status))
+    status: drains.some((item) => /error|missing|invalid|timeout/u.test(item.status))
       ? ('unverified' as const)
       : records.length > 0
         ? ('observed' as const)
@@ -464,6 +474,36 @@ export async function beginConnectionAllowlistReportCapture(page: Page, extensio
     drains,
   });
   return { drain, finish };
+}
+
+/** Attribute policy reports to the document only after its main-frame navigation commits. */
+export function beginCommittedPolicyNavigation(page: Page) {
+  let navigating = false;
+  let current = 'initial-watch';
+  let expectedDocumentSha256: string | null = null;
+  const onFrameNavigated = (frame: ReturnType<Page['mainFrame']>) => {
+    if (navigating && frame === page.mainFrame()) {
+      let committedDocumentSha256: string | null = null;
+      try {
+        committedDocumentSha256 = publicWatchDocumentSha256(frame.url());
+      } catch {
+        // A committed document without a valid public watch identity remains unknown.
+      }
+      current =
+        expectedDocumentSha256 && committedDocumentSha256 === expectedDocumentSha256
+          ? 'next-watch'
+          : 'unknown';
+    }
+  };
+  page.on('framenavigated', onFrameNavigated);
+  return {
+    beginNextNavigation: (expectedUrl: string) => {
+      expectedDocumentSha256 = publicWatchDocumentSha256(expectedUrl);
+      navigating = true;
+    },
+    current: () => current,
+    stop: () => page.off('framenavigated', onFrameNavigated),
+  };
 }
 
 function safeRequestResourceType(request: Request) {
@@ -1607,6 +1647,7 @@ async function inspectLivePage(
   const policyReportCapture = extensionResources
     ? await beginConnectionAllowlistReportCapture(page, extensionResources.extensionId)
     : null;
+  const policyNavigation = policyReportCapture ? beginCommittedPolicyNavigation(page) : null;
   let deadlineReached = false;
   let deadlineCleanup: Promise<unknown> | undefined;
   const screenshot = `live-${index}.png`;
@@ -1811,7 +1852,9 @@ async function inspectLivePage(
       seek.selectionRange = seekRange;
     }
     observation.phase = 'navigation-transition';
-    await policyReportCapture?.drain(activeNavigation);
+    if (policyReportCapture && policyNavigation)
+      await policyReportCapture.drain(policyNavigation.current());
+    policyNavigation?.beginNextNavigation(nextUrl);
     activeNavigation = 'next-watch';
     const diagnosticStart = workerDiagnostics.length;
     await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
@@ -1888,8 +1931,9 @@ async function inspectLivePage(
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
+    policyNavigation?.stop();
     if (policyReportCapture) {
-      await policyReportCapture.drain(activeNavigation);
+      await policyReportCapture.drain(policyNavigation?.current() ?? 'initial-watch');
       observation.policyReports = policyReportCapture.finish();
     }
     if (finishResourceCapture) {

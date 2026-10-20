@@ -30,6 +30,7 @@ const {
   compareOwnedExtensionResourceBody,
   beginOwnedExtensionResourceCapture,
   beginConnectionAllowlistReportCapture,
+  beginCommittedPolicyNavigation,
   installConnectionAllowlistObserver,
   drainConnectionAllowlistObserver,
   readBoundedPackagedResource,
@@ -224,6 +225,96 @@ describe('installed Chrome acceptance outcomes', () => {
     await capture.drain('initial-watch');
     expect(capture.finish()).toMatchObject({ status: 'unverified', records: [] });
     expect(JSON.stringify(capture.finish())).not.toContain('private');
+  });
+
+  it('bounds a never-settling policy drain and marks its evidence unverified', async () => {
+    vi.useFakeTimers();
+    try {
+      const page = {
+        addInitScript: vi.fn(async () => {}),
+        evaluate: vi.fn(() => new Promise(() => {})),
+      } as unknown as Page;
+      const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+      const draining = capture.drain('initial-watch');
+      await vi.advanceTimersByTimeAsync(3_000);
+      await draining;
+      expect(capture.finish()).toMatchObject({
+        status: 'unverified',
+        drains: [{ navigation: 'initial-watch', status: 'drain-timeout' }],
+        records: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a policy drain that resolves after its bounded result was saved', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveEvaluate!: (value: unknown) => void;
+      const page = {
+        addInitScript: vi.fn(async () => {}),
+        evaluate: vi.fn(
+          () =>
+            new Promise((resolve) => {
+              resolveEvaluate = resolve;
+            })
+        ),
+      } as unknown as Page;
+      const capture = await beginConnectionAllowlistReportCapture(page, 'a'.repeat(32));
+      const draining = capture.drain('initial-watch');
+      await vi.advanceTimersByTimeAsync(3_000);
+      await draining;
+      const before = JSON.stringify(capture.finish());
+      resolveEvaluate({
+        status: 'supported',
+        overflow: 0,
+        records: [
+          {
+            documentUrl: 'https://www.youtube.com/watch?v=private',
+            documentElapsedMs: 1,
+            ownedResourcePath: 'page-script.js',
+            ownedExtensionOriginOnly: false,
+            disposition: 'report',
+          },
+        ],
+      });
+      await Promise.resolve();
+      expect(JSON.stringify(capture.finish())).toBe(before);
+      expect(before).not.toContain('private');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('attributes reports to the last committed main-frame document after navigation failure', async () => {
+    const page = new EventEmitter();
+    const mainFrame = { url: () => 'https://www.youtube.com/watch?v=next' };
+    Object.assign(page, { mainFrame: () => mainFrame });
+    const navigation = beginCommittedPolicyNavigation(page as unknown as Page);
+    navigation.beginNextNavigation('https://www.youtube.com/watch?v=next');
+    const failedGoto = async (committed: boolean) => {
+      if (committed) page.emit('framenavigated', mainFrame);
+      throw new Error('navigation failed');
+    };
+    await expect(failedGoto(false)).rejects.toThrow('navigation failed');
+    page.emit('framenavigated', {});
+    expect(navigation.current()).toBe('initial-watch');
+    await expect(failedGoto(true)).rejects.toThrow('navigation failed');
+    expect(navigation.current()).toBe('next-watch');
+    navigation.stop();
+    expect(page.listenerCount('framenavigated')).toBe(0);
+  });
+
+  it('leaves a committed unexpected document unattributed', () => {
+    const page = new EventEmitter();
+    const mainFrame = { url: () => 'https://www.youtube.com/watch?v=unrelated' };
+    Object.assign(page, { mainFrame: () => mainFrame });
+    const navigation = beginCommittedPolicyNavigation(page as unknown as Page);
+    navigation.beginNextNavigation('https://www.youtube.com/watch?v=next');
+    page.emit('framenavigated', mainFrame);
+    expect(navigation.current()).toBe('unknown');
+    navigation.stop();
   });
   it('reads the installed script version from a bounded bundle without a source package manifest', async () => {
     const { root } = await fixture();
