@@ -980,16 +980,20 @@ export class FirefoxBidiSession {
     return this.#timeoutProbe;
   }
 
-  async evaluateJson(expression: string): Promise<unknown> {
+  async evaluateJson(expression: string, timeoutMs?: number): Promise<unknown> {
     const response = await this.command<{
       type?: string;
       exceptionDetails?: { text?: string };
       result?: { type?: string; value?: string };
-    }>('script.evaluate', {
-      awaitPromise: true,
-      expression: `Promise.resolve(${expression}).then((value) => JSON.stringify(value))`,
-      target: { context: this.context },
-    });
+    }>(
+      'script.evaluate',
+      {
+        awaitPromise: true,
+        expression: `Promise.resolve(${expression}).then((value) => JSON.stringify(value))`,
+        target: { context: this.context },
+      },
+      timeoutMs
+    );
     if (response.type === 'exception') {
       throw new Error(
         `Firefox page evaluation failed: ${response.exceptionDetails?.text ?? 'unknown exception'}`
@@ -1001,6 +1005,10 @@ export class FirefoxBidiSession {
       throw new Error(`Firefox page evaluation returned ${remote.type}, expected a JSON string`);
     }
     return JSON.parse(remote.value);
+  }
+
+  abandonAfterAdmissionTimeout() {
+    this.#unresponsive = true;
   }
 
   async waitFor(expression: string, description: string, timeoutMs = COMMAND_TIMEOUT_MS) {

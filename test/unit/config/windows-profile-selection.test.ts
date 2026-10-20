@@ -47,6 +47,7 @@ it('selects both native TypeScript entrypoints and their installation helper gra
     'validation/windows/natural-chrome.ts',
     'validation/windows/profile.ts',
     'validation/windows/firefox-install.ts',
+    'validation/windows/native-ad-skip.ts',
     'validation/windows/live-duration.ts',
   ]) {
     expect(profile.installation?.assets).toContain(helper);
