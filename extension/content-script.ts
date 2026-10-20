@@ -20,8 +20,7 @@
  * explicitly instead of silently dropping a required relay operation.
  */
 
-import { createLogger } from '@util/logging';
-
+import { createLogger } from '../src/util/logging';
 import { loadPackagedWorkerSource } from './worker-source-loader';
 
 declare const __CHROME_NATIVE_BOOTSTRAP__: boolean;
