@@ -22,6 +22,8 @@ const {
   selectPublicSeekTarget,
 } = firefoxInstallModule;
 const {
+  FirefoxBidiCommandTimeout,
+  FirefoxBidiSession,
   buildFirefoxLaunchArguments,
   cleanupFirefoxResources,
   combineFirefoxCloseFailures,
@@ -37,6 +39,32 @@ const {
 } = firefoxBidiModule;
 
 const temporaryDirectories: string[] = [];
+
+function createBidiSession(onSend: (message: { id: number; method: string }) => void) {
+  const listeners = new Map<string, (event: { data: string }) => void>();
+  const socket = {
+    readyState: WebSocket.OPEN,
+    addEventListener: (name: string, listener: (event: { data: string }) => void) =>
+      listeners.set(name, listener),
+    send: (payload: string) => onSend(JSON.parse(payload)),
+  };
+  const session = new FirefoxBidiSession({
+    child: { exitCode: null, signalCode: null } as never,
+    socket: socket as never,
+    root: '/task',
+    profileDir: '/task/.firefox-install-profile-test',
+    ownership: {
+      executablePath: '/test/firefox.exe',
+      profileDir: '/task/.firefox-install-profile-test',
+      spawnedAt: Date.now(),
+    },
+  });
+  return {
+    session,
+    respond: (message: Record<string, unknown>) =>
+      listeners.get('message')?.({ data: JSON.stringify(message) }),
+  };
+}
 
 async function createBundle(): Promise<{ output: string; root: string }> {
   const root = await mkdtemp(join(tmpdir(), 'yt-firefox-profile-test-'));
@@ -58,6 +86,9 @@ function createSession(
     adAtSeek?: boolean;
     missingContentIdentity?: boolean;
     durationConflict?: boolean;
+    timeoutOnFirstLive?: boolean;
+    probeUnresponsive?: boolean;
+    timeoutFixture?: boolean;
   } = {}
 ) {
   const calls: string[] = [];
@@ -69,12 +100,36 @@ function createSession(
   const session = {
     context: 'owned-context',
     command: vi.fn(async (_method: string, _params?: unknown) => ({})),
+    probeAfterTimeout: vi.fn(async () => {
+      calls.push('probe');
+      return {
+        socketState: 'open' as const,
+        childExitCode: null,
+        childSignal: null,
+        commands: [
+          {
+            method: 'session.status' as const,
+            outcome: options.probeUnresponsive ? ('timeout' as const) : ('response' as const),
+            elapsedMs: 2_000,
+          },
+          {
+            method: 'browsingContext.getTree' as const,
+            outcome: options.probeUnresponsive ? ('timeout' as const) : ('response' as const),
+            elapsedMs: 2_000,
+          },
+        ],
+        unresponsive: options.probeUnresponsive ?? false,
+      };
+    }),
     browserName: 'Firefox',
     browserVersion: '155.0.1',
     platformName: 'windows',
     pageErrors,
     pageLogs,
-    captureScreenshot: vi.fn(async () => Buffer.from('screenshot')),
+    captureScreenshot: vi.fn(async () => {
+      calls.push('screenshot');
+      return Buffer.from('screenshot');
+    }),
     clearPageLogs: vi.fn(() => {
       pageLogs.length = 0;
       calls.push('clear-logs');
@@ -83,6 +138,7 @@ function createSession(
       calls.push('close');
     }),
     evaluateJson: vi.fn(async (expression: string) => {
+      if (publicPage >= 0) calls.push('evaluate-public');
       new Script(expression);
       if (expression.includes('video.muted = true')) return { paused: false, readyState: 4 };
       if (expression.includes('getBoundingClientRect')) return { x: 300, y: 200 };
@@ -163,6 +219,8 @@ function createSession(
         };
       }
       evaluateIndex++;
+      if (options.timeoutFixture && evaluateIndex === 1)
+        throw new FirefoxBidiCommandTimeout('script.evaluate', 12, 20_001);
       if (options.failStartup && evaluateIndex === 1) throw new Error('fixture startup failed');
       switch (evaluateIndex) {
         case 1:
@@ -191,6 +249,8 @@ function createSession(
       calls.push(url.includes('windowsFirefoxExtension') ? 'navigate-fixture' : 'navigate-live');
       if (!url.includes('windowsFirefoxExtension')) {
         publicPage++;
+        if (options.timeoutOnFirstLive && publicPage === 0)
+          throw new FirefoxBidiCommandTimeout('browsingContext.navigate', 41, 45_001);
         contentReads = 0;
         pageLogs.push({
           level: 'info',
@@ -239,6 +299,75 @@ afterEach(async () => {
 });
 
 describe('Windows Firefox installation profile', () => {
+  it('preserves typed command timeout identity without command parameters', async () => {
+    const { session } = createBidiSession(() => {});
+    const failure = await session
+      .command('script.evaluate', { url: 'https://private.invalid' }, 1)
+      .then(
+        () => null,
+        (error: unknown) => error
+      );
+    expect(failure).toBeInstanceOf(FirefoxBidiCommandTimeout);
+    if (!(failure instanceof FirefoxBidiCommandTimeout))
+      throw new Error('Expected command timeout');
+    expect(failure).toMatchObject({ method: 'script.evaluate', id: 1 });
+    expect(failure.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(failure)).not.toContain('private.invalid');
+    session.evaluateJson = vi.fn(async () => {
+      throw failure;
+    });
+    await expect(session.waitFor('false', 'a condition', 1000)).rejects.toBe(failure);
+    expect(session.evaluateJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('probes status then context tree with 2000 ms bounds and treats a protocol error as a response', async () => {
+    const sent: string[] = [];
+    let respond: (message: Record<string, unknown>) => void = () => {};
+    const created = createBidiSession(({ id, method }) => {
+      sent.push(method);
+      queueMicrotask(() =>
+        respond(
+          method === 'session.status'
+            ? {
+                id,
+                type: 'error',
+                error: 'unknown command',
+                message: 'https://private.invalid',
+              }
+            : {
+                id,
+                type: 'success',
+                result: { contexts: [{ url: 'https://private.invalid' }] },
+              }
+        )
+      );
+    });
+    respond = created.respond;
+    const result = await created.session.probeAfterTimeout();
+    expect(sent).toEqual(['session.status', 'browsingContext.getTree']);
+    expect(result.commands.map(({ outcome }) => outcome)).toEqual(['protocol-error', 'response']);
+    expect(result.unresponsive).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('private.invalid');
+    expect(await created.session.probeAfterTimeout()).toBe(result);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('records both bounded probe timeouts and marks the channel unresponsive', async () => {
+    const { session } = createBidiSession(() => {});
+    const calls: [string, number | undefined][] = [];
+    session.command = vi.fn(async (method: string, _params = {}, timeoutMs?: number) => {
+      calls.push([method, timeoutMs]);
+      throw new FirefoxBidiCommandTimeout(method, calls.length, timeoutMs ?? 0);
+    });
+    const result = await session.probeAfterTimeout();
+    expect(calls).toEqual([
+      ['session.status', 2_000],
+      ['browsingContext.getTree', 2_000],
+    ]);
+    expect(result.commands.map(({ outcome }) => outcome)).toEqual(['timeout', 'timeout']);
+    expect(result.unresponsive).toBe(true);
+    expect(result.socketState).toBe('open');
+  });
   it('accepts only a fresh ordinary profile endpoint with a loopback port', async () => {
     const root = await mkdtemp(join(tmpdir(), 'yt-firefox-endpoint-test-'));
     temporaryDirectories.push(root);
@@ -1007,6 +1136,103 @@ describe('Windows Firefox installation profile', () => {
       status: 'failed',
       errors: [{ name: 'Error', message: 'undefined' }],
     });
+  });
+
+  it('preserves the first public command timeout and stops work after two unresponsive probes', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({
+      timeoutOnFirstLive: true,
+      probeUnresponsive: true,
+    });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public-live',
+            'https://www.youtube.com/watch?v=public-replay',
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toMatchObject({
+      name: 'FirefoxBidiCommandTimeout',
+      method: 'browsingContext.navigate',
+      id: 41,
+    });
+    expect(calls.slice(calls.indexOf('navigate-live'))).toEqual([
+      'navigate-live',
+      'probe',
+      'close',
+    ]);
+    expect(session.probeAfterTimeout).toHaveBeenCalledTimes(1);
+    expect(session.uninstallExtension).not.toHaveBeenCalled();
+    expect(session.close).toHaveBeenCalledTimes(1);
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.live).toMatchObject([
+      { status: 'unverified', failureCategory: 'navigation-timeout' },
+      { status: 'not-run', reason: 'bidi-unresponsive', loaded: false },
+    ]);
+    expect(receipt.observations.diagnostics).toMatchObject({
+      bidiTimeout: { command: { method: 'browsingContext.navigate', id: 41 }, unresponsive: true },
+      extensionUninstall: { status: 'not-run', reason: 'bidi-unresponsive' },
+      failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' },
+    });
+    expect(await readdir(output)).toEqual(['firefox-installation-result.json']);
+  });
+
+  it('skips fixture BiDi teardown after an unresponsive deterministic timeout but closes ownership', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({ timeoutFixture: true, probeUnresponsive: true });
+    await expect(
+      runFirefoxInstallation(
+        { executablePath: '/test/firefox.exe', output, root },
+        { launch: async () => session }
+      )
+    ).rejects.toMatchObject({ method: 'script.evaluate', id: 12 });
+    expect(calls.slice(calls.indexOf('probe'))).toEqual(['probe', 'close']);
+    expect(session.uninstallExtension).not.toHaveBeenCalled();
+    expect(session.close).toHaveBeenCalledTimes(1);
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.diagnostics).toMatchObject({
+      fixtureInterceptRemoval: { status: 'not-run', reason: 'bidi-unresponsive' },
+      extensionUninstall: { status: 'not-run', reason: 'bidi-unresponsive' },
+      failureScreenshot: { status: 'not-run', reason: 'bidi-unresponsive' },
+    });
+  });
+
+  it('continues cleanup when the bounded timeout probes receive responses', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({ timeoutOnFirstLive: true });
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: [
+            'https://www.youtube.com/watch?v=public-live',
+            'https://www.youtube.com/watch?v=public-replay',
+          ],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toBeInstanceOf(FirefoxBidiCommandTimeout);
+    expect(session.probeAfterTimeout).toHaveBeenCalledTimes(1);
+    expect(session.navigate).toHaveBeenCalledTimes(3);
+    expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
+    const receipt = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(receipt.observations.diagnostics.bidiTimeout).toMatchObject({ unresponsive: false });
+    expect(receipt.observations.live[1].loaded).toBe(true);
+    expect(receipt.checks.extensionUninstalled).toBe(true);
   });
 
   it('leaves public-page checks not-run when only the installed fixture was requested', async () => {

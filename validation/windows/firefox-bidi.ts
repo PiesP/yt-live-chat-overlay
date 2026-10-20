@@ -55,6 +55,40 @@ const ENDPOINT_FILE_MAX_BYTES = 1024;
 const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 5_000;
 const execFileAsync = promisify(execFile);
 
+export class FirefoxBidiCommandTimeout extends Error {
+  readonly method: string;
+  readonly id: number;
+  readonly elapsedMs: number;
+
+  constructor(method: string, id: number, elapsedMs: number) {
+    super(`Firefox BiDi command timed out: ${method}`);
+    this.name = 'FirefoxBidiCommandTimeout';
+    this.method = method;
+    this.id = id;
+    this.elapsedMs = elapsedMs;
+  }
+}
+
+class FirefoxBidiProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FirefoxBidiProtocolError';
+  }
+}
+
+export type FirefoxBidiTimeoutProbe = {
+  socketState: 'connecting' | 'open' | 'closing' | 'closed' | 'unknown';
+  childExitCode: number | null;
+  childSignal: string | null;
+  commands: {
+    method: 'session.status' | 'browsingContext.getTree';
+    outcome: 'response' | 'protocol-error' | 'timeout' | 'error';
+    elapsedMs: number;
+    errorCategory?: 'socket-closed' | 'event-handler' | 'send-failed' | 'other';
+  }[];
+  unresponsive: boolean;
+};
+
 function errorMessage(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
 }
@@ -722,7 +756,7 @@ function connectWebSocket(endpoint: string) {
   });
 }
 
-class FirefoxBidiSession {
+export class FirefoxBidiSession {
   pageErrors: { level: string; text: string; type: string }[] = [];
   pageLogs: { level: string; text: string; type: string }[] = [];
   browserName = 'Firefox';
@@ -731,6 +765,8 @@ class FirefoxBidiSession {
   context = 'pending';
   #child: ChildProcess;
   #closed = false;
+  #unresponsive = false;
+  #timeoutProbe: Promise<FirefoxBidiTimeoutProbe> | null = null;
   #commandId = 0;
   #eventErrors: string[] = [];
   #eventListeners = new Map<
@@ -790,7 +826,9 @@ class FirefoxBidiSession {
       clearTimeout(pending.timeout);
       if (message.type === 'error') {
         pending.reject(
-          new Error(`${String(message.error ?? 'BiDi error')}: ${String(message.message ?? '')}`)
+          new FirefoxBidiProtocolError(
+            `${String(message.error ?? 'BiDi error')}: ${String(message.message ?? '')}`
+          )
         );
       } else {
         pending.resolve(message.result);
@@ -858,10 +896,13 @@ class FirefoxBidiSession {
     }
 
     const id = ++this.#commandId;
+    const started = performance.now();
     return new Promise<T>((resolveCommand, rejectCommand) => {
       const timeout = setTimeout(() => {
         this.#pendingCommands.delete(id);
-        rejectCommand(new Error(`Firefox BiDi command timed out: ${method}`));
+        rejectCommand(
+          new FirefoxBidiCommandTimeout(method, id, Math.round(performance.now() - started))
+        );
       }, timeoutMs);
       this.#pendingCommands.set(id, {
         reject: rejectCommand,
@@ -876,6 +917,67 @@ class FirefoxBidiSession {
         rejectCommand(new Error(`Failed to send ${method}: ${errorMessage(error)}`));
       }
     });
+  }
+
+  probeAfterTimeout(): Promise<FirefoxBidiTimeoutProbe> {
+    if (this.#timeoutProbe) return this.#timeoutProbe;
+    this.#timeoutProbe = (async () => {
+      const socketState =
+        this.#socket.readyState === WebSocket.CONNECTING
+          ? 'connecting'
+          : this.#socket.readyState === WebSocket.OPEN
+            ? 'open'
+            : this.#socket.readyState === WebSocket.CLOSING
+              ? 'closing'
+              : this.#socket.readyState === WebSocket.CLOSED
+                ? 'closed'
+                : 'unknown';
+      const commands: FirefoxBidiTimeoutProbe['commands'] = [];
+      for (const method of ['session.status', 'browsingContext.getTree'] as const) {
+        const started = performance.now();
+        let outcome: FirefoxBidiTimeoutProbe['commands'][number]['outcome'] = 'response';
+        let errorCategory: FirefoxBidiTimeoutProbe['commands'][number]['errorCategory'];
+        try {
+          await this.command(
+            method,
+            method === 'browsingContext.getTree' ? { maxDepth: 0 } : {},
+            2_000
+          );
+        } catch (error) {
+          if (error instanceof FirefoxBidiProtocolError) outcome = 'protocol-error';
+          else if (error instanceof FirefoxBidiCommandTimeout) outcome = 'timeout';
+          else {
+            outcome = 'error';
+            const message = errorMessage(error);
+            errorCategory = /socket.*closed|session is closed/iu.test(message)
+              ? 'socket-closed'
+              : /event handler failed/iu.test(message)
+                ? 'event-handler'
+                : /failed to send/iu.test(message)
+                  ? 'send-failed'
+                  : 'other';
+          }
+        }
+        commands.push({
+          method,
+          outcome,
+          elapsedMs: Math.round(performance.now() - started),
+          ...(errorCategory ? { errorCategory } : {}),
+        });
+      }
+      const unresponsive = commands.every(
+        ({ outcome }) => outcome !== 'response' && outcome !== 'protocol-error'
+      );
+      this.#unresponsive = unresponsive;
+      return {
+        socketState,
+        childExitCode: this.#child.exitCode,
+        childSignal: this.#child.signalCode,
+        commands,
+        unresponsive,
+      };
+    })();
+    return this.#timeoutProbe;
   }
 
   async evaluateJson(expression: string): Promise<unknown> {
@@ -910,6 +1012,7 @@ class FirefoxBidiSession {
         if (await this.evaluateJson(expression)) return;
         lastError = null;
       } catch (error) {
+        if (error instanceof FirefoxBidiCommandTimeout) throw error;
         lastError = errorMessage(error);
       }
       await delay(Math.min(POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
@@ -1077,7 +1180,7 @@ class FirefoxBidiSession {
           throw error;
         }
       }
-      if (this.#socket.readyState === WebSocket.OPEN) {
+      if (!this.#unresponsive && this.#socket.readyState === WebSocket.OPEN) {
         await Promise.race([
           this.command('session.end', {}, CLOSE_TIMEOUT_MS).catch(() => undefined),
           delay(CLOSE_TIMEOUT_MS),
