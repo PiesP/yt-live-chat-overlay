@@ -2,13 +2,11 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Extension bridge — set by the ISOLATED-world content script before
- * injecting the MAIN-world page script.
+ * Extension bridge — set in MAIN world before the application starts.
  *
  * In MV3 extensions, the MAIN world has no access to chrome.runtime or
- * chrome.storage. The ISOLATED content script resolves the worker URL and
- * places it on the external page-script element. The page bundle initializes
- * this object before the application starts. Core platform adapters check
+ * chrome.storage. Chrome's native scripting initializes this object directly;
+ * Firefox passes data through the external page-script element. Core adapters check
  * this bridge first, falling back to GM_* / localStorage if absent.
  */
 interface ExtensionBridge {
@@ -25,6 +23,8 @@ interface ExtensionBridge {
 declare global {
   interface Window {
     __ytExtensionBridge?: ExtensionBridge;
+    /** MAIN-world one-shot claim, set before native page bundle injection. */
+    __ytExtensionBootstrapClaim?: boolean;
   }
 }
 

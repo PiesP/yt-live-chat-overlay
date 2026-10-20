@@ -5,14 +5,14 @@
  * Extension Content Script — runs in the ISOLATED world.
  *
  * Responsibilities:
- * 1. Inject the MAIN-world page script as an external <script> element.
+ * 1. Request native Chrome MAIN-world injection, or inject Firefox's external script.
  * 2. Relay menu commands from the background service worker to the
  *    page script via window.postMessage (strict origin validation).
  * 3. Relay chrome.storage.local requests from the MAIN-world page script
  *    (which cannot access chrome.* APIs directly in MV3).
  *
  * ISOLATED world has full access to chrome.runtime APIs, unlike MAIN world
- * where chrome.runtime is undefined. The previous MAIN-world content script
+ * where chrome.runtime is undefined. A previous MAIN-world content script
  * used optional chaining (chrome?.runtime?.onMessage?.addListener?.()) which
  * silently failed — menu commands were never delivered.
  *
@@ -21,6 +21,8 @@
  */
 
 import { loadPackagedWorkerSource } from './worker-source-loader';
+
+declare const __CHROME_NATIVE_BOOTSTRAP__: boolean;
 
 const cr = chrome?.runtime;
 const storage = chrome?.storage;
@@ -32,47 +34,57 @@ if (!cr || !localStorage || !storageChanged || !onMessage) {
 }
 
 const bridgeNonce = crypto.randomUUID();
-// ── Inject page script ─────────────────────────────────────────────────
-//
-// Do not use script.textContent here. YouTube's CSP blocks inline script
-// execution, even when the element was created by an extension content script.
-// Read only the fixed packaged worker resource in ISOLATED world. The external
-// page script creates the Blob URL in MAIN world so the Worker is same-origin
-// with the YouTube document instead of chrome-extension:// or moz-extension://.
+// ── Bootstrap page script ───────────────────────────────────────────────
 
-const workerPreparationController = new AbortController();
-let documentPermanentlyHidden = false;
-const handlePageHideBeforeInjection = (event: PageTransitionEvent): void => {
-  if (event.persisted) return;
-  documentPermanentlyHidden = true;
-  workerPreparationController.abort();
-  window.removeEventListener('pagehide', handlePageHideBeforeInjection);
-};
-window.addEventListener('pagehide', handlePageHideBeforeInjection);
-
-async function injectPageScript(): Promise<void> {
-  let workerSource: string | undefined;
-  try {
-    workerSource = await loadPackagedWorkerSource(cr.getURL('workers/renderer.js'), {
-      signal: workerPreparationController.signal,
+if (typeof __CHROME_NATIVE_BOOTSTRAP__ !== 'undefined' && __CHROME_NATIVE_BOOTSTRAP__) {
+  // Chrome performs both MAIN-world steps through the scripting API in the
+  // exact originating document. The nonce never enters a page DOM attribute.
+  void cr
+    .sendMessage({ type: 'native-page-bootstrap', nonce: bridgeNonce })
+    .then((response) => {
+      if ((response as { ok?: boolean } | undefined)?.ok !== true) {
+        throw new Error('Native page bootstrap failed');
+      }
+    })
+    .catch((error: unknown) => {
+      console.error('Native page bootstrap failed', error);
     });
-  } catch {
-    // The storage/menu bridge remains available; the renderer uses main-thread fallback.
+} else {
+  // Firefox uses an external script element. Read only fixed packaged worker
+  // source in ISOLATED world; the page script creates its page-origin Blob.
+  const workerPreparationController = new AbortController();
+  let documentPermanentlyHidden = false;
+  const handlePageHideBeforeInjection = (event: PageTransitionEvent): void => {
+    if (event.persisted) return;
+    documentPermanentlyHidden = true;
+    workerPreparationController.abort();
+    window.removeEventListener('pagehide', handlePageHideBeforeInjection);
+  };
+  window.addEventListener('pagehide', handlePageHideBeforeInjection);
+
+  async function injectPageScript(): Promise<void> {
+    let workerSource: string | undefined;
+    try {
+      workerSource = await loadPackagedWorkerSource(cr.getURL('workers/renderer.js'), {
+        signal: workerPreparationController.signal,
+      });
+    } catch {
+      // The storage/menu bridge remains available; the renderer uses main-thread fallback.
+    }
+
+    if (documentPermanentlyHidden) return;
+    window.removeEventListener('pagehide', handlePageHideBeforeInjection);
+
+    const pageScript = document.createElement('script');
+    pageScript.src = cr.getURL('page-script.js');
+    pageScript.type = 'text/javascript';
+    if (workerSource !== undefined) pageScript.dataset.ytExtensionWorkerSource = workerSource;
+    pageScript.dataset.ytExtensionBridgeNonce = bridgeNonce;
+    (document.head || document.documentElement).appendChild(pageScript);
   }
 
-  if (documentPermanentlyHidden) return;
-  window.removeEventListener('pagehide', handlePageHideBeforeInjection);
-
-  const pageScript = document.createElement('script');
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  pageScript.src = cr.getURL('page-script.js');
-  pageScript.type = 'text/javascript';
-  if (workerSource !== undefined) pageScript.dataset.ytExtensionWorkerSource = workerSource;
-  pageScript.dataset.ytExtensionBridgeNonce = bridgeNonce;
-  (document.head || document.documentElement).appendChild(pageScript);
+  void injectPageScript();
 }
-
-void injectPageScript();
 
 // ── Storage relay (MAIN world → ISOLATED → chrome.storage.local) ─────
 // MAIN-world page script posts { source: 'yt-storage-relay', ... } when

@@ -38,6 +38,9 @@ interface ChromeMessageSender {
   id?: string;
   tab?: ChromeTab;
   url?: string;
+  origin?: string;
+  frameId?: number;
+  documentId?: string;
 }
 
 interface ChromeRuntimeOnMessageEvent {
@@ -55,6 +58,7 @@ interface ChromeRuntimeNamespace {
   getURL(path: string): string;
   onInstalled: ChromeRuntimeOnInstalledEvent;
   onMessage?: ChromeRuntimeOnMessageEvent;
+  sendMessage(message: unknown): Promise<unknown>;
   lastError?: { message?: string };
 }
 
@@ -94,6 +98,31 @@ interface ChromeI18nNamespace {
   getUILanguage(): string;
 }
 
+interface ChromeScriptingInjectionResult<T> {
+  documentId?: string;
+  frameId: number;
+  result: T;
+}
+
+interface ChromeScriptingTarget {
+  tabId: number;
+  documentIds: string[];
+}
+
+interface ChromeScriptingNamespace {
+  executeScript<A extends unknown[], T>(injection: {
+    target: ChromeScriptingTarget;
+    world: 'MAIN';
+    func: (...args: A) => T;
+    args: A;
+  }): Promise<Array<ChromeScriptingInjectionResult<T>>>;
+  executeScript(injection: {
+    target: ChromeScriptingTarget;
+    world: 'MAIN';
+    files: string[];
+  }): Promise<Array<ChromeScriptingInjectionResult<unknown>>>;
+}
+
 // ── Top-level namespace ────────────────────────────────────────────────────
 
 interface ChromeNamespace {
@@ -102,6 +131,7 @@ interface ChromeNamespace {
   contextMenus: ChromeContextMenusNamespace;
   tabs: ChromeTabsNamespace;
   i18n: ChromeI18nNamespace;
+  scripting?: ChromeScriptingNamespace;
 }
 
 declare const chrome: ChromeNamespace;
