@@ -71,6 +71,13 @@ type ResourceEntry = {
   navigation?: string | undefined;
   documentUrl: string | null;
   documentUrlSha256: string | null;
+  requestedAtMs: number;
+  respondedAtMs: number | null;
+  finishedAtMs: number | null;
+  failedAtMs: number | null;
+  resourceType: string | null;
+  fetchMode: string | null;
+  fetchDest: string | null;
   status: string;
   reason: string | null;
   responseStatus: number | null;
@@ -79,6 +86,18 @@ type ResourceEntry = {
   expectedSha256: string;
   bytes?: number;
   sha256?: string;
+};
+type ConsoleErrorEntry = {
+  type: string;
+  text: string;
+  redactedText: string;
+  url: string;
+  observedAtMs: number;
+  sourcePhase: string | undefined;
+  navigation: string;
+  currentDocumentSha256: string | null;
+  ownedResourcePath: string | null;
+  reportedFrameDocumentSha256: string | null;
 };
 type WorkflowStep = {
   status: string;
@@ -182,6 +201,93 @@ export function ownedExtensionResourcePath(value: string, extensionId: string) {
   } catch {
     return null;
   }
+}
+
+function publicWatchDocumentSha256(value: string): string | null {
+  if (value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== 'https:' ||
+      !['www.youtube.com', 'youtube.com'].includes(url.hostname) ||
+      url.pathname !== '/watch' ||
+      url.username ||
+      url.password
+    )
+      return null;
+    return createHash('sha256').update(url.href).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/** Link only the browser's exact unsafe-origin warning to owned resources and watch documents. */
+export function diagnoseUnsafeOriginConsole(
+  text: string,
+  currentDocumentUrl: string,
+  extensionId: string
+) {
+  const match =
+    text.length <= 4096
+      ? /^Unsafe attempt to load URL (\S{1,2048}) from frame with URL (\S{1,2048}) Domains, protocols and ports must match\./u.exec(
+          text
+        )
+      : null;
+  return {
+    currentDocumentSha256: publicWatchDocumentSha256(currentDocumentUrl),
+    ownedResourcePath: match ? ownedExtensionResourcePath(match[1] ?? '', extensionId) : null,
+    reportedFrameDocumentSha256: match ? publicWatchDocumentSha256(match[2] ?? '') : null,
+  };
+}
+
+/** Redact URL credentials and queries before the shared diagnostic length cap. */
+export function redactChromeDiagnosticText(text: string): string {
+  if (text.length > 16_384) return '[diagnostic omitted: length limit]';
+  const withoutSecrets = text.replace(/(?:https?|chrome-extension):\/\/[^\s‘’'"<>]+/gu, (value) => {
+    try {
+      const url = new URL(value);
+      url.username = '';
+      url.password = '';
+      url.search = '';
+      url.hash = '';
+      return url.href;
+    } catch {
+      return '[redacted-url]';
+    }
+  });
+  const redacted = redactDiagnosticText(withoutSecrets);
+  let bytes = 0;
+  let bounded = '';
+  for (const character of redacted) {
+    const size = Buffer.byteLength(character);
+    if (bytes + size > 1000) break;
+    bounded += character;
+    bytes += size;
+  }
+  return bounded;
+}
+
+function boundedObservationMs(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(180_000, Math.round(value))) : 0;
+}
+
+function safeRequestMetadata(request: Request) {
+  let resourceType: string | null = null;
+  let fetchMode: string | null = null;
+  let fetchDest: string | null = null;
+  try {
+    const value = request.resourceType();
+    if (['document', 'script', 'fetch', 'xhr', 'other'].includes(value)) resourceType = value;
+    const headers = request.headers();
+    const mode = headers['sec-fetch-mode'];
+    const dest = headers['sec-fetch-dest'];
+    if (mode && ['cors', 'no-cors', 'same-origin', 'navigate'].includes(mode)) fetchMode = mode;
+    if (dest && ['empty', 'script', 'worker', 'sharedworker', 'document'].includes(dest))
+      fetchDest = dest;
+  } catch {
+    // Missing browser metadata remains unknown; it does not change the resource verdict.
+  }
+  return { resourceType, fetchMode, fetchDest };
 }
 
 export function compareOwnedExtensionResourceBody(body: unknown, expected: ExpectedResource) {
@@ -293,8 +399,11 @@ export function beginOwnedExtensionResourceCapture(
   page: Page,
   extensionId: string,
   expected: Record<string, ExpectedResource>,
-  sourceContext: () => { sourcePhase?: string | undefined; navigation?: string | undefined }
+  sourceContext: () => { sourcePhase?: string | undefined; navigation?: string | undefined },
+  observedAtMs?: () => number
 ) {
+  const startedAt = performance.now();
+  const nowMs = () => boundedObservationMs(observedAtMs?.() ?? performance.now() - startedAt);
   const requests: ResourceEntry[] = [];
   const pending = new Set<Promise<void>>();
   const entries = new Map<Request, ResourceEntry>();
@@ -318,7 +427,7 @@ export function beginOwnedExtensionResourceCapture(
         document.pathname === '/watch'
           ? `${document.origin}/watch`
           : null;
-      documentUrlSha256 = createHash('sha256').update(document.href).digest('hex');
+      documentUrlSha256 = publicWatchDocumentSha256(document.href);
     } catch {
       documentUrl = null;
       documentUrlSha256 = null;
@@ -328,6 +437,11 @@ export function beginOwnedExtensionResourceCapture(
       ...sourceContext(),
       documentUrl,
       documentUrlSha256,
+      requestedAtMs: nowMs(),
+      respondedAtMs: null,
+      finishedAtMs: null,
+      failedAtMs: null,
+      ...safeRequestMetadata(request),
       status: 'unverified',
       reason: 'request-incomplete',
       responseStatus: null,
@@ -339,6 +453,7 @@ export function beginOwnedExtensionResourceCapture(
     entries.set(request, entry);
   };
   const recordResponse = (entry: ResourceEntry, response: Response) => {
+    entry.respondedAtMs = nowMs();
     entry.responseStatus = response.status();
     const mime = response.headers()['content-type']?.split(';', 1)[0]?.trim();
     entry.mime = mime && /^[\w.+-]+\/[\w.+-]+$/u.test(mime) ? mime : null;
@@ -350,6 +465,7 @@ export function beginOwnedExtensionResourceCapture(
   const onRequestFailed = (request: Request) => {
     const entry = entries.get(request);
     if (!entry) return;
+    entry.failedAtMs = nowMs();
     const failure = request.failure()?.errorText ?? '';
     entry.reason = /^net::ERR_[A-Z_]+$/u.test(failure) ? failure : 'request-failed';
     entries.delete(request);
@@ -357,6 +473,7 @@ export function beginOwnedExtensionResourceCapture(
   const onRequestFinished = (request: Request) => {
     const entry = entries.get(request);
     if (!entry) return;
+    entry.finishedAtMs = nowMs();
     const resource = expected[entry.path];
     assert(resource, 'Expected owned extension resource is missing');
     entries.delete(request);
@@ -1285,6 +1402,8 @@ async function inspectLivePage(
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
+  const observationStartedAt = performance.now();
+  const observedAtMs = () => boundedObservationMs(performance.now() - observationStartedAt);
   const realm = new PublicUserscriptRealm(context, page, userscriptVersion);
   if (installation === 'userscript') await realm.start();
   const imageResponses: PublicImageResponse[] = [];
@@ -1301,25 +1420,35 @@ async function inspectLivePage(
   });
   const pageErrors: string[] = [];
   const workerDiagnostics: { type: string; text: string; url: string }[] = [];
-  const consoleErrors: { type: string; text: string; url: string }[] = [];
+  const consoleErrors: ConsoleErrorEntry[] = [];
   let consoleErrorOverflow = 0;
   page.on('pageerror', (error) => pageErrors.push(error.name));
   page.on('console', (message) => {
     const text = message.text();
     if (message.type() === 'error') {
-      if (consoleErrors.length < 32)
+      if (consoleErrors.length < 32) {
+        const link = diagnoseUnsafeOriginConsole(
+          text,
+          page.url(),
+          extensionResources?.extensionId ?? ''
+        );
         consoleErrors.push({
           type: 'error',
           text: text.slice(0, 1000),
+          redactedText: redactChromeDiagnosticText(text),
           url: message.location().url,
+          observedAtMs: observedAtMs(),
+          sourcePhase: observation.phase,
+          navigation: activeNavigation,
+          ...link,
         });
-      else consoleErrorOverflow++;
+      } else consoleErrorOverflow++;
     }
     if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
       workerDiagnostics.push({
         type: message.type(),
-        text: redactDiagnosticText(text),
-        url: redactDiagnosticText(message.location().url),
+        text: redactChromeDiagnosticText(text),
+        url: redactChromeDiagnosticText(message.location().url),
       });
     }
   });
@@ -1330,7 +1459,8 @@ async function inspectLivePage(
         page,
         extensionResources.extensionId,
         extensionResources.expected,
-        () => ({ sourcePhase: observation.phase, navigation: activeNavigation })
+        () => ({ sourcePhase: observation.phase, navigation: activeNavigation }),
+        observedAtMs
       )
     : null;
   let deadlineReached = false;
@@ -1630,11 +1760,14 @@ async function inspectLivePage(
       consoleErrorOverflow +
       countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback ?? false);
     observation.hostConsoleErrors = consoleErrors.filter(isYouTubeHostError).length;
-    observation.consoleErrors = consoleErrors.map(({ type, text, url }) => ({
-      type,
-      text: redactDiagnosticText(text),
-      url: redactDiagnosticText(url),
-    }));
+    observation.consoleErrors = consoleErrors.map(
+      ({ type, redactedText, url, text: _text, ...link }) => ({
+        type,
+        text: redactedText,
+        url: redactChromeDiagnosticText(url),
+        ...link,
+      })
+    );
     if (
       observation.status === 'passed' &&
       (observation.pageErrorTypes.length > 0 || observation.unexpectedConsoleErrors > 0)

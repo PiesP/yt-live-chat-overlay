@@ -25,6 +25,8 @@ const {
   requireManagerUiLabels,
   selectPublicSeekTarget,
   ownedExtensionResourcePath,
+  diagnoseUnsafeOriginConsole,
+  redactChromeDiagnosticText,
   compareOwnedExtensionResourceBody,
   beginOwnedExtensionResourceCapture,
   readBoundedPackagedResource,
@@ -119,6 +121,39 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(ownedExtensionResourcePath('not-a-url', id)).toBeNull();
   });
 
+  it('correlates only bounded owned-resource warnings without recording URL secrets', () => {
+    const id = 'a'.repeat(32);
+    const frame = 'https://www.youtube.com/watch?v=private&sig=secret';
+    const warning = `Unsafe attempt to load URL chrome-extension://${id}/workers/renderer.js from frame with URL ${frame} Domains, protocols and ports must match.`;
+    const link = diagnoseUnsafeOriginConsole(warning, frame, id);
+    expect(link).toEqual({
+      currentDocumentSha256: createHash('sha256').update(frame).digest('hex'),
+      ownedResourcePath: 'workers/renderer.js',
+      reportedFrameDocumentSha256: createHash('sha256').update(frame).digest('hex'),
+    });
+    expect(JSON.stringify(link)).not.toMatch(/private|secret/u);
+    expect(
+      diagnoseUnsafeOriginConsole(
+        warning.replace('workers/renderer.js', 'workers/other.js'),
+        'https://www.youtube.com/watch?v=other',
+        id
+      )
+    ).toMatchObject({ ownedResourcePath: null });
+    expect(diagnoseUnsafeOriginConsole(warning.repeat(30), frame, id)).toMatchObject({
+      ownedResourcePath: null,
+      reportedFrameDocumentSha256: null,
+    });
+    const redacted = redactChromeDiagnosticText(
+      `Unsafe https://user:credential@example.com/watch?v=private&sig=secret and chrome-extension://${id}/page-script.js?token=hidden`
+    );
+    expect(redacted).not.toMatch(/user|credential|private|secret|hidden|token=/u);
+    expect(redacted).toContain('example.com/watch');
+    expect(redacted.length).toBeLessThanOrEqual(1000);
+    expect(Buffer.byteLength(redactChromeDiagnosticText('🧪'.repeat(1000)))).toBeLessThanOrEqual(
+      1000
+    );
+  });
+
   it('bounds and hashes only the exact packaged resource body', () => {
     const body = Buffer.from('owned resource');
     const expected = {
@@ -157,6 +192,7 @@ describe('installed Chrome acceptance outcomes', () => {
       };
     }
     let navigation = 'initial-watch';
+    let observedAtMs = 0;
     const finish = beginOwnedExtensionResourceCapture(
       page as unknown as Page,
       id,
@@ -164,14 +200,18 @@ describe('installed Chrome acceptance outcomes', () => {
       () => ({
         sourcePhase: 'navigation',
         navigation,
-      })
+      }),
+      () => observedAtMs
     );
     for (navigation of ['initial-watch', 'next-watch']) {
       for (const path of resources) {
+        observedAtMs += 5;
         const body = Buffer.from(path);
         const request = {
           url: () => `chrome-extension://${id}/${path}`,
-          frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+          frame: () => ({ url: () => `https://www.youtube.com/watch?v=${navigation}&sig=private` }),
+          resourceType: () => (path === 'page-script.js' ? 'script' : 'fetch'),
+          headers: () => ({ 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'script' }),
           sizes: async () => ({ responseBodySize: body.length }),
           response: async () => response,
         };
@@ -182,6 +222,9 @@ describe('installed Chrome acceptance outcomes', () => {
           body: async () => body,
         };
         page.emit('request', request);
+        observedAtMs += 1;
+        page.emit('response', response);
+        observedAtMs += 1;
         page.emit('requestfinished', request);
       }
     }
@@ -198,7 +241,15 @@ describe('installed Chrome acceptance outcomes', () => {
       sourcePhase: 'navigation',
       status: 'matched',
       responseStatus: 200,
+      requestedAtMs: 5,
+      respondedAtMs: 6,
+      finishedAtMs: 7,
+      failedAtMs: null,
+      resourceType: 'fetch',
+      fetchMode: 'cors',
+      fetchDest: 'script',
     });
+    expect(result.requests[0]?.documentUrlSha256).not.toBe(result.requests[2]?.documentUrlSha256);
     expect(JSON.stringify(result)).not.toContain('private');
     for (const event of ['request', 'response', 'requestfinished', 'requestfailed']) {
       expect(page.listenerCount(event)).toBe(0);
@@ -222,12 +273,15 @@ describe('installed Chrome acceptance outcomes', () => {
       expected,
       () => ({
         navigation: 'initial-watch',
-      })
+      }),
+      () => 999_999
     );
     const request = {
       url: () => `chrome-extension://${id}/page-script.js`,
       frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
       failure: () => ({ errorText: 'net::ERR_CONNECTION_RESET' }),
+      resourceType: () => 'untrusted-type',
+      headers: () => ({ 'sec-fetch-mode': 'private-mode', 'sec-fetch-dest': 'private-dest' }),
     };
     page.emit('request', request);
     page.emit('requestfailed', request);
@@ -235,7 +289,32 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(result.requests[0]).toMatchObject({
       status: 'unverified',
       reason: 'net::ERR_CONNECTION_RESET',
+      requestedAtMs: 180_000,
+      failedAtMs: 180_000,
+      resourceType: null,
+      fetchMode: null,
+      fetchDest: null,
     });
+  });
+
+  it('keeps the owned request inventory capped when a page repeats one resource', async () => {
+    const page = new EventEmitter();
+    const id = 'a'.repeat(32);
+    const finish = beginOwnedExtensionResourceCapture(
+      page as unknown as Page,
+      id,
+      { 'page-script.js': { maxBytes: 1, bytes: 1, sha256: 'a'.repeat(64) } },
+      () => ({ navigation: 'initial-watch' })
+    );
+    for (let index = 0; index < 17; index++) {
+      page.emit('request', {
+        url: () => `chrome-extension://${id}/page-script.js`,
+        frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+      });
+    }
+    const result = await finish();
+    expect(result).toMatchObject({ status: 'unverified', overflow: 1 });
+    expect(result.requests).toHaveLength(16);
   });
 
   it.each([
