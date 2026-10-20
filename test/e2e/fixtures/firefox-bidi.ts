@@ -12,6 +12,8 @@ const STARTUP_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 15_000;
 const CLOSE_TIMEOUT_MS = 3_000;
 const POLL_INTERVAL_MS = 50;
+const PROFILE_REMOVE_RETRIES = 10;
+const PROFILE_REMOVE_RETRY_DELAY_MS = 100;
 
 type BidiParams = Record<string, unknown>;
 type BidiEventListener = (params: BidiParams) => void | Promise<void>;
@@ -75,19 +77,67 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  return new Promise((resolveExit) => {
-    const timeout = setTimeout(() => {
-      child.removeListener('exit', onExit);
-      resolveExit(false);
-    }, timeoutMs);
-    const onExit = (): void => {
-      clearTimeout(timeout);
-      resolveExit(true);
-    };
-    child.once('exit', onExit);
-  });
+async function closedWithin(closed: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      closed.then(() => true),
+      new Promise<boolean>((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+type OwnedFirefoxChild = Pick<ChildProcess, 'exitCode' | 'signalCode' | 'kill'>;
+
+interface FirefoxCleanupOptions {
+  closeTimeoutMs?: number;
+  maxRemoveRetries?: number;
+  removeProfile?: (path: string) => void;
+  retryDelayMs?: number;
+}
+
+export async function cleanupFirefoxProfile(
+  child: OwnedFirefoxChild,
+  closed: Promise<void>,
+  profileDir: string,
+  options: FirefoxCleanupOptions = {}
+): Promise<void> {
+  const closeTimeoutMs = options.closeTimeoutMs ?? CLOSE_TIMEOUT_MS;
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  if (!(await closedWithin(closed, closeTimeoutMs))) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    if (!(await closedWithin(closed, closeTimeoutMs))) {
+      throw new Error('Firefox process did not close; profile retained');
+    }
+  }
+
+  const maxRemoveRetries = options.maxRemoveRetries ?? PROFILE_REMOVE_RETRIES;
+  const retryDelayMs = options.retryDelayMs ?? PROFILE_REMOVE_RETRY_DELAY_MS;
+  const removeProfile =
+    options.removeProfile ??
+    ((path: string) => {
+      rmSync(path, { force: true, recursive: true });
+    });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      removeProfile(profileDir);
+      return;
+    } catch (error: unknown) {
+      if (
+        !(error instanceof Error) ||
+        !('code' in error) ||
+        error.code !== 'EPERM' ||
+        attempt >= maxRemoveRetries
+      ) {
+        throw error;
+      }
+      await delay(retryDelayMs);
+    }
+  }
 }
 
 function waitForEndpoint(child: ChildProcess, readStderr: () => string): Promise<string> {
@@ -174,6 +224,7 @@ class FirefoxBidiSessionImpl implements FirefoxBidiSession {
 
   constructor(
     private readonly child: ChildProcess,
+    private readonly childClosed: Promise<void>,
     private readonly socket: WebSocket,
     private readonly profileDir: string,
     public context: string
@@ -447,16 +498,11 @@ class FirefoxBidiSessionImpl implements FirefoxBidiSession {
       this.handleClose();
       this.socket.removeEventListener('message', this.handleMessage);
       this.socket.removeEventListener('close', this.handleClose);
-      this.socket.close();
-
-      if (this.child.exitCode === null && this.child.signalCode === null) {
-        this.child.kill('SIGTERM');
-        if (!(await waitForProcessExit(this.child, CLOSE_TIMEOUT_MS))) {
-          this.child.kill('SIGKILL');
-          await waitForProcessExit(this.child, CLOSE_TIMEOUT_MS);
-        }
+      try {
+        this.socket.close();
+      } finally {
+        await cleanupFirefoxProfile(this.child, this.childClosed, this.profileDir);
       }
-      rmSync(this.profileDir, { force: true, recursive: true });
     }
   }
 }
@@ -476,6 +522,9 @@ export async function launchFirefoxBidi(): Promise<FirefoxBidiSession> {
     ],
     { stdio: ['ignore', 'ignore', 'pipe'] }
   );
+  const childClosed = new Promise<void>((resolveClose) => {
+    child.once('close', () => resolveClose());
+  });
   let stderr = '';
   child.stderr?.on('data', (chunk: Buffer) => {
     stderr = `${stderr}${chunk.toString('utf8')}`.slice(-16_384);
@@ -485,7 +534,13 @@ export async function launchFirefoxBidi(): Promise<FirefoxBidiSession> {
   try {
     const endpoint = await waitForEndpoint(child, () => stderr);
     const socket = await connectWebSocket(endpoint);
-    const bootstrapSession = new FirefoxBidiSessionImpl(child, socket, profileDir, 'pending');
+    const bootstrapSession = new FirefoxBidiSessionImpl(
+      child,
+      childClosed,
+      socket,
+      profileDir,
+      'pending'
+    );
     session = bootstrapSession;
     await bootstrapSession.command('session.new', { capabilities: {} });
     const tree = await bootstrapSession.command<ContextTreeResult>('browsingContext.getTree', {
@@ -501,15 +556,11 @@ export async function launchFirefoxBidi(): Promise<FirefoxBidiSession> {
     });
     return session;
   } catch (error: unknown) {
-    if (session) {
-      await session.close();
-    } else {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-      if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
-        child.kill('SIGKILL');
-        await waitForProcessExit(child, CLOSE_TIMEOUT_MS);
-      }
-      rmSync(profileDir, { force: true, recursive: true });
+    try {
+      if (session) await session.close();
+      else await cleanupFirefoxProfile(child, childClosed, profileDir);
+    } catch (cleanupError: unknown) {
+      throw new AggregateError([error, cleanupError], 'Firefox launch and cleanup failed');
     }
     throw error;
   }
