@@ -29,6 +29,7 @@ import {
   isYouTubeHostError,
   readPublicCanvasFrame,
   readPublicPageBrowserState,
+  readSurvivingPublicImageDraws,
   redactDiagnosticText,
   selectPublicSeekTarget,
   validateLiveRenderer,
@@ -716,24 +717,44 @@ async function observePublicUserscriptMedia(
           }
         ).__ytPublicImageDraws?.slice(0, 16) ?? []
     );
-    const assessed = assessPublicImage(draws, imageResponses);
+    const survivingDraws = await page.evaluate(readSurvivingPublicImageDraws);
+    const assessed = assessPublicImage(survivingDraws, imageResponses);
     if (assessed.status === 'passed') {
       const imageScreenshot = 'live-' + index + '-public-image.png';
       await page.screenshot({ path: join(output, imageScreenshot) });
-      image = {
-        status: 'passed',
-        probeCapability: 'overlay-image-draw-observed',
-        productVerdict: 'visible-public-image-observed',
-        sourceType: assessed.draw.sourceType,
-        sourceHost: new URL(assessed.draw.url).hostname,
-        sourceSha256: createHash('sha256').update(assessed.draw.url).digest('hex'),
-        naturalWidth: assessed.draw.naturalWidth,
-        naturalHeight: assessed.draw.naturalHeight,
-        pixelAlpha: assessed.draw.pixelAlpha,
-        responseStatus: assessed.response.status,
-        responseContentType: assessed.response.contentType,
-        screenshot: imageScreenshot,
-      };
+      const afterScreenshot = await page.evaluate(readSurvivingPublicImageDraws);
+      const survivedScreenshot = afterScreenshot.some(
+        (draw) =>
+          draw.url === assessed.draw.url &&
+          draw.pixelX === assessed.draw.pixelX &&
+          draw.pixelY === assessed.draw.pixelY &&
+          draw.pixelRgba.every((value, pixelIndex) => value === assessed.draw.pixelRgba[pixelIndex])
+      );
+      image = survivedScreenshot
+        ? {
+            status: 'passed',
+            probeCapability: 'overlay-image-draw-observed',
+            productVerdict: 'visible-public-image-observed',
+            sourceType: assessed.draw.sourceType,
+            sourceHost: new URL(assessed.draw.url).hostname,
+            sourceSha256: createHash('sha256').update(assessed.draw.url).digest('hex'),
+            naturalWidth: assessed.draw.naturalWidth,
+            naturalHeight: assessed.draw.naturalHeight,
+            pixelAlpha: assessed.draw.pixelAlpha,
+            pixelX: assessed.draw.pixelX,
+            pixelY: assessed.draw.pixelY,
+            pixelRgba: assessed.draw.pixelRgba,
+            responseStatus: assessed.response.status,
+            responseContentType: assessed.response.contentType,
+            screenshot: imageScreenshot,
+          }
+        : {
+            status: 'unverified',
+            reason: 'public-image-final-frame-unverified',
+            probeCapability: 'overlay-image-draw-observed',
+            productVerdict: 'unverified',
+            screenshot: imageScreenshot,
+          };
     } else {
       image = {
         status: 'unverified',
@@ -741,6 +762,7 @@ async function observePublicUserscriptMedia(
         probeCapability: draws.length > 0 ? 'overlay-draw-observed' : 'unproven',
         productVerdict: 'unverified',
         drawCount: draws.length,
+        survivingDrawCount: survivingDraws.length,
         imageResponseCount: imageResponses.length,
       };
     }
@@ -841,6 +863,9 @@ async function observePublicUserscriptMedia(
       beforeScreenshot,
       afterScreenshot,
       scope: 'one paused public resize; no capacity-exhaustion or message-identity claim',
+      observation: 'backing geometry and nonempty canvas after actual resize',
+      messagePreservationVerdict: 'unverified',
+      messagePreservationReason: 'visible-message-identity-not-observed',
     };
   } catch {
     resize = { status: 'unverified', reason: 'public-resize-probe-error' };

@@ -24,6 +24,9 @@ export type PublicImageDraw = {
   naturalWidth: number;
   naturalHeight: number;
   pixelAlpha: number;
+  pixelX: number;
+  pixelY: number;
+  pixelRgba: [number, number, number, number];
 };
 
 export type PublicImageResponse = {
@@ -32,7 +35,7 @@ export type PublicImageResponse = {
   contentType: string;
 };
 
-/** Browser-only public-page probe; the wrapper always calls the native draw first. */
+/** Browser-only public-page probe; sampling cannot skip or replace the native draw. */
 export function installPublicImageDrawProbe(): void {
   const probeWindow = window as Window & { __ytPublicImageDraws?: PublicImageDraw[] };
   const draws: PublicImageDraw[] = [];
@@ -63,60 +66,136 @@ export function installPublicImageDrawProbe(): void {
     drawImage: (image: CanvasImageSource, ...args: number[]) => void;
   };
   const nativeCanvasDraw = canvas.drawImage;
+  const readPixel = (
+    context: CanvasRenderingContext2D,
+    x: number,
+    y: number
+  ): [number, number, number, number] => {
+    const data = context.getImageData(x, y, 1, 1).data;
+    return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0, data[3] ?? 0];
+  };
   canvas.drawImage = function (
     this: CanvasRenderingContext2D,
     image: CanvasImageSource,
     ...args: number[]
   ): void {
-    nativeCanvasDraw.call(this, image, ...args);
-    if (!this.canvas.closest('#yt-live-chat-overlay') || draws.length >= 16) return;
-    const url = sourceUrl(image);
-    if (!url || draws.some((draw) => draw.url === url)) return;
-    const naturalWidth =
-      image instanceof HTMLImageElement
-        ? image.naturalWidth
-        : 'width' in image && typeof image.width === 'number'
-          ? image.width
-          : 0;
-    const naturalHeight =
-      image instanceof HTMLImageElement
-        ? image.naturalHeight
-        : 'height' in image && typeof image.height === 'number'
-          ? image.height
-          : 0;
-    if (naturalWidth < 1 || naturalHeight < 1) return;
-    const destination =
-      args.length === 2
-        ? [args[0], args[1], naturalWidth, naturalHeight]
-        : args.length === 4
-          ? args
-          : args.length === 8
-            ? args.slice(4)
-            : null;
-    if (!destination || destination.some((value) => !Number.isFinite(value))) return;
-    const [x = 0, y = 0, width = 0, height = 0] = destination;
-    if (width <= 0 || height <= 0) return;
-    const transform = this.getTransform();
-    const midX = x + width / 2;
-    const midY = y + height / 2;
-    const pixelX = Math.floor(transform.a * midX + transform.c * midY + transform.e);
-    const pixelY = Math.floor(transform.b * midX + transform.d * midY + transform.f);
-    if (pixelX < 0 || pixelY < 0 || pixelX >= this.canvas.width || pixelY >= this.canvas.height)
-      return;
+    let candidate:
+      | {
+          url: string;
+          sourceType: PublicImageDraw['sourceType'];
+          naturalWidth: number;
+          naturalHeight: number;
+          pixelX: number;
+          pixelY: number;
+          before: [number, number, number, number];
+        }
+      | undefined;
     try {
-      const pixelAlpha = this.getImageData(pixelX, pixelY, 1, 1).data[3] ?? 0;
+      if (this.canvas.closest('#yt-live-chat-overlay') && draws.length < 16) {
+        const url = sourceUrl(image);
+        if (url && !draws.some((draw) => draw.url === url)) {
+          const naturalWidth =
+            image instanceof HTMLImageElement
+              ? image.naturalWidth
+              : 'width' in image && typeof image.width === 'number'
+                ? image.width
+                : 0;
+          const naturalHeight =
+            image instanceof HTMLImageElement
+              ? image.naturalHeight
+              : 'height' in image && typeof image.height === 'number'
+                ? image.height
+                : 0;
+          const destination =
+            args.length === 2
+              ? [args[0], args[1], naturalWidth, naturalHeight]
+              : args.length === 4
+                ? args
+                : args.length === 8
+                  ? args.slice(4)
+                  : null;
+          if (
+            naturalWidth > 0 &&
+            naturalHeight > 0 &&
+            destination &&
+            destination.every((value) => Number.isFinite(value))
+          ) {
+            const [x = 0, y = 0, width = 0, height = 0] = destination;
+            if (width > 0 && height > 0) {
+              const transform = this.getTransform();
+              const midX = x + width / 2;
+              const midY = y + height / 2;
+              const pixelX = Math.floor(transform.a * midX + transform.c * midY + transform.e);
+              const pixelY = Math.floor(transform.b * midX + transform.d * midY + transform.f);
+              if (
+                pixelX >= 0 &&
+                pixelY >= 0 &&
+                pixelX < this.canvas.width &&
+                pixelY < this.canvas.height
+              ) {
+                candidate = {
+                  url,
+                  sourceType: image instanceof HTMLImageElement ? 'image' : 'derived-canvas',
+                  naturalWidth,
+                  naturalHeight,
+                  pixelX,
+                  pixelY,
+                  before: readPixel(this, pixelX, pixelY),
+                };
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Sampling is optional; native drawing must still execute exactly once.
+    }
+    nativeCanvasDraw.call(this, image, ...args);
+    if (!candidate) return;
+    try {
+      const pixelRgba = readPixel(this, candidate.pixelX, candidate.pixelY);
+      const pixelAlpha = pixelRgba[3];
       if (pixelAlpha <= 8) return;
+      if (pixelRgba.every((value, index) => value === candidate.before[index])) return;
       draws.push({
-        url,
-        sourceType: image instanceof HTMLImageElement ? 'image' : 'derived-canvas',
-        naturalWidth,
-        naturalHeight,
+        url: candidate.url,
+        sourceType: candidate.sourceType,
+        naturalWidth: candidate.naturalWidth,
+        naturalHeight: candidate.naturalHeight,
         pixelAlpha,
+        pixelX: candidate.pixelX,
+        pixelY: candidate.pixelY,
+        pixelRgba,
       });
     } catch {
-      // A tainted or unavailable canvas cannot establish visible image pixels.
+      // A tainted or unavailable canvas cannot establish image contribution.
     }
   };
+}
+
+/** Require the contributed pixel to survive later drawing on the actual overlay canvas. */
+export function readSurvivingPublicImageDraws(): PublicImageDraw[] {
+  const canvas = document.querySelector('#yt-live-chat-overlay canvas');
+  if (!(canvas instanceof HTMLCanvasElement)) return [];
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) return [];
+    const draws =
+      (window as Window & { __ytPublicImageDraws?: PublicImageDraw[] }).__ytPublicImageDraws ?? [];
+    return draws.filter((draw) => {
+      if (
+        draw.pixelX < 0 ||
+        draw.pixelY < 0 ||
+        draw.pixelX >= canvas.width ||
+        draw.pixelY >= canvas.height
+      )
+        return false;
+      const actual = context.getImageData(draw.pixelX, draw.pixelY, 1, 1).data;
+      return draw.pixelRgba.every((value, index) => actual[index] === value);
+    });
+  } catch {
+    return [];
+  }
 }
 
 /** Read actual overlay backing pixels and debug counters without injecting messages. */
@@ -202,7 +281,14 @@ export function assessPublicImage(
       draw.naturalHeight > 0 &&
       Number.isSafeInteger(draw.pixelAlpha) &&
       draw.pixelAlpha > 8 &&
-      draw.pixelAlpha <= 255
+      draw.pixelAlpha <= 255 &&
+      Number.isSafeInteger(draw.pixelX) &&
+      draw.pixelX >= 0 &&
+      Number.isSafeInteger(draw.pixelY) &&
+      draw.pixelY >= 0 &&
+      draw.pixelRgba.length === 4 &&
+      draw.pixelRgba.every((value) => Number.isSafeInteger(value) && value >= 0 && value <= 255) &&
+      draw.pixelRgba[3] === draw.pixelAlpha
   );
   for (const draw of qualifiedDraws) {
     const response = responses.find(
