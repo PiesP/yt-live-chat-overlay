@@ -289,6 +289,9 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.base};
         flex-shrink: 0;
       }
+      .yt-chat-overlay-settings-title {
+        margin: 0;
+      }
       .yt-chat-overlay-settings-close {
         border: none;
         background: transparent;
