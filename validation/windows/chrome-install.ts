@@ -36,7 +36,12 @@ import {
   selectPublicSeekTarget,
   validateLiveRenderer,
 } from './live-rendering.ts';
-import type { PublicImageDraw, PublicImageResponse } from './live-rendering.ts';
+import type {
+  PublicCanvasFrame,
+  PublicCanvasRead,
+  PublicImageDraw,
+  PublicImageResponse,
+} from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import {
@@ -1006,6 +1011,7 @@ export async function observePublicResize(
   let resized = false;
   let overlayPaused = originalOverlayPaused;
   let videoPaused = originalVideoPaused;
+  let originalCanvasFrame: PublicCanvasFrame | null = null;
   let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
   try {
     await page
@@ -1037,6 +1043,7 @@ export async function observePublicResize(
       .evaluate((element) => (element as HTMLVideoElement).paused);
     if (!heldVideoPaused) throw new Error('Video pause did not engage');
     const before = await page.evaluate(readPublicCanvasFrame);
+    originalCanvasFrame = before.frame;
     const beforeScreenshot = 'live-' + index + '-before-resize.png';
     await page.screenshot({ path: join(output, beforeScreenshot) });
     const nextViewport = {
@@ -1129,6 +1136,58 @@ export async function observePublicResize(
       await page.setViewportSize(originalViewport).catch(() => {
         restored = false;
       });
+    let restoredCanvas: PublicCanvasRead | null = null;
+    let restoredCanvasReadFailed = false;
+    if (resized && restored) {
+      // Both viewport changes clear the canvas backing. Repaint while the
+      // renderer and video run, before restoring an originally paused page.
+      if (overlayPaused) {
+        await page.keyboard.press('Control+Space').then(
+          () => {
+            overlayPaused = false;
+          },
+          () => {
+            restored = false;
+          }
+        );
+      }
+      const videoRunning = await page
+        .locator('video')
+        .first()
+        .evaluate(async (element) => {
+          const video = element as HTMLVideoElement;
+          if (video.paused) await video.play().catch(() => {});
+          return !video.paused;
+        })
+        .catch(() => false);
+      const expectedFrame = originalCanvasFrame;
+      if (!videoRunning || !expectedFrame) restored = false;
+      if (restored && expectedFrame) {
+        const deadline = Date.now() + 8_000;
+        do {
+          restoredCanvas = await page.evaluate(readPublicCanvasFrame).catch(() => {
+            restoredCanvasReadFailed = true;
+            return null;
+          });
+          if (!restoredCanvas) break;
+          const frame = restoredCanvas.frame;
+          if (
+            frame?.width === expectedFrame.width &&
+            frame.height === expectedFrame.height &&
+            frame.visiblePixels > 0
+          )
+            break;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        } while (Date.now() < deadline);
+        const frame = restoredCanvas?.frame;
+        if (
+          frame?.width !== expectedFrame.width ||
+          frame.height !== expectedFrame.height ||
+          frame.visiblePixels < 1
+        )
+          restored = false;
+      }
+    }
     if (overlayPaused !== originalOverlayPaused) {
       await page.keyboard.press('Control+Space').then(
         () => {
@@ -1152,6 +1211,20 @@ export async function observePublicResize(
       }, originalVideoPaused)
       .catch(() => null);
     if (finalVideoPaused !== originalVideoPaused) restored = false;
+    if (resized)
+      resize.canvasReadRestored = restoredCanvas
+        ? {
+            reason: restoredCanvas.reason,
+            width: restoredCanvas.width,
+            height: restoredCanvas.height,
+            dpr: restoredCanvas.dpr,
+            visiblePixels: restoredCanvas.frame?.visiblePixels ?? null,
+          }
+        : {
+            reason: restoredCanvasReadFailed
+              ? 'canvas-evaluation-failed'
+              : 'canvas-repaint-unverified',
+          };
     resize.restoredOriginalState = restored;
     if (!restored) {
       resize.status = 'unverified';

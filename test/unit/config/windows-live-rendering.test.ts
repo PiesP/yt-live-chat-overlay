@@ -160,15 +160,23 @@ describe('installed public rendering observations', () => {
   };
   const after = { ...before, width: 1600, height: 900 };
 
-  it.each([false, true])(
-    'samples resize ink after resume and restores original pause states (initially paused=%s)',
-    async (initiallyPaused) => {
+  it.each([
+    { initiallyPaused: false, restoreReadFails: false },
+    { initiallyPaused: true, restoreReadFails: false },
+    { initiallyPaused: false, restoreReadFails: true },
+    { initiallyPaused: true, restoreReadFails: true },
+  ])(
+    'restores viewport paint before pause (paused=$initiallyPaused, read fails=$restoreReadFails)',
+    async ({ initiallyPaused, restoreReadFails }) => {
       const state = {
         overlayPaused: initiallyPaused,
         videoPaused: initiallyPaused,
         resized: false,
         backingClearedWhilePaused: false,
+        backingClearCount: 0,
+        paintReads: 0,
       };
+      const restoreReadStates: { overlayPaused: boolean; videoPaused: boolean }[] = [];
       const screenshots: { path: string; overlayPaused: boolean; videoPaused: boolean }[] = [];
       const video = {
         get paused() {
@@ -192,20 +200,30 @@ describe('installed public rendering observations', () => {
         }),
         evaluate: async (fn: unknown) => {
           if (fn === readPublicOverlayPauseState) return state.overlayPaused;
-          if (fn === readPublicCanvasFrame)
+          if (fn === readPublicCanvasFrame) {
+            if (state.backingClearCount === 2) {
+              restoreReadStates.push({
+                overlayPaused: state.overlayPaused,
+                videoPaused: state.videoPaused,
+              });
+              if (restoreReadFails) throw new Error('Canvas read unavailable');
+            }
+            if (state.backingClearCount > 0 && !state.overlayPaused && !state.videoPaused)
+              state.paintReads++;
             return {
               frame: {
                 width: state.resized ? 960 : 1280,
                 height: state.resized ? 560 : 720,
                 active: 2,
                 dropped: 1,
-                visiblePixels: state.resized && (state.overlayPaused || state.videoPaused) ? 0 : 16,
+                visiblePixels: state.backingClearCount === 0 || state.paintReads >= 2 ? 16 : 0,
               },
               reason: null,
               width: state.resized ? 960 : 1280,
               height: state.resized ? 560 : 720,
               dpr: 1,
             };
+          }
           throw new Error('Unexpected browser evaluation');
         },
         waitForFunction: async () => {},
@@ -223,6 +241,8 @@ describe('installed public rendering observations', () => {
         },
         setViewportSize: async ({ width }: { width: number }) => {
           state.resized = width !== 1280;
+          state.backingClearCount++;
+          state.paintReads = 0;
           if (state.resized && state.overlayPaused && state.videoPaused)
             state.backingClearedWhilePaused = true;
         },
@@ -232,12 +252,23 @@ describe('installed public rendering observations', () => {
         height: 720,
       });
       expect(state.backingClearedWhilePaused).toBe(true);
+      expect(state.backingClearCount).toBe(2);
+      expect(restoreReadStates).toHaveLength(restoreReadFails ? 1 : 2);
+      expect(restoreReadStates).toEqual(
+        Array.from({ length: restoreReadFails ? 1 : 2 }, () => ({
+          overlayPaused: false,
+          videoPaused: false,
+        }))
+      );
       expect(result).toMatchObject({
-        status: 'passed',
+        status: restoreReadFails ? 'unverified' : 'passed',
         before: { visiblePixels: 16 },
         after: { visiblePixels: 16 },
         samplingPhase: 'resumed-after-resize',
-        restoredOriginalState: true,
+        restoredOriginalState: !restoreReadFails,
+        canvasReadRestored: restoreReadFails
+          ? { reason: 'canvas-evaluation-failed' }
+          : { width: 1280, height: 720, visiblePixels: 16 },
       });
       expect(
         screenshots.map(({ overlayPaused, videoPaused }) => [overlayPaused, videoPaused])
