@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   appendFile,
@@ -14,6 +15,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import type { Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -29,6 +31,11 @@ import {
 
 const INPUT = 'validation/windows/release-upgrade/extension-input.json';
 const PUBLIC = 'validation/windows/release-upgrade/public-v0.45.7-chrome';
+const extensionModule = new globalThis.URL(
+  '../../../validation/windows/release-upgrade/extension.ts',
+  import.meta.url
+).href;
+const execFileAsync = promisify(execFile);
 const URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip';
 const FILES = [
@@ -139,6 +146,62 @@ afterEach(async () => {
 });
 
 describe('optional public Chrome extension update inputs', () => {
+  it.skipIf(process.platform === 'win32')(
+    'rejects an unwritten FIFO without blocking the input read',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'yt-extension-fifo-'));
+      roots.push(root);
+      const fifo = join(root, 'input.json');
+      await execFileAsync('mkfifo', [fifo]);
+      const script = `
+        import { boundedFile } from ${JSON.stringify(extensionModule)};
+        try {
+          await boundedFile(process.argv[1], 4096);
+          throw new Error('FIFO was accepted');
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('bounded regular file'))
+            throw error;
+          process.stdout.write('rejected FIFO');
+        }
+      `;
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ['--experimental-strip-types', '--input-type=module', '-e', script, fifo],
+        { timeout: 2500, killSignal: 'SIGKILL' }
+      );
+      expect(stdout).toBe('rejected FIFO');
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a dangling input symlink when opening follows Windows semantics',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'yt-extension-dangling-input-'));
+      roots.push(root);
+      const directory = join(root, 'validation/windows/release-upgrade');
+      await mkdir(directory, { recursive: true });
+      await symlink(join(directory, 'missing-input.json'), join(root, INPUT));
+      const script = `
+        import { readExtensionUpgradeInput } from ${JSON.stringify(extensionModule)};
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        try {
+          await readExtensionUpgradeInput(process.argv[1]);
+          throw new Error('Dangling input was treated as absent');
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('Extension input path is invalid'))
+            throw error;
+          process.stdout.write('rejected dangling input');
+        }
+      `;
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ['--experimental-strip-types', '--input-type=module', '-e', script, root],
+        { timeout: 2500, killSignal: 'SIGKILL' }
+      );
+      expect(stdout).toBe('rejected dangling input');
+    }
+  );
+
   it('stops reading a file that grows after opening beyond its admitted size', async () => {
     const root = await mkdtemp(join(tmpdir(), 'yt-extension-bounded-file-'));
     roots.push(root);

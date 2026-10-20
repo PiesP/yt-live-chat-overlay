@@ -113,7 +113,9 @@ export async function boundedFile(
   { onOpened }: { onOpened?: () => Promise<void> } = {}
 ): Promise<Buffer> {
   const flags =
-    process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
+    process.platform === 'win32'
+      ? constants.O_RDONLY
+      : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
   const handle = await open(path, flags);
   try {
     const opened = await handle.stat({ bigint: true });
@@ -343,7 +345,15 @@ export async function readExtensionUpgradeInput(root: string): Promise<{
     await ordinaryParents(root, INPUT);
     raw = await boundedFile(join(root, INPUT), 4096);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      try {
+        await lstat(join(root, INPUT));
+      } catch (inspectionError) {
+        if ((inspectionError as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+        throw inspectionError;
+      }
+      assert.fail('Extension input path is invalid');
+    }
     throw error;
   }
   const input = validateExtensionUpgradeInput(JSON.parse(raw.toString('utf8')));
