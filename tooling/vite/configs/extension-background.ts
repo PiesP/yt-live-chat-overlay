@@ -40,6 +40,7 @@ export function createExtensionBackgroundConfig(browser: ExtensionBrowser) {
         },
       },
       define: {
+        __CHROME_NATIVE_BOOTSTRAP__: JSON.stringify(browser === 'chrome'),
         __VERSION__: JSON.stringify(process.env.BUILD_VERSION ?? pkg.version),
         __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
       },

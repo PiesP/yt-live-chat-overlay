@@ -9,22 +9,26 @@ not browser-store installations.
 - `manifest.json`: Chromium manifest
 - `manifest.firefox.json`: Firefox manifest and minimum version
 - `content-script.ts`: isolated-world entry point and storage relay
+- `native-bootstrap.ts`: Chromium main-world bridge and worker initialization
 - `page-bridge.ts`: main-world runtime bridge initialization
 - `page-script.ts`: main-world application entry point
-- `background.ts`: context menu and extension lifecycle handling
+- `background.ts`: context menus, extension lifecycle, and Chromium page injection
 - `src/platform/`: storage, menu, worker, cross-tab, language, and translation adapters
 
-The isolated content script injects `page-script.js` into the YouTube page's
-main world. Messages crossing that boundary are origin- and shape-validated and
-carry a per-injection nonce; extension APIs remain in the isolated or background
-context.
+The isolated content script starts `page-script.js` in the YouTube page's main
+world. Chromium uses the `scripting` permission: the background reads the fixed
+packaged worker and injects the bridge and page bundle into the originating
+document. Firefox uses an external script element. Both create the worker Blob
+in the page's origin. Messages crossing the boundary are origin- and
+shape-validated and carry a per-injection nonce; extension APIs remain in the
+isolated or background context.
 
 | Capability | Userscript | Chromium extension | Firefox extension |
 | --- | --- | --- | --- |
 | Storage | Userscript manager `GM_*` storage | Extension local storage | Extension local storage |
 | Cross-tab sync | Userscript value-change listener | Extension storage events | Extension storage events |
 | Menu | Userscript menu command | Context menu | Context menu |
-| Worker URL | Bundled userscript URL | `runtime.getURL()` | `runtime.getURL()` |
+| Worker URL | Bundled userscript URL | Page-origin Blob | Page-origin Blob |
 | Translation | Built-in API when available | Built-in API when available | Built-in API when available |
 
 ## Build

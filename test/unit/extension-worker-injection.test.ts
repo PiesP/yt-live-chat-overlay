@@ -22,6 +22,10 @@ afterEach(() => {
     script.remove();
   });
   delete window.__ytExtensionBridge;
+  delete window.__ytExtensionBootstrapClaim;
+  document.querySelectorAll('script[data-yt-extension-bridge-nonce]').forEach((script) => {
+    script.remove();
+  });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.resetModules();
@@ -45,6 +49,7 @@ describe('extension worker injection lifecycle', () => {
   });
 
   it('hands packaged source to MAIN world and retains its Blob through BFCache', async () => {
+    vi.stubGlobal('__CHROME_NATIVE_BOOTSTRAP__', false);
     const createObjectURL = vi.fn().mockReturnValue('blob:https://www.youtube.com/worker');
     const revokeObjectURL = vi.fn();
     class TestUrl extends URL {}
@@ -72,6 +77,54 @@ describe('extension worker injection lifecycle', () => {
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:https://www.youtube.com/worker');
     script.remove();
+  });
+
+  it('does not let a hostile DOM script replace the native Chrome bridge', async () => {
+    vi.stubGlobal('__CHROME_NATIVE_BOOTSTRAP__', true);
+    const hostile = document.createElement('script');
+    hostile.dataset.ytExtensionBridgeNonce = 'hostile-nonce';
+    hostile.dataset.ytExtensionWorkerSource = 'hostile worker source';
+    document.head.appendChild(hostile);
+    const bridge = {
+      nonce: 'background-nonce',
+      workerSupported: false,
+      storageType: 'chrome.storage.local' as const,
+    };
+    window.__ytExtensionBootstrapClaim = true;
+    window.__ytExtensionBridge = bridge;
+
+    await import('../../extension/page-bridge');
+
+    expect(window.__ytExtensionBridge).toBe(bridge);
+    expect(hostile.dataset.ytExtensionBridgeNonce).toBe('hostile-nonce');
+    expect(hostile.dataset.ytExtensionWorkerSource).toBe('hostile worker source');
+  });
+
+  it.each([
+    {
+      claim: undefined,
+      bridge: {
+        nonce: 'background-nonce',
+        workerSupported: false,
+        storageType: 'chrome.storage.local' as const,
+      },
+    },
+    { claim: true, bridge: undefined },
+  ])('fails closed if the native Chrome bridge is unavailable', async ({ claim, bridge }) => {
+    vi.stubGlobal('__CHROME_NATIVE_BOOTSTRAP__', true);
+    const hostile = document.createElement('script');
+    hostile.dataset.ytExtensionBridgeNonce = 'hostile-nonce';
+    hostile.dataset.ytExtensionWorkerSource = 'hostile worker source';
+    document.head.appendChild(hostile);
+    if (claim === undefined) delete window.__ytExtensionBootstrapClaim;
+    else window.__ytExtensionBootstrapClaim = claim;
+    if (bridge === undefined) delete window.__ytExtensionBridge;
+    else window.__ytExtensionBridge = bridge;
+
+    await expect(import('../../extension/page-bridge')).rejects.toThrow(
+      'Native extension bridge is unavailable'
+    );
+    expect(window.__ytExtensionBridge).toBe(bridge);
   });
 
   it('keeps the authenticated storage bridge when worker preparation fails', async () => {

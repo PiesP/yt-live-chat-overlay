@@ -6,7 +6,7 @@
   "author": "PiesP",
   "homepage_url": "https://github.com/PiesP/yt-live-chat-overlay",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "contextMenus"],
+  "permissions": ["storage", "contextMenus", "scripting"],
   "host_permissions": ["https://www.youtube.com/*"],
   "content_scripts": [
     {
@@ -14,12 +14,6 @@
       "js": ["content-script.js"],
       "run_at": "document_end",
       "world": "ISOLATED"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["workers/*.js", "page-script.js"],
-      "matches": ["https://www.youtube.com/*"]
     }
   ],
   "content_security_policy": {

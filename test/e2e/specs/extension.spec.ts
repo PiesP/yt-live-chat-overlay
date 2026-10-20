@@ -5,7 +5,7 @@
  * @fileoverview E2E tests for the Chrome extension deployment path.
  *
  * These tests load the built Chrome extension (dist-extension/) and verify
- * that the content script injects the page script on a real youtube.com page,
+ * that native scripting injects the page bundle on a real youtube.com page,
  * exercising the actual extension manifest + service worker + content
  * script + MAIN-world bridge pipeline.
  *
@@ -40,7 +40,7 @@ test.describe('Chrome Extension', () => {
     expect(manifest.content_scripts).toBeDefined();
   });
 
-  test('extension injects page script on youtube.com', async () => {
+  test('extension bootstraps the page bundle on youtube.com', async () => {
     // Extensions are loaded at browser launch time. A normal browser fixture
     // context cannot load an unpacked MV3 extension after the browser starts.
     const userDataDir = mkdtempSync(join(tmpdir(), 'yt-overlay-extension-'));
@@ -86,9 +86,8 @@ test.describe('Chrome Extension', () => {
         storageType: 'chrome.storage.local',
       });
       expect(bridge?.workerUrl).toMatch(/^blob:https:\/\/www\.youtube\.com\//);
-      await expect(
-        page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]')
-      ).toHaveCount(1);
+      expect(await page.evaluate(() => window.__ytExtensionBootstrapClaim)).toBe(true);
+      await expect(page.locator('script[src^="chrome-extension://"]')).toHaveCount(0);
       await expect(page.locator('#yt-live-chat-overlay')).toBeAttached();
       await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
       await expect(page.locator('#yt-chat-overlay-settings-button')).toBeVisible();
