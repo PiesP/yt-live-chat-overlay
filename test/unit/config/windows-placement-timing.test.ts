@@ -708,6 +708,7 @@ describe('Windows placement timing probe', () => {
     const source = `(() => {
       function getRegularCardInsets() {}
       function reconcileMessagePlacements(candidates) {
+        globalThis.reflowCalls = (globalThis.reflowCalls ?? 0) + 1;
         return {
           placements: [candidates[0]],
           dropped: candidates.slice(1).map((candidate) => ({
@@ -723,6 +724,12 @@ describe('Windows placement timing probe', () => {
           { message: { message: { id: 'WINDOWS195_BACKLOG_LONG' } }, laneIndex: 0,
             height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } }
         ], { now: 200, laneCount: 1, laneHeight: 44, viewportHeight: 44 });
+        globalThis.acceptedRetained = reconcileMessagePlacements([
+          { message: { message: { id: 'WINDOWS195_BACKLOG_LONG' } }, laneIndex: 0,
+            height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } },
+          { message: { message: { id: 'WINDOWS195_LOAD_00' } }, laneIndex: 0,
+            height: 44, motion: { viewportEntryTime: 100, visibleExitTime: 500 } }
+        ], { now: 200, laneCount: 1, laneHeight: 44, viewportHeight: 44 });
       }
 \tmain();
     })();`;
@@ -733,6 +740,8 @@ describe('Windows placement timing probe', () => {
       __ytPlacementProbe: state,
       performance: { timeOrigin: 1000, now: () => 1 },
       accepted: null as unknown,
+      acceptedRetained: null as unknown,
+      reflowCalls: 0,
     };
     const script = instrumentCanvasPageScript(source, probe);
     expect(script).not.toBeNull();
@@ -744,14 +753,19 @@ describe('Windows placement timing probe', () => {
     expect(accepted.placements[0]?.message.message.id).toBe('WINDOWS195_LOAD_00');
     expect(accepted.dropped[0]?.message.message.id).toBe('WINDOWS195_BACKLOG_LONG');
     const exact = state.exact as {
-      reflows: { actual: { dropped: { id: string }[] }; longFirst: { placedIds: string[] } }[];
+      reflows: {
+        actual: { dropped: { id: string }[] };
+        longFirst: { placedIds: string[] } | null;
+      }[];
       reflowOverflow: number;
     };
-    expect(exact.reflows).toHaveLength(1);
+    expect(exact.reflows).toHaveLength(2);
     expect(exact.reflows[0]?.actual.dropped).toEqual([
       { id: 'WINDOWS195_BACKLOG_LONG', reason: 'reflow_capacity' },
     ]);
-    expect(exact.reflows[0]?.longFirst.placedIds).toEqual(['WINDOWS195_BACKLOG_LONG']);
+    expect(exact.reflows[0]?.longFirst?.placedIds).toEqual(['WINDOWS195_BACKLOG_LONG']);
+    expect(exact.reflows[1]?.longFirst).toBeNull();
+    expect(sandbox.reflowCalls).toBe(3);
     expect(exact.reflowOverflow).toBeUndefined();
   });
 

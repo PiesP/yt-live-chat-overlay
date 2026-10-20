@@ -1864,11 +1864,15 @@ function attachReflowDiagnostic(
       exact.reflowOverflow = (exact.reflowOverflow ?? 0) + 1;
       return actual;
     }
-    const reordered = [
-      ...candidates.filter((candidate) => idOf(candidate.message) === target),
-      ...candidates.filter((candidate) => idOf(candidate.message) !== target),
-    ];
-    const longFirst = original(reordered, options);
+    const longFirst = actual.placements.some((placement) => idOf(placement.message) === target)
+      ? null
+      : original(
+          [
+            ...candidates.filter((candidate) => idOf(candidate.message) === target),
+            ...candidates.filter((candidate) => idOf(candidate.message) !== target),
+          ],
+          options
+        );
     const summarize = (result: typeof actual) => ({
       placedIds: result.placements.map((placement) => idOf(placement.message)),
       dropped: result.dropped.map((entry) => ({ id: idOf(entry.message), reason: entry.reason })),
@@ -1890,7 +1894,7 @@ function attachReflowDiagnostic(
           candidate.motion.visibleExitTime > options.now,
       })),
       actual: summarize(actual),
-      longFirst: summarize(longFirst),
+      longFirst: longFirst ? summarize(longFirst) : null,
     });
     return actual;
   };
