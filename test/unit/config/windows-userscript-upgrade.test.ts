@@ -11,10 +11,10 @@ import * as chromeInstall from '../../../validation/windows/chrome-install.ts';
 import * as upgrade from '../../../validation/windows/release-upgrade/upgrade.ts';
 
 const roots: string[] = [];
-const baselineVersion = '0.45.6';
-const candidateVersion = '0.45.7';
+const baselineVersion = '0.45.7';
+const candidateVersion = '0.45.8';
 const assetUrl =
-  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.6/yt-live-chat-overlay.user.js';
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay.user.js';
 const candidateDownloadUrl =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js';
 const metadata = (version: string, unsafeWindow: boolean, downloadUrl: string) => `// ==UserScript==
@@ -36,7 +36,7 @@ async function fixture(
   const directory = join(root, 'validation/windows/release-upgrade');
   await mkdir(directory, { recursive: true });
   await mkdir(join(root, 'dist'));
-  const baseline = overrides.baseline ?? metadata(baselineVersion, true, assetUrl);
+  const baseline = overrides.baseline ?? metadata(baselineVersion, true, candidateDownloadUrl);
   const candidate = overrides.candidate ?? metadata(candidateVersion, true, candidateDownloadUrl);
   const input = overrides.input ?? {
     schemaVersion: 1,
@@ -45,7 +45,7 @@ async function fixture(
     publishedAssetUrl: assetUrl,
   };
   await writeFile(join(directory, 'input.json'), JSON.stringify(input));
-  await writeFile(join(directory, 'public-v0.45.6.user.js'), baseline);
+  await writeFile(join(directory, 'public-v0.45.7.user.js'), baseline);
   await writeFile(join(root, 'dist/yt-live-chat-overlay.user.js'), candidate);
   return { root, directory };
 }
@@ -70,13 +70,15 @@ describe('installed manager upgrade inputs', () => {
     expect(inputs.candidate.grants).toContain('unsafeWindow');
     expect(inputs.baselineSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(inputs.candidateSha256).not.toBe(inputs.baselineSha256);
-    expect(inputs.baseline.downloadUrl).toBe(assetUrl);
+    expect(inputs.publishedAssetUrl).toBe(assetUrl);
+    expect(inputs.baseline.downloadUrl).toBe(candidateDownloadUrl);
     expect(inputs.candidate.downloadUrl).toBe(candidateDownloadUrl);
   });
 
-  it('rejects a changed public URL and versioned or unrelated candidate download URLs', async () => {
+  it('rejects versioned or unrelated metadata download URLs', async () => {
     for (const overrides of [
-      { baseline: metadata(baselineVersion, true, candidateDownloadUrl) },
+      { baseline: metadata(baselineVersion, true, assetUrl) },
+      { baseline: metadata(baselineVersion, true, 'https://example.com/other.user.js') },
       {
         candidate: metadata(
           candidateVersion,
@@ -120,10 +122,10 @@ describe('installed manager upgrade inputs', () => {
     });
     await expect(upgrade.loadUpgradeInputs(badDigest.root)).rejects.toThrow('SHA-256 differs');
     const linked = await fixture();
-    await rm(join(linked.directory, 'public-v0.45.6.user.js'));
+    await rm(join(linked.directory, 'public-v0.45.7.user.js'));
     await symlink(
-      join(badDigest.directory, 'public-v0.45.6.user.js'),
-      join(linked.directory, 'public-v0.45.6.user.js')
+      join(badDigest.directory, 'public-v0.45.7.user.js'),
+      join(linked.directory, 'public-v0.45.7.user.js')
     );
     await expect(upgrade.loadUpgradeInputs(linked.root)).rejects.toThrow('Invalid upgrade file');
   });
@@ -172,8 +174,34 @@ describe('installed manager upgrade inputs', () => {
     }
   });
 
+  it('rejects unexpected grant changes and invalid baseline metadata', async () => {
+    const validBaseline = metadata(baselineVersion, true, candidateDownloadUrl);
+    const validCandidate = metadata(candidateVersion, true, candidateDownloadUrl);
+    for (const overrides of [
+      { baseline: metadata('0.45.6', true, candidateDownloadUrl) },
+      { baseline: metadata(baselineVersion, false, candidateDownloadUrl) },
+      { baseline: validBaseline.replace('YouTube Live Chat Overlay', 'Other Script') },
+      {
+        baseline: validBaseline.replace(
+          '// @grant        unsafeWindow\n',
+          '// @grant        GM_getValue\n'
+        ),
+      },
+      { candidate: validCandidate.replace('// @grant        GM_getValue\n', '') },
+      {
+        candidate: validCandidate.replace(
+          '// @grant        unsafeWindow\n',
+          '// @grant        GM_setValue\n// @grant        unsafeWindow\n'
+        ),
+      },
+    ]) {
+      const { root } = await fixture(overrides);
+      await expect(upgrade.loadUpgradeInputs(root)).rejects.toThrow();
+    }
+  });
+
   it('requires one displayed version and retained nondefault settings', () => {
-    const row = '1  YouTube Live Chat Overlay  0.45.7  946 KB';
+    const row = '1  YouTube Live Chat Overlay  0.45.8  946 KB';
     expect(upgrade.requireInstalledScriptRow([row], candidateVersion).version).toBe(
       candidateVersion
     );

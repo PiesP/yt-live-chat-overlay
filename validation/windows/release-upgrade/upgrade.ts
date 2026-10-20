@@ -89,13 +89,13 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 const DIRECTORY = 'validation/windows/release-upgrade';
 const INPUT_FILE = `${DIRECTORY}/input.json`;
-const BASELINE_FILE = `${DIRECTORY}/public-v0.45.6.user.js`;
+const BASELINE_FILE = `${DIRECTORY}/public-v0.45.7.user.js`;
 const CANDIDATE_FILE = 'dist/yt-live-chat-overlay.user.js';
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const SCRIPT_NAMESPACE = 'https://github.com/PiesP';
-const BASELINE_VERSION = '0.45.6';
+const BASELINE_VERSION = '0.45.7';
 const PUBLIC_ASSET_URL =
-  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.6/yt-live-chat-overlay.user.js';
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay.user.js';
 const UPDATE_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js';
 const CANDIDATE_DOWNLOAD_URL =
@@ -117,7 +117,7 @@ export function validateUpgradeInput(value: unknown): UpgradeInput {
   assert.equal(input.schemaVersion, 1, 'Unsupported upgrade input schema');
   assert(typeof input.baselineSha256 === 'string');
   assert.match(input.baselineSha256, /^[a-f0-9]{64}$/u, 'Invalid public baseline SHA-256');
-  assert.equal(input.candidateVersion, '0.45.7', 'Unexpected candidate version');
+  assert.equal(input.candidateVersion, '0.45.8', 'Unexpected candidate version');
   assert.equal(input.publishedAssetUrl, PUBLIC_ASSET_URL, 'Unexpected public asset URL');
   return input as UpgradeInput;
 }
@@ -166,13 +166,19 @@ export function requireUpgradeMetadata(
     assert.equal(metadata.version, version, `${label} script version changed`);
     assert.equal(metadata.updateUrl, UPDATE_URL, `${label} update URL changed`);
   }
-  assert.equal(baseline.downloadUrl, PUBLIC_ASSET_URL, 'baseline download URL changed');
+  assert.equal(baseline.downloadUrl, CANDIDATE_DOWNLOAD_URL, 'baseline download URL changed');
   assert.equal(candidate.downloadUrl, CANDIDATE_DOWNLOAD_URL, 'candidate download URL changed');
-  assert(candidate.grants.includes('unsafeWindow'), 'Candidate lacks unsafeWindow grant');
-  assert.equal(
-    new Set(candidate.grants).size,
-    candidate.grants.length,
-    'Duplicate candidate grant'
+  for (const [label, metadata] of [
+    ['baseline', baseline],
+    ['candidate', candidate],
+  ] as const) {
+    assert(metadata.grants.includes('unsafeWindow'), `${label} lacks unsafeWindow grant`);
+    assert.equal(new Set(metadata.grants).size, metadata.grants.length, `Duplicate ${label} grant`);
+  }
+  assert.deepEqual(
+    [...candidate.grants].sort(),
+    [...baseline.grants].sort(),
+    'Candidate grants differ from public baseline'
   );
 }
 
