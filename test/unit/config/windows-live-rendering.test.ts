@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vite-plus/test';
 
 import {
   observePublicResize,
+  openPublicSettingsDialog,
   PublicUserscriptRealm,
 } from '../../../validation/windows/chrome-install.ts';
 import {
@@ -129,6 +130,27 @@ describe('public userscript realm authentication', () => {
 });
 
 describe('installed public rendering observations', () => {
+  it('opens the hover-hidden settings control through its keyboard path', async () => {
+    const actions: string[] = [];
+    const modal = {
+      waitFor: async ({ state }: { state: string }) => actions.push(`modal:${state}`),
+    };
+    const button = {
+      waitFor: async ({ state }: { state: string }) => actions.push(`button:${state}`),
+      focus: async () => actions.push('button:focus'),
+      click: async () => {
+        throw new Error('pointer click cannot reach the hidden control');
+      },
+    };
+    const page = {
+      locator: (selector: string) =>
+        selector === '#yt-chat-overlay-settings-button' ? button : modal,
+      keyboard: { press: async (key: string) => actions.push(`keyboard:${key}`) },
+    };
+    expect(await openPublicSettingsDialog(page as never)).toBe(modal);
+    expect(actions).toEqual(['button:visible', 'button:focus', 'keyboard:Enter', 'modal:visible']);
+  });
+
   const before = {
     width: 1280,
     height: 720,

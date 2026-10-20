@@ -12,6 +12,7 @@ import type {
   BrowserContext,
   BrowserType,
   CDPSession,
+  Locator,
   Page,
   Request,
   Response,
@@ -838,6 +839,17 @@ export class PublicUserscriptRealm {
   }
 }
 
+/** Open the player-hover settings control through its keyboard-accessible path. */
+export async function openPublicSettingsDialog(page: Page): Promise<Locator> {
+  const button = page.locator('#yt-chat-overlay-settings-button');
+  await button.waitFor({ state: 'visible', timeout: 20_000 });
+  await button.focus();
+  await page.keyboard.press('Enter');
+  const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+  await modal.waitFor({ state: 'visible' });
+  return modal;
+}
+
 /** Exercise actual installed userscript output on public chat without changing site responses. */
 async function observePublicUserscriptMedia(
   page: Page,
@@ -856,9 +868,7 @@ async function observePublicUserscriptMedia(
   let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
   let imagePhase: 'settings-ui' | 'realm-probe' | 'realm-read' | 'screenshot' = 'settings-ui';
   try {
-    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
-    await page.locator('#yt-chat-overlay-settings-button').click();
-    await modal.waitFor({ state: 'visible' });
+    const modal = await openPublicSettingsDialog(page);
     await modal.locator('#tab-colors').click();
     const checkbox = modal.locator('input[name="showAuthor-normal"]');
     originalShowAuthor = await checkbox.isChecked();
@@ -954,16 +964,14 @@ async function observePublicUserscriptMedia(
         .catch(() => {});
     if (originalShowAuthor !== undefined) {
       const restored = await (async () => {
-        await page.locator('#yt-chat-overlay-settings-button').click();
-        await modal.waitFor({ state: 'visible' });
+        await openPublicSettingsDialog(page);
         await modal.locator('#tab-colors').click();
         const checkbox = modal.locator('input[name="showAuthor-normal"]');
         if ((await checkbox.isChecked()) !== originalShowAuthor)
           await checkbox.setChecked(originalShowAuthor);
         await modal.locator('button[data-action="close"]').click();
         await modal.waitFor({ state: 'hidden' });
-        await page.locator('#yt-chat-overlay-settings-button').click();
-        await modal.waitFor({ state: 'visible' });
+        await openPublicSettingsDialog(page);
         await modal.locator('#tab-colors').click();
         const saved = (await checkbox.isChecked()) === originalShowAuthor;
         await modal.locator('button[data-action="close"]').click();
@@ -1255,12 +1263,7 @@ async function inspectLivePage(
         };
       });
     observation.phase = 'settings';
-    const settingsButton = page.locator('#yt-chat-overlay-settings-button');
-    await settingsButton.waitFor({ state: 'visible', timeout: 20_000 });
-    await settingsButton.focus();
-    await page.keyboard.press('Enter');
-    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
-    await modal.waitFor({ state: 'visible' });
+    const modal = await openPublicSettingsDialog(page);
     const fontSize = modal.locator('input[name="fontSize"]');
     observation.fontSize = Number(await fontSize.inputValue());
     await page.keyboard.press('Escape');
