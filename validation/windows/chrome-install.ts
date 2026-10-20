@@ -229,7 +229,7 @@ export function diagnoseUnsafeOriginConsole(
 ) {
   const match =
     text.length <= 4096
-      ? /^Unsafe attempt to load URL (\S{1,2048}) from frame with URL (\S{1,2048}) Domains, protocols and ports must match\./u.exec(
+      ? /^Unsafe attempt to load URL (\S{1,2048}) from frame with URL (\S{1,2048})\. Domains, protocols and ports must match\./u.exec(
           text
         )
       : null;
@@ -820,144 +820,66 @@ export async function readPublicPageState(page: Page) {
   }));
 }
 
-type RealmContext = { id: number; uniqueId: string; auxData?: { frameId?: string } };
+/** The init script runs before site code and only on the current top-level public watch document. */
+function publicImageProbeExpression(body: string): string {
+  return `(() => {
+    if (window !== window.top ||
+        !['https://www.youtube.com', 'https://youtube.com'].includes(location.origin) ||
+        location.pathname !== '/watch') return null;
+    return (${body})();
+  })()`;
+}
 
-export class PublicUserscriptRealm {
-  private readonly contexts = new Map<number, RealmContext>();
-  private session: CDPSession | null = null;
-  private selectedId: string | null = null;
-  private selectedSandboxMode: string | null = null;
-  private setupReason: string | null = null;
-  private readonly browserContext: BrowserContext;
+export function publicImageProbeInitScript(): string {
+  return publicImageProbeExpression(installPublicImageDrawProbe.toString());
+}
+
+export class PublicPageImageProbe {
+  private installed = false;
+  private reason = 'public-image-main-probe-install-failed';
   private readonly page: Page;
-  private readonly version: string;
 
-  constructor(browserContext: BrowserContext, page: Page, version: string) {
-    this.browserContext = browserContext;
+  constructor(page: Page) {
     this.page = page;
-    this.version = version;
   }
 
-  async start(): Promise<void> {
+  async installBeforeNavigation(): Promise<void> {
     try {
-      const session = await this.browserContext.newCDPSession(this.page);
-      this.session = session;
-      session.on('Runtime.executionContextCreated', ({ context }) => {
-        this.contexts.set(context.id, context);
-        if (this.contexts.size > 32) {
-          const oldest = this.contexts.keys().next().value;
-          if (oldest !== undefined) this.contexts.delete(oldest);
-        }
-      });
-      session.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
-        this.contexts.delete(executionContextId);
-      });
-      session.on('Runtime.executionContextsCleared', () => this.contexts.clear());
-      await session.send('Runtime.enable');
+      await this.page.addInitScript({ content: publicImageProbeInitScript() });
+      this.installed = true;
     } catch {
-      this.setupReason = 'public-image-cdp-unavailable';
-      await this.close();
+      this.reason = 'public-image-main-probe-install-failed';
     }
   }
 
-  private async evaluate<T>(id: string, expression: string): Promise<T> {
-    if (!this.session) throw new Error('CDP session unavailable');
-    const result = await this.session.send('Runtime.evaluate', {
-      uniqueContextId: id,
-      expression,
-      returnByValue: true,
-    });
-    if (result.exceptionDetails) throw new Error('CDP evaluation failed');
-    return result.result.value as T;
-  }
-
-  get sandboxMode(): string | null {
-    return this.selectedSandboxMode;
-  }
-
-  async selectAndInstall(): Promise<{ status: string; reason: string }> {
-    if (!this.session)
-      return { status: 'unproven', reason: this.setupReason ?? 'public-image-cdp-unavailable' };
-    let frameId: string;
+  async readiness(): Promise<{ status: string; reason: string }> {
+    if (!this.installed) return { status: 'unproven', reason: this.reason };
     try {
-      frameId = (await this.session.send('Page.getFrameTree')).frameTree.frame.id;
+      const present = await this.page.evaluate(
+        publicImageProbeExpression('() => Array.isArray(window.__ytPublicImageDraws)')
+      );
+      return present === true
+        ? { status: 'ready', reason: 'public-image-main-probe-ready' }
+        : { status: 'unproven', reason: 'public-image-main-probe-unavailable' };
     } catch {
-      return { status: 'unproven', reason: 'public-image-main-frame-unavailable' };
-    }
-    const candidates: { id: string; sandboxMode: string | null }[] = [];
-    const expression = `(() => {
-      const info = typeof GM_info === 'undefined' ? null : GM_info;
-      const handle = window.__ytChatOverlay;
-      return {
-        name: info?.script?.name ?? null,
-        version: info?.script?.version ?? null,
-        sandboxMode: info?.sandboxMode ?? null,
-        callable: typeof handle?.getSettings === 'function' && typeof handle?.applySettings === 'function'
-      };
-    })()`;
-    for (const entry of this.contexts.values()) {
-      if (entry.auxData?.frameId !== frameId) continue;
-      try {
-        const candidate = await this.evaluate<{
-          name: unknown;
-          version: unknown;
-          sandboxMode: unknown;
-          callable: unknown;
-        }>(entry.uniqueId, expression);
-        if (
-          candidate.name === SCRIPT_NAME &&
-          candidate.version === this.version &&
-          candidate.callable === true
-        )
-          candidates.push({
-            id: entry.uniqueId,
-            sandboxMode:
-              typeof candidate.sandboxMode === 'string' ? candidate.sandboxMode.slice(0, 32) : null,
-          });
-      } catch {
-        // Navigation may destroy a context between discovery and evaluation.
-      }
-    }
-    if (candidates.length !== 1)
-      return {
-        status: candidates.length ? 'ambiguous' : 'unproven',
-        reason: candidates.length ? 'public-image-realm-ambiguous' : 'public-image-realm-unproven',
-      };
-    const candidate = candidates[0];
-    if (candidate === undefined)
-      return { status: 'unproven', reason: 'public-image-realm-unproven' };
-    try {
-      await this.evaluate(candidate.id, `(${installPublicImageDrawProbe.toString()})()`);
-      this.selectedId = candidate.id;
-      this.selectedSandboxMode = candidate.sandboxMode;
-      return { status: 'ready', reason: 'public-image-realm-authenticated' };
-    } catch {
-      return { status: 'unproven', reason: 'public-image-probe-install-failed' };
+      return { status: 'unproven', reason: 'public-image-main-probe-read-failed' };
     }
   }
 
   async readDraws(): Promise<PublicImageDraw[]> {
-    if (this.selectedId === null) return [];
-    return this.evaluate<PublicImageDraw[]>(
-      this.selectedId,
-      'window.__ytPublicImageDraws?.slice(0, 16) ?? []'
+    const draws = await this.page.evaluate(
+      publicImageProbeExpression('() => window.__ytPublicImageDraws?.slice(0, 16) ?? []')
     );
+    if (!Array.isArray(draws)) throw new Error('Public watch document unavailable');
+    return draws as PublicImageDraw[];
   }
 
   async readSurvivors(): Promise<PublicImageDraw[]> {
-    if (this.selectedId === null) return [];
-    return this.evaluate<PublicImageDraw[]>(
-      this.selectedId,
-      `(${readSurvivingPublicImageDraws.toString()})()`
+    const draws = await this.page.evaluate(
+      publicImageProbeExpression(readSurvivingPublicImageDraws.toString())
     );
-  }
-
-  async close(): Promise<void> {
-    await this.session?.detach().catch(() => {});
-    this.session = null;
-    this.contexts.clear();
-    this.selectedId = null;
-    this.selectedSandboxMode = null;
+    if (!Array.isArray(draws)) throw new Error('Public watch document unavailable');
+    return draws as PublicImageDraw[];
   }
 }
 
@@ -983,17 +905,19 @@ export async function observePublicUserscriptMedia(
   output: string,
   index: number,
   imageResponses: PublicImageResponse[],
-  realm: PublicUserscriptRealm
+  probe: PublicPageImageProbe
 ): Promise<{ image: WorkflowStep; resize: WorkflowStep }> {
   let image: WorkflowStep = {
     status: 'unverified',
     reason: 'public-image-not-observed',
     probeCapability: 'unproven',
+    probeRealm: 'page-main',
+    sandboxMode: null,
     productVerdict: 'unverified',
   };
   let originalShowAuthor: boolean | undefined;
   let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
-  let imagePhase: 'settings-ui' | 'resize' | 'realm-probe' | 'realm-read' | 'screenshot' =
+  let imagePhase: 'settings-ui' | 'resize' | 'probe-readiness' | 'probe-read' | 'screenshot' =
     'settings-ui';
   let settingsAction = 'open';
   try {
@@ -1014,20 +938,20 @@ export async function observePublicUserscriptMedia(
     } else {
       resize = { status: 'unverified', reason: 'viewport-unavailable' };
     }
-    imagePhase = 'realm-probe';
-    const selected = await realm.selectAndInstall();
+    imagePhase = 'probe-readiness';
+    const selected = await probe.readiness();
     if (selected.status !== 'ready') {
       image.reason = selected.reason;
       image.probeCapability = selected.status;
     } else {
-      imagePhase = 'realm-read';
+      imagePhase = 'probe-read';
       const deadline = Date.now() + 20_000;
       let draws: PublicImageDraw[] = [];
       let survivingDraws: PublicImageDraw[] = [];
       let assessed = assessPublicImage(survivingDraws, imageResponses);
       do {
-        draws = await realm.readDraws();
-        survivingDraws = await realm.readSurvivors();
+        draws = await probe.readDraws();
+        survivingDraws = await probe.readSurvivors();
         assessed = assessPublicImage(survivingDraws, imageResponses);
         if (assessed.status === 'passed') break;
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1036,15 +960,16 @@ export async function observePublicUserscriptMedia(
         const imageScreenshot = 'live-' + index + '-public-image.png';
         imagePhase = 'screenshot';
         await page.screenshot({ path: join(output, imageScreenshot) });
-        imagePhase = 'realm-read';
-        const afterScreenshot = await realm.readSurvivors();
+        imagePhase = 'probe-read';
+        const afterScreenshot = await probe.readSurvivors();
         const finalAssessed = assessPublicImage(afterScreenshot, imageResponses);
         image =
           finalAssessed.status === 'passed' && finalAssessed.draw.url === assessed.draw.url
             ? {
                 status: 'passed',
                 probeCapability: 'overlay-image-draw-observed',
-                sandboxMode: realm.sandboxMode,
+                probeRealm: 'page-main',
+                sandboxMode: null,
                 productVerdict: 'visible-public-image-observed',
                 sourceType: finalAssessed.draw.sourceType,
                 sourceHost: new URL(finalAssessed.draw.url).hostname,
@@ -1063,7 +988,8 @@ export async function observePublicUserscriptMedia(
                 status: 'unverified',
                 reason: 'public-image-final-frame-unverified',
                 probeCapability: 'overlay-image-draw-observed',
-                sandboxMode: realm.sandboxMode,
+                probeRealm: 'page-main',
+                sandboxMode: null,
                 productVerdict: 'unverified',
                 screenshot: imageScreenshot,
               };
@@ -1072,7 +998,8 @@ export async function observePublicUserscriptMedia(
           status: 'unverified',
           reason: assessed.reason,
           probeCapability: draws.length > 0 ? 'overlay-draw-observed' : 'unproven',
-          sandboxMode: realm.sandboxMode,
+          probeRealm: 'page-main',
+          sandboxMode: null,
           productVerdict: 'unverified',
           drawCount: draws.length,
           survivingDrawCount: survivingDraws.length,
@@ -1085,6 +1012,8 @@ export async function observePublicUserscriptMedia(
       status: 'unverified',
       reason: `public-image-${imagePhase}-failed`,
       probeCapability: 'unproven',
+      probeRealm: 'page-main',
+      sandboxMode: null,
       productVerdict: 'unverified',
       errorType: error instanceof Error ? error.name : 'Error',
       ...(imagePhase === 'settings-ui' ? { settingsAction } : {}),
@@ -1404,8 +1333,8 @@ async function inspectLivePage(
   page.setDefaultTimeout(10_000);
   const observationStartedAt = performance.now();
   const observedAtMs = () => boundedObservationMs(performance.now() - observationStartedAt);
-  const realm = new PublicUserscriptRealm(context, page, userscriptVersion);
-  if (installation === 'userscript') await realm.start();
+  const imageProbe = new PublicPageImageProbe(page);
+  if (installation === 'userscript') await imageProbe.installBeforeNavigation();
   const imageResponses: PublicImageResponse[] = [];
   page.on('response', (response) => {
     if (installation !== 'userscript') return;
@@ -1453,6 +1382,7 @@ async function inspectLivePage(
     }
   });
   const observation: LiveObservation = { url, status: 'not-run', mocked: false };
+  if (installation === 'userscript') observation.expectedUserscriptVersion = userscriptVersion;
   let activeNavigation = 'initial-watch';
   const finishResourceCapture = extensionResources
     ? beginOwnedExtensionResourceCapture(
@@ -1545,7 +1475,13 @@ async function inspectLivePage(
     };
     if (installation === 'userscript') {
       observation.phase = 'public-media';
-      const media = await observePublicUserscriptMedia(page, output, index, imageResponses, realm);
+      const media = await observePublicUserscriptMedia(
+        page,
+        output,
+        index,
+        imageResponses,
+        imageProbe
+      );
       observation.workflow.image = media.image;
       observation.workflow.resize = media.resize;
     }
@@ -1736,7 +1672,6 @@ async function inspectLivePage(
                 : `${observation.phase}-error`;
   } finally {
     clearTimeout(deadline);
-    await realm.close();
     if (deadlineCleanup) await deadlineCleanup;
     if (finishResourceCapture) {
       assert(extensionResources);

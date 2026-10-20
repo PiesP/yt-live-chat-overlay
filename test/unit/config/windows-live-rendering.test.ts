@@ -8,7 +8,7 @@ import {
   observePublicUserscriptMedia,
   observePublicResize,
   openPublicSettingsDialog,
-  PublicUserscriptRealm,
+  PublicPageImageProbe,
 } from '../../../validation/windows/chrome-install.ts';
 import {
   assessPublicImage,
@@ -61,73 +61,88 @@ describe('shared public-media seek calculation', () => {
   });
 });
 
-describe('public userscript realm authentication', () => {
-  it.each([
-    { names: ['YouTube Live Chat Overlay'], version: '1.2.3', expected: 'ready', installs: 1 },
-    {
-      names: ['YouTube Live Chat Overlay', 'YouTube Live Chat Overlay'],
-      version: '1.2.3',
-      expected: 'ambiguous',
-      installs: 0,
-    },
-    { names: ['Other Script'], version: '1.2.3', expected: 'unproven', installs: 0 },
-    { names: ['YouTube Live Chat Overlay'], version: 'older', expected: 'unproven', installs: 0 },
-  ])(
-    'installs only for a unique matching main-frame realm: $expected',
-    async ({ names, version, expected, installs }) => {
-      const handlers = new Map<string, (value: unknown) => void>();
-      let installed = 0;
-      const session = {
-        on: (event: string, listener: (value: unknown) => void) => handlers.set(event, listener),
-        send: async (
-          method: string,
-          params?: { uniqueContextId?: string; expression?: string }
-        ) => {
-          if (method === 'Runtime.enable') {
-            names.forEach((_, index) =>
-              handlers.get('Runtime.executionContextCreated')?.({
-                context: {
-                  id: index + 1,
-                  uniqueId: `main-${index + 1}`,
-                  auxData: { frameId: 'main' },
-                },
-              })
-            );
-            handlers.get('Runtime.executionContextCreated')?.({
-              context: { id: 99, uniqueId: 'child-99', auxData: { frameId: 'child' } },
-            });
-            return {};
-          }
-          if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } };
-          if (method === 'Runtime.evaluate') {
-            if (params?.expression?.includes('GM_info'))
-              return {
-                result: {
-                  value: {
-                    name: names[Number(params.uniqueContextId?.split('-')[1]) - 1],
-                    version,
-                    callable: true,
-                  },
-                },
-              };
-            installed++;
-            return { result: { value: undefined } };
-          }
-          throw new Error('Unexpected CDP command');
-        },
-        detach: async () => {},
-      };
-      const realm = new PublicUserscriptRealm(
-        { newCDPSession: async () => session } as never,
-        {} as never,
-        '1.2.3'
-      );
-      await realm.start();
-      expect((await realm.selectAndInstall()).status).toBe(expected);
-      expect(installed).toBe(installs);
-      await realm.close();
+describe('early public page image probe', () => {
+  function pageRealm(url: string, child = false) {
+    const pageWindow: { top?: object; __ytPublicImageDraws?: unknown } = {};
+    pageWindow.top = child ? {} : pageWindow;
+    class CanvasContext {
+      drawImage() {}
     }
-  );
+    const realm = {
+      window: pageWindow,
+      location: new URL(url),
+      CanvasRenderingContext2D: CanvasContext,
+      OffscreenCanvasRenderingContext2D: undefined,
+    };
+    return { pageWindow, realm };
+  }
+
+  it('installs before first navigation on the top-level watch document without stacking hooks', async () => {
+    const calls: string[] = [];
+    const { pageWindow, realm } = pageRealm('https://www.youtube.com/watch?v=public');
+    let initScript = '';
+    const page = {
+      addInitScript: async ({ content }: { content: string }) => {
+        calls.push('init');
+        initScript = content;
+      },
+      goto: async () => {
+        calls.push('goto');
+        runInNewContext(initScript, realm);
+      },
+      evaluate: async (expression: string) => runInNewContext(expression, realm),
+    };
+    const probe = new PublicPageImageProbe(page as never);
+    await probe.installBeforeNavigation();
+    await page.goto();
+    expect(calls).toEqual(['init', 'goto']);
+    expect(await probe.readiness()).toEqual({
+      status: 'ready',
+      reason: 'public-image-main-probe-ready',
+    });
+    expect(await probe.readDraws()).toEqual([]);
+    const originalDraws = pageWindow.__ytPublicImageDraws;
+    const originalHook = realm.CanvasRenderingContext2D.prototype.drawImage;
+    runInNewContext(initScript, realm);
+    expect(pageWindow.__ytPublicImageDraws).toBe(originalDraws);
+    expect(realm.CanvasRenderingContext2D.prototype.drawImage).toBe(originalHook);
+    realm.location = new URL('https://www.youtube.com/results?search_query=chat');
+    expect((await probe.readiness()).status).toBe('unproven');
+    await expect(probe.readDraws()).rejects.toThrow('Public watch document unavailable');
+    await expect(probe.readSurvivors()).rejects.toThrow('Public watch document unavailable');
+  });
+
+  it.each([
+    ['child frame', 'https://www.youtube.com/watch?v=public', true],
+    ['non-watch page', 'https://www.youtube.com/results?search_query=chat', false],
+    ['other HTTPS host', 'https://example.com/watch?v=public', false],
+    ['nonstandard port', 'https://www.youtube.com:444/watch?v=public', false],
+    ['insecure watch', 'http://www.youtube.com/watch?v=public', false],
+  ])('fails closed on %s', async (_label, url, child) => {
+    const { pageWindow, realm } = pageRealm(url, child);
+    const page = {
+      addInitScript: async ({ content }: { content: string }) => runInNewContext(content, realm),
+      evaluate: async (expression: string) => runInNewContext(expression, realm),
+    };
+    const probe = new PublicPageImageProbe(page as never);
+    await probe.installBeforeNavigation();
+    expect(pageWindow.__ytPublicImageDraws).toBeUndefined();
+    expect((await probe.readiness()).status).toBe('unproven');
+    await expect(probe.readDraws()).rejects.toThrow('Public watch document unavailable');
+  });
+
+  it('fails closed when the install hook is unavailable', async () => {
+    const probe = new PublicPageImageProbe({
+      addInitScript: async () => {
+        throw new Error('Injection unavailable');
+      },
+    } as never);
+    await probe.installBeforeNavigation();
+    expect(await probe.readiness()).toEqual({
+      status: 'unproven',
+      reason: 'public-image-main-probe-install-failed',
+    });
+  });
 });
 
 describe('installed public rendering observations', () => {

@@ -61,6 +61,7 @@ export type PublicImageResponse = {
 /** Browser-only public-page probe; sampling cannot skip or replace the native draw. */
 export function installPublicImageDrawProbe(): void {
   const probeWindow = window as Window & { __ytPublicImageDraws?: PublicImageDraw[] };
+  if (Array.isArray(probeWindow.__ytPublicImageDraws)) return;
   const draws: PublicImageDraw[] = [];
   probeWindow.__ytPublicImageDraws = draws;
   const derivedSources = new WeakMap<object, string>();
