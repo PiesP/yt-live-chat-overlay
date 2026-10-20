@@ -21,6 +21,7 @@ import type {
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
+import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
 import {
   assessPublicImage,
   assessPublicResize,
@@ -44,6 +45,7 @@ import type {
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
+import { readExtensionUpgradeInput, runExtensionUpgrade } from './release-upgrade/extension.ts';
 import {
   loadUpgradeInputs,
   readUserscriptMetadata,
@@ -158,6 +160,7 @@ type LiveObservation = {
     overflow: number;
     drains: Array<{ navigation: string; status: string }>;
   };
+  nativeNetworkDiagnostics?: Record<string, unknown>;
   workerPolicyFallback?: boolean;
   [key: string]: unknown;
 };
@@ -170,6 +173,7 @@ type ChromeResult<Live = LiveObservation> = {
   placementTiming?: Awaited<ReturnType<typeof runPlacementTimingFixture>> | null;
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
+  extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
   liveWorkflowCoverage?: {
     observedModes: (string | undefined)[];
@@ -1664,7 +1668,21 @@ async function inspectLivePage(
       )
       .finally(() => page.close().catch(() => {}));
   }, 120_000);
+  let nativeNetworkCapture: Awaited<ReturnType<typeof beginChromiumNetworkDiagnostics>> | null =
+    null;
   try {
+    if (extensionResources) {
+      nativeNetworkCapture = await beginChromiumNetworkDiagnostics({
+        createSession: () => context.newCDPSession(page),
+        classifyUrl: (value) => ({
+          ownedResourcePath: ownedExtensionResourcePath(value, extensionResources.extensionId),
+          watchDocumentSha256: publicWatchDocumentSha256(value),
+        }),
+        classifyWarning: (text) =>
+          diagnoseUnsafeOriginConsole(text, '', extensionResources.extensionId),
+        extensionId: extensionResources.extensionId,
+      });
+    }
     observation.phase = 'navigation';
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     observation.finalUrl = page.url();
@@ -1932,6 +1950,9 @@ async function inspectLivePage(
   } finally {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
+    if (nativeNetworkCapture) {
+      observation.nativeNetworkDiagnostics = await nativeNetworkCapture.finish();
+    }
     policyNavigation?.stop();
     if (policyReportCapture) {
       await policyReportCapture.drain(policyNavigation?.current() ?? 'initial-watch');
@@ -2217,11 +2238,30 @@ export async function runChromeInstallation({
     placementTiming: null,
     bitmapLifecycle: null,
     userscriptUpgrade: null,
+    extensionUpgrade:
+      installation === 'extension'
+        ? {
+            status: 'failed',
+            transition: 'public-0.45.7-to-candidate-0.45.8',
+            activeStage: 'input-preflight',
+          }
+        : null,
     live: [],
     liveWorkflowCoverage: null,
     cleanup: {},
   };
   try {
+    const extensionUpgradeInput =
+      installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
+    if (installation === 'extension') {
+      result.extensionUpgrade = extensionUpgradeInput
+        ? {
+            status: 'failed',
+            transition: 'public-0.45.7-to-candidate-0.45.8',
+            activeStage: 'browser-launch',
+          }
+        : { status: 'not-requested', transition: 'fresh-candidate-install' };
+    }
     context = await chromium.launchPersistentContext(profile, {
       channel: browserName,
       headless,
@@ -2239,11 +2279,43 @@ export async function runChromeInstallation({
     result.cleanup.browserProcessIdentified = true;
     await enableDeveloperMode(context, browserName);
     if (installation === 'extension') {
-      ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
-        path: join(root, 'dist-extension'),
-      })) as { id: string });
-      assert.equal(typeof extensionId, 'string');
-      result.installationMethod = 'cdp-unpacked-extension';
+      if (extensionUpgradeInput) {
+        try {
+          const upgraded = await runExtensionUpgrade({
+            context,
+            cdp,
+            root,
+            profile,
+            verified: extensionUpgradeInput,
+            onLoaded: (id) => {
+              extensionId = id;
+            },
+          });
+          extensionId = upgraded.extensionId;
+          result.extensionUpgrade = upgraded.receipt;
+        } catch (error) {
+          result.extensionUpgrade =
+            error &&
+            typeof error === 'object' &&
+            'extensionUpgrade' in error &&
+            error.extensionUpgrade &&
+            typeof error.extensionUpgrade === 'object'
+              ? (error.extensionUpgrade as Record<string, unknown>)
+              : { status: 'failed', transition: 'public-0.45.7-to-candidate-0.45.8' };
+          throw error;
+        }
+        result.installationMethod = 'same-path-unpacked-extension-upgrade';
+      } else {
+        ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
+          path: join(root, 'dist-extension'),
+        })) as { id: string });
+        assert.equal(typeof extensionId, 'string');
+        result.extensionUpgrade = {
+          status: 'not-requested',
+          transition: 'fresh-candidate-install',
+        };
+        result.installationMethod = 'cdp-unpacked-extension';
+      }
     } else {
       ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'test-tools/userscript-manager'),

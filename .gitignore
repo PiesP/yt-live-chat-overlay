@@ -81,4 +81,6 @@ __pycache__/
 /validation/windows/release-upgrade/public-v0.45.5.user.js
 /validation/windows/release-upgrade/public-v0.45.6.user.js
 /validation/windows/release-upgrade/public-v0.45.7.user.js
+/validation/windows/release-upgrade/extension-input.json
+/validation/windows/release-upgrade/public-v0.45.7-chrome/
 .vitest/

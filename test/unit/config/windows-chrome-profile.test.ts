@@ -3,12 +3,22 @@
 
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 
-import type { BrowserContext, Page } from '@playwright/test';
+import type { BrowserContext, BrowserType, Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import * as chromeInstallModule from '../../../validation/windows/chrome-install.ts';
@@ -54,6 +64,55 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('records extension input preflight failure and removes its profile before browser launch', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/release-upgrade');
+    await mkdir(join(inputDir, 'public-v0.45.7-chrome'), { recursive: true });
+    await writeFile(
+      join(inputDir, 'extension-input.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        previousVersion: '0.45.7',
+        candidateVersion: '0.45.8',
+        publicAssetUrl:
+          'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip',
+        publicArchive: {
+          path: 'validation/windows/release-upgrade/public-v0.45.7-chrome/artifact.zip',
+          sha256: '0'.repeat(64),
+        },
+        previousExtension: {
+          path: 'validation/windows/release-upgrade/public-v0.45.7-chrome/unpacked',
+          inventorySha256: '0'.repeat(64),
+        },
+        candidateExtension: { inventorySha256: '0'.repeat(64) },
+      })
+    );
+    const before = (await readdir(paths.root)).sort();
+    const launchPersistentContext = vi.fn();
+    await expect(
+      chromeInstallModule.runChromeInstallation({
+        chromium: { launchPersistentContext } as unknown as BrowserType,
+        root: paths.root,
+        output: paths.output,
+        installation: 'extension',
+      })
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(launchPersistentContext).not.toHaveBeenCalled();
+    expect((await readdir(paths.root)).sort()).toEqual(before);
+    const evidence = JSON.parse(
+      await readFile(join(paths.output, 'installation-result.json'), 'utf8')
+    );
+    expect(evidence.extensionUpgrade).toEqual({
+      status: 'failed',
+      transition: 'public-0.45.7-to-candidate-0.45.8',
+      activeStage: 'input-preflight',
+    });
+    expect(evidence.cleanup).toMatchObject({
+      profileRemoved: true,
+      errorCount: 0,
+    });
+  });
+
   it('observes only the public top watch frame and drains callback and pending reports once', () => {
     const id = 'a'.repeat(32);
     const instances: Array<{
