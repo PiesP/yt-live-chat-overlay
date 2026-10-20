@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vite-plus/test';
 
 import {
+  observePublicUserscriptMedia,
   observePublicResize,
   openPublicSettingsDialog,
   PublicUserscriptRealm,
@@ -130,6 +131,79 @@ describe('public userscript realm authentication', () => {
 });
 
 describe('installed public rendering observations', () => {
+  it.each([false, true])(
+    'keeps the settings failure and its open-dialog screenshot when restore fails=%s',
+    async (restoreFails) => {
+      let visible = false;
+      let tabClicks = 0;
+      const screenshots: { path: string; dialogVisible: boolean }[] = [];
+      const checkbox = {
+        isChecked: async () => false,
+        check: async () => {
+          throw new Error('Checkbox interaction failed');
+        },
+        setChecked: async () => {},
+      };
+      const modal = {
+        waitFor: async ({ state }: { state: string }) => {
+          expect(visible).toBe(state === 'visible');
+        },
+        isVisible: async () => visible,
+        locator: (selector: string) => {
+          if (selector === '#tab-colors')
+            return {
+              click: async () => {
+                tabClicks++;
+                if (restoreFails && tabClicks === 2) throw new Error('Restore tab failed');
+              },
+            };
+          if (selector === 'input[name="showAuthor-normal"]') return checkbox;
+          throw new Error(`Unexpected selector: ${selector}`);
+        },
+      };
+      const button = {
+        waitFor: async () => {},
+        focus: async () => {},
+      };
+      const page = {
+        locator: (selector: string) =>
+          selector === '#yt-chat-overlay-settings-button' ? button : modal,
+        keyboard: {
+          press: async (key: string) => {
+            if (key === 'Enter') visible = true;
+            else if (key === 'Escape') visible = false;
+            else throw new Error(`Unexpected key: ${key}`);
+          },
+        },
+        screenshot: async ({ path }: { path: string }) => {
+          screenshots.push({ path, dialogVisible: visible });
+        },
+      };
+      const result = await observePublicUserscriptMedia(
+        page as never,
+        '/evidence',
+        0,
+        [],
+        {} as never
+      );
+      expect(result.image).toMatchObject({
+        status: 'unverified',
+        reason: 'public-image-settings-ui-failed',
+        settingsAction: 'enable-author-display',
+        errorType: 'Error',
+        settingsErrorScreenshot: 'live-0-settings-error.png',
+        settingRestore: restoreFails
+          ? { status: 'unverified', phase: 'select-appearance', errorType: 'Error' }
+          : { status: 'passed' },
+      });
+      expect(result.resize.reason).toBe('public-resize-not-observed');
+      expect(screenshots).toEqual([
+        { path: '/evidence/live-0-settings-error.png', dialogVisible: true },
+      ]);
+      expect(visible).toBe(false);
+    }
+  );
+
   it('opens the hover-hidden settings control through its keyboard path', async () => {
     const actions: string[] = [];
     const modal = {

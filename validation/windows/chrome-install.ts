@@ -855,8 +855,13 @@ export async function openPublicSettingsDialog(page: Page): Promise<Locator> {
   return modal;
 }
 
+export async function closePublicSettingsDialog(page: Page, modal: Locator): Promise<void> {
+  await page.keyboard.press('Escape');
+  await modal.waitFor({ state: 'hidden' });
+}
+
 /** Exercise actual installed userscript output on public chat without changing site responses. */
-async function observePublicUserscriptMedia(
+export async function observePublicUserscriptMedia(
   page: Page,
   output: string,
   index: number,
@@ -871,15 +876,21 @@ async function observePublicUserscriptMedia(
   };
   let originalShowAuthor: boolean | undefined;
   let resize: WorkflowStep = { status: 'unverified', reason: 'public-resize-not-observed' };
-  let imagePhase: 'settings-ui' | 'realm-probe' | 'realm-read' | 'screenshot' = 'settings-ui';
+  let imagePhase: 'settings-ui' | 'resize' | 'realm-probe' | 'realm-read' | 'screenshot' =
+    'settings-ui';
+  let settingsAction = 'open';
   try {
     const modal = await openPublicSettingsDialog(page);
+    settingsAction = 'select-appearance';
     await modal.locator('#tab-colors').click();
+    settingsAction = 'read-author-display';
     const checkbox = modal.locator('input[name="showAuthor-normal"]');
     originalShowAuthor = await checkbox.isChecked();
+    settingsAction = 'enable-author-display';
     if (!originalShowAuthor) await checkbox.check();
-    await modal.locator('button[data-action="close"]').click();
-    await modal.waitFor({ state: 'hidden' });
+    settingsAction = 'save-author-display';
+    await closePublicSettingsDialog(page, modal);
+    imagePhase = 'resize';
     const originalViewport = page.viewportSize();
     if (originalViewport) {
       resize = await observePublicResize(page, output, index, originalViewport);
@@ -959,36 +970,60 @@ async function observePublicUserscriptMedia(
       probeCapability: 'unproven',
       productVerdict: 'unverified',
       errorType: error instanceof Error ? error.name : 'Error',
+      ...(imagePhase === 'settings-ui' ? { settingsAction } : {}),
     };
+    if (imagePhase === 'settings-ui') {
+      const settingsErrorScreenshot = `live-${index}-settings-error.png`;
+      await page.screenshot({ path: join(output, settingsErrorScreenshot), timeout: 3_000 }).then(
+        () => {
+          image.settingsErrorScreenshot = settingsErrorScreenshot;
+        },
+        () => {}
+      );
+    }
   } finally {
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
-    if (await modal.isVisible().catch(() => false))
-      await modal
-        .locator('button[data-action="close"]')
-        .click()
-        .catch(() => {});
-    if (originalShowAuthor !== undefined) {
-      const restored = await (async () => {
+    let restorePhase = 'close-active-dialog';
+    let restoreErrorType: string | null = null;
+    let restored = originalShowAuthor === undefined;
+    try {
+      if (await modal.isVisible()) await closePublicSettingsDialog(page, modal);
+      if (originalShowAuthor !== undefined) {
+        restorePhase = 'open';
         await openPublicSettingsDialog(page);
+        restorePhase = 'select-appearance';
         await modal.locator('#tab-colors').click();
         const checkbox = modal.locator('input[name="showAuthor-normal"]');
+        restorePhase = 'restore-author-display';
         if ((await checkbox.isChecked()) !== originalShowAuthor)
           await checkbox.setChecked(originalShowAuthor);
-        await modal.locator('button[data-action="close"]').click();
-        await modal.waitFor({ state: 'hidden' });
+        restorePhase = 'save-author-display';
+        await closePublicSettingsDialog(page, modal);
+        restorePhase = 'reopen';
         await openPublicSettingsDialog(page);
+        restorePhase = 'verify-author-display';
         await modal.locator('#tab-colors').click();
         const saved = (await checkbox.isChecked()) === originalShowAuthor;
-        await modal.locator('button[data-action="close"]').click();
-        return saved;
-      })().catch(() => false);
-      if (!restored) {
-        image = {
-          status: 'unverified',
-          reason: 'public-image-setting-restore-unverified',
-          probeCapability: image.probeCapability,
-          productVerdict: 'unverified',
-        };
+        restorePhase = 'close-verification-dialog';
+        await closePublicSettingsDialog(page, modal);
+        restored = saved;
+      }
+    } catch (error) {
+      restored = false;
+      restoreErrorType = error instanceof Error ? error.name : 'Error';
+      if (await modal.isVisible().catch(() => false))
+        await closePublicSettingsDialog(page, modal).catch(() => {});
+    }
+    if (originalShowAuthor !== undefined || !restored) {
+      image.settingRestore = {
+        status: restored ? 'passed' : 'unverified',
+        ...(restored ? {} : { phase: restorePhase, errorType: restoreErrorType }),
+      };
+      if (!restored && image.status === 'passed') {
+        image.primaryObservation = { status: image.status, productVerdict: image.productVerdict };
+        image.status = 'unverified';
+        image.reason = 'public-image-setting-restore-unverified';
+        image.productVerdict = 'unverified';
       }
     }
   }
