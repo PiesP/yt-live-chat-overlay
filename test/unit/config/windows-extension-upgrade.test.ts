@@ -224,6 +224,26 @@ describe('optional public Chrome extension update inputs', () => {
     expect(() => verifyExtensionZip(traversal, inventory)).toThrow();
   });
 
+  it('rejects high-bit ZIP filename bytes even when the ZIP digest is re-pinned', async () => {
+    const fixture = await makeFixture();
+    const altered = Buffer.from(fixture.zip);
+    const central = altered.readUInt32LE(altered.length - 22 + 16);
+    const local = altered.readUInt32LE(central + 42);
+    altered[central + 46] = altered[central + 46]! | 0x80;
+    altered[local + 30] = altered[local + 30]! | 0x80;
+    await writeFile(join(fixture.root, PUBLIC, 'artifact.zip'), altered);
+    await writeFile(
+      join(fixture.root, INPUT),
+      JSON.stringify({
+        ...fixture.input,
+        publicArchive: { ...fixture.input.publicArchive, sha256: sha(altered) },
+      })
+    );
+    await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow(
+      'ZIP filename is not ASCII'
+    );
+  });
+
   it('includes the native CDP import in the Windows bundle and ignores private inputs', async () => {
     const profile = JSON.parse(await readFile('validation/windows/profile.json', 'utf8')) as {
       installation: { assets: string[] };

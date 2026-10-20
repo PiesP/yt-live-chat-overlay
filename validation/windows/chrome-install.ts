@@ -2225,8 +2225,6 @@ export async function runChromeInstallation({
     });
   }
   const upgradeInputs = installation === 'userscript' ? await loadUpgradeInputs(root) : null;
-  const extensionUpgradeInput =
-    installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let context: BrowserContext | undefined;
   let cdp: CDPSession | undefined;
@@ -2240,11 +2238,30 @@ export async function runChromeInstallation({
     placementTiming: null,
     bitmapLifecycle: null,
     userscriptUpgrade: null,
+    extensionUpgrade:
+      installation === 'extension'
+        ? {
+            status: 'failed',
+            transition: 'public-0.45.7-to-candidate-0.45.8',
+            activeStage: 'input-preflight',
+          }
+        : null,
     live: [],
     liveWorkflowCoverage: null,
     cleanup: {},
   };
   try {
+    const extensionUpgradeInput =
+      installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
+    if (installation === 'extension') {
+      result.extensionUpgrade = extensionUpgradeInput
+        ? {
+            status: 'failed',
+            transition: 'public-0.45.7-to-candidate-0.45.8',
+            activeStage: 'browser-launch',
+          }
+        : { status: 'not-requested', transition: 'fresh-candidate-install' };
+    }
     context = await chromium.launchPersistentContext(profile, {
       channel: browserName,
       headless,

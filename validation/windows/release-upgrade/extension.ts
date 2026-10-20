@@ -243,7 +243,12 @@ export function verifyExtensionZip(bytes: Buffer, inventory: Inventory): void {
         cursor + 46 + nameLength + extraLength + commentLength <= end,
       'Unsupported ZIP entry'
     );
-    const rawName = bytes.toString('ascii', cursor + 46, cursor + 46 + nameLength);
+    const rawNameBytes = bytes.subarray(cursor + 46, cursor + 46 + nameLength);
+    assert(
+      rawNameBytes.every((byte) => byte <= 0x7f),
+      'ZIP filename is not ASCII'
+    );
+    const rawName = rawNameBytes.toString('ascii');
     const name = rawName.startsWith('./') ? rawName.slice(2) : rawName;
     assert(!seen.has(name), 'Duplicate ZIP entry');
     seen.add(name);
@@ -265,7 +270,7 @@ export function verifyExtensionZip(bytes: Buffer, inventory: Inventory): void {
         localNameLength === nameLength &&
         bytes.readUInt16LE(local + 6) === flags &&
         bytes.readUInt16LE(local + 8) === method &&
-        bytes.toString('ascii', local + 30, local + 30 + localNameLength) === rawName,
+        bytes.subarray(local + 30, local + 30 + localNameLength).equals(rawNameBytes),
       'ZIP local and central names differ'
     );
     ranges.push({ start: local, end: start + compressed });
