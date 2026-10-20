@@ -466,23 +466,27 @@ export async function beginConnectionAllowlistReportCapture(page: Page, extensio
   return { drain, finish };
 }
 
-function safeRequestMetadata(request: Request) {
+function safeRequestResourceType(request: Request) {
   let resourceType: string | null = null;
-  let fetchMode: string | null = null;
-  let fetchDest: string | null = null;
   try {
     const value = request.resourceType();
     if (['document', 'script', 'fetch', 'xhr', 'other'].includes(value)) resourceType = value;
-    const headers = request.headers();
-    const mode = headers['sec-fetch-mode'];
-    const dest = headers['sec-fetch-dest'];
-    if (mode && ['cors', 'no-cors', 'same-origin', 'navigate'].includes(mode)) fetchMode = mode;
-    if (dest && ['empty', 'script', 'worker', 'sharedworker', 'document'].includes(dest))
-      fetchDest = dest;
   } catch {
     // Missing browser metadata remains unknown; it does not change the resource verdict.
   }
-  return { resourceType, fetchMode, fetchDest };
+  return resourceType;
+}
+
+function safeRequestFetchMetadata(headers: Record<string, string>) {
+  const mode = headers['sec-fetch-mode'];
+  const dest = headers['sec-fetch-dest'];
+  return {
+    fetchMode: mode && ['cors', 'no-cors', 'same-origin', 'navigate'].includes(mode) ? mode : null,
+    fetchDest:
+      dest && ['empty', 'script', 'worker', 'sharedworker', 'document'].includes(dest)
+        ? dest
+        : null,
+  };
 }
 
 export function compareOwnedExtensionResourceBody(body: unknown, expected: ExpectedResource) {
@@ -636,7 +640,9 @@ export function beginOwnedExtensionResourceCapture(
       respondedAtMs: null,
       finishedAtMs: null,
       failedAtMs: null,
-      ...safeRequestMetadata(request),
+      resourceType: safeRequestResourceType(request),
+      fetchMode: null,
+      fetchDest: null,
       status: 'unverified',
       reason: 'request-incomplete',
       responseStatus: null,
@@ -646,6 +652,16 @@ export function beginOwnedExtensionResourceCapture(
     };
     requests.push(entry);
     entries.set(request, entry);
+    const readHeaders = Promise.resolve()
+      .then(() => request.allHeaders())
+      .then((headers) => {
+        Object.assign(entry, safeRequestFetchMetadata(headers));
+      })
+      .catch(() => {
+        // Security headers can be unavailable even through allHeaders().
+      });
+    pending.add(readHeaders);
+    void readHeaders.finally(() => pending.delete(readHeaders));
   };
   const recordResponse = (entry: ResourceEntry, response: Response) => {
     entry.respondedAtMs = nowMs();

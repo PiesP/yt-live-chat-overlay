@@ -389,7 +389,12 @@ describe('installed Chrome acceptance outcomes', () => {
           url: () => `chrome-extension://${id}/${path}`,
           frame: () => ({ url: () => `https://www.youtube.com/watch?v=${navigation}&sig=private` }),
           resourceType: () => (path === 'page-script.js' ? 'script' : 'fetch'),
-          headers: () => ({ 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'script' }),
+          headers: () => ({ 'sec-fetch-mode': 'private-mode', authorization: 'private' }),
+          allHeaders: async () => ({
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'script',
+            authorization: 'private',
+          }),
           sizes: async () => ({ responseBodySize: body.length }),
           response: async () => response,
         };
@@ -459,7 +464,9 @@ describe('installed Chrome acceptance outcomes', () => {
       frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
       failure: () => ({ errorText: 'net::ERR_CONNECTION_RESET' }),
       resourceType: () => 'untrusted-type',
-      headers: () => ({ 'sec-fetch-mode': 'private-mode', 'sec-fetch-dest': 'private-dest' }),
+      allHeaders: async () => {
+        throw new Error('headers unavailable');
+      },
     };
     page.emit('request', request);
     page.emit('requestfailed', request);
@@ -473,6 +480,38 @@ describe('installed Chrome acceptance outcomes', () => {
       fetchMode: null,
       fetchDest: null,
     });
+  });
+
+  it('does not let late allHeaders metadata mutate a completed resource receipt', async () => {
+    const page = new EventEmitter();
+    const id = 'a'.repeat(32);
+    let resolveHeaders!: (headers: Record<string, string>) => void;
+    const finish = beginOwnedExtensionResourceCapture(
+      page as unknown as Page,
+      id,
+      { 'page-script.js': { maxBytes: 1, bytes: 1, sha256: 'a'.repeat(64) } },
+      () => ({ navigation: 'initial-watch' })
+    );
+    page.emit('request', {
+      url: () => `chrome-extension://${id}/page-script.js`,
+      frame: () => ({ url: () => 'https://www.youtube.com/watch?v=private' }),
+      resourceType: () => 'script',
+      allHeaders: () =>
+        new Promise<Record<string, string>>((resolve) => {
+          resolveHeaders = resolve;
+        }),
+    });
+    const result = await finish();
+    expect(result.requests[0]).toMatchObject({ fetchMode: null, fetchDest: null });
+    resolveHeaders({
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'script',
+      authorization: 'private-secret',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(result.requests[0]).toMatchObject({ fetchMode: null, fetchDest: null });
+    expect(JSON.stringify(result)).not.toContain('private-secret');
   });
 
   it('keeps the owned request inventory capped when a page repeats one resource', async () => {
