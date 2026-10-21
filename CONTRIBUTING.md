@@ -249,7 +249,7 @@ entry points remain analyzed in both modes before running `pnpm quality` and
 
 The GitHub Actions updater watches root workflows and
 `.github/actions/setup-release/action.yaml`, with independent CodeQL,
-`pnpm/setup`, and other Actions groups. For each Action SHA update, verify the
+`pnpm/action-setup`, and other Actions groups. For each Action SHA update, verify the
 full commit against the official upstream release and wait at least 24 hours
 from that release. Review changed executable behavior and update independent
 allowed-SHA assertions in `test/unit/config/toolchain-action.test.ts` and any

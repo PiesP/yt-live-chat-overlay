@@ -51,7 +51,7 @@ jobs:
         id: runtime
         if: ${{ steps.checkout.outcome == 'success' }}
         continue-on-error: true
-        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
         with:
           install-dependencies: 'false'
 
@@ -102,7 +102,7 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
 
       - name: ✅ Run quality gate
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
@@ -129,7 +129,7 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
 
       - name: Record release setup inputs
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
@@ -184,7 +184,7 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
 
       - name: 🎭 Run E2E tests
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
@@ -228,7 +228,7 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
-        uses: PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969
+        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
 
       - name: 🏗️ Build all targets
         if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
