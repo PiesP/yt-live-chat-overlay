@@ -206,6 +206,7 @@ function condition(
     upload?: string;
     fixtureReportUpload?: string;
     cancelled?: boolean;
+    trustOutcome?: string;
   } = {}
 ): boolean {
   const expression = body.match(/if: \$\{\{ (.+) \}\}/)?.[1];
@@ -226,6 +227,7 @@ function condition(
         },
       },
       steps: {
+        node_trust: { outcome: options.trustOutcome ?? 'success' },
         scan: { outcome: options.scanOutcome ?? 'success' },
         report: { outputs: { sarifUpload: options.upload ?? '' } },
         fixtureReport: { outputs: { sarifUpload: options.fixtureReportUpload ?? '' } },
@@ -336,6 +338,10 @@ describe('Semgrep workflow composition', () => {
     expect(condition(uploadStep, { upload: 'true', cancelled: true })).toBe(false);
     expect(condition(uploadStep, { upload: 'true', semgrep: 'false' })).toBe(false);
     expect(condition(uploadStep, { upload: '' })).toBe(false);
+    for (const trustOutcome of ['failure', 'skipped', 'cancelled']) {
+      expect(condition(reportStep, { trustOutcome })).toBe(false);
+      expect(condition(uploadStep, { trustOutcome, upload: 'true' })).toBe(false);
+    }
     expect(condition(uploadStep, { upload: 'true', classification: 'failure', semgrep: '' })).toBe(
       true
     );

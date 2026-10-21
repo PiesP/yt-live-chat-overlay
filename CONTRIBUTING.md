@@ -20,6 +20,15 @@ Do not report vulnerability details publicly. Follow the
 
 ## Development setup
 
+Workflow jobs prepare the official remediated OS CA store before their first
+JavaScript Action and select it through workflow-scoped Node TLS settings. The
+[pinned shared helper contract](https://github.com/PiesP/browser-core/blob/381b4ca733494cf069212cd0d16458389a83c623/automation/README.md#consumer-contract)
+covers Ubuntu 24.04 and the pinned Alpine scanner image; unsupported systems fail
+closed. Runner downloads before job steps and tools with separate TLS stores
+remain separate boundaries. Keep the helper first and preserve these settings
+when editing workflows.
+
+
 Use the toolchain pinned in `package.json`, or versions that satisfy its
 `engines` fields.
 
