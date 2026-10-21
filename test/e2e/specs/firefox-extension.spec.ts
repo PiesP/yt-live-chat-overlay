@@ -271,7 +271,7 @@ test.describe('Firefox extension runtime', () => {
         );
         throw new Error(
           `${error instanceof Error ? error.message : String(error)}\n` +
-            `Firefox runtime diagnostics: ${JSON.stringify({ diagnostics, diagnosticLogs })}`,
+            `Firefox runtime diagnostics: ${JSON.stringify({ diagnostics, diagnosticLogs, pageErrors: browser.pageErrors })}`,
           { cause: error }
         );
       }
@@ -347,5 +347,35 @@ test.describe('Firefox extension runtime', () => {
       }
     }
     if (failed) throw primaryFailure;
+  });
+
+  // oxlint-disable-next-line no-empty-pattern -- The native BiDi fixture owns its Firefox process.
+  test('rejects an invalid extension and keeps a healthy session after a script timeout', async ({}) => {
+    const browser = await launchFirefoxBidi();
+    let failure: unknown;
+    try {
+      await expect(
+        browser.installExtension(resolve(FIREFOX_EXTENSION_PATH, 'missing'))
+      ).rejects.toThrow();
+      await expect(browser.installExtension(FIREFOX_EXTENSION_PATH)).resolves.toBe(
+        FIREFOX_EXTENSION_ID
+      );
+      await expect(browser.evaluateJson('new Promise(() => {})')).rejects.toThrow(
+        'script.evaluate timed out'
+      );
+      expect(await browser.evaluateJson('true')).toBe(true);
+    } catch (error: unknown) {
+      failure = error;
+    } finally {
+      try {
+        await browser.close();
+      } catch (cleanupError: unknown) {
+        failure =
+          failure === undefined
+            ? cleanupError
+            : new AggregateError([failure, cleanupError], 'Firefox test and cleanup failed');
+      }
+    }
+    if (failure !== undefined) throw failure;
   });
 });
