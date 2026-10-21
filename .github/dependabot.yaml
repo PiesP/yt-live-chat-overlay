@@ -102,10 +102,10 @@ updates:
           - "github/codeql-action*"
       pnpm-setup:
         patterns:
-          - "pnpm/setup"
+          - "pnpm/action-setup"
       actions:
         patterns:
           - "*"
         exclude-patterns:
           - "github/codeql-action*"
-          - "pnpm/setup"
+          - "pnpm/action-setup"
