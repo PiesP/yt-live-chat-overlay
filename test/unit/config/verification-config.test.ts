@@ -273,7 +273,7 @@ describe('Verification configuration', () => {
     }
   }, 30_000);
 
-  it('captures browser failure evidence on the first CI retry', () => {
+  it('retains browser traces from the first failed attempt without changing retry verdicts', () => {
     const url = pathToFileURL(resolve(root, 'test/e2e/playwright.config.ts')).href;
     // Direct Node loading avoids asking Vitest to transform Playwright's runner.
     const result = spawnSync(
@@ -306,7 +306,7 @@ describe('Verification configuration', () => {
       {
         retries: 1,
         failOnFlakyTests: true,
-        trace: 'on-first-retry',
+        trace: 'retain-on-failure',
         video: 'on-first-retry',
         screenshot: 'only-on-failure',
       },

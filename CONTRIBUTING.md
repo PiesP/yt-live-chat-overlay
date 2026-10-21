@@ -87,6 +87,17 @@ did not establish a useful net benefit. Reconsider caching if runner provisionin
 the browser set or download costs change; compare miss, hit and no-cache runs
 before restoring it. Package-manager caches have a separate contract.
 
+Playwright records applicable attempts from the start with `retain-on-failure`
+and keeps a trace only for a failed attempt. CI still permits one retry and fails
+flaky tests. The pinned runner also records the persistent Chromium context in
+`extension.spec.ts`; it owns trace finalization and report attachments, so do not
+start a second manual recording. The native Firefox BiDi extension client is
+outside Playwright's browser instrumentation and retains its own screenshots
+and logs. A crash or termination can leave a trace incomplete or unavailable.
+Failed, non-cancelled E2E jobs upload `test-results/` and `playwright-report/`
+through the existing diagnostics artifact with seven-day retention. Open the
+failed attempt's trace from that report; a retry is separate evidence.
+
 ### External Windows bundle and retained languages
 
 `validation/windows/profile.json` lists artifact-only assets, the installation entry, every transitive helper, and the `pnpm` build commands. The external controller supplies portable Windows Node from the exact `volta.node` pin, `playwright-core`, a headed stable browser, and calls `run({ browser, root, output })`. It admits `.mjs` and erasable `.ts` entries, copies declared source bytes without compiling them, verifies source and bundle hashes, and imports the entry with Node's native TypeScript stripping. Use explicit relative `.ts` imports for converted helpers, include each runtime helper in the profile assets, and type-check the Windows source through `tsconfig.windows.json`. The Node boundary suite runs `node --check` over both module formats; existing Windows helper unit tests cover behavior. These local checks do not prove desktop or live-site behavior; the prepared-VM campaign remains the runtime gate.
