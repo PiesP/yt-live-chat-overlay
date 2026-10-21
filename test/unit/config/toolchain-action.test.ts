@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
-  'PiesP/browser-core/automation/actions/setup-project@279124fa998847bd0184d2de12bdaadcd6d2f969';
+  'PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9';
 const centralWorkflowJobs = {
   'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
   'security.yaml': ['changes', 'pin-metadata', 'pinned-tools', 'osv-scan-pr', 'osv-scan-dispatch'],
@@ -155,12 +155,24 @@ describe('project setup actions', () => {
 
     expect(existsSync(actionPath)).toBe(true);
     const action = readFileSync(actionPath, 'utf8');
-    expect(action).toContain('uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1');
-    expect(action).toContain('package-json-file: package.json');
-    expect(action).toContain('runtime: "node@${{ steps.runtime.outputs.version }}"');
-    expect(action).toContain('cache: false');
-    expect(action).toContain('install: false');
+    const nodeAction = 'uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0';
+    const pnpmAction = 'uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0';
+    const nodeStep = action.split(nodeAction)[1]?.split('    - name:')[0] ?? '';
+    const pnpmStep = action.split(pnpmAction)[1]?.split('    - name:')[0] ?? '';
+    expect(nodeStep).toContain('node-version: ${{ steps.runtime.outputs.version }}');
+    expect(nodeStep).toContain('package-manager-cache: false');
+    expect(pnpmStep).toContain('package_json_file: package.json');
+    expect(pnpmStep).toMatch(/\n        cache: false\n/);
+    expect(pnpmStep).toContain('run_install: false');
+    expect(pnpmStep).toContain('standalone: false');
+    expect(pnpmStep).not.toMatch(/\n        version:/);
     expect(action).toContain('pnpm install --frozen-lockfile --no-runtime');
+    expect(action).not.toContain('uses: pnpm/setup@');
+    expect(action.indexOf('id: runtime')).toBeLessThan(action.indexOf(nodeAction));
+    expect(action.indexOf(nodeAction)).toBeLessThan(action.indexOf(pnpmAction));
+    expect(action.indexOf(pnpmAction)).toBeLessThan(
+      action.indexOf('pnpm install --frozen-lockfile --no-runtime')
+    );
     expect(existsSync(resolve(root, '.github/actions/setup-toolchain/action.yaml'))).toBe(false);
   });
 });

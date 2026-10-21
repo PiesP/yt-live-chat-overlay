@@ -202,8 +202,9 @@ describe('pinned Node userscript manager preparation', () => {
     expect(VERSION).toBe('5.5.1');
     expect(SHA256).toBe('b5167937817e636adeba462ed9bf9b32ff01c2888f78a9afc6aa4f8e655fe872');
     expect(EXTENSION_ID).toBe('dhdgffkkebhmkfjojejmpbldmpobfkfo');
-    expect(() => assertQualifiedRuntime('22.22.2')).toThrow('pinned Node 26.9.0');
-    expect(() => assertQualifiedRuntime('24.15.0')).toThrow('pinned Node 26.9.0');
+    expect(() => assertQualifiedRuntime('22.23.4')).toThrow('pinned Node 26.12.1');
+    expect(() => assertQualifiedRuntime('24.22.1')).toThrow('pinned Node 26.12.1');
+    expect(() => assertQualifiedRuntime('26.9.0')).toThrow('pinned Node 26.12.1');
     assertQualifiedRuntime();
   });
 
