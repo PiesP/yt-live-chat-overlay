@@ -7,6 +7,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { firefox } from '@playwright/test';
+import puppeteer, {
+  type Browser,
+  type ConsoleMessage,
+  type HTTPRequest,
+  type Page,
+} from 'puppeteer-core';
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 15_000;
@@ -15,48 +21,12 @@ const POLL_INTERVAL_MS = 50;
 const PROFILE_REMOVE_RETRIES = 10;
 const PROFILE_REMOVE_RETRY_DELAY_MS = 100;
 
-type BidiParams = Record<string, unknown>;
-type BidiEventListener = (params: BidiParams) => void | Promise<void>;
-
-interface PendingCommand {
-  reject: (reason: Error) => void;
-  resolve: (result: unknown) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
-
-interface BidiMessage {
-  error?: unknown;
-  id?: unknown;
-  message?: unknown;
-  method?: unknown;
-  params?: unknown;
-  result?: unknown;
-  stacktrace?: unknown;
-  type?: unknown;
-}
-
-interface ContextTreeResult {
-  contexts: Array<{ context: string; url: string }>;
-}
-
-interface ScriptEvaluateResult {
-  exceptionDetails?: { text?: string };
-  result?: { type: string; value?: unknown };
-  type: 'exception' | 'success';
-}
-
-interface ExtensionInstallResult {
-  extension: string;
-}
-
 export interface FirefoxBidiSession {
-  readonly context: string;
   readonly pageErrors: readonly string[];
   readonly pageLogs: readonly { args?: unknown; level: string; text: string }[];
   captureScreenshot(): Promise<Buffer>;
   clearPageLogs(): void;
   close(): Promise<void>;
-  command<T>(method: string, params?: BidiParams, timeoutMs?: number): Promise<T>;
   evaluateJson<T>(expression: string): Promise<T>;
   installExtension(extensionPath?: string): Promise<string>;
   navigate(url: string): Promise<void>;
@@ -84,6 +54,24 @@ async function closedWithin(closed: Promise<void>, timeoutMs: number): Promise<b
       closed.then(() => true),
       new Promise<boolean>((resolveTimeout) => {
         timer = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function boundedOperation<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, rejectTimeout) => {
+        timer = setTimeout(() => rejectTimeout(new Error(message)), timeoutMs);
       }),
     ]);
   } finally {
@@ -140,6 +128,43 @@ export async function cleanupFirefoxProfile(
   }
 }
 
+type FirefoxBrowserCleanup = Pick<Browser, 'close' | 'uninstallExtension'>;
+
+export async function closeFirefoxResources(
+  browser: FirefoxBrowserCleanup,
+  child: OwnedFirefoxChild,
+  childClosed: Promise<void>,
+  profileDir: string,
+  extensionId: string | null,
+  options: { closeTimeoutMs?: number; profile?: FirefoxCleanupOptions } = {}
+): Promise<void> {
+  const errors: unknown[] = [];
+  const closeTimeoutMs = options.closeTimeoutMs ?? CLOSE_TIMEOUT_MS;
+  if (extensionId) {
+    try {
+      await boundedOperation(
+        browser.uninstallExtension(extensionId),
+        closeTimeoutMs,
+        'Firefox extension uninstall timed out'
+      );
+    } catch (error: unknown) {
+      errors.push(error);
+    }
+  }
+  try {
+    await boundedOperation(browser.close(), closeTimeoutMs, 'Firefox BiDi session close timed out');
+  } catch (error: unknown) {
+    errors.push(error);
+  }
+  try {
+    await cleanupFirefoxProfile(child, childClosed, profileDir, options.profile);
+  } catch (error: unknown) {
+    errors.push(error);
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'Firefox session cleanup failed');
+}
+
 function waitForEndpoint(child: ChildProcess, readStderr: () => string): Promise<string> {
   return new Promise((resolveEndpoint, rejectEndpoint) => {
     const stderr = child.stderr;
@@ -187,169 +212,78 @@ function waitForEndpoint(child: ChildProcess, readStderr: () => string): Promise
   });
 }
 
-function connectWebSocket(endpoint: string): Promise<WebSocket> {
-  return new Promise((resolveSocket, rejectSocket) => {
-    const socket = new WebSocket(endpoint);
-    const timeout = setTimeout(() => {
-      cleanup();
-      socket.close();
-      rejectSocket(new Error(`Timed out connecting to Firefox BiDi endpoint ${endpoint}`));
-    }, STARTUP_TIMEOUT_MS);
-    const cleanup = (): void => {
-      clearTimeout(timeout);
-      socket.removeEventListener('open', onOpen);
-      socket.removeEventListener('error', onError);
-    };
-    const onOpen = (): void => {
-      cleanup();
-      resolveSocket(socket);
-    };
-    const onError = (): void => {
-      cleanup();
-      rejectSocket(new Error(`Failed to connect to Firefox BiDi endpoint ${endpoint}`));
-    };
-    socket.addEventListener('open', onOpen);
-    socket.addEventListener('error', onError);
-  });
-}
-
 class FirefoxBidiSessionImpl implements FirefoxBidiSession {
   readonly pageErrors: string[] = [];
   readonly pageLogs: Array<{ args?: unknown; level: string; text: string }> = [];
   private closed = false;
-  private commandId = 0;
+  private extensionId: string | null = null;
   private readonly eventErrors: string[] = [];
-  private readonly eventListeners = new Map<string, Set<BidiEventListener>>();
-  private readonly pendingCommands = new Map<number, PendingCommand>();
+  private readonly pendingLogs = new Set<Promise<void>>();
+  private requestListener: ((request: HTTPRequest) => void) | null = null;
 
   constructor(
     private readonly child: ChildProcess,
     private readonly childClosed: Promise<void>,
-    private readonly socket: WebSocket,
-    private readonly profileDir: string,
-    public context: string
+    private readonly browser: Browser,
+    private readonly page: Page,
+    private readonly profileDir: string
   ) {
-    socket.addEventListener('message', this.handleMessage);
-    socket.addEventListener('close', this.handleClose);
+    page.on('console', this.handleConsole);
+    page.on('pageerror', this.handlePageError);
   }
 
-  private readonly handleMessage = (event: MessageEvent): void => {
-    if (typeof event.data !== 'string') return;
-    let message: BidiMessage;
-    try {
-      message = JSON.parse(event.data) as BidiMessage;
-    } catch (error: unknown) {
-      this.eventErrors.push(`Invalid BiDi JSON: ${errorMessage(error)}`);
-      return;
-    }
-
-    if (typeof message.id === 'number') {
-      const pending = this.pendingCommands.get(message.id);
-      if (!pending) return;
-      this.pendingCommands.delete(message.id);
-      clearTimeout(pending.timeout);
-      if (message.type === 'error') {
-        pending.reject(
-          new Error(
-            `${String(message.error ?? 'BiDi error')}: ${String(message.message ?? '')}` +
-              (message.stacktrace ? `\n${String(message.stacktrace)}` : '')
-          )
-        );
-      } else {
-        pending.resolve(message.result);
-      }
-      return;
-    }
-
-    if (typeof message.method !== 'string') return;
-    const listeners = this.eventListeners.get(message.method);
-    if (!listeners) return;
-    const params =
-      typeof message.params === 'object' && message.params !== null
-        ? (message.params as BidiParams)
-        : {};
-    for (const listener of listeners) {
-      void Promise.resolve()
-        .then(() => listener(params))
-        .catch((error: unknown) => {
-          this.eventErrors.push(`${message.method}: ${errorMessage(error)}`);
-        });
-    }
+  private readonly handleConsole = (message: ConsoleMessage): void => {
+    const entry: { args?: unknown; level: string; text: string } = {
+      level: message.type(),
+      text: message.text(),
+    };
+    if (this.pageLogs.length >= 200) this.pageLogs.shift();
+    this.pageLogs.push(entry);
+    if (entry.level === 'error') this.pageErrors.push(entry.text);
+    const pending = Promise.all(message.args().map((argument) => argument.jsonValue()))
+      .then((args) => {
+        entry.args = args;
+      })
+      .catch((error: unknown) => {
+        entry.args = [`Firefox page log arguments unavailable: ${errorMessage(error)}`];
+      });
+    this.pendingLogs.add(pending);
+    void pending.finally(() => this.pendingLogs.delete(pending));
   };
 
-  private readonly handleClose = (): void => {
-    const error = new Error('Firefox BiDi socket closed');
-    if (!this.closed) this.eventErrors.push(error.message);
-    for (const pending of this.pendingCommands.values()) {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-    }
-    this.pendingCommands.clear();
+  private readonly handlePageError = (error: unknown): void => {
+    this.pageErrors.push(errorMessage(error));
   };
-
-  private on(method: string, listener: BidiEventListener): void {
-    const listeners = this.eventListeners.get(method) ?? new Set<BidiEventListener>();
-    listeners.add(listener);
-    this.eventListeners.set(method, listeners);
-  }
 
   private assertHealthy(): void {
     const [eventError] = this.eventErrors;
     if (eventError) throw new Error(`Firefox BiDi event handler failed: ${eventError}`);
+    if (this.closed || this.child.exitCode !== null || this.child.signalCode !== null) {
+      throw new Error('Firefox BiDi session is closed');
+    }
+  }
+
+  private async flushPageLogs(): Promise<void> {
+    await Promise.all(this.pendingLogs);
+    this.assertHealthy();
   }
 
   clearPageLogs(): void {
     this.pageLogs.length = 0;
   }
 
-  command<T>(method: string, params: BidiParams = {}, timeoutMs = COMMAND_TIMEOUT_MS): Promise<T> {
-    try {
-      this.assertHealthy();
-    } catch (error: unknown) {
-      return Promise.reject(error instanceof Error ? error : new Error(errorMessage(error)));
-    }
-    if (this.closed || this.socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error(`Cannot send ${method}: Firefox BiDi session is closed`));
-    }
-
-    const id = ++this.commandId;
-    return new Promise<T>((resolveCommand, rejectCommand) => {
-      const timeout = setTimeout(() => {
-        this.pendingCommands.delete(id);
-        rejectCommand(new Error(`Firefox BiDi command timed out: ${method}`));
-      }, timeoutMs);
-      this.pendingCommands.set(id, {
-        reject: rejectCommand,
-        resolve: (result) => resolveCommand(result as T),
-        timeout,
-      });
-      try {
-        this.socket.send(JSON.stringify({ id, method, params }));
-      } catch (error: unknown) {
-        clearTimeout(timeout);
-        this.pendingCommands.delete(id);
-        rejectCommand(new Error(`Failed to send ${method}: ${errorMessage(error)}`));
-      }
-    });
-  }
-
   async evaluateJson<T>(expression: string): Promise<T> {
-    const response = await this.command<ScriptEvaluateResult>('script.evaluate', {
-      awaitPromise: true,
-      expression: `Promise.resolve(${expression}).then((value) => JSON.stringify(value))`,
-      target: { context: this.context },
-    });
-    if (response.type === 'exception') {
-      throw new Error(
-        `Firefox page evaluation failed: ${response.exceptionDetails?.text ?? 'unknown exception'}`
-      );
+    this.assertHealthy();
+    // Expressions are fixed test source. Serialize inside the page to retain the
+    // previous fixture's JSON value contract across the BiDi result boundary.
+    const json = await this.page.evaluate(
+      `Promise.resolve(${expression}).then((value) => JSON.stringify(value))`
+    );
+    if (typeof json !== 'string') {
+      throw new Error(`Firefox page evaluation returned ${typeof json}, expected a JSON string`);
     }
-    const remote = response.result;
-    if (!remote) throw new Error('Firefox page evaluation omitted its result');
-    if (remote.type !== 'string' || typeof remote.value !== 'string') {
-      throw new Error(`Firefox page evaluation returned ${remote.type}, expected a JSON string`);
-    }
-    return JSON.parse(remote.value) as T;
+    await this.flushPageLogs();
+    return JSON.parse(json) as T;
   }
 
   async waitFor(
@@ -365,6 +299,18 @@ class FirefoxBidiSessionImpl implements FirefoxBidiSession {
         if (await this.evaluateJson<boolean>(expression)) return;
         lastError = null;
       } catch (error: unknown) {
+        // Page-script exceptions can be transient while navigation initializes.
+        // Transport failures and command timeouts must remain the primary error.
+        if (
+          this.closed ||
+          this.child.exitCode !== null ||
+          this.child.signalCode !== null ||
+          /Target closed|Session closed|Connection closed|timed out|TimeoutError/i.test(
+            errorMessage(error)
+          )
+        ) {
+          throw error;
+        }
         lastError = errorMessage(error);
       }
       await delay(Math.min(POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
@@ -379,131 +325,91 @@ class FirefoxBidiSessionImpl implements FirefoxBidiSession {
     nonWatchHtml: string;
     watchHtml: string;
   }): Promise<void> {
-    this.on('network.beforeRequestSent', async (params) => {
-      if (params.isBlocked !== true) return;
-      const request = params.request;
-      if (typeof request !== 'object' || request === null) {
-        throw new Error('network.beforeRequestSent omitted request data');
-      }
-      const requestRecord = request as Record<string, unknown>;
-      if (typeof requestRecord.request !== 'string' || typeof requestRecord.url !== 'string') {
-        throw new Error('network.beforeRequestSent contained malformed request data');
-      }
-      const url = new URL(requestRecord.url);
-      if (url.hostname !== 'www.youtube.com') {
-        throw new Error(`Unexpected intercepted hostname: ${url.hostname}`);
-      }
-      if (typeof params.navigation !== 'string') {
-        if (
-          options.chatResponseJson !== undefined &&
-          url.pathname.startsWith('/youtubei/v1/live_chat/')
-        ) {
-          await this.command('network.provideResponse', {
-            body: { type: 'string', value: options.chatResponseJson },
-            headers: [
-              {
-                name: 'content-type',
-                value: { type: 'string', value: 'application/json; charset=utf-8' },
-              },
-            ],
-            request: requestRecord.request,
-            statusCode: 200,
-          });
-          return;
-        }
-        await this.command('network.provideResponse', {
-          request: requestRecord.request,
-          statusCode: 204,
-        });
-        return;
-      }
-      const isWatchPage = url.pathname === '/watch' || url.pathname.startsWith('/live/');
-      await this.command('network.provideResponse', {
-        body: { type: 'string', value: isWatchPage ? options.watchHtml : options.nonWatchHtml },
-        headers: [
-          { name: 'content-type', value: { type: 'string', value: 'text/html; charset=utf-8' } },
-        ],
-        request: requestRecord.request,
-        statusCode: 200,
+    this.assertHealthy();
+    if (this.requestListener) throw new Error('Firefox request interception is already active');
+    await this.page.setRequestInterception(true);
+    this.requestListener = (request): void => {
+      void this.respondToRequest(request, options).catch((error: unknown) => {
+        this.eventErrors.push(`Firefox request interception: ${errorMessage(error)}`);
       });
-    });
-    this.on('log.entryAdded', (params) => {
-      const level = String(params.level ?? 'unknown');
-      const text = String(params.text ?? 'Unknown Firefox page log');
-      if (this.pageLogs.length >= 200) this.pageLogs.shift();
-      this.pageLogs.push({
-        ...(params.args === undefined ? {} : { args: params.args }),
-        level,
-        text,
-      });
-      if (level === 'error') this.pageErrors.push(text);
-    });
+    };
+    this.page.on('request', this.requestListener);
+  }
 
-    await this.command('session.subscribe', {
-      events: ['network.beforeRequestSent', 'log.entryAdded'],
-    });
-    await this.command('network.addIntercept', {
-      phases: ['beforeRequestSent'],
-      urlPatterns: [{ type: 'pattern', protocol: 'https', hostname: 'www.youtube.com' }],
-    });
+  private async respondToRequest(
+    request: HTTPRequest,
+    options: { chatResponseJson?: string; nonWatchHtml: string; watchHtml: string }
+  ): Promise<void> {
+    const url = new URL(request.url());
+    if (url.hostname !== 'www.youtube.com') {
+      await request.continue();
+      return;
+    }
+    if (request.isNavigationRequest()) {
+      const isWatchPage = url.pathname === '/watch' || url.pathname.startsWith('/live/');
+      await request.respond({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: isWatchPage ? options.watchHtml : options.nonWatchHtml,
+      });
+      return;
+    }
+    if (
+      options.chatResponseJson !== undefined &&
+      url.pathname.startsWith('/youtubei/v1/live_chat/')
+    ) {
+      await request.respond({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: options.chatResponseJson,
+      });
+      return;
+    }
+    await request.respond({ status: 204 });
   }
 
   async installExtension(
     extensionPath = resolve(process.cwd(), 'dist-extension-firefox')
   ): Promise<string> {
-    const result = await this.command<ExtensionInstallResult>('webExtension.install', {
-      extensionData: { type: 'path', path: extensionPath },
-    });
-    return result.extension;
+    this.assertHealthy();
+    const extensionId = await this.browser.installExtension(extensionPath);
+    this.extensionId = extensionId;
+    return extensionId;
   }
 
   async navigate(url: string): Promise<void> {
-    await this.command('browsingContext.navigate', {
-      context: this.context,
-      url,
-      wait: 'complete',
-    });
+    this.assertHealthy();
+    await this.page.goto(url, { waitUntil: 'load', timeout: COMMAND_TIMEOUT_MS });
   }
 
   async reload(): Promise<void> {
-    await this.command('browsingContext.reload', {
-      context: this.context,
-      wait: 'complete',
-    });
+    this.assertHealthy();
+    await this.page.reload({ waitUntil: 'load', timeout: COMMAND_TIMEOUT_MS });
   }
 
   async captureScreenshot(): Promise<Buffer> {
-    const result = await this.command<{ data: string }>(
-      'browsingContext.captureScreenshot',
-      {
-        context: this.context,
-        origin: 'viewport',
-      },
-      5_000
+    this.assertHealthy();
+    const screenshot = await boundedOperation(
+      this.page.screenshot({ type: 'png' }),
+      5_000,
+      'Firefox screenshot timed out'
     );
-    return Buffer.from(result.data, 'base64');
+    return Buffer.from(screenshot);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
-    try {
-      if (this.socket.readyState === WebSocket.OPEN) {
-        await Promise.race([
-          this.command('session.end', {}, CLOSE_TIMEOUT_MS).catch(() => undefined),
-          delay(CLOSE_TIMEOUT_MS),
-        ]);
-      }
-    } finally {
-      this.closed = true;
-      this.handleClose();
-      this.socket.removeEventListener('message', this.handleMessage);
-      this.socket.removeEventListener('close', this.handleClose);
-      try {
-        this.socket.close();
-      } finally {
-        await cleanupFirefoxProfile(this.child, this.childClosed, this.profileDir);
-      }
-    }
+    this.closed = true;
+    this.page.off('console', this.handleConsole);
+    this.page.off('pageerror', this.handlePageError);
+    if (this.requestListener) this.page.off('request', this.requestListener);
+    await closeFirefoxResources(
+      this.browser,
+      this.child,
+      this.childClosed,
+      this.profileDir,
+      this.extensionId
+    );
   }
 }
 
@@ -530,38 +436,48 @@ export async function launchFirefoxBidi(): Promise<FirefoxBidiSession> {
     stderr = `${stderr}${chunk.toString('utf8')}`.slice(-16_384);
   });
 
+  let browser: Browser | null = null;
   let session: FirefoxBidiSessionImpl | null = null;
   try {
     const endpoint = await waitForEndpoint(child, () => stderr);
-    const socket = await connectWebSocket(endpoint);
-    const bootstrapSession = new FirefoxBidiSessionImpl(
-      child,
-      childClosed,
-      socket,
-      profileDir,
-      'pending'
-    );
-    session = bootstrapSession;
-    await bootstrapSession.command('session.new', { capabilities: {} });
-    const tree = await bootstrapSession.command<ContextTreeResult>('browsingContext.getTree', {
-      maxDepth: 0,
+    browser = await puppeteer.connect({
+      browserWSEndpoint: endpoint,
+      protocol: 'webDriverBiDi',
+      protocolTimeout: COMMAND_TIMEOUT_MS,
+      defaultViewport: { width: 1280, height: 800 },
     });
-    const initialContext = tree.contexts.find((entry) => entry.url === 'about:blank');
-    if (!initialContext) throw new Error('Firefox did not expose the initial about:blank context');
-
-    bootstrapSession.context = initialContext.context;
-    await session.command('browsingContext.setViewport', {
-      context: initialContext.context,
-      viewport: { height: 800, width: 1280 },
-    });
+    const pages = await browser.pages();
+    const page = pages.find((candidate) => candidate.url() === 'about:blank');
+    if (!page) throw new Error('Firefox did not expose the initial about:blank page');
+    page.setDefaultTimeout(COMMAND_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(COMMAND_TIMEOUT_MS);
+    session = new FirefoxBidiSessionImpl(child, childClosed, browser, page, profileDir);
+    await page.setViewport({ height: 800, width: 1280 });
     return session;
   } catch (error: unknown) {
-    try {
-      if (session) await session.close();
-      else await cleanupFirefoxProfile(child, childClosed, profileDir);
-    } catch (cleanupError: unknown) {
-      throw new AggregateError([error, cleanupError], 'Firefox launch and cleanup failed');
+    const errors: unknown[] = [error];
+    if (session) {
+      try {
+        await session.close();
+      } catch (cleanupError: unknown) {
+        errors.push(cleanupError);
+      }
+    } else {
+      if (browser) {
+        try {
+          await closeFirefoxResources(browser, child, childClosed, profileDir, null);
+        } catch (cleanupError: unknown) {
+          errors.push(cleanupError);
+        }
+      } else {
+        try {
+          await cleanupFirefoxProfile(child, childClosed, profileDir);
+        } catch (cleanupError: unknown) {
+          errors.push(cleanupError);
+        }
+      }
     }
+    if (errors.length > 1) throw new AggregateError(errors, 'Firefox launch and cleanup failed');
     throw error;
   }
 }
