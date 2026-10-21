@@ -14,7 +14,7 @@ const runtimePin = 'af19a6597c351f03a65e49532bdec6276e4b5ae9';
 const active = "${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}";
 const inactive = "${{ needs.changes.result == 'success' && needs.changes.outputs.osv != 'true' }}";
 const upload =
-  "${{ !cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') }}";
+  "${{ steps.node_trust.outcome == 'success' && (!cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true')) }}";
 
 function job(name: string): string {
   const start = workflow.search(new RegExp(`^  ${name}:$`, 'm'));
@@ -64,7 +64,9 @@ describe('shared overlay OSV workflow composition', () => {
         "OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}"
       );
       const names = [...body.matchAll(/^ {6}- name: (.+)$/gm)].map((match) => match[1]);
-      for (const name of names.slice(1, -2))
+      for (const name of names
+        .filter((name) => name !== 'Prepare remediated Node trust')
+        .slice(1, -2))
         expect(step(body, name ?? '')).toContain(`if: ${active}`);
     }
   });

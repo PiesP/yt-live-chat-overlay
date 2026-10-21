@@ -31,6 +31,11 @@ concurrency:
   group: security-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_OPTIONS: --use-openssl-ca
+  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+  SSL_CERT_DIR: /etc/ssl/certs
+
 jobs:
   pin-metadata:
     name: Resolve reviewed scanner images
@@ -42,6 +47,9 @@ jobs:
       OSV_SCANNER_IMAGE: ${{ steps.pins.outputs.OSV_SCANNER_IMAGE }}
       SEMGREP_IMAGE: ${{ steps.pins.outputs.SEMGREP_IMAGE }}
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: 📥 Checkout reviewed pin source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,6 +86,9 @@ jobs:
       codeql_javascript: ${{ steps.scope.outputs.codeql_javascript }}
       pinned_tools: ${{ steps.scope.outputs.pinned_tools }}
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: 📥 Checkout change history
         id: checkout
         continue-on-error: true
@@ -136,6 +147,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: 📥 Checkout code
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -183,6 +197,9 @@ jobs:
     env:
       OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: ❌ Require reviewed scanner image
         if: ${{ needs['pin-metadata'].result != 'success' }}
         run: exit 1
@@ -253,7 +270,7 @@ jobs:
         run: node --strip-types "$OSV_HELPER" report-pr overlay
 
       - name: 📊 Upload OSV SARIF to GitHub Security
-        if: ${{ !cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') }}
+        if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true')) }}
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: ${{ runner.temp }}/osv-results/osv-results.sarif
@@ -271,6 +288,9 @@ jobs:
     env:
       OSV_SCANNER_IMAGE: ${{ needs['pin-metadata'].outputs.OSV_SCANNER_IMAGE }}
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: ❌ Require reviewed scanner image
         if: ${{ needs['pin-metadata'].result != 'success' }}
         run: exit 1
@@ -343,7 +363,7 @@ jobs:
         run: node --strip-types "$OSV_HELPER" report-full overlay
 
       - name: 📊 Upload OSV SARIF to GitHub Security
-        if: ${{ !cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true') }}
+        if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && steps.osv-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.osv == 'true')) }}
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: ${{ runner.temp }}/osv-results/osv-results.sarif
@@ -367,6 +387,9 @@ jobs:
       matrix:
         language: [actions, javascript-typescript]
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: 📥 Checkout code
         if: ${{ needs.changes.result != 'success' || (matrix.language == 'actions' && needs.changes.outputs.codeql_actions == 'true') || (matrix.language == 'javascript-typescript' && needs.changes.outputs.codeql_javascript == 'true') }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -403,6 +426,9 @@ jobs:
     container:
       image: ${{ needs['pin-metadata'].outputs.SEMGREP_IMAGE || 'invalid@@' }}
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       - name: ❌ Require reviewed scanner image
         if: ${{ needs['pin-metadata'].result != 'success' }}
         run: exit 1
@@ -449,7 +475,7 @@ jobs:
 
       - name: ✅ Validate Semgrep SARIF
         id: semgrep-report
-        if: ${{ !cancelled() && steps.semgrep-scan.outcome == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') }}
+        if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && steps.semgrep-scan.outcome == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true')) }}
         uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@0c7fea5ab60757cad50520cf5ace89eb6396fabd
         with:
           sarif_path: semgrep.sarif
@@ -457,7 +483,7 @@ jobs:
           scanner_status: ${{ steps.semgrep-scan.outputs.scanner-status }}
 
       - name: 📊 Upload SARIF to GitHub Security
-        if: ${{ !cancelled() && steps.semgrep-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true') }}
+        if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && steps.semgrep-report.outputs.sarif-upload == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true')) }}
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: semgrep.sarif
@@ -465,7 +491,7 @@ jobs:
 
       - name: 🧪 Scan bounded Semgrep finding fixture
         id: semgrep-fixture-scan
-        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+        if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && github.event_name == 'workflow_dispatch') }}
         shell: sh
         run: |
           set -eu
@@ -483,7 +509,7 @@ jobs:
 
       - name: ✅ Validate bounded Semgrep finding
         id: semgrep-fixture-report
-        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.semgrep-fixture-scan.outcome == 'success' }}
+        if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && github.event_name == 'workflow_dispatch' && steps.semgrep-fixture-scan.outcome == 'success') }}
         continue-on-error: true
         uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@0c7fea5ab60757cad50520cf5ace89eb6396fabd
         with:

@@ -19,6 +19,11 @@ concurrency:
   group: dependabot-auto-merge-apply-${{ github.event.workflow_run.id }}
   cancel-in-progress: false
 
+env:
+  NODE_OPTIONS: --use-openssl-ca
+  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+  SSL_CERT_DIR: /etc/ssl/certs
+
 jobs:
   validate:
     name: 🔎 Validate Dependabot decision
@@ -35,6 +40,9 @@ jobs:
       base_ref: ${{ steps.gate.outputs.base_ref }}
       reason_base64: ${{ steps.gate.outputs.reason_base64 }}
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       # workflow_run artifacts are untrusted data; execute only default-branch code.
       - name: 📥 Checkout trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,6 +97,9 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Prepare remediated Node trust
+        uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
+        id: node_trust
       # The write-capable job also starts from trusted default-branch code.
       - name: 📥 Checkout trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
