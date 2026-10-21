@@ -101,6 +101,7 @@
     "dpdm": "4.3.0",
     "jsdom": "30.1.1",
     "knip": "^6.41.0",
+    "puppeteer-core": "25.12.0",
     "typescript": "7.0.2",
     "vite": "catalog:",
     "vite-plugin-monkey": "^8.1.1",
