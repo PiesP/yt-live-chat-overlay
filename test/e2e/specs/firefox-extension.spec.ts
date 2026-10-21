@@ -78,6 +78,8 @@ test.describe('Firefox extension runtime', () => {
   // oxlint-disable-next-line no-empty-pattern -- This native BiDi lane owns its browser and requests no Playwright fixtures.
   test('injects, persists normalized cache settings, renders chat, and survives SPA navigation', async ({}, testInfo) => {
     let browser: FirefoxBidiSession | null = null;
+    let primaryFailure: unknown;
+    let failed = false;
     try {
       browser = await launchFirefoxBidi();
       await browser.serveMockYouTube({
@@ -231,12 +233,14 @@ test.describe('Firefox extension runtime', () => {
           'a real Firefox extension chat message to be ingested and rendered'
         );
       } catch (error: unknown) {
-        const diagnostics = await browser.evaluateJson<{
-          canvasContextState: string;
-          debugText: string | null;
-          liveRegionText: string | null;
-          videoPaused: boolean | null;
-        }>(`(() => {
+        let diagnostics: unknown;
+        try {
+          diagnostics = await browser.evaluateJson<{
+            canvasContextState: string;
+            debugText: string | null;
+            liveRegionText: string | null;
+            videoPaused: boolean | null;
+          }>(`(() => {
           const canvas = document.querySelector('#${OVERLAY_ID} canvas');
           let canvasContextState = 'missing';
           if (canvas instanceof HTMLCanvasElement) {
@@ -255,13 +259,20 @@ test.describe('Firefox extension runtime', () => {
               : null,
           };
         })()`);
+        } catch (diagnosticError: unknown) {
+          diagnostics = {
+            collectionError:
+              diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError),
+          };
+        }
         const diagnosticLogs = browser.pageLogs.filter(
           ({ level, text }) =>
             level === 'error' || level === 'warn' || text.includes('[RenderWorkerManager]')
         );
         throw new Error(
           `${error instanceof Error ? error.message : String(error)}\n` +
-            `Firefox runtime diagnostics: ${JSON.stringify({ diagnostics, diagnosticLogs })}`
+            `Firefox runtime diagnostics: ${JSON.stringify({ diagnostics, diagnosticLogs, pageErrors: browser.pageErrors })}`,
+          { cause: error }
         );
       }
       const reloadLogs = browser.pageLogs;
@@ -308,6 +319,8 @@ test.describe('Firefox extension runtime', () => {
       await browser.evaluateJson('true');
       expect(browser.pageErrors).toEqual([]);
     } catch (error: unknown) {
+      primaryFailure = error;
+      failed = true;
       if (browser) {
         try {
           await testInfo.attach('firefox-extension-failure', {
@@ -318,9 +331,51 @@ test.describe('Firefox extension runtime', () => {
           // Preserve the original failure when Firefox already exited.
         }
       }
-      throw error;
     } finally {
-      await browser?.close();
+      try {
+        await browser?.close();
+      } catch (cleanupError: unknown) {
+        if (failed) {
+          primaryFailure = new AggregateError(
+            [primaryFailure, cleanupError],
+            'Firefox test and cleanup failed'
+          );
+        } else {
+          primaryFailure = cleanupError;
+          failed = true;
+        }
+      }
     }
+    if (failed) throw primaryFailure;
+  });
+
+  // oxlint-disable-next-line no-empty-pattern -- The native BiDi fixture owns its Firefox process.
+  test('rejects an invalid extension and keeps a healthy session after a script timeout', async ({}) => {
+    const browser = await launchFirefoxBidi();
+    let failure: unknown;
+    try {
+      await expect(
+        browser.installExtension(resolve(FIREFOX_EXTENSION_PATH, 'missing'))
+      ).rejects.toThrow();
+      await expect(browser.installExtension(FIREFOX_EXTENSION_PATH)).resolves.toBe(
+        FIREFOX_EXTENSION_ID
+      );
+      await expect(browser.evaluateJson('new Promise(() => {})')).rejects.toThrow(
+        'script.evaluate timed out'
+      );
+      expect(await browser.evaluateJson('true')).toBe(true);
+    } catch (error: unknown) {
+      failure = error;
+    } finally {
+      try {
+        await browser.close();
+      } catch (cleanupError: unknown) {
+        failure =
+          failure === undefined
+            ? cleanupError
+            : new AggregateError([failure, cleanupError], 'Firefox test and cleanup failed');
+      }
+    }
+    if (failure !== undefined) throw failure;
   });
 });
