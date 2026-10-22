@@ -206,6 +206,141 @@ describe('bootstrapChatSession page identity', () => {
   });
 });
 
+describe('bootstrapChatSession fallback and chat availability', () => {
+  const videoId = 'video-B';
+  const config = { INNERTUBE_API_KEY: 'key-B' };
+  const baseData = { currentVideoEndpoint: { watchEndpoint: { videoId } } };
+  const readyData = {
+    ...baseData,
+    contents: {
+      twoColumnWatchNextResults: {
+        conversationBar: {
+          liveChatRenderer: {
+            continuations: [{ reloadContinuationData: { continuation: 'token-B' } }],
+          },
+        },
+      },
+    },
+  };
+  const setWatchLocation = (): void => {
+    vi.stubGlobal('location', {
+      href: buildWatchUrl(videoId),
+      origin: 'https://www.youtube.com',
+    });
+  };
+
+  it('reuses one HTML fetch to resolve missing config and initial data', async () => {
+    setWatchLocation();
+    vi.stubGlobal('ytcfg', undefined);
+    vi.stubGlobal('ytInitialData', undefined);
+    const html = `ytcfg.set(${JSON.stringify(config)}); var ytInitialData = ${JSON.stringify(readyData)};`;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(html));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(bootstrapChatSession()).resolves.toMatchObject({
+      status: 'ready',
+      data: {
+        videoId,
+        apiKey: 'key-B',
+        initialContinuation: { continuation: 'token-B' },
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(buildWatchUrl(videoId));
+  });
+
+  it.each([
+    {
+      name: 'configuration',
+      html: `ytcfg.set({bad}); var ytInitialData = ${JSON.stringify(readyData)};`,
+      reason: 'Could not resolve YouTube page configuration',
+    },
+    {
+      name: 'initial data',
+      html: `ytcfg.set(${JSON.stringify(config)}); var ytInitialData = {bad};`,
+      reason: 'Could not extract ytInitialData from watch page',
+    },
+  ])('classifies malformed watch HTML $name as retryable', async ({ html, reason }) => {
+    setWatchLocation();
+    vi.stubGlobal('ytcfg', undefined);
+    vi.stubGlobal('ytInitialData', undefined);
+    const fetchMock = vi.fn(async () => new Response(html));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(bootstrapChatSession()).resolves.toMatchObject({ status: 'retryable', reason });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      name: 'disabled chat',
+      data: {
+        ...baseData,
+        playabilityStatus: { status: 'OK', reason: 'Live chat is disabled' },
+        contents: { twoColumnWatchNextResults: { conversationBar: {} } },
+      },
+      status: 'unavailable',
+      reason: 'Watch page does not expose a live chat renderer for this video',
+    },
+    {
+      name: 'chat-less VOD',
+      data: { ...baseData, videoDetails: { isLiveContent: false } },
+      status: 'unavailable',
+      reason: 'Watch page does not expose a live chat renderer for this video',
+    },
+    {
+      name: 'scheduled stream',
+      data: { ...baseData, playabilityStatus: { status: 'LIVE_STREAM_OFFLINE' } },
+      status: 'waiting',
+      reason: 'Stream not yet started — live chat renderer unavailable',
+    },
+    {
+      name: 'missing initial continuation',
+      data: {
+        ...baseData,
+        contents: {
+          twoColumnWatchNextResults: {
+            conversationBar: { liveChatRenderer: { actions: [] } },
+          },
+        },
+      },
+      status: 'unavailable',
+      reason: 'Live chat renderer does not expose an initial continuation token',
+    },
+  ])('classifies $name and accepts a later ready page', async ({ data, status, reason }) => {
+    setWatchLocation();
+    vi.stubGlobal('ytcfg', { data_: config });
+    vi.stubGlobal('ytInitialData', data);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(bootstrapChatSession()).resolves.toMatchObject({ status, reason });
+    vi.stubGlobal('ytInitialData', readyData);
+    await expect(bootstrapChatSession()).resolves.toMatchObject({
+      status: 'ready',
+      data: { videoId, initialContinuation: { continuation: 'token-B' } },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports an unsupported URL without fetching or accepting ready window data', async () => {
+    vi.stubGlobal('location', {
+      href: 'https://www.youtube.com/shorts/video-B',
+      origin: 'https://www.youtube.com',
+    });
+    vi.stubGlobal('ytcfg', { data_: config });
+    vi.stubGlobal('ytInitialData', readyData);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(bootstrapChatSession()).resolves.toMatchObject({
+      status: 'unavailable',
+      reason: 'Current URL is not a supported YouTube watch page',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('fetchWatchHtml', () => {
   it('rejects a declared response larger than the watch-page byte limit', async () => {
     const cancel = vi.fn();
