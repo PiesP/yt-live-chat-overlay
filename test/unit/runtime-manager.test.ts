@@ -370,6 +370,141 @@ describe('RuntimeManager', () => {
     internals.stopForegroundListeners();
   });
 
+  describe('foreground return thresholds', () => {
+    const makeHarness = (videoPaused = false) => {
+      const rm = new RuntimeManager(createOpts());
+      const renderer = {
+        isVideoPaused: videoPaused,
+        pause: vi.fn(),
+        resume: vi.fn(),
+        clearPausedDuration: vi.fn(),
+        trimBackgroundQueue: vi.fn(),
+        drainPendingQueue: vi.fn(() => []),
+        getActiveMessageCount: vi.fn(() => 0),
+        getQueueLength: vi.fn(() => 0),
+        getMsSinceLastRenderActivity: vi.fn(() => 0),
+        isWorkerAlive: vi.fn(() => true),
+      };
+      const setPauseReason = vi.fn();
+      const source = {
+        setPauseReason,
+        getHealthSnapshot: vi.fn(() => ({
+          observerAlive: true,
+          recentlyActive: true,
+          consecutiveErrors: 0,
+          isInBackoff: false,
+        })),
+      };
+      const internals = rm as unknown as {
+        state: string;
+        hiddenSince: number | null;
+        renderer: typeof renderer | null;
+        chatSource: typeof source | null;
+        standbyController: { pause: () => void; resume: () => void; isStandby: () => boolean };
+        startForegroundListeners: () => void;
+        stopForegroundListeners: () => void;
+        getRuntimeHealthSnapshot: () => { shouldRestart: boolean; isRendererStuck: boolean };
+        performOverlayRefresh: (reason: string) => void;
+      };
+      internals.state = 'active';
+      internals.renderer = renderer;
+      internals.chatSource = source;
+      internals.standbyController = {
+        pause: vi.fn(),
+        resume: vi.fn(),
+        isStandby: () => false,
+      };
+      vi.spyOn(internals, 'getRuntimeHealthSnapshot').mockReturnValue({
+        shouldRestart: false,
+        isRendererStuck: false,
+      });
+      const refresh = vi.spyOn(internals, 'performOverlayRefresh').mockImplementation(() => {});
+      const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+      const setVisibility = (value: 'hidden' | 'visible'): void => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value });
+        document.dispatchEvent(new Event('visibilitychange'));
+      };
+      internals.startForegroundListeners();
+
+      return {
+        internals,
+        renderer,
+        setPauseReason,
+        refresh,
+        setVisibility,
+        cleanup: (): void => {
+          internals.stopForegroundListeners();
+          if (originalVisibility) {
+            Object.defineProperty(document, 'visibilityState', originalVisibility);
+          } else {
+            Reflect.deleteProperty(document, 'visibilityState');
+          }
+        },
+      };
+    };
+
+    it.each([
+      { duration: 19_999, timeJump: true, refresh: false },
+      { duration: 20_000, timeJump: false, refresh: false },
+      { duration: 59_999, timeJump: false, refresh: false },
+      { duration: 60_000, timeJump: false, refresh: true },
+    ])('selects the correct recovery at $duration ms hidden', ({ duration, timeJump, refresh }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(100_000);
+      const h = makeHarness();
+      try {
+        h.setVisibility('hidden');
+        expect(h.internals.hiddenSince).toBe(100_000);
+        expect(h.renderer.pause).toHaveBeenCalledOnce();
+        expect(h.setPauseReason).toHaveBeenCalledWith('visibility', true);
+        vi.advanceTimersByTime(duration);
+        h.setVisibility('visible');
+        expect(h.internals.hiddenSince).toBeNull();
+
+        if (refresh) {
+          expect(h.refresh).toHaveBeenCalledExactlyOnceWith('hidden-60s');
+          expect(h.renderer.drainPendingQueue).not.toHaveBeenCalled();
+          expect(h.renderer.resume).not.toHaveBeenCalled();
+          expect(h.renderer.clearPausedDuration).not.toHaveBeenCalled();
+        } else {
+          expect(h.refresh).not.toHaveBeenCalled();
+          expect(h.renderer.drainPendingQueue).toHaveBeenCalledOnce();
+          expect(h.renderer.resume).toHaveBeenCalledOnce();
+          expect(h.renderer.clearPausedDuration).toHaveBeenCalledTimes(timeJump ? 0 : 1);
+          expect(h.setPauseReason).toHaveBeenLastCalledWith('visibility', false);
+        }
+      } finally {
+        h.cleanup();
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps a paused video paused across visibilitychange, pageshow, and resume', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(100_000);
+      const h = makeHarness(true);
+      try {
+        h.setVisibility('hidden');
+        vi.advanceTimersByTime(60_000);
+        h.setVisibility('visible');
+        window.dispatchEvent(new Event('pageshow'));
+        document.dispatchEvent(new Event('resume'));
+
+        expect(h.renderer.drainPendingQueue).toHaveBeenCalledOnce();
+        expect(h.renderer.resume).not.toHaveBeenCalled();
+        expect(h.renderer.clearPausedDuration).not.toHaveBeenCalled();
+        expect(h.refresh).not.toHaveBeenCalled();
+        expect(h.setPauseReason.mock.calls).toEqual([
+          ['visibility', true],
+          ['visibility', false],
+        ]);
+      } finally {
+        h.cleanup();
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('cancels a deferred restart when the active session is disposed', () => {
     vi.useFakeTimers();
     const rm = new RuntimeManager(createOpts());
