@@ -666,14 +666,14 @@ describe('RenderWorkerManager', () => {
         const workerA = instances[0];
         expect(workerA).toBeDefined();
         manager.destroy();
-        expect(manager.getWorker()).toBeNull();
+        expect(manager.workerRef).toBeNull();
         expect(workerA?.postMessage).toHaveBeenLastCalledWith({ type: 'destroy' });
         expect(workerA?.terminate).not.toHaveBeenCalled();
 
         init();
         const workerB = instances[1];
         expect(workerB).toBeDefined();
-        expect(manager.getWorker()).toBe(workerB);
+        expect(manager.workerRef).toBe(workerB);
 
         vi.advanceTimersByTime(499);
         expect(workerA?.terminate).not.toHaveBeenCalled();
@@ -692,7 +692,7 @@ describe('RenderWorkerManager', () => {
         workerA?.onmessageerror?.({ data: null } as MessageEvent);
         expect(workerA?.terminate).toHaveBeenCalledOnce();
         expect(workerB?.terminate).not.toHaveBeenCalled();
-        expect(manager.getWorker()).toBe(workerB);
+        expect(manager.workerRef).toBe(workerB);
         expect(manager.isActive).toBe(true);
       } finally {
         manager.destroy();
