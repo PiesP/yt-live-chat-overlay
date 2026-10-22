@@ -452,6 +452,12 @@ export async function runVideoPiPFixture({
     assert.equal(resumedInPiP.pipMatchesVideo, true);
     assertLastCall(resumedInPiP, 'pip-user-play', true);
     assert(
+      resumedInPiP.calls
+        .filter((call) => call.phase === 'pip-user-play' && call.pipMatchesVideo)
+        .every((call) => call.paused),
+      'A production callback temporarily resumed the page overlay during PiP'
+    );
+    assert(
       resumedInPiP.events.some((event) => event.phase === 'pip-user-play' && event.type === 'play'),
       'Native play event in PiP was not observed'
     );
@@ -514,6 +520,21 @@ export async function runVideoPiPFixture({
     await setPhase(page, 'restored-play');
     await page.locator('#pip-play').click();
     await waitForPhaseCall(page, 'restored-play', false);
+    await page.waitForFunction(
+      (before) => {
+        const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+        return (
+          video &&
+          !video.paused &&
+          video.currentTime > before + 0.1 &&
+          window.__ytVideoPiPFixture.events.some(
+            (event) => event.phase === 'restored-play' && event.type === 'playing'
+          )
+        );
+      },
+      exitedPaused.videoTime,
+      { timeout: 5_000 }
+    );
     const restoredPlaying = await snapshot(page);
     states.push(restoredPlaying);
     assertLastCall(restoredPlaying, 'restored-play', false);
@@ -553,14 +574,21 @@ export async function runVideoPiPFixture({
       cleanupReceipt.media = await page.evaluate(async () => {
         const fixture = window.__ytVideoPiPFixture;
         if (!fixture) return { status: 'fixture-not-started' };
-        if (document.pictureInPictureElement) await document.exitPictureInPicture();
         const video = document.querySelector<HTMLVideoElement>('#movie_player video');
-        video?.pause();
-        if (video) video.srcObject = null;
-        cancelAnimationFrame(fixture.animationFrame);
-        for (const track of fixture.stream.getTracks()) track.stop();
+        let pipExitError: string | null = null;
+        try {
+          if (document.pictureInPictureElement) await document.exitPictureInPicture();
+        } catch (error) {
+          pipExitError = String(error).slice(0, 200);
+        } finally {
+          video?.pause();
+          if (video) video.srcObject = null;
+          cancelAnimationFrame(fixture.animationFrame);
+          for (const track of fixture.stream.getTracks()) track.stop();
+        }
         return {
           status: 'cleaned',
+          pipExitError,
           pipClosed: document.pictureInPictureElement === null,
           videoSourceDetached: video?.srcObject === null,
           tracksEnded: fixture.stream.getTracks().every((track) => track.readyState === 'ended'),
@@ -578,6 +606,8 @@ export async function runVideoPiPFixture({
         mediaCleanup.status !== 'cleaned' ||
         !('pipClosed' in mediaCleanup) ||
         mediaCleanup.pipClosed !== true ||
+        !('pipExitError' in mediaCleanup) ||
+        mediaCleanup.pipExitError !== null ||
         !('videoSourceDetached' in mediaCleanup) ||
         mediaCleanup.videoSourceDetached !== true ||
         !('tracksEnded' in mediaCleanup) ||
