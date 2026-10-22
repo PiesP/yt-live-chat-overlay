@@ -349,6 +349,7 @@ export async function runBitmapLifecycleFixture({
   let imageRouteRegistered = false;
   let nativePageProbe: NativePageScriptProbe | undefined;
   let pageScriptProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
+  let primaryError: unknown;
   try {
     await context.route(SELF_FETCH_URL, selfFetchRoute);
     routeRegistered = true;
@@ -914,6 +915,8 @@ export async function runBitmapLifecycleFixture({
       imageAcquisition: {
         scope:
           'same packaged WorkerRenderer self-fetch, native decode/cache/draw in installed Edge',
+        drawScope:
+          'cached production bitmap on probe-created OffscreenCanvas; production message placement/draw is separate',
         negativeCacheRetry: 'not run; each recovery uses a distinct URL within the active TTL',
         controls,
         cases,
@@ -930,16 +933,31 @@ export async function runBitmapLifecycleFixture({
       probeOverflow,
       pageScriptProbeProvenance,
     };
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    try {
-      if (nativePageProbe) await nativePageProbe.restore();
-    } finally {
-      try {
-        await page.close();
-      } finally {
+    const cleanupErrors: unknown[] = [];
+    for (const cleanup of [
+      async () => nativePageProbe?.restore(),
+      async () => page.close(),
+      async () => {
         if (imageRouteRegistered) await context.unroute('**/windows-bitmap-issue306-*', imageRoute);
+      },
+      async () => {
         if (routeRegistered) await context.unroute(SELF_FETCH_URL, selfFetchRoute);
+      },
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        cleanupErrors.push(error);
       }
     }
+    if (cleanupErrors.length > 0)
+      throw new AggregateError(
+        primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
+        'Bitmap fixture owned-resource cleanup failed'
+      );
   }
 }
