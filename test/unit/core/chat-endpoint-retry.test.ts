@@ -64,6 +64,11 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
       vi.stubGlobal('fetch', fetchMock);
 
       const pending = request();
+      const rejection = expect(pending).rejects.toMatchObject(
+        failure === 'TypeError'
+          ? { name: 'TypeError', message: 'Network failure' }
+          : { name: 'YoutubeInnertubeRequestError', status: failure }
+      );
       await vi.advanceTimersByTimeAsync(999);
       expect(starts).toEqual([0]);
       await vi.advanceTimersByTimeAsync(1);
@@ -75,11 +80,7 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
       await vi.advanceTimersByTimeAsync(3_999);
       expect(starts).toEqual([0, 1_000, 3_000]);
       await vi.advanceTimersByTimeAsync(1);
-      await expect(pending).rejects.toMatchObject(
-        failure === 'TypeError'
-          ? { name: 'TypeError', message: 'Network failure' }
-          : { name: 'YoutubeInnertubeRequestError', status: failure }
-      );
+      await rejection;
       expect(starts).toEqual([0, 1_000, 3_000, 7_000]);
       expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(path);
