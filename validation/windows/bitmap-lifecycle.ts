@@ -350,7 +350,7 @@ export async function runBitmapLifecycleFixture({
   let nativePageProbe: NativePageScriptProbe | undefined;
   let pageScriptProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
   let primaryError: unknown;
-  try {
+  const execute = async () => {
     await context.route(SELF_FETCH_URL, selfFetchRoute);
     routeRegistered = true;
     await context.route('**/windows-bitmap-issue306-*', imageRoute);
@@ -933,31 +933,36 @@ export async function runBitmapLifecycleFixture({
       probeOverflow,
       pageScriptProbeProvenance,
     };
+  };
+  let result: Awaited<ReturnType<typeof execute>> | undefined;
+  try {
+    result = await execute();
   } catch (error) {
     primaryError = error;
-    throw error;
-  } finally {
-    const cleanupErrors: unknown[] = [];
-    for (const cleanup of [
-      async () => nativePageProbe?.restore(),
-      async () => page.close(),
-      async () => {
-        if (imageRouteRegistered) await context.unroute('**/windows-bitmap-issue306-*', imageRoute);
-      },
-      async () => {
-        if (routeRegistered) await context.unroute(SELF_FETCH_URL, selfFetchRoute);
-      },
-    ]) {
-      try {
-        await cleanup();
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    if (cleanupErrors.length > 0)
-      throw new AggregateError(
-        primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
-        'Bitmap fixture owned-resource cleanup failed'
-      );
   }
+  const cleanupErrors: unknown[] = [];
+  for (const cleanup of [
+    async () => nativePageProbe?.restore(),
+    async () => page.close(),
+    async () => {
+      if (imageRouteRegistered) await context.unroute('**/windows-bitmap-issue306-*', imageRoute);
+    },
+    async () => {
+      if (routeRegistered) await context.unroute(SELF_FETCH_URL, selfFetchRoute);
+    },
+  ]) {
+    try {
+      await cleanup();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length > 0)
+    throw new AggregateError(
+      primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
+      'Bitmap fixture owned-resource cleanup failed'
+    );
+  if (primaryError) throw primaryError;
+  assert(result, 'Bitmap fixture completed without a result');
+  return result;
 }
