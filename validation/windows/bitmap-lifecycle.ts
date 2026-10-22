@@ -22,6 +22,8 @@ type BitmapCache = {
 
 type BitmapProbeResult = {
   phase: string;
+  id?: string;
+  target?: 'emoji' | 'author' | 'sticker';
   owned?: boolean;
   width?: number | null;
   height?: number | null;
@@ -31,6 +33,14 @@ type BitmapProbeResult = {
   aliasErrorType?: string | null;
   aliasOwned?: boolean | null;
   errorType?: string;
+  fetchAttempts?: number;
+  responseStatus?: number | null;
+  finalUrl?: string | null;
+  fetchErrorType?: string | null;
+  decodeAttempts?: number;
+  decodeSuccesses?: number;
+  decodeFailures?: number;
+  failedCached?: boolean;
 };
 
 type BitmapWorkerRecord = {
@@ -40,6 +50,14 @@ type BitmapWorkerRecord = {
   results: BitmapProbeResult[];
   overflow: number;
 };
+
+type ImageRoutePlan =
+  | { kind: 'png' | 'cors' | 'malformed' | 'truncated' | 'html' | 'empty' }
+  | { kind: 'http'; status: number }
+  | { kind: 'abort' }
+  | { kind: 'redirect'; location: string };
+
+type ImageRouteRecord = { url: string; kind: ImageRoutePlan['kind']; status: number | null };
 
 declare global {
   interface Window {
@@ -56,6 +74,7 @@ declare global {
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsBitmapLifecycle';
 const BITMAP_URL = 'https://yt3.ggpht.com/windows-bitmap-lifecycle';
 const SELF_FETCH_URL = 'https://yt3.ggpht.com/windows-bitmap-self-fetch.png';
+const IMAGE_CASE_PREFIX = 'https://yt3.ggpht.com/windows-bitmap-issue306-';
 const RED_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFUlEQVR4nGP8z8DwnwEJMDGgAcICAIPRAgYCkO9YAAAAAElFTkSuQmCC',
   'base64'
@@ -66,6 +85,9 @@ const RED_PNG = Buffer.from(
 function attachWorkerBitmapProbe(renderer: {
   handleMessage: (event: MessageEvent) => void;
   emojiCache: BitmapCache;
+  authorPhotoCache: BitmapCache;
+  stickerCache: BitmapCache;
+  failedImageFetches: Map<string, number>;
   prefetchImages: (urls: string[], cache: BitmapCache) => Promise<void>;
 }) {
   if (typeof renderer?.handleMessage !== 'function') return;
@@ -73,8 +95,95 @@ function attachWorkerBitmapProbe(renderer: {
   let retained: ImageBitmap | undefined;
   self.addEventListener('message', async (event) => {
     if (event.data?.type !== 'ytBitmapProbe') return;
-    const { phase, url } = event.data;
+    const { phase, url, id, target } = event.data;
     try {
+      if (phase === 'acquire' || phase === 'release') {
+        const cache =
+          target === 'author'
+            ? renderer.authorPhotoCache
+            : target === 'sticker'
+              ? renderer.stickerCache
+              : renderer.emojiCache;
+        const globals = self as unknown as {
+          fetch: typeof fetch;
+          createImageBitmap: (source: Blob) => Promise<ImageBitmap>;
+        };
+        const nativeFetch = globals.fetch;
+        const nativeCreateImageBitmap = globals.createImageBitmap;
+        let fetchAttempts = 0;
+        let responseStatus: number | null = null;
+        let finalUrl: string | null = null;
+        let fetchErrorType: string | null = null;
+        let decodeAttempts = 0;
+        let decodeSuccesses = 0;
+        let decodeFailures = 0;
+        if (phase === 'acquire') {
+          globals.fetch = async (input, init) => {
+            fetchAttempts++;
+            try {
+              const response = await nativeFetch.call(self, input, init);
+              responseStatus = response.status;
+              finalUrl = response.url;
+              return response;
+            } catch (error) {
+              fetchErrorType = error instanceof Error ? error.name : typeof error;
+              throw error;
+            }
+          };
+          globals.createImageBitmap = async (source) => {
+            decodeAttempts++;
+            try {
+              const bitmap = await nativeCreateImageBitmap.call(self, source);
+              decodeSuccesses++;
+              return bitmap;
+            } catch (error) {
+              decodeFailures++;
+              throw error;
+            }
+          };
+          try {
+            await renderer.prefetchImages([url], cache);
+          } finally {
+            globals.fetch = nativeFetch;
+            globals.createImageBitmap = nativeCreateImageBitmap;
+          }
+        }
+        const bitmap = cache.get(url);
+        if (phase === 'release') cache.delete(url);
+        const canvas = new OffscreenCanvas(4, 4);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Worker image acquisition context unavailable');
+        let drawError: string | null = null;
+        let pixel: number[] | null = null;
+        if (bitmap) {
+          try {
+            ctx.drawImage(bitmap, 0, 0);
+            pixel = Array.from(ctx.getImageData(0, 0, 1, 1).data);
+          } catch (error) {
+            drawError = error instanceof Error ? error.name : String(error);
+          }
+        }
+        self.postMessage({
+          type: 'ytBitmapProbeResult',
+          phase,
+          id,
+          target,
+          owned: cache.has(url),
+          width: bitmap?.width ?? null,
+          height: bitmap?.height ?? null,
+          pixel,
+          drawError,
+          fetchAttempts,
+          responseStatus,
+          finalUrl,
+          fetchErrorType,
+          decodeAttempts,
+          decodeSuccesses,
+          decodeFailures,
+          failedCached: renderer.failedImageFetches.has(url),
+        });
+        return;
+      }
       const cache = renderer.emojiCache;
       if (phase === 'self-fetch-before') {
         await renderer.prefetchImages([url], cache);
@@ -158,13 +267,74 @@ export async function runBitmapLifecycleFixture({
     if (pageErrors.length < 10) pageErrors.push(error.name);
     else pageErrorOverflow++;
   });
-  const consoleErrors: string[] = [];
+  const consoleErrors: Array<{ text: string; url: string }> = [];
   let consoleErrorOverflow = 0;
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (consoleErrors.length < 10) consoleErrors.push(message.text().slice(0, 200));
+    if (consoleErrors.length < 20)
+      consoleErrors.push({ text: message.text().slice(0, 250), url: message.location().url });
     else consoleErrorOverflow++;
   });
+  const requestFailures: Array<{ url: string; errorText: string }> = [];
+  let requestFailureOverflow = 0;
+  page.on('requestfailed', (request) => {
+    if (requestFailures.length < 20)
+      requestFailures.push({
+        url: request.url(),
+        errorText: request.failure()?.errorText ?? 'unknown',
+      });
+    else requestFailureOverflow++;
+  });
+  const imageRoutes = new Map<string, ImageRoutePlan>();
+  const imageRequests: ImageRouteRecord[] = [];
+  let imageRequestOverflow = 0;
+  const imageRoute = (route: Route) => {
+    const url = route.request().url();
+    const plan = imageRoutes.get(url);
+    assert(plan, `Unplanned image route: ${url}`);
+    const status = plan.kind === 'http' ? plan.status : plan.kind === 'redirect' ? 302 : 200;
+    if (imageRequests.length < 64)
+      imageRequests.push({ url, kind: plan.kind, status: plan.kind === 'abort' ? null : status });
+    else imageRequestOverflow++;
+    if (plan.kind === 'abort') return route.abort('failed');
+    if (plan.kind === 'redirect') {
+      return route.fulfill({
+        status,
+        headers: {
+          location: plan.location,
+          'access-control-allow-origin': '*',
+          'cache-control': 'no-store',
+        },
+      });
+    }
+    if (plan.kind === 'http') {
+      return route.fulfill({
+        status,
+        contentType: 'text/plain',
+        headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
+        body: 'Image fixture HTTP failure',
+      });
+    }
+    const body =
+      plan.kind === 'empty'
+        ? Buffer.alloc(0)
+        : plan.kind === 'html'
+          ? Buffer.from('<html></html>')
+          : plan.kind === 'malformed'
+            ? Buffer.from([0, 1, 2, 3])
+            : plan.kind === 'truncated'
+              ? RED_PNG.subarray(0, 12)
+              : RED_PNG;
+    return route.fulfill({
+      status,
+      contentType: plan.kind === 'html' ? 'text/html' : 'image/png',
+      headers:
+        plan.kind === 'cors'
+          ? { 'cache-control': 'no-store' }
+          : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
+      body,
+    });
+  };
   let selfFetchRequests = 0;
   const selfFetchRoute = (route: Route) => {
     selfFetchRequests++;
@@ -176,14 +346,18 @@ export async function runBitmapLifecycleFixture({
     });
   };
   let routeRegistered = false;
+  let imageRouteRegistered = false;
   let nativePageProbe: NativePageScriptProbe | undefined;
   let pageScriptProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
   try {
     await context.route(SELF_FETCH_URL, selfFetchRoute);
     routeRegistered = true;
+    await context.route('**/windows-bitmap-issue306-*', imageRoute);
+    imageRouteRegistered = true;
     await page.route('**/*', (route) => {
       const url = new URL(route.request().url());
       if (url.href === SELF_FETCH_URL) return selfFetchRoute(route);
+      if (imageRoutes.has(url.href)) return imageRoute(route);
       if (url.protocol === 'chrome-extension:' && url.hostname === extensionId)
         return route.continue();
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
@@ -267,7 +441,7 @@ export async function runBitmapLifecycleFixture({
             if (event.data?.type === 'ready') record.ready = true;
             if (event.data?.type === 'ytBitmapProbeAttached') record.attached = true;
             if (event.data?.type === 'ytBitmapProbeResult') {
-              if (record.results.length < 4) record.results.push(event.data);
+              if (record.results.length < 64) record.results.push(event.data);
               else record.overflow++;
             }
           });
@@ -436,6 +610,224 @@ export async function runBitmapLifecycleFixture({
       undefined,
       { timeout: 15_000 }
     );
+    const probeImage = async (
+      id: string,
+      phase: 'acquire' | 'release',
+      target: 'emoji' | 'author' | 'sticker',
+      url: string
+    ): Promise<BitmapProbeResult> => {
+      await page.evaluate(
+        (command) => {
+          const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+          if (!record) throw new Error('Bitmap Worker was not attached');
+          record.worker.postMessage({ type: 'ytBitmapProbe', ...command });
+        },
+        { id, phase, target, url }
+      );
+      await page.waitForFunction(
+        ({ id: expectedId, phase: expectedPhase }) =>
+          window.__ytBitmapWorkers.some((record) =>
+            record.results.some(
+              (result) => result.id === expectedId && result.phase === expectedPhase
+            )
+          ),
+        { id, phase },
+        { timeout: 8_000 }
+      );
+      const result = await page.evaluate(
+        ({ id: expectedId, phase: expectedPhase }) => {
+          const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+          return record?.results.find(
+            (item) => item.id === expectedId && item.phase === expectedPhase
+          );
+        },
+        { id, phase }
+      );
+      assert(result, `Missing Worker image result for ${id}/${phase}`);
+      assert.equal(result.errorType, undefined, `${id}/${phase}: ${result.errorType}`);
+      assert.equal(result.target, target);
+      return result;
+    };
+    const assertDrawn = (result: BitmapProbeResult, id: string) => {
+      assert.equal(result.owned, true, `${id}: image absent from its target cache`);
+      assert.deepEqual(result.pixel, [255, 0, 0, 255], `${id}: decoded image not drawn red`);
+      assert.equal(result.width, 4);
+      assert.equal(result.height, 4);
+      assert.equal(result.drawError, null);
+      assert.equal(result.failedCached, false);
+    };
+    const assertReleased = (result: BitmapProbeResult, id: string) => {
+      assert.equal(result.owned, false, `${id}: cache retained released image`);
+      assert.equal(result.width, 0);
+      assert.equal(result.height, 0);
+      assert(result.drawError, `${id}: released bitmap remained drawable`);
+    };
+    const controls: Array<{
+      target: 'emoji' | 'author' | 'sticker';
+      url: string;
+      acquired: BitmapProbeResult;
+      released: BitmapProbeResult;
+    }> = [];
+    for (const target of ['emoji', 'author', 'sticker'] as const) {
+      const id = `control-${target}`;
+      const url = `${IMAGE_CASE_PREFIX}${id}.png`;
+      imageRoutes.set(url, { kind: 'png' });
+      const requestStart = imageRequests.length;
+      const acquired = await probeImage(id, 'acquire', target, url);
+      assert.deepEqual(imageRequests.slice(requestStart), [{ url, kind: 'png', status: 200 }]);
+      assert.equal(acquired.fetchAttempts, 1);
+      assert.equal(acquired.responseStatus, 200);
+      assert.equal(acquired.finalUrl, url);
+      assert.equal(acquired.decodeAttempts, 1);
+      assert.equal(acquired.decodeSuccesses, 1);
+      assert.equal(acquired.decodeFailures, 0);
+      assertDrawn(acquired, id);
+      const released = await probeImage(id, 'release', target, url);
+      assertReleased(released, id);
+      controls.push({ target, url, acquired, released });
+    }
+
+    const faultKinds = [
+      'http-401',
+      'http-403',
+      'http-404',
+      'http-429',
+      'http-503',
+      'malformed',
+      'truncated',
+      'html',
+      'empty',
+      'abort',
+      'cors',
+      'redirect-allowed',
+      'redirect-offhost',
+    ] as const;
+    const targets = ['emoji', 'author', 'sticker'] as const;
+    const expectedConsoleFaultUrls = new Set<string>();
+    const expectedRequestFailureUrls = new Set<string>();
+    const cases: Array<{
+      id: string;
+      target: 'emoji' | 'author' | 'sticker';
+      faultUrl: string;
+      routed: ImageRouteRecord[];
+      fault: BitmapProbeResult;
+      faultRelease: BitmapProbeResult | undefined;
+      recoveryUrl: string;
+      recovery: BitmapProbeResult;
+      recoveryRelease: BitmapProbeResult;
+    }> = [];
+    for (const [index, kind] of faultKinds.entries()) {
+      const id = kind;
+      const target = targets[index % targets.length];
+      assert(target);
+      const faultUrl = `${IMAGE_CASE_PREFIX}${id}.png`;
+      const recoveryUrl = `${IMAGE_CASE_PREFIX}${id}-recovery.png`;
+      const redirectUrl =
+        kind === 'redirect-allowed'
+          ? `https://yt4.ggpht.com/windows-bitmap-issue306-${id}-final.png`
+          : kind === 'redirect-offhost'
+            ? `https://example.test/windows-bitmap-issue306-${id}-final.png`
+            : null;
+      if (kind.startsWith('http-')) {
+        imageRoutes.set(faultUrl, { kind: 'http', status: Number(kind.slice(5)) });
+        expectedConsoleFaultUrls.add(faultUrl);
+      } else if (redirectUrl) {
+        imageRoutes.set(faultUrl, { kind: 'redirect', location: redirectUrl });
+        imageRoutes.set(redirectUrl, { kind: 'png' });
+      } else if (
+        kind === 'malformed' ||
+        kind === 'truncated' ||
+        kind === 'html' ||
+        kind === 'empty' ||
+        kind === 'abort' ||
+        kind === 'cors'
+      ) {
+        imageRoutes.set(faultUrl, { kind });
+      } else {
+        assert.fail(`Unsupported image fault kind: ${kind}`);
+      }
+      if (kind === 'abort' || kind === 'cors') {
+        expectedConsoleFaultUrls.add(faultUrl);
+        expectedRequestFailureUrls.add(faultUrl);
+      }
+      imageRoutes.set(recoveryUrl, { kind: 'png' });
+
+      const requestStart = imageRequests.length;
+      const fault = await probeImage(id, 'acquire', target, faultUrl);
+      const routed = imageRequests.slice(requestStart);
+      assert.deepEqual(
+        routed.map((request) => request.url),
+        redirectUrl ? [faultUrl, redirectUrl] : [faultUrl],
+        `${id}: unexpected routed request sequence`
+      );
+      assert.deepEqual(
+        routed.map((request) => request.status),
+        redirectUrl
+          ? [302, 200]
+          : [kind.startsWith('http-') ? Number(kind.slice(5)) : kind === 'abort' ? null : 200],
+        `${id}: unexpected routed response status`
+      );
+      assert.equal(fault.fetchAttempts, 1, `${id}: Worker did not call fetch once`);
+      assert.equal(
+        fault.responseStatus,
+        kind.startsWith('http-')
+          ? Number(kind.slice(5))
+          : kind === 'abort' || kind === 'cors'
+            ? null
+            : 200
+      );
+      assert.equal(
+        fault.finalUrl,
+        kind === 'abort' || kind === 'cors' ? null : (redirectUrl ?? faultUrl)
+      );
+      const permitted = kind === 'redirect-allowed';
+      const decodeFault = ['malformed', 'truncated', 'html', 'empty'].includes(kind);
+      assert.equal(
+        fault.decodeAttempts,
+        decodeFault || permitted ? 1 : 0,
+        `${id}: decode boundary`
+      );
+      assert.equal(fault.decodeSuccesses, permitted ? 1 : 0);
+      assert.equal(fault.decodeFailures, decodeFault ? 1 : 0);
+      if (kind === 'abort' || kind === 'cors') assert(fault.fetchErrorType);
+      else assert.equal(fault.fetchErrorType, null);
+      let faultRelease: BitmapProbeResult | undefined;
+      if (permitted) {
+        assertDrawn(fault, id);
+        faultRelease = await probeImage(id, 'release', target, faultUrl);
+        assertReleased(faultRelease, id);
+      } else {
+        assert.equal(fault.owned, false, `${id}: failed image reached cache`);
+        assert.equal(fault.pixel, null);
+        assert.equal(fault.failedCached, true, `${id}: failure not retained by retry policy`);
+      }
+
+      const recoveryStart = imageRequests.length;
+      const recovery = await probeImage(`${id}-recovery`, 'acquire', target, recoveryUrl);
+      assert.deepEqual(imageRequests.slice(recoveryStart), [
+        { url: recoveryUrl, kind: 'png', status: 200 },
+      ]);
+      assert.equal(recovery.fetchAttempts, 1);
+      assert.equal(recovery.responseStatus, 200);
+      assert.equal(recovery.finalUrl, recoveryUrl);
+      assert.equal(recovery.decodeAttempts, 1);
+      assert.equal(recovery.decodeSuccesses, 1);
+      assert.equal(recovery.decodeFailures, 0);
+      assertDrawn(recovery, `${id}-recovery`);
+      const recoveryRelease = await probeImage(`${id}-recovery`, 'release', target, recoveryUrl);
+      assertReleased(recoveryRelease, `${id}-recovery`);
+      cases.push({
+        id,
+        target,
+        faultUrl,
+        routed,
+        fault,
+        faultRelease,
+        recoveryUrl,
+        recovery,
+        recoveryRelease,
+      });
+    }
     const worker = await page.evaluate(() => {
       const record = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
       if (!record) throw new Error('Bitmap Worker was not attached');
@@ -460,9 +852,10 @@ export async function runBitmapLifecycleFixture({
     assert.equal(sender.widthAfterTransfer, 0);
     assert.equal(sender.heightAfterTransfer, 0);
     assert.deepEqual(
-      worker.map((result) => result.phase),
+      worker.slice(0, 4).map((result) => result.phase),
       ['before', 'after', 'self-fetch-before', 'self-fetch-after']
     );
+    assert.equal(worker.length, 4 + controls.length * 2 + cases.length * 3 + 1);
     const [before, after, selfFetchBefore, selfFetchAfter] = worker;
     assert(before && after && selfFetchBefore && selfFetchAfter);
     assert.deepEqual(before.pixel, [255, 0, 0, 255]);
@@ -490,8 +883,25 @@ export async function runBitmapLifecycleFixture({
     assert.equal(selfFetchRequests, 1);
     assert.deepEqual(pageErrors, []);
     assert.equal(pageErrorOverflow, 0);
-    assert.deepEqual(consoleErrors, []);
+    assert.deepEqual(
+      consoleErrors.filter(
+        (message) =>
+          !Array.from(expectedConsoleFaultUrls).some(
+            (url) => message.url === url || message.text.includes(url)
+          )
+      ),
+      [],
+      'Unexpected browser console error outside exact image fault URLs'
+    );
     assert.equal(consoleErrorOverflow, 0);
+    assert.deepEqual(
+      requestFailures.filter((failure) => !expectedRequestFailureUrls.has(failure.url)),
+      [],
+      'Unexpected network failure outside exact abort/CORS URLs'
+    );
+    assert.equal(requestFailureOverflow, 0);
+    assert.equal(imageRequestOverflow, 0);
+    assert.equal(imageRequests.length, 31);
     assert.deepEqual(probeOverflow, { workers: 0, results: 0 });
     return {
       status: 'passed',
@@ -500,7 +910,18 @@ export async function runBitmapLifecycleFixture({
       main,
       selfFetchScope: 'direct call to compiled WorkerRenderer.prefetchImages with routed image',
       sender,
-      worker,
+      worker: worker.slice(0, 4),
+      imageAcquisition: {
+        scope:
+          'same packaged WorkerRenderer self-fetch, native decode/cache/draw in installed Edge',
+        negativeCacheRetry: 'not run; each recovery uses a distinct URL within the active TTL',
+        controls,
+        cases,
+        imageRequests,
+        imageRequestOverflow,
+        requestFailures,
+        requestFailureOverflow,
+      },
       selfFetchRequests,
       pageErrors,
       pageErrorOverflow,
@@ -516,6 +937,7 @@ export async function runBitmapLifecycleFixture({
       try {
         await page.close();
       } finally {
+        if (imageRouteRegistered) await context.unroute('**/windows-bitmap-issue306-*', imageRoute);
         if (routeRegistered) await context.unroute(SELF_FETCH_URL, selfFetchRoute);
       }
     }
