@@ -51,6 +51,7 @@ import {
   readUserscriptMetadata,
   runManagerUpgrade,
 } from './release-upgrade/upgrade.ts';
+import { runVideoPiPFixture } from './video-pip.ts';
 
 export { selectPublicSeekTarget };
 
@@ -172,6 +173,7 @@ type ChromeResult<Live = LiveObservation> = {
   fixture: Awaited<ReturnType<typeof runFixture>> | null;
   placementTiming?: Awaited<ReturnType<typeof runPlacementTimingFixture>> | null;
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
+  videoPiP?: Awaited<ReturnType<typeof runVideoPiPFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
@@ -2237,6 +2239,7 @@ export async function runChromeInstallation({
     fixture: null,
     placementTiming: null,
     bitmapLifecycle: null,
+    videoPiP: null,
     userscriptUpgrade: null,
     extensionUpgrade:
       installation === 'extension'
@@ -2373,6 +2376,8 @@ export async function runChromeInstallation({
       };
     }
     if (browserName === 'msedge' && installation === 'extension') {
+      result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
+      assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
         context,
         root,
