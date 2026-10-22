@@ -1246,11 +1246,10 @@ export class WorkerRenderer {
     for (const controller of this.fetchControllers) controller.abort();
     this.fetchControllers.clear();
     this.fetching.clear();
-    for (const [url, task] of this.imageFetchTasks) {
-      if (task.started) continue;
-      task.resolve();
-      this.imageFetchTasks.delete(url);
-    }
+    // Native bitmap decoding cannot be aborted. Retire its waiters now; the
+    // generation guard still closes any bitmap that completes after destroy.
+    for (const task of this.imageFetchTasks.values()) task.resolve();
+    this.imageFetchTasks.clear();
     this.uncacheableImageUrls.clear();
     this.failedImageFetches.clear();
     this.pendingTranslations.clear();
