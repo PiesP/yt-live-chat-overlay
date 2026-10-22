@@ -1933,6 +1933,61 @@ describe('Worker message protocol', () => {
       await Promise.all([first, live]);
     });
 
+    it('caps 1,200 pending image tasks while retaining shared owners and recovering capacity', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        authorPhotoCache: unknown;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown, ownerId?: string) => Promise<void>;
+        releaseQueuedAssetsForOwner(ownerId: string): void;
+      };
+      const urls = Array.from(
+        { length: 1_200 },
+        (_, index) => `https://yt3.ggpht.com/cap-${index}`
+      );
+      const sharedUrl = 'https://yt3.ggpht.com/cap-1199';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted')));
+          })
+      );
+
+      const bulk = internals.prefetchImages(urls, internals.emojiCache, 'bulk');
+      expect(internals.imageFetchTasks.size).toBe(1_200);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+
+      await internals.prefetchImages(['https://yt3.ggpht.com/cap-refused'], internals.emojiCache);
+      expect(internals.imageFetchTasks.size).toBe(1_200);
+      const shared = internals.prefetchImages([sharedUrl], internals.emojiCache, 'shared');
+      expect(internals.imageFetchTasks.size).toBe(1_200);
+
+      internals.releaseQueuedAssetsForOwner('bulk');
+      expect(internals.imageFetchTasks.size).toBe(2);
+      const otherTarget = internals.prefetchImages(
+        [sharedUrl],
+        internals.authorPhotoCache,
+        'author'
+      );
+      expect(internals.imageFetchTasks.size).toBe(3);
+
+      internals.releaseQueuedAssetsForOwner('shared');
+      await shared;
+      expect(internals.imageFetchTasks.size).toBe(2);
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([urls[0]]);
+
+      const recovered = internals.prefetchImages(
+        ['https://yt3.ggpht.com/cap-recovered'],
+        internals.emojiCache,
+        'recovered'
+      );
+      expect(internals.imageFetchTasks.size).toBe(3);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      await Promise.all([bulk, otherTarget, recovered]);
+      expect(internals.imageFetchTasks.size).toBe(0);
+    });
+
     it('bounds and cleans worker image failure state on config update and destroy', () => {
       const renderer = initializeRenderer({ failedEmojiRetryMins: 5 });
       const internals = renderer as unknown as {
@@ -1986,6 +2041,37 @@ describe('Worker message protocol', () => {
       expect(internals.fetchControllers.size).toBe(0);
       expect(internals.fetching.size).toBe(0);
       fetchSpy.mockRestore();
+    });
+
+    it('settles a prefetch waiter on destroy even while bitmap decoding remains pending', async () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/pending-decode';
+      const bitmap = { width: 10, height: 10, close: vi.fn() };
+      let resolveBitmap!: (value: typeof bitmap) => void;
+      const bitmapPromise = new Promise<typeof bitmap>((resolve) => {
+        resolveBitmap = resolve;
+      });
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockImplementationOnce(() => bitmapPromise as Promise<ImageBitmap>);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse());
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.waitFor(() => expect(decoder).toHaveBeenCalledOnce());
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      const settledBeforeDecode = await Promise.race([
+        prefetch.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 0)),
+      ]);
+
+      resolveBitmap(bitmap);
+      await prefetch;
+      expect(settledBeforeDecode).toBe(true);
+      expect(bitmap.close).toHaveBeenCalledOnce();
+      expect(internals.emojiCache.has(url)).toBe(false);
     });
   });
 
