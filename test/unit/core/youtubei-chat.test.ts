@@ -145,6 +145,67 @@ describe('buildWatchUrl', () => {
   });
 });
 
+describe('bootstrapChatSession page identity', () => {
+  const pageData = (videoId?: string, continuation = 'stale') => ({
+    ...(videoId ? { currentVideoEndpoint: { watchEndpoint: { videoId } } } : {}),
+    contents: {
+      twoColumnWatchNextResults: {
+        conversationBar: {
+          liveChatRenderer: {
+            continuations: [{ reloadContinuationData: { continuation } }],
+          },
+        },
+      },
+    },
+  });
+
+  it.each([
+    { name: 'stale A identity', initialData: pageData('video-A') },
+    { name: 'absent identity', initialData: pageData() },
+  ])('uses B watch HTML when window data has $name', async ({ initialData }) => {
+    vi.stubGlobal('location', {
+      href: 'https://www.youtube.com/watch?v=video-B',
+      origin: 'https://www.youtube.com',
+    });
+    vi.stubGlobal('ytcfg', { data_: { INNERTUBE_API_KEY: 'key-B' } });
+    vi.stubGlobal('ytInitialData', initialData);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response(`var ytInitialData = ${JSON.stringify(pageData('video-B', 'token-B'))};`)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(bootstrapChatSession()).resolves.toMatchObject({
+      status: 'ready',
+      data: {
+        videoId: 'video-B',
+        apiKey: 'key-B',
+        initialContinuation: { continuation: 'token-B' },
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(buildWatchUrl('video-B'));
+  });
+
+  it('rejects A identity even when both stale window data and fetched HTML name A', async () => {
+    vi.stubGlobal('location', {
+      href: 'https://www.youtube.com/watch?v=video-B',
+      origin: 'https://www.youtube.com',
+    });
+    vi.stubGlobal('ytcfg', { data_: { INNERTUBE_API_KEY: 'key-B' } });
+    vi.stubGlobal('ytInitialData', pageData('video-A'));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response(`var ytInitialData = ${JSON.stringify(pageData('video-A'))};`)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(bootstrapChatSession()).resolves.toMatchObject({
+      status: 'retryable',
+      reason: 'initialData videoId (video-A) does not match current URL videoId (video-B)',
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
 describe('fetchWatchHtml', () => {
   it('rejects a declared response larger than the watch-page byte limit', async () => {
     const cancel = vi.fn();
