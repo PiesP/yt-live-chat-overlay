@@ -48,6 +48,9 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(path);
+    fetchMock.mockImplementation(async () => goodResponse());
+    await expect(request()).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it.each([429, 503, 504, 'TypeError'] as const)(
@@ -84,6 +87,9 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
       expect(starts).toEqual([0, 1_000, 3_000, 7_000]);
       expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(path);
+      fetchMock.mockImplementation(async () => goodResponse());
+      await expect(request()).resolves.toEqual(payload);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
     }
   );
 
