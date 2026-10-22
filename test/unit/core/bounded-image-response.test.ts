@@ -97,7 +97,7 @@ describe('bounded Worker image response', () => {
           },
           { highWaterMark: 0 }
         ),
-        { headers: length === undefined ? undefined : { 'content-length': length } }
+        { headers: length === undefined ? {} : { 'content-length': length } }
       );
 
       if (offset > 0) {

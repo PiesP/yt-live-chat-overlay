@@ -385,10 +385,14 @@ export async function runVideoPiPFixture({
       video.srcObject = stream;
       await video.play();
     }, EVENT_LIMIT);
-    await page.waitForFunction(() => {
-      const video = document.querySelector<HTMLVideoElement>('#movie_player video');
-      return video && video.videoWidth > 0 && video.videoHeight > 0 && video.currentTime > 0.2;
-    }, undefined, { timeout: 5_000 });
+    await page.waitForFunction(
+      () => {
+        const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+        return video && video.videoWidth > 0 && video.videoHeight > 0 && video.currentTime > 0.2;
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
     const initialState = await snapshot(page);
     states.push(initialState);
     assert.equal(initialState.starts, 1, 'Production video pause controller did not bind once');
@@ -397,8 +401,8 @@ export async function runVideoPiPFixture({
 
     await setPhase(page, 'pip-playing');
     await page.locator('#pip-enter').click();
-    await page.waitForFunction(() =>
-      document.pictureInPictureElement === document.querySelector('#movie_player video'),
+    await page.waitForFunction(
+      () => document.pictureInPictureElement === document.querySelector('#movie_player video'),
       undefined,
       { timeout: 5_000 }
     );
@@ -416,8 +420,8 @@ export async function runVideoPiPFixture({
 
     await setPhase(page, 'pip-user-pause');
     await page.locator('#pip-pause').click();
-    await page.waitForFunction(() =>
-      document.querySelector<HTMLVideoElement>('#movie_player video')?.paused === true,
+    await page.waitForFunction(
+      () => document.querySelector<HTMLVideoElement>('#movie_player video')?.paused === true,
       undefined,
       { timeout: 5_000 }
     );
@@ -429,8 +433,8 @@ export async function runVideoPiPFixture({
 
     await setPhase(page, 'pip-user-play');
     await page.locator('#pip-play').click();
-    await page.waitForFunction(() =>
-      document.querySelector<HTMLVideoElement>('#movie_player video')?.paused === false,
+    await page.waitForFunction(
+      () => document.querySelector<HTMLVideoElement>('#movie_player video')?.paused === false,
       undefined,
       { timeout: 5_000 }
     );
@@ -477,8 +481,8 @@ export async function runVideoPiPFixture({
 
     await setPhase(page, 'pip-second-enter');
     await page.locator('#pip-enter').click();
-    await page.waitForFunction(() =>
-      document.pictureInPictureElement === document.querySelector('#movie_player video'),
+    await page.waitForFunction(
+      () => document.pictureInPictureElement === document.querySelector('#movie_player video'),
       undefined,
       { timeout: 5_000 }
     );

@@ -169,8 +169,9 @@ describe('bootstrapChatSession page identity', () => {
     });
     vi.stubGlobal('ytcfg', { data_: { INNERTUBE_API_KEY: 'key-B' } });
     vi.stubGlobal('ytInitialData', initialData);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      new Response(`var ytInitialData = ${JSON.stringify(pageData('video-B', 'token-B'))};`)
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(`var ytInitialData = ${JSON.stringify(pageData('video-B', 'token-B'))};`)
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -193,8 +194,9 @@ describe('bootstrapChatSession page identity', () => {
     });
     vi.stubGlobal('ytcfg', { data_: { INNERTUBE_API_KEY: 'key-B' } });
     vi.stubGlobal('ytInitialData', pageData('video-A'));
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      new Response(`var ytInitialData = ${JSON.stringify(pageData('video-A'))};`)
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(`var ytInitialData = ${JSON.stringify(pageData('video-A'))};`)
     );
     vi.stubGlobal('fetch', fetchMock);
 

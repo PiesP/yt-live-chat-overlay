@@ -180,7 +180,14 @@ describe('RenderWorkerManager', () => {
           onDimensionsChanged,
         };
 
-        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        expect(
+          manager.init(
+            canvas,
+            DEFAULT_SETTINGS,
+            overlay as unknown as Parameters<RenderWorkerManager['init']>[2],
+            'worker.js'
+          )
+        ).toEqual({
           started: false,
           canvasTransferred: false,
         });
@@ -688,8 +695,8 @@ describe('RenderWorkerManager', () => {
           workerA?.emitMessage({ type: 'ack' });
         }
         workerA?.emitMessage({ type: 'error', error: 'stale worker' });
-        workerA?.onerror?.({ message: 'stale worker', preventDefault: vi.fn() } as ErrorEvent);
-        workerA?.onmessageerror?.({ data: null } as MessageEvent);
+        workerA?.onerror?.(new ErrorEvent('error', { message: 'stale worker' }));
+        workerA?.onmessageerror?.(new MessageEvent('messageerror', { data: null }));
         expect(workerA?.terminate).toHaveBeenCalledOnce();
         expect(workerB?.terminate).not.toHaveBeenCalled();
         expect(manager.workerRef).toBe(workerB);
