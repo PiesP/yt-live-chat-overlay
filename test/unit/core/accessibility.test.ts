@@ -541,6 +541,8 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
     document.body.innerHTML = '';
     modal = document.createElement('dialog');
     document.body.appendChild(modal);
+    // jsdom does not implement showModal(); open the dialog so its tabs can receive focus.
+    modal.setAttribute('open', '');
 
     form = new SettingsUiForm(getDefaultSettings);
     const content = form.createModalContent();
