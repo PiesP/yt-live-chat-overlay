@@ -44,6 +44,9 @@ pnpm install --frozen-lockfile
 Volta selects Node.js; `packageManager` selects the native pnpm release. Put
 npm's global binary directory before Volta's experimental pnpm shim in `PATH`;
 that shim expects the older JavaScript entrypoint.
+For an existing global Volta pnpm selection, also follow the
+[shared bootstrap](https://github.com/PiesP/browser-core/blob/master/README.md#development);
+PATH order alone does not retire the manager injected by Volta's Node launcher.
 
 `packages/core` is a pinned Git submodule. Restore the recorded revision with
 `git submodule update --init --recursive`; do not pull inside the detached
