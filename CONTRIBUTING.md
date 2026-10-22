@@ -37,8 +37,16 @@ git clone --recurse-submodules https://github.com/PiesP/yt-live-chat-overlay.git
 cd yt-live-chat-overlay
 git submodule sync --recursive
 git submodule update --init --recursive
-pnpm install
+npm install --global "$(node -p "require('./package.json').packageManager")" --allow-scripts=pnpm
+pnpm install --frozen-lockfile
 ```
+
+Volta selects Node.js; `packageManager` selects the native pnpm release. Put
+npm's global binary directory before Volta's experimental pnpm shim in `PATH`;
+that shim expects the older JavaScript entrypoint.
+For an existing global Volta pnpm selection, also follow the
+[shared bootstrap](https://github.com/PiesP/browser-core/blob/master/README.md#development);
+PATH order alone does not retire the manager injected by Volta's Node launcher.
 
 `packages/core` is a pinned Git submodule. Restore the recorded revision with
 `git submodule update --init --recursive`; do not pull inside the detached
@@ -157,10 +165,11 @@ existing boundary checks. HTML fixtures remain excluded from style checks while
 the pinned formatter's full HTML support is experimental; browser checks still
 load them.
 
-The Vite alias reports Vite+ `1.2.0` and bundles Vite `8.3.4`. Strict peer
-validation stays enabled. `pnpm-workspace.yaml` permits only that exact alias
+The Vite alias reports the selected Vite+ version and records the bundled Vite
+version in its package metadata. Strict peer validation stays enabled.
+`pnpm-workspace.yaml` permits only that exact alias
 for the reviewed Vitest, mocker and userscript-plugin versions, whose declared
-Vite ranges include 8.3.4. Recheck callers, their original ranges and both
+Vite ranges include the bundled implementation. Recheck callers, their original ranges and both
 versions together on updates; never widen this to `allowAny`. Validate a fresh
 dependency resolution as well as the frozen install, since a migration lockfile
 can otherwise hide peer metadata conflicts.

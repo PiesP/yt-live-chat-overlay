@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
-const reviewedConsumerSha = '83364ae1027cf6b1761a91dcb855ea9a95c8886c';
+const reviewedConsumerSha = '5adbdf8592366862002d5e8c9a408845f889f099';
 const reviewedProviderSha = '4ab0442d8d2e3cf640767b499b6444c92f6479b5';
 const action = `uses: PiesP/browser-core/automation/actions/prepare-scanner-pins@${reviewedProviderSha}`;
 const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
@@ -23,7 +23,7 @@ function stepSection(job: string, name: string): string {
 describe('reviewed scanner helper boundary', () => {
   it('retains consumer-owned scanner metadata byte-for-byte', () => {
     expect(createHash('sha256').update(read('scripts/ci/pinned-tools.json')).digest('hex')).toBe(
-      '6272b8eb6806d92fcae67f4f1bba238b0955a08e7b5d544276b9fdb1006588b9'
+      'bedb4bb9a258425a93ad7b87294e9b0a304b1d708e5a46e820d59163aa566af3'
     );
     const pins = JSON.parse(read('scripts/ci/pinned-tools.json')) as Record<string, unknown>;
     expect(Object.keys(pins).sort()).toEqual(['osv', 'semgrep']);

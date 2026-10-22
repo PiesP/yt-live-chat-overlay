@@ -53,7 +53,7 @@ jobs:
       - name: 📥 Checkout reviewed pin source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 83364ae1027cf6b1761a91dcb855ea9a95c8886c
+          ref: 5adbdf8592366862002d5e8c9a408845f889f099
           persist-credentials: false
           submodules: false
 
@@ -154,7 +154,7 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 83364ae1027cf6b1761a91dcb855ea9a95c8886c
+          ref: 5adbdf8592366862002d5e8c9a408845f889f099
           persist-credentials: false
           submodules: false
 
