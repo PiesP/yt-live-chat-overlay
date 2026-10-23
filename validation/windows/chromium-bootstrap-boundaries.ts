@@ -51,7 +51,18 @@ type PageState = {
   canvasCount: number;
   sourceStatus: string | null;
   deliveredIds: string[];
+  samePinnedApp: boolean | null;
+  samePinnedCanvas: boolean | null;
 };
+
+declare global {
+  interface Window {
+    __ytBootstrapBoundaryIdentity?: {
+      app: Window['__ytChatOverlay'];
+      canvas: HTMLCanvasElement | null;
+    };
+  }
+}
 
 function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 300);
@@ -76,6 +87,13 @@ function sourceState(page: Page): Promise<PageState> {
         document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
         (element) => element.getAttribute('data-message-id') ?? ''
       ).slice(0, 8),
+      samePinnedApp: window.__ytBootstrapBoundaryIdentity
+        ? window.__ytChatOverlay === window.__ytBootstrapBoundaryIdentity.app
+        : null,
+      samePinnedCanvas: window.__ytBootstrapBoundaryIdentity
+        ? document.querySelector('#yt-live-chat-overlay canvas') ===
+          window.__ytBootstrapBoundaryIdentity.canvas
+        : null,
     };
   });
 }
@@ -477,6 +495,21 @@ export async function runChromiumBootstrapBoundaries({
       .waitFor({ state: 'attached', timeout: 15_000 });
     const b = await deliverSourceControl(page, 'windows-bootstrap-source-b');
     assertHealthy(b, WATCH_URLS[1], 'windows-bootstrap-source-b');
+    await page.evaluate(() => {
+      window.__ytBootstrapBoundaryIdentity = {
+        app: window.__ytChatOverlay,
+        canvas: document.querySelector('#yt-live-chat-overlay canvas'),
+      };
+    });
+    const retainedB: PageState[] = [];
+    const assertRetainedB = (current: PageState) => {
+      assertHealthy(current, WATCH_URLS[1], 'windows-bootstrap-source-b');
+      assert.equal(current.timeOrigin, b.timeOrigin);
+      assert.equal(current.bridgeNonce, b.bridgeNonce, 'Retired request changed B relay nonce');
+      assert.equal(current.samePinnedApp, true, 'B application instance was replaced');
+      assert.equal(current.samePinnedCanvas, true, 'B canvas instance was replaced');
+      retainedB.push(current);
+    };
     const bState = await waitForWorkerState(
       worker,
       token,
@@ -508,7 +541,7 @@ export async function runChromiumBootstrapBoundaries({
     const aAfter = productionRecords(retired, WATCH_URLS[0])[0];
     assert.equal(aAfter?.resultDocumentId, null);
     assert(aAfter?.error, 'Browser did not reject retired A document');
-    assertHealthy(await sourceState(page), WATCH_URLS[1], 'windows-bootstrap-source-b');
+    assertRetainedB(await sourceState(page));
 
     phase = 'B-duplicate';
     const duplicate = await sendFromDocument(
@@ -529,7 +562,7 @@ export async function runChromiumBootstrapBoundaries({
       productionRecords(afterDuplicate, WATCH_URLS[1]).map((entry) => entry.outcome),
       ['claimed', 'injected', 'already']
     );
-    assertHealthy(await sourceState(page), WATCH_URLS[1], 'windows-bootstrap-source-b');
+    assertRetainedB(await sourceState(page));
 
     phase = 'invalid-senders';
     const workerSender = await worker.evaluate<unknown>(
@@ -559,7 +592,7 @@ export async function runChromiumBootstrapBoundaries({
     assert.equal(childSenders.length, 1);
     assert.deepEqual(childSenders[0]?.result, { ok: false, reason: 'unauthorized-document' });
     assert.notEqual(childSenders[0]?.documentId, bDocumentId);
-    assertHealthy(await sourceState(page), WATCH_URLS[1], 'windows-bootstrap-source-b');
+    assertRetainedB(await sourceState(page));
 
     phase = 'C-fault';
     await page.goto(WATCH_URLS[2], { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -619,6 +652,7 @@ export async function runChromiumBootstrapBoundaries({
       scope: 'installed Chromium extension, real service worker and native scripting target',
       documentA: { url: WATCH_URLS[0], documentId: aRecord.documentId, tabId: aRecord.tabId },
       documentB: { ...b, documentId: bDocumentId },
+      retainedB,
       staleA: aAfter,
       duplicate,
       workerSender,

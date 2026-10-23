@@ -21,6 +21,7 @@ import type {
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
+import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
 import {
   assessPublicImage,
@@ -180,6 +181,7 @@ type ChromeResult<Live = LiveObservation> = {
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
   videoPiP?: Awaited<ReturnType<typeof runVideoPiPFixture>> | null;
   nativeTabInstallation?: ChromeResult | null;
+  chromiumBootstrapBoundaries?: Awaited<ReturnType<typeof runChromiumBootstrapBoundaries>> | null;
   mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
@@ -2432,6 +2434,13 @@ export async function runChromeInstallation({
         output,
         result: result.nativeTabInstallation,
       });
+      result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
     }
     const extensionResources =
       installation === 'extension' && liveUrls.length > 0
