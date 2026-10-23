@@ -2390,6 +2390,21 @@ export async function runChromeInstallation({
       };
     }
     if (browserName === 'msedge' && installation === 'extension') {
+      // Exercise document and realm ownership before the longer media campaign.
+      result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
+      result.nativeWorkerRetirement = await runNativeWorkerRetirementFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.nativeWorkerRetirement.status, 'passed');
       result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
       assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
@@ -2436,20 +2451,6 @@ export async function runChromeInstallation({
         output,
         result: result.nativeTabInstallation,
       });
-      result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
-      result.nativeWorkerRetirement = await runNativeWorkerRetirementFixture({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      assert.equal(result.nativeWorkerRetirement.status, 'passed');
     }
     const extensionResources =
       installation === 'extension' && liveUrls.length > 0

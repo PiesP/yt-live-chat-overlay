@@ -565,10 +565,23 @@ export async function runChromiumBootstrapBoundaries({
     assertRetainedB(await sourceState(page));
 
     phase = 'invalid-senders';
-    const workerSender = await worker.evaluate<unknown>(
-      `chrome.runtime.sendMessage({ type: 'native-page-bootstrap', nonce: crypto.randomUUID() })`
+    // The service worker has no separate receiver for its own runtime message.
+    // Record that transport result; only the real child frame below proves the
+    // production authorization denial.
+    const workerSender = await worker.evaluate<{ status: string; error: string }>(`(async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'native-page-bootstrap', nonce: crypto.randomUUID() });
+        return { status: 'unexpected-delivery', error: '' };
+      } catch (error) {
+        return { status: 'no-self-receiver', error: String(error?.message ?? error) };
+      }
+    })()`);
+    assert.equal(workerSender.status, 'no-self-receiver');
+    assert.equal(
+      workerSender.error,
+      'Could not establish connection. Receiving end does not exist.'
     );
-    assert.deepEqual(workerSender, { ok: false, reason: 'unauthorized-document' });
+    assertRetainedB(await sourceState(page));
     await page.evaluate((url) => {
       const child = document.createElement('iframe');
       child.id = 'bootstrap-boundary-child';
@@ -668,6 +681,7 @@ export async function runChromiumBootstrapBoundaries({
       overflow,
       limits: [
         'The scoped executeScript rejection is a fixture fault, not native API absence or a missing permission.',
+        'Service-worker self-send has no receiver; authorization denial is proved by the real child frame, not self-send.',
         'This fixture does not exercise automatic reinjection into the same failed document or live YouTube.',
       ],
     };
