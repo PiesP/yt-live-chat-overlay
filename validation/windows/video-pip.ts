@@ -178,6 +178,99 @@ async function waitForPhaseCall(page: Page, phase: string, paused: boolean): Pro
   );
 }
 
+async function verifyDomFallbackLifetime(page: Page) {
+  const previous = await page.evaluate(() => {
+    const app = window.__ytChatOverlay;
+    if (!app) throw new Error('Installed application is unavailable for DOM fallback');
+    const settings = structuredClone(app.getSettings());
+    app.applySettings({
+      showDebugOverlay: true,
+      allowShortTextMessages: true,
+      danmakuMode: 'top',
+      depthLayersEnabled: false,
+      topBottomDurationMs: 8_000,
+    });
+    return settings;
+  });
+  let primaryError: unknown;
+  let result: { ids: string[]; counters: string | null } | undefined;
+  const healthyId = 'windows-dom-control';
+  const recoveredId = 'windows-dom-recovered';
+  try {
+    await page.evaluate(
+      async ({ healthyId, recoveredId }) => {
+        const items = document.querySelector('yt-live-chat-item-list-renderer #items');
+        if (!items) throw new Error('DOM fallback chat container is missing');
+        const append = (id: string) => {
+          const renderer = document.createElement('yt-live-chat-text-message-renderer');
+          renderer.id = id;
+          const author = document.createElement('span');
+          author.id = 'author-name';
+          author.textContent = 'Fixture author';
+          const message = document.createElement('span');
+          message.id = 'message';
+          message.textContent = `DOM lifetime ${id}`;
+          renderer.append(author, message);
+          items.append(renderer);
+          return renderer;
+        };
+        append(healthyId);
+        await new Promise(requestAnimationFrame);
+        for (const relocation of ['detach', 'move']) {
+          const retired = append(`windows-dom-retired-${relocation}`);
+          // Native MutationObserver queues the batch before this continuation;
+          // retirement still occurs before its native animation-frame flush.
+          await Promise.resolve();
+          if (relocation === 'detach') retired.remove();
+          else document.body.append(retired);
+          await new Promise(requestAnimationFrame);
+        }
+        append(recoveredId);
+      },
+      { healthyId, recoveredId }
+    );
+    await page.waitForFunction(
+      (id) =>
+        Array.from(
+          document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p')
+        ).some((element) => element.getAttribute('data-message-id') === id),
+      recoveredId,
+      { timeout: 8_000 }
+    );
+    // The production debug reporter updates at 250 ms; observe two cycles
+    // after the recovery actually reaches the production live region.
+    await page.waitForTimeout(600);
+    result = await page.evaluate(() => ({
+      ids: Array.from(
+        document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+        (element) => element.getAttribute('data-message-id') ?? ''
+      ),
+      counters: document.querySelector('#yt-chat-overlay-debug > div')?.textContent ?? null,
+    }));
+    assert(result.ids.includes(healthyId), 'Healthy DOM control was not rendered');
+    assert(result.ids.includes(recoveredId), 'Healthy DOM recovery was not rendered');
+    assert(!result.ids.some((id) => id.startsWith('windows-dom-retired-')));
+    assert.equal(result.counters, 'Rcvd: 2 | Rndr: 2', 'Retired DOM input reached the runtime');
+  } catch (error) {
+    primaryError = error;
+  }
+  try {
+    await page.evaluate((settings) => window.__ytChatOverlay?.applySettings(settings), previous);
+  } catch (error) {
+    throw new AggregateError(
+      primaryError ? [primaryError, error] : [error],
+      'DOM lifetime fixture settings restoration failed'
+    );
+  }
+  if (primaryError) throw primaryError;
+  assert(result, 'DOM lifetime fixture completed without observations');
+  return {
+    status: 'passed',
+    scope: 'native DOM mutation through installed overlay rendering',
+    ...result,
+  };
+}
+
 /** Installed Edge: exercise actual PiP media events against the compiled controller. */
 export async function runVideoPiPFixture({
   context,
@@ -545,6 +638,7 @@ export async function runVideoPiPFixture({
     assert.equal(pageErrorOverflow, 0);
     assert.deepEqual(consoleErrors, []);
     assert.equal(consoleErrorOverflow, 0);
+    const domFallbackLifetime = await verifyDomFallbackLifetime(page);
     result = {
       status: 'passed',
       scope: 'installed Edge extension, native Picture-in-Picture, routed YouTube fixture',
@@ -553,6 +647,7 @@ export async function runVideoPiPFixture({
       documentRequests,
       chatRequests,
       states,
+      domFallbackLifetime,
       pageErrors,
       pageErrorOverflow,
       consoleErrors,
