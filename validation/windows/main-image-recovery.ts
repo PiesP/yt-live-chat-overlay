@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Page, Request, Route } from '@playwright/test';
 
+import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
@@ -24,7 +25,7 @@ const MAX_EVENTS = 40;
 const MAX_DRAWS = 60;
 
 type AssetKind = 'emoji' | 'author' | 'sticker';
-type RoutePlan = 'png' | 'http404' | 'cors' | 'malformed';
+type RoutePlan = 'png' | 'http404' | 'cors' | 'malformed' | 'connectionreset';
 type Case = { id: string; kind: AssetKind; plan: RoutePlan; url: string; textToken: string };
 type NativeImageEvent = {
   url: string;
@@ -87,6 +88,8 @@ function fixtureCases(): Case[] {
     { id: 'recovery-emoji', kind: 'emoji', plan: 'png' },
     { id: 'fault-author-cors', kind: 'author', plan: 'cors' },
     { id: 'recovery-author', kind: 'author', plan: 'png' },
+    { id: 'fault-author-connection', kind: 'author', plan: 'connectionreset' },
+    { id: 'recovery-author-connection', kind: 'author', plan: 'png' },
     { id: 'fault-sticker-malformed', kind: 'sticker', plan: 'malformed' },
     { id: 'recovery-sticker', kind: 'sticker', plan: 'png' },
   ] satisfies Array<Omit<Case, 'url' | 'textToken'>>;
@@ -95,6 +98,38 @@ function fixtureCases(): Case[] {
     url: `${IMAGE_PREFIX}${entry.id}.png`,
     textToken: `WIN306_${index}`,
   }));
+}
+
+function isExpectedFaultConsoleError(
+  observation: { text: string; url: string },
+  cases: readonly Case[]
+): boolean {
+  return cases.some((entry) => {
+    switch (entry.plan) {
+      case 'http404':
+        return (
+          observation.url === entry.url &&
+          observation.text ===
+            'Failed to load resource: the server responded with a status of 404 (Not Found)'
+        );
+      case 'cors':
+        return (
+          (observation.url === FIXTURE_URL &&
+            observation.text.startsWith(
+              `Access to image at '${entry.url}' from origin 'https://www.youtube.com' has been blocked by CORS policy:`
+            )) ||
+          (observation.url === entry.url &&
+            observation.text === 'Failed to load resource: net::ERR_FAILED')
+        );
+      case 'connectionreset':
+        return (
+          observation.url === entry.url &&
+          observation.text === 'Failed to load resource: net::ERR_CONNECTION_RESET'
+        );
+      default:
+        return false;
+    }
+  });
 }
 
 function actionFor(entry: Case) {
@@ -492,7 +527,7 @@ export async function runMainImageRecoveryFixture({
   const byId = new Map(cases.map((entry) => [entry.id, entry]));
   const byUrl = new Map(cases.map((entry) => [entry.url, entry]));
   const delivered = new Set<string>();
-  const imageRequests: Array<{ url: string; status: number; kind: AssetKind }> = [];
+  const imageRequests: Array<{ url: string; status: number | null; kind: AssetKind }> = [];
   let imageRequestOverflow = 0;
   const requestResults = new Map<
     Request,
@@ -501,10 +536,12 @@ export async function runMainImageRecoveryFixture({
   let requestOverflow = 0;
   const page = await context.newPage();
   const pageErrors: string[] = [];
+  let pageErrorOverflow = 0;
   const consoleErrors: Array<{ text: string; url: string }> = [];
   let consoleErrorOverflow = 0;
   page.on('pageerror', (error) => {
     if (pageErrors.length < 10) pageErrors.push(error.name);
+    else pageErrorOverflow++;
   });
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -528,7 +565,7 @@ export async function runMainImageRecoveryFixture({
   });
   page.on('requestfailed', (request) => {
     const record = requestResults.get(request);
-    if (record) record.terminal = request.failure()?.errorText ?? 'failed';
+    if (record) record.terminal = request.failure()?.errorText.slice(0, 300) ?? 'failed';
   });
   const routeHandler = async (route: Route) => {
     const request = route.request();
@@ -537,10 +574,12 @@ export async function runMainImageRecoveryFixture({
       return route.continue();
     const image = byUrl.get(url.href);
     if (image) {
-      const status = image.plan === 'http404' ? 404 : 200;
+      const status = image.plan === 'connectionreset' ? null : image.plan === 'http404' ? 404 : 200;
       if (imageRequests.length < MAX_EVENTS)
         imageRequests.push({ url: url.href, status, kind: image.kind });
       else imageRequestOverflow++;
+      if (image.plan === 'connectionreset') return route.abort('connectionreset');
+      assert(status !== null);
       return route.fulfill({
         status,
         contentType: image.plan === 'http404' ? 'text/plain' : 'image/png',
@@ -593,7 +632,9 @@ export async function runMainImageRecoveryFixture({
     kind: AssetKind;
     plan: RoutePlan;
     imageEvent: NativeImageEvent;
-    routeStatus: number;
+    routeStatus: number | null;
+    networkStatus: number | null;
+    networkTerminal: string;
     cacheHit: boolean;
     negativeEmoji: boolean;
     drawnOnOverlay: boolean;
@@ -757,26 +798,49 @@ export async function runMainImageRecoveryFixture({
       } else {
         assert.equal(observation.cacheHit, false);
         assert.equal(observation.drawnOnOverlay, false);
+        if (entry.plan === 'connectionreset') {
+          assert.equal(imageEvent.naturalWidth, 0);
+          assert.equal(imageEvent.naturalHeight, 0);
+        }
       }
       if (entry.id === 'fault-emoji-404')
         assert(observation.negativeEmoji, 'Main failed-emoji suppression was not set');
       const requests = imageRequests.filter((request) => request.url === entry.url);
       assert.equal(requests.length, 1, `Image request identity changed for ${entry.id}`);
-      assert.equal(requests[0]?.status, entry.plan === 'http404' ? 404 : 200);
+      assert.equal(
+        requests[0]?.status,
+        entry.plan === 'connectionreset' ? null : entry.plan === 'http404' ? 404 : 200
+      );
       const network = [...requestResults.values()].filter((request) => request.url === entry.url);
       assert.equal(network.length, 1, `Native request count changed for ${entry.id}`);
-      if (entry.plan === 'cors') {
+      if (entry.plan === 'connectionreset') {
+        assert.equal(network[0]?.status, null, 'A connection reset cannot have an HTTP response');
+        assert.equal(network[0]?.terminal, 'net::ERR_CONNECTION_RESET');
+      } else if (entry.plan === 'cors') {
         // The route serves 200, but CORS rejection may suppress Playwright's
         // response event. The native Image error and exact request still bind it.
         assert(network[0]?.status === null || network[0]?.status === 200);
-      } else assert.equal(network[0]?.status, entry.plan === 'http404' ? 404 : 200);
-      assert.notEqual(network[0]?.terminal, 'pending');
+        assert.equal(network[0]?.terminal, 'net::ERR_FAILED');
+      } else {
+        assert.equal(network[0]?.status, entry.plan === 'http404' ? 404 : 200);
+        assert.equal(network[0]?.terminal, 'finished');
+      }
+      if (entry.id === 'recovery-author-connection') {
+        assert.equal(caseResults.at(-1)?.id, 'fault-author-connection');
+        assert.notEqual(
+          entry.url,
+          cases.find((candidate) => candidate.id === 'fault-author-connection')?.url
+        );
+        assert(observation.positivePixel, 'Author photo did not recover after connection reset');
+      }
       caseResults.push({
         id: entry.id,
         kind: entry.kind,
         plan: entry.plan,
         imageEvent,
-        routeStatus: requests[0]?.status ?? -1,
+        routeStatus: requests[0]?.status ?? null,
+        networkStatus: network[0]?.status ?? null,
+        networkTerminal: network[0]?.terminal ?? 'unavailable',
         cacheHit: observation.cacheHit,
         negativeEmoji: observation.negativeEmoji,
         drawnOnOverlay: observation.drawnOnOverlay,
@@ -801,13 +865,9 @@ export async function runMainImageRecoveryFixture({
     assert.equal(imageRequestOverflow, 0);
     assert.equal(requestOverflow, 0);
     assert.equal(pageErrors.length, 0, 'Unexpected page script error during Main recovery');
-    const expectedFaultUrls = cases
-      .filter((entry) => entry.plan !== 'png')
-      .map((entry) => entry.url);
+    assert.equal(pageErrorOverflow, 0);
     assert.deepEqual(
-      consoleErrors.filter(
-        (entry) => !expectedFaultUrls.some((url) => entry.url === url || entry.text.includes(url))
-      ),
+      consoleErrors.filter((entry) => !isExpectedFaultConsoleError(entry, cases)),
       [],
       'Unexpected console error outside exact Main image faults'
     );
@@ -824,6 +884,7 @@ export async function runMainImageRecoveryFixture({
       requestResults: [...requestResults.values()],
       native: final,
       pageErrors,
+      pageErrorOverflow,
       consoleErrors,
       consoleErrorOverflow,
       gap: 'Does not prove a fresh Worker after a new document, live YouTube image delivery, or every image timeout/TTL boundary',
@@ -848,6 +909,7 @@ export async function runMainImageRecoveryFixture({
             requestResults: [...requestResults.values()],
             requestOverflow,
             pageErrors,
+            pageErrorOverflow,
             consoleErrors,
             consoleErrorOverflow,
             native: await snapshot(page).catch((snapshotError) => ({
@@ -870,11 +932,7 @@ export async function runMainImageRecoveryFixture({
     async () => nativePageProbe?.restore(),
     async () => {
       if (originalSettings && !page.isClosed()) {
-        await page.evaluate((settings) => {
-          const app = window.__ytChatOverlay;
-          if (!app) throw new Error('Main settings runtime was lost before restore');
-          app.applySettings(settings);
-        }, originalSettings);
+        await restoreFixtureSettings(context, page, extensionId, originalSettings);
       }
     },
     async () => {

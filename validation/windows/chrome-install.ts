@@ -18,11 +18,14 @@ import type {
   Response,
 } from '@playwright/test';
 
+import { runAcquisitionBoundaries } from './acquisition-boundaries.ts';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
+import { runCanvasRecoveryFixture } from './canvas-recovery.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
+import { runLiveContentPrerequisite } from './live-content-prerequisite.ts';
 import {
   assessPublicImage,
   assessPublicResize,
@@ -45,9 +48,11 @@ import type {
   PublicImageResponse,
 } from './live-rendering.ts';
 import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
+import { runNativePlayerBoundaries } from './native-player-boundaries.ts';
 import { runNativeWorkerRetirementFixture } from './native-worker-retirement.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
+import { runRecoveryContinuityFixture } from './recovery-continuity.ts';
 import {
   extensionUpgradeTransition,
   readExtensionUpgradeInput,
@@ -184,10 +189,15 @@ type ChromeResult<Live = LiveObservation> = {
   nativeTabInstallation?: ChromeResult | null;
   chromiumBootstrapBoundaries?: Awaited<ReturnType<typeof runChromiumBootstrapBoundaries>> | null;
   nativeWorkerRetirement?: Awaited<ReturnType<typeof runNativeWorkerRetirementFixture>> | null;
+  canvasRecovery?: Awaited<ReturnType<typeof runCanvasRecoveryFixture>> | null;
+  nativePlayerBoundaries?: Awaited<ReturnType<typeof runNativePlayerBoundaries>> | null;
+  acquisitionBoundaries?: Awaited<ReturnType<typeof runAcquisitionBoundaries>> | null;
+  recoveryContinuity?: Awaited<ReturnType<typeof runRecoveryContinuityFixture>> | null;
   mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
+  liveContentPrerequisites?: Array<Awaited<ReturnType<typeof runLiveContentPrerequisite>>>;
   liveWorkflowCoverage?: {
     observedModes: (string | undefined)[];
     crossWatch: boolean;
@@ -2405,6 +2415,28 @@ export async function runChromeInstallation({
         extensionId,
       });
       assert.equal(result.nativeWorkerRetirement.status, 'passed');
+      result.canvasRecovery = await runCanvasRecoveryFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.canvasRecovery.status, 'passed');
+      result.recoveryContinuity = await runRecoveryContinuityFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.recoveryContinuity.status, 'passed');
+      result.acquisitionBoundaries = await runAcquisitionBoundaries({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      // Late image route cancellation remains explicitly partial evidence.
+      assert.equal(result.acquisitionBoundaries.controlStatus, 'passed');
       result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
       assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
@@ -2461,6 +2493,10 @@ export async function runChromeInstallation({
         ? (upgradeInputs?.candidate.version ?? (await readBundledUserscriptVersion(root)))
         : '';
     for (const [index, url] of liveUrls.entries()) {
+      result.liveContentPrerequisites ??= [];
+      result.liveContentPrerequisites.push(
+        await runLiveContentPrerequisite({ context, url, output, index })
+      );
       const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
       result.live.push(
         await inspectLivePage(
@@ -2540,7 +2576,14 @@ async function runNativeTabInstallation({
   let extensionId: string | undefined;
   let primaryError: unknown;
   try {
-    ownedChrome = await launchOwnedNaturalChrome({ chromium, root, output });
+    ownedChrome = await launchOwnedNaturalChrome({
+      chromium,
+      root,
+      output,
+      requireAutoplayGesture: true,
+    });
+    assert.equal(ownedChrome.launchEvidence.autoplayPolicy, 'user-gesture-required');
+    assert.equal(ownedChrome.launchEvidence.autoplayArgumentObserved, true);
     assert.equal(ownedChrome.launchEvidence.noDefaults, true);
     const { browser, context } = ownedChrome;
     result.browserVersion = browser.version();
@@ -2552,6 +2595,14 @@ async function runNativeTabInstallation({
     })) as { id: string });
     assert.match(extensionId, /^[a-p]{32}$/u);
     result.installationMethod = 'cdp-unpacked-extension-natural-visibility';
+    // This fresh context must exercise autoplay before any trusted PiP/Play action.
+    result.nativePlayerBoundaries = await runNativePlayerBoundaries({
+      context,
+      root,
+      output,
+      extensionId,
+    });
+    assert.equal(result.nativePlayerBoundaries.status, 'passed');
     result.videoPiP = await runVideoPiPFixture({
       context,
       root,

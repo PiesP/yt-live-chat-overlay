@@ -79,6 +79,51 @@ describe('extension worker injection lifecycle', () => {
     script.remove();
   });
 
+  it.each(['Blob construction', 'object URL creation'])(
+    'keeps the Firefox storage bridge when %s fails',
+    async (failure) => {
+      vi.stubGlobal('__CHROME_NATIVE_BOOTSTRAP__', false);
+      const createObjectURL = vi.fn(() => {
+        throw new DOMException('Blob URL blocked', 'SecurityError');
+      });
+      const revokeObjectURL = vi.fn();
+      class TestUrl extends URL {}
+      Object.defineProperties(TestUrl, {
+        createObjectURL: { value: createObjectURL },
+        revokeObjectURL: { value: revokeObjectURL },
+      });
+      vi.stubGlobal('URL', TestUrl);
+      if (failure === 'Blob construction') {
+        vi.stubGlobal(
+          'Blob',
+          class {
+            constructor() {
+              throw new TypeError('Blob construction blocked');
+            }
+          }
+        );
+      }
+      const script = document.createElement('script');
+      script.dataset.ytExtensionBridgeNonce = 'firefox-bridge-nonce';
+      script.dataset.ytExtensionWorkerSource = 'self.postMessage({ type: "ready" });';
+      document.head.appendChild(script);
+
+      await import('../../extension/page-bridge');
+
+      expect(window.__ytExtensionBridge).toEqual({
+        nonce: 'firefox-bridge-nonce',
+        storageType: 'chrome.storage.local',
+        workerSupported: false,
+      });
+      expect(createObjectURL).toHaveBeenCalledTimes(failure === 'Blob construction' ? 0 : 1);
+      expect(script.dataset.ytExtensionWorkerSource).toBeUndefined();
+      expect(script.dataset.ytExtensionBridgeNonce).toBeUndefined();
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      script.remove();
+    }
+  );
+
   it('does not let a hostile DOM script replace the native Chrome bridge', async () => {
     vi.stubGlobal('__CHROME_NATIVE_BOOTSTRAP__', true);
     const hostile = document.createElement('script');

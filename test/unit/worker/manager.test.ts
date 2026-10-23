@@ -164,6 +164,107 @@ describe('RenderWorkerManager', () => {
   });
 
   describe('init', () => {
+    it.each(['Worker', 'OffscreenCanvas'] as const)(
+      'keeps the original canvas usable when %s is unavailable',
+      (missingApi) => {
+        const original = globalThis[missingApi];
+        const context = {} as CanvasRenderingContext2D;
+        const canvas = {
+          getContext: vi.fn(() => context),
+          transferControlToOffscreen: vi.fn(),
+        } as unknown as HTMLCanvasElement;
+        const overlay = {
+          getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+          onDimensionsChanged: vi.fn(() => vi.fn()),
+        };
+        vi.stubGlobal(missingApi, undefined);
+
+        try {
+          expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+            started: false,
+            canvasTransferred: false,
+          });
+          expect(canvas.transferControlToOffscreen).not.toHaveBeenCalled();
+          expect(canvas.getContext('2d')).toBe(context);
+          expect(manager.isActive).toBe(false);
+        } finally {
+          vi.stubGlobal(missingApi, original);
+        }
+      }
+    );
+
+    it.each([
+      ['CSP SecurityError', () => new DOMException('blocked', 'SecurityError')],
+      ['TrustedScriptURL TypeError', () => new TypeError('TrustedScriptURL required')],
+    ])(
+      'leaves the original canvas available after %s during Worker construction',
+      (_label, error) => {
+        const originalWorker = globalThis.Worker;
+        const context = {} as CanvasRenderingContext2D;
+        const canvas = {
+          getContext: vi.fn(() => context),
+          transferControlToOffscreen: vi.fn(),
+        } as unknown as HTMLCanvasElement;
+        const overlay = {
+          getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+          onDimensionsChanged: vi.fn(() => vi.fn()),
+        };
+        const constructorAttempt = vi.fn(() => {
+          throw error();
+        });
+        vi.stubGlobal('Worker', constructorAttempt);
+
+        try {
+          expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+            started: false,
+            canvasTransferred: false,
+          });
+          expect(constructorAttempt).toHaveBeenCalledOnce();
+          expect(canvas.transferControlToOffscreen).not.toHaveBeenCalled();
+          expect(canvas.getContext('2d')).toBe(context);
+          expect(manager.isActive).toBe(false);
+        } finally {
+          vi.stubGlobal('Worker', originalWorker);
+        }
+      }
+    );
+
+    it('terminates the Worker and preserves the original canvas after transfer failure', () => {
+      const originalWorker = globalThis.Worker;
+      const terminate = vi.fn();
+      vi.stubGlobal(
+        'Worker',
+        class {
+          terminate = terminate;
+        }
+      );
+      const context = {} as CanvasRenderingContext2D;
+      const transferControlToOffscreen = vi.fn(() => {
+        throw new DOMException('transfer denied', 'InvalidStateError');
+      });
+      const canvas = {
+        getContext: vi.fn(() => context),
+        transferControlToOffscreen,
+      } as unknown as HTMLCanvasElement;
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged: vi.fn(() => vi.fn()),
+      };
+
+      try {
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+          started: false,
+          canvasTransferred: false,
+        });
+        expect(transferControlToOffscreen).toHaveBeenCalledOnce();
+        expect(terminate).toHaveBeenCalledOnce();
+        expect(canvas.getContext('2d')).toBe(context);
+        expect(manager.isActive).toBe(false);
+      } finally {
+        vi.stubGlobal('Worker', originalWorker);
+      }
+    });
+
     it.each([
       ['missing', null],
       ['zero-width', { width: 0, height: 360 }],
