@@ -152,6 +152,8 @@ export function installDomChatWatcher(
 
     const appendRenderer = (renderer: HTMLElement): void => {
       if (messages.length >= capacity || visitBudget.remaining <= 0) return;
+      // Mutation records can outlive a removed or relocated chat item until rAF.
+      if (!renderer.isConnected || !container?.contains(renderer)) return;
       const fields = findRendererFields(renderer);
       if (!fields.message || visitBudget.remaining <= 0) return;
       const author = extractBoundedText(fields.author);
