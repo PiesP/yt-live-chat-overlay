@@ -12,6 +12,10 @@ import {
   type NativePageScriptProbe,
 } from './native-page-script-probe.ts';
 import { buildVisibleWatchHtml } from './visible-watch.ts';
+import {
+  installWorkerRedirectTransport,
+  type WorkerRedirectTransport,
+} from './worker-redirect-transport.ts';
 
 type BitmapCache = {
   get(key: string): ImageBitmap | undefined;
@@ -45,6 +49,7 @@ type BitmapProbeResult = {
 
 type BitmapWorkerRecord = {
   worker: Worker;
+  sourceUrl: string;
   ready: boolean;
   attached: boolean;
   results: BitmapProbeResult[];
@@ -356,6 +361,7 @@ export async function runBitmapLifecycleFixture({
   let nativePageProbe: NativePageScriptProbe | undefined;
   let pageScriptProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
   let primaryError: unknown;
+  let redirectTransport: WorkerRedirectTransport | undefined;
   const execute = async () => {
     await context.route(SELF_FETCH_URL, selfFetchRoute);
     routeRegistered = true;
@@ -437,6 +443,7 @@ export async function runBitmapLifecycleFixture({
           const worker = Reflect.construct(target, args);
           const record: BitmapWorkerRecord = {
             worker,
+            sourceUrl: String(args[0]),
             ready: false,
             attached: false,
             results: [],
@@ -694,6 +701,27 @@ export async function runBitmapLifecycleFixture({
       controls.push({ target, url, acquired, released });
     }
 
+    const finalUrls = [
+      'https://yt4.ggpht.com/windows-bitmap-issue306-redirect-allowed-final.png',
+      'https://example.test/windows-bitmap-issue306-redirect-offhost-final.png',
+    ];
+    const workerUrl = await page.evaluate(() => {
+      const worker = window.__ytBitmapWorkers.find((entry) => entry.ready && entry.attached);
+      if (!worker) throw new Error('Exact bitmap Worker is unavailable for redirects');
+      return worker.sourceUrl;
+    });
+    redirectTransport = await installWorkerRedirectTransport({
+      context,
+      page,
+      workerUrl,
+      finalUrls,
+      bodyBase64: RED_PNG.toString('base64'),
+      onRequest: (url) => {
+        assert.equal(imageRoutes.get(url)?.kind, 'png', 'Unplanned Worker redirect final response');
+        if (imageRequests.length < 64) imageRequests.push({ url, kind: 'png', status: 200 });
+        else imageRequestOverflow++;
+      },
+    });
     const faultKinds = [
       'http-401',
       'http-403',
@@ -761,6 +789,7 @@ export async function runBitmapLifecycleFixture({
 
       const requestStart = imageRequests.length;
       const fault = await probeImage(id, 'acquire', target, faultUrl);
+      redirectTransport.assertHealthy();
       const routed = imageRequests.slice(requestStart);
       assert.deepEqual(
         routed.map((request) => request.url),
@@ -910,6 +939,8 @@ export async function runBitmapLifecycleFixture({
     assert.equal(requestFailureOverflow, 0);
     assert.equal(imageRequestOverflow, 0);
     assert.equal(imageRequests.length, 31);
+    redirectTransport.assertHealthy();
+    assert.deepEqual(redirectTransport.binding.terminalRequests, finalUrls);
     assert.deepEqual(probeOverflow, { workers: 0, results: 0 });
     return {
       status: 'passed',
@@ -929,6 +960,7 @@ export async function runBitmapLifecycleFixture({
         cases,
         imageRequests,
         imageRequestOverflow,
+        redirectTransport: redirectTransport.binding,
         requestFailures,
         requestFailureOverflow,
       },
@@ -985,6 +1017,7 @@ export async function runBitmapLifecycleFixture({
   }
   const cleanupErrors: unknown[] = [];
   for (const cleanup of [
+    async () => redirectTransport?.close(),
     async () => nativePageProbe?.restore(),
     async () => page.close(),
     async () => {

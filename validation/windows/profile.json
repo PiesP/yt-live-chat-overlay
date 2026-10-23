@@ -15,6 +15,7 @@
       "validation/windows/release-upgrade",
       "validation/windows/placement-timing.ts",
       "validation/windows/bitmap-lifecycle.ts",
+      "validation/windows/worker-redirect-transport.ts",
       "validation/windows/video-pip.ts",
       "validation/windows/native-page-script-probe.ts",
       "validation/windows/chrome-process.ts",

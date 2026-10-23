@@ -300,6 +300,7 @@ export async function installWorkerRedirectTransport({
         errors.push(error);
       }
     }
+    if (healthError) errors.unshift(healthError);
     if (errors.length > 0)
       throw new AggregateError(errors, 'Worker redirect transport cleanup failed');
   }
