@@ -43,6 +43,7 @@ import type {
   PublicImageDraw,
   PublicImageResponse,
 } from './live-rendering.ts';
+import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import {
@@ -178,6 +179,7 @@ type ChromeResult<Live = LiveObservation> = {
   placementTiming?: Awaited<ReturnType<typeof runPlacementTimingFixture>> | null;
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
   videoPiP?: Awaited<ReturnType<typeof runVideoPiPFixture>> | null;
+  mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
@@ -2410,6 +2412,13 @@ export async function runChromeInstallation({
         'passed',
         'Installed Edge placement or replay fixture did not satisfy its observations'
       );
+      result.mainImageRecovery = await runMainImageRecoveryFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.mainImageRecovery.status, 'passed', 'Installed Main recovery failed');
     }
     const extensionResources =
       installation === 'extension' && liveUrls.length > 0

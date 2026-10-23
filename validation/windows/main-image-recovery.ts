@@ -52,6 +52,7 @@ type NativeState = {
       imageLoading: Set<string>;
     };
     activeMessages: Array<{ message: { id?: string } }>;
+    settings: { danmakuMode: string; topBottomDurationMs: number };
     workerManager: { workerRef: Worker | null };
   } | null;
   renderFrames: number;
@@ -431,8 +432,16 @@ export async function runMainImageRecoveryFixture({
   let requestOverflow = 0;
   const page = await context.newPage();
   const pageErrors: string[] = [];
+  const consoleErrors: Array<{ text: string; url: string }> = [];
+  let consoleErrorOverflow = 0;
   page.on('pageerror', (error) => {
     if (pageErrors.length < 10) pageErrors.push(error.name);
+  });
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (consoleErrors.length < 20)
+      consoleErrors.push({ text: message.text().slice(0, 500), url: message.location().url });
+    else consoleErrorOverflow++;
   });
   page.on('request', (request) => {
     if (!request.url().startsWith(IMAGE_PREFIX)) return;
@@ -565,7 +574,7 @@ export async function runMainImageRecoveryFixture({
       const settings = structuredClone(app.getSettings());
       app.applySettings({
         danmakuMode: 'top',
-        topBottomDurationMs: 30_000,
+        topBottomDurationMs: 2_000,
         showAuthor: { ...settings.showAuthor, normal: true, superChat: true },
         showDebugOverlay: true,
         allowShortTextMessages: true,
@@ -574,6 +583,14 @@ export async function runMainImageRecoveryFixture({
       });
       return settings;
     });
+    await page.waitForFunction(
+      () => {
+        const settings = window.__ytMainImageRecovery?.renderer?.settings;
+        return settings?.danmakuMode === 'top' && settings.topBottomDurationMs === 2_000;
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
     const initial = await snapshot(page);
     assert(initial.sourceBound && initial.renderFrames > 0, 'Packaged Main renderer did not run');
     assert.equal(initial.nativeWorker, false, 'Worker remained active after constructor fault');
@@ -678,7 +695,11 @@ export async function runMainImageRecoveryFixture({
       assert.equal(requests[0]?.status, entry.plan === 'http404' ? 404 : 200);
       const network = [...requestResults.values()].filter((request) => request.url === entry.url);
       assert.equal(network.length, 1, `Native request count changed for ${entry.id}`);
-      assert.equal(network[0]?.status, entry.plan === 'http404' ? 404 : 200);
+      if (entry.plan === 'cors') {
+        // The route serves 200, but CORS rejection may suppress Playwright's
+        // response event. The native Image error and exact request still bind it.
+        assert(network[0]?.status === null || network[0]?.status === 200);
+      } else assert.equal(network[0]?.status, entry.plan === 'http404' ? 404 : 200);
       assert.notEqual(network[0]?.terminal, 'pending');
       caseResults.push({
         id: entry.id,
@@ -692,16 +713,40 @@ export async function runMainImageRecoveryFixture({
         positivePixel: observation.positivePixel,
         textObserved: observation.textObserved,
       });
+      // Let this real message retire before the next independent case so
+      // lane capacity cannot be mistaken for an image acquisition failure.
+      await page.waitForFunction(
+        (id) =>
+          window.__ytMainImageRecovery?.renderer?.activeMessages.every(
+            (item) => item.message.id !== id
+          ),
+        messageId,
+        { timeout: 8_000 }
+      );
     }
     const final = await snapshot(page);
     assert.equal(final.imageEventOverflow, 0);
     assert.equal(final.drawOverflow, 0);
+    assert.equal(final.textOverflow, 0);
     assert.equal(imageRequestOverflow, 0);
     assert.equal(requestOverflow, 0);
     assert.equal(pageErrors.length, 0, 'Unexpected page script error during Main recovery');
+    const expectedFaultUrls = cases
+      .filter((entry) => entry.plan !== 'png')
+      .map((entry) => entry.url);
+    assert.deepEqual(
+      consoleErrors.filter(
+        (entry) => !expectedFaultUrls.some((url) => entry.url === url || entry.text.includes(url))
+      ),
+      [],
+      'Unexpected console error outside exact Main image faults'
+    );
+    assert.equal(consoleErrorOverflow, 0);
     return {
       status: 'passed',
       scope: 'installed Edge extension; real packaged Main Canvas and native HTMLImageElement',
+      videoPrerequisite:
+        'paused property overridden only in this isolated rendering fixture; no player acceptance claim',
       workerFault: 'one exact extension renderer Worker constructor SecurityError',
       pageScriptProbeProvenance,
       cases: caseResults,
@@ -709,6 +754,8 @@ export async function runMainImageRecoveryFixture({
       requestResults: [...requestResults.values()],
       native: final,
       pageErrors,
+      consoleErrors,
+      consoleErrorOverflow,
       gap: 'Does not prove a fresh Worker after a new document, live YouTube image delivery, or every image timeout/TTL boundary',
     };
   };
@@ -731,6 +778,8 @@ export async function runMainImageRecoveryFixture({
             requestResults: [...requestResults.values()],
             requestOverflow,
             pageErrors,
+            consoleErrors,
+            consoleErrorOverflow,
             native: await snapshot(page).catch((snapshotError) => ({
               unavailable: describeError(snapshotError),
             })),

@@ -11,6 +11,7 @@ import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
 } from './native-page-script-probe.ts';
+import { verifyNativeTabLifetime } from './native-tab-lifetime.ts';
 import { buildVisibleWatchHtml } from './visible-watch.ts';
 
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsVideoPiP';
@@ -675,6 +676,7 @@ export async function runVideoPiPFixture({
     assert.deepEqual(consoleErrors, []);
     assert.equal(consoleErrorOverflow, 0);
     const domFallbackLifetime = await verifyDomFallbackLifetime(page, output);
+    const nativeTabLifetime = await verifyNativeTabLifetime({ context, page, output });
     result = {
       status: 'passed',
       scope: 'installed Edge extension, native Picture-in-Picture, routed YouTube fixture',
@@ -684,6 +686,7 @@ export async function runVideoPiPFixture({
       chatRequests,
       states,
       domFallbackLifetime,
+      nativeTabLifetime,
       pageErrors,
       pageErrorOverflow,
       consoleErrors,

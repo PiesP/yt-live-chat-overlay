@@ -17,6 +17,8 @@
       "validation/windows/bitmap-lifecycle.ts",
       "validation/windows/worker-redirect-transport.ts",
       "validation/windows/video-pip.ts",
+      "validation/windows/native-tab-lifetime.ts",
+      "validation/windows/main-image-recovery.ts",
       "validation/windows/native-page-script-probe.ts",
       "validation/windows/chrome-process.ts",
       "validation/windows/live-duration.ts",
