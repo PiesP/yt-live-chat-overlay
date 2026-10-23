@@ -178,7 +178,7 @@ async function waitForPhaseCall(page: Page, phase: string, paused: boolean): Pro
   );
 }
 
-async function verifyDomFallbackLifetime(page: Page) {
+async function verifyDomFallbackLifetime(page: Page, output: string) {
   const previous = await page.evaluate(() => {
     const app = window.__ytChatOverlay;
     if (!app) throw new Error('Installed application is unavailable for DOM fallback');
@@ -253,6 +253,36 @@ async function verifyDomFallbackLifetime(page: Page) {
     assert.equal(result.counters, 'Rcvd: 2 | Rndr: 2', 'Retired DOM input reached the runtime');
   } catch (error) {
     primaryError = error;
+    try {
+      const observations = await page.evaluate(() => {
+        const panel = document.querySelector('#chat.ytd-live-chat-frame');
+        const rect = panel?.getBoundingClientRect();
+        const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+        return {
+          visibility: document.visibilityState,
+          panel: rect ? { width: rect.width, height: rect.height } : null,
+          chatIds: Array.from(
+            document.querySelectorAll('yt-live-chat-item-list-renderer #items > *'),
+            (node) => node.id
+          ).slice(0, 8),
+          liveIds: Array.from(
+            document.querySelectorAll('.yt-live-chat-overlay-live-region > p'),
+            (node) => node.getAttribute('data-message-id')
+          ).slice(0, 8),
+          debug: document.querySelector('#yt-chat-overlay-debug')?.textContent?.slice(0, 2_000),
+          video: video ? { paused: video.paused, time: video.currentTime } : null,
+        };
+      });
+      await writeFile(
+        join(output, 'dom-fallback-failure.json'),
+        JSON.stringify({ error: errorText(error), observations }, null, 2)
+      );
+    } catch (diagnosticError) {
+      primaryError = new AggregateError(
+        [error, diagnosticError],
+        'DOM lifetime fixture and diagnostic collection failed'
+      );
+    }
   }
   try {
     await page.evaluate((settings) => window.__ytChatOverlay?.applySettings(settings), previous);
@@ -286,12 +316,18 @@ export async function runVideoPiPFixture({
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
   const instrumentedSource = instrumentPageScript(source);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
-  const html = buildVisibleWatchHtml(preview, 'Native PiP fixture video').replace(
-    '</body>',
-    '<div id="pip-controls"><button id="pip-enter">Enter PiP</button>' +
-      '<button id="pip-exit">Exit PiP</button><button id="pip-pause">Pause</button>' +
-      '<button id="pip-play">Play</button></div></body>'
-  );
+  const html = buildVisibleWatchHtml(preview, 'Native PiP fixture video')
+    // Match the production panel observer as well as the DOM item selector.
+    .replace(
+      '<div id="chat">',
+      '<div id="chat" class="ytd-live-chat-frame" style="min-height:1px">'
+    )
+    .replace(
+      '</body>',
+      '<div id="pip-controls"><button id="pip-enter">Enter PiP</button>' +
+        '<button id="pip-exit">Exit PiP</button><button id="pip-pause">Pause</button>' +
+        '<button id="pip-play">Play</button></div></body>'
+    );
   const page = await context.newPage();
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
@@ -638,7 +674,7 @@ export async function runVideoPiPFixture({
     assert.equal(pageErrorOverflow, 0);
     assert.deepEqual(consoleErrors, []);
     assert.equal(consoleErrorOverflow, 0);
-    const domFallbackLifetime = await verifyDomFallbackLifetime(page);
+    const domFallbackLifetime = await verifyDomFallbackLifetime(page, output);
     result = {
       status: 'passed',
       scope: 'installed Edge extension, native Picture-in-Picture, routed YouTube fixture',

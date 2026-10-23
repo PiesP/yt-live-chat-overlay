@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { BrowserContext, Route } from '@playwright/test';
+import type { BrowserContext, Request, Route } from '@playwright/test';
 
 import {
   installNativePageScriptProbe,
@@ -282,11 +282,61 @@ export async function runBitmapLifecycleFixture({
       consoleErrors.push({ text: message.text().slice(0, 250), url: message.location().url });
     else consoleErrorOverflow++;
   });
-  const requestFailures: Array<{ url: string; errorText: string }> = [];
+  type RequestObservation = {
+    id: number;
+    url: string;
+    method: string;
+    resourceType: string;
+    redirectedFrom: string | null;
+    startedAt: number;
+    responseStatus: number | null;
+    terminal: 'finished' | 'failed' | null;
+    terminalAt: number | null;
+    errorText: string | null;
+  };
+  const requestObservations = new Map<Request, RequestObservation>();
+  let requestObservationOverflow = 0;
+  page.on('request', (request) => {
+    if (!request.url().includes('/windows-bitmap-')) return;
+    if (requestObservations.size >= 64) {
+      requestObservationOverflow++;
+      return;
+    }
+    requestObservations.set(request, {
+      id: requestObservations.size + 1,
+      url: request.url(),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      redirectedFrom: request.redirectedFrom()?.url() ?? null,
+      startedAt: Date.now(),
+      responseStatus: null,
+      terminal: null,
+      terminalAt: null,
+      errorText: null,
+    });
+  });
+  page.on('response', (response) => {
+    const observation = requestObservations.get(response.request());
+    if (observation) observation.responseStatus = response.status();
+  });
+  page.on('requestfinished', (request) => {
+    const observation = requestObservations.get(request);
+    if (!observation) return;
+    observation.terminal = 'finished';
+    observation.terminalAt = Date.now();
+  });
+  const requestFailures: Array<{ id: number | null; url: string; errorText: string }> = [];
   let requestFailureOverflow = 0;
   page.on('requestfailed', (request) => {
+    const observation = requestObservations.get(request);
+    if (observation) {
+      observation.terminal = 'failed';
+      observation.terminalAt = Date.now();
+      observation.errorText = request.failure()?.errorText ?? 'unknown';
+    }
     if (requestFailures.length < 20)
       requestFailures.push({
+        id: observation?.id ?? null,
         url: request.url(),
         errorText: request.failure()?.errorText ?? 'unknown',
       });
@@ -937,6 +987,7 @@ export async function runBitmapLifecycleFixture({
       'Unexpected network failure outside exact abort/CORS URLs'
     );
     assert.equal(requestFailureOverflow, 0);
+    assert.equal(requestObservationOverflow, 0);
     assert.equal(imageRequestOverflow, 0);
     assert.equal(imageRequests.length, 31);
     redirectTransport.assertHealthy();
@@ -963,6 +1014,8 @@ export async function runBitmapLifecycleFixture({
         redirectTransport: redirectTransport.binding,
         requestFailures,
         requestFailureOverflow,
+        requestObservations: [...requestObservations.values()],
+        requestObservationOverflow,
       },
       selfFetchRequests,
       pageErrors,
@@ -1003,6 +1056,8 @@ export async function runBitmapLifecycleFixture({
             consoleErrorOverflow,
             requestFailures,
             requestFailureOverflow,
+            requestObservations: [...requestObservations.values()],
+            requestObservationOverflow,
           },
           null,
           2
@@ -1033,11 +1088,29 @@ export async function runBitmapLifecycleFixture({
       cleanupErrors.push(error);
     }
   }
-  if (cleanupErrors.length > 0)
+  if (cleanupErrors.length > 0) {
+    try {
+      await writeFile(
+        join(output, 'bitmap-lifecycle-cleanup-failure.json'),
+        JSON.stringify(
+          {
+            status: 'failed',
+            scenarioError: primaryError ? String(primaryError) : null,
+            scenarioResult: result ?? null,
+            cleanupErrors: cleanupErrors.map(String),
+          },
+          null,
+          2
+        )
+      );
+    } catch (diagnosticError) {
+      cleanupErrors.push(diagnosticError);
+    }
     throw new AggregateError(
       primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
       'Bitmap fixture owned-resource cleanup failed'
     );
+  }
   if (primaryError) throw primaryError;
   assert(result, 'Bitmap fixture completed without a result');
   return result;
