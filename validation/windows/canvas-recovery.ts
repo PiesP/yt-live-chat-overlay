@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { BrowserContext, Page, Route } from '@playwright/test';
+import type { BrowserContext, CDPSession, Page, Route } from '@playwright/test';
 
 import {
   installNativePageScriptProbe,
@@ -36,7 +36,12 @@ type RendererProbe = {
   pendingQueue: { size: number; toArray(): Array<{ id?: string }> };
   activeMessages: Array<{ message: { id?: string } }>;
   imageFetchManager: { authorPhotoCache: { has(url: string): boolean } };
-  settings: { danmakuMode: string; topBottomDurationMs: number; queueMaxSize: number };
+  settings: {
+    danmakuMode: string;
+    topBottomDurationMs: number;
+    queueMaxSize: number;
+    outline: { enabled: boolean };
+  };
   addMessage(message: {
     id: string;
     text: string;
@@ -44,6 +49,7 @@ type RendererProbe = {
     kind: 'text';
     timestamp: number;
     authorType: 'normal';
+    author: string;
     authorPhotoUrl: string;
   }): void;
   fallbackToMainThread(reason: string): void;
@@ -63,7 +69,13 @@ type ProbeState = {
   faultOriginalCanvas: HTMLCanvasElement | null;
   fallbackReasons: string[];
   textDraws: string[];
-  imageDraws: Array<{ url: string; width: number; height: number; transform: number[] }>;
+  imageDraws: Array<{
+    url: string;
+    width: number;
+    height: number;
+    alpha: number;
+    transform: number[];
+  }>;
   overflow: number;
 };
 
@@ -155,29 +167,16 @@ function prelude({
       this,
       maxWidth === undefined ? [text, x, y] : [text, x, y, maxWidth]
     );
-    if (!text.startsWith('WIN306_CANVAS_') || !this.canvas.closest('#yt-live-chat-overlay')) return;
+    if (
+      !text.startsWith('WIN306_CANVAS_') ||
+      !this.canvas.closest('#yt-live-chat-overlay') ||
+      this.globalAlpha <= 0
+    )
+      return;
     if (state.textDraws.includes(text)) return;
     if (state.textDraws.length < maxRecords) state.textDraws.push(text);
     else state.overflow++;
   };
-  if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
-    const nativeOffscreenFillText = OffscreenCanvasRenderingContext2D.prototype.fillText;
-    OffscreenCanvasRenderingContext2D.prototype.fillText = function (
-      text: string,
-      x: number,
-      y: number,
-      maxWidth?: number
-    ): void {
-      Reflect.apply(
-        nativeOffscreenFillText,
-        this,
-        maxWidth === undefined ? [text, x, y] : [text, x, y, maxWidth]
-      );
-      if (!text.startsWith('WIN306_CANVAS_') || state.textDraws.includes(text)) return;
-      if (state.textDraws.length < maxRecords) state.textDraws.push(text);
-      else state.overflow++;
-    };
-  }
   const derivedUrls = new WeakMap<object, string>();
   const sourceUrl = (image: CanvasImageSource): string | null => {
     if (image instanceof HTMLImageElement) return image.currentSrc || image.src || null;
@@ -204,7 +203,7 @@ function prelude({
     if (url?.startsWith(imagePrefix) && !this.canvas.closest('#yt-live-chat-overlay'))
       derivedUrls.set(this.canvas, url);
     if (!url?.startsWith(imagePrefix)) return;
-    if (!this.canvas.closest('#yt-live-chat-overlay')) return;
+    if (!this.canvas.closest('#yt-live-chat-overlay') || this.globalAlpha <= 0) return;
     if (state.imageDraws.some((entry) => entry.url === url)) return;
     const matrix = this.getTransform();
     if (state.imageDraws.length < maxRecords)
@@ -212,6 +211,7 @@ function prelude({
         url,
         width: this.canvas.width,
         height: this.canvas.height,
+        alpha: this.globalAlpha,
         transform: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
       });
     else state.overflow++;
@@ -285,6 +285,7 @@ async function snapshot(page: Page) {
       cssWidth: canvas?.getBoundingClientRect().width ?? null,
       cssHeight: canvas?.getBoundingClientRect().height ?? null,
       dpr: devicePixelRatio,
+      outlineEnabled: renderer.settings.outline.enabled,
       transform: transform
         ? [transform.a, transform.b, transform.c, transform.d, transform.e, transform.f]
         : null,
@@ -323,6 +324,7 @@ async function sendAndObserve(page: Page, id: string): Promise<void> {
       kind: 'text',
       timestamp: Date.now(),
       authorType: 'normal',
+      author: 'Canvas fixture viewer',
       authorPhotoUrl: `${window.__ytCanvasRecovery?.imagePrefix}${value}.png`,
     });
   }, id);
@@ -441,6 +443,7 @@ async function runVariant({
   };
   let routeInstalled = false;
   let probe: NativePageScriptProbe | undefined;
+  let metricsSession: CDPSession | undefined;
   let originalSettings:
     | ReturnType<NonNullable<Window['__ytChatOverlay']>['getSettings']>
     | undefined;
@@ -450,6 +453,13 @@ async function runVariant({
   let stage = 'preflight';
   try {
     await page.setViewportSize({ width: 1280, height: 720 });
+    metricsSession = await context.newCDPSession(page);
+    await metricsSession.send('Emulation.setDeviceMetricsOverride', {
+      width: 1280,
+      height: 720,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.route('**/*', routeHandler);
     routeInstalled = true;
@@ -486,6 +496,7 @@ async function runVariant({
       const settings = structuredClone(app.getSettings());
       app.applySettings({
         danmakuMode: 'top',
+        outline: { ...settings.outline, enabled: false },
         topBottomDurationMs: 5_000,
         showAuthor: { ...settings.showAuthor, normal: true },
         allowShortTextMessages: true,
@@ -497,7 +508,11 @@ async function runVariant({
     });
     await page.waitForFunction(() => {
       const settings = window.__ytCanvasRecovery?.renderer?.settings;
-      return settings?.danmakuMode === 'top' && settings.topBottomDurationMs === 5_000;
+      return (
+        settings?.danmakuMode === 'top' &&
+        settings.topBottomDurationMs === 5_000 &&
+        settings.outline.enabled === false
+      );
     });
     await page.evaluate(() => {
       const state = window.__ytCanvasRecovery;
@@ -509,6 +524,8 @@ async function runVariant({
     stage = 'healthy';
     const initial = await snapshot(page);
     assert(initial.sourceBound && initial.canvasCount === 1);
+    assert.equal(initial.dpr, 2);
+    assert.equal(initial.outlineEnabled, false);
     assert(initial.appPinned && initial.canvasPinned);
     assert.equal(initial.rendererIdentityChanges, 0);
     assert.equal(initial.workerActive, variant === 'worker-replacement-retry');
@@ -541,6 +558,7 @@ async function runVariant({
           kind: 'text',
           timestamp: Date.now(),
           authorType: 'normal',
+          author: 'Canvas fixture viewer',
           authorPhotoUrl: `${window.__ytCanvasRecovery?.imagePrefix}main-after.png`,
         });
       });
@@ -593,6 +611,7 @@ async function runVariant({
             kind: 'text',
             timestamp: Date.now(),
             authorType: 'normal',
+            author: 'Canvas fixture viewer',
             authorPhotoUrl: `${state.imagePrefix}worker-before.png`,
           });
         }),
@@ -651,6 +670,7 @@ async function runVariant({
           kind: 'text',
           timestamp: Date.now(),
           authorType: 'normal',
+          author: 'Canvas fixture viewer',
           authorPhotoUrl: `${window.__ytCanvasRecovery?.imagePrefix}worker-retained.png`,
         });
       });
@@ -714,6 +734,9 @@ async function runVariant({
       evidenceBoundary:
         'Synthetic Main Canvas events and Worker contextLost protocol event in installed Edge; no physical GPU or driver reset claim',
       videoPrerequisite: 'Paused property overridden only in this isolated renderer fixture',
+      dprScope: 'Per-page CDP device scale2; not a Windows DPI matrix',
+      drawingScope:
+        'Native overlay text/image calls with positive effective alpha; not exhaustive pixel acceptance',
     };
   } catch (error) {
     primaryError = error;
@@ -760,6 +783,8 @@ async function runVariant({
     async () => {
       if (routeInstalled) await page.unroute('**/*', routeHandler);
     },
+    async () => metricsSession?.send('Emulation.clearDeviceMetricsOverride'),
+    async () => metricsSession?.detach(),
     async () => page.close(),
   ]) {
     try {
