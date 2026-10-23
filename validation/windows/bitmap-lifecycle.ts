@@ -832,8 +832,12 @@ export async function runBitmapLifecycleFixture({
       } else if (redirectUrl) {
         imageRoutes.set(faultUrl, { kind: 'redirect', location: redirectUrl });
         imageRoutes.set(redirectUrl, { kind: 'png' });
-        if (kind === 'redirect-offhost')
+        if (kind === 'redirect-offhost') {
+          // Playwright's Worker event can retain the original request URL
+          // while native Response.url names the final redirected response.
+          expectedRequestFailures.set(faultUrl, 'net::ERR_ABORTED');
           expectedRequestFailures.set(redirectUrl, 'net::ERR_ABORTED');
+        }
       } else if (
         kind === 'malformed' ||
         kind === 'truncated' ||
