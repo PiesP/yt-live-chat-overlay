@@ -11,10 +11,16 @@
     "assets": [
       "validation/windows/chrome-install.ts",
       "validation/windows/chromium-network-diagnostics.ts",
+      "validation/windows/chromium-bootstrap-boundaries.ts",
       "validation/windows/profile.ts",
       "validation/windows/release-upgrade",
       "validation/windows/placement-timing.ts",
       "validation/windows/bitmap-lifecycle.ts",
+      "validation/windows/worker-redirect-transport.ts",
+      "validation/windows/video-pip.ts",
+      "validation/windows/native-tab-lifetime.ts",
+      "validation/windows/native-worker-retirement.ts",
+      "validation/windows/main-image-recovery.ts",
       "validation/windows/native-page-script-probe.ts",
       "validation/windows/chrome-process.ts",
       "validation/windows/live-duration.ts",
@@ -26,7 +32,14 @@
       "validation/windows/native-ad-skip.ts",
       "validation/windows/firefox-install.ts",
       "dist-extension",
-      "dist-extension-firefox"
+      "dist-extension-firefox",
+      "validation/windows/acquisition-boundaries.ts",
+      "validation/windows/canvas-recovery.ts",
+      "validation/windows/native-player-boundaries.ts",
+      "validation/windows/recovery-continuity.ts",
+      "validation/windows/live-content-prerequisite.ts",
+      "validation/windows/fixture-settings.ts",
+      "validation/windows/fixtures/autoplay-av.webm"
     ],
     "build_commands": [
       ["pnpm", "build:ci"],

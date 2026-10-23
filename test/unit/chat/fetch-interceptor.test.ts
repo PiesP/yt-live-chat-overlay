@@ -222,6 +222,85 @@ describe('fetch interceptor response identities', () => {
     }
   });
 
+  it('releases capacity when cloning throws without changing the original response', async () => {
+    const first = new Response('original response');
+    const clone = vi.spyOn(first, 'clone').mockImplementation(() => {
+      throw new Error('Clone unavailable');
+    });
+    const healthy = responseWithText(JSON.stringify({ continuationContents: {} }));
+    const original = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(healthy);
+    window.fetch = original;
+    const onMessages = vi.fn();
+    const restore = installFetchInterceptor(window, () => settings, onMessages);
+
+    try {
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(first);
+      await flushInterceptor();
+      expect(clone).toHaveBeenCalledOnce();
+      expect(first.bodyUsed).toBe(false);
+      await expect(first.text()).resolves.toBe('original response');
+
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(healthy);
+      await vi.waitFor(() => expect(onMessages).toHaveBeenCalledOnce());
+      expect(original).toHaveBeenCalledTimes(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it('ignores malformed clone JSON while keeping the original response readable', async () => {
+    const first = new Response('original response');
+    vi.spyOn(first, 'clone').mockReturnValue(new Response('{malformed'));
+    const healthy = responseWithText(JSON.stringify({ continuationContents: {} }));
+    window.fetch = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(healthy);
+    const onMessages = vi.fn();
+    const restore = installFetchInterceptor(window, () => settings, onMessages);
+
+    try {
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(first);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(first.bodyUsed).toBe(false);
+      await expect(first.text()).resolves.toBe('original response');
+      expect(onMessages).not.toHaveBeenCalled();
+
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(healthy);
+      await vi.waitFor(() => expect(onMessages).toHaveBeenCalledOnce());
+      expect(mocks.getLiveChatPayload).toHaveBeenCalledOnce();
+    } finally {
+      restore();
+    }
+  });
+
+  it('parses changed bodies and evicts the oldest identity after 64 unique responses', async () => {
+    let nextBody = 0;
+    window.fetch = vi.fn(async () =>
+      responseWithText(JSON.stringify({ continuationContents: {}, sequence: nextBody }))
+    );
+    const onMessages = vi.fn();
+    const restore = installFetchInterceptor(window, () => settings, onMessages);
+
+    try {
+      await window.fetch(CHAT_URL);
+      await flushInterceptor();
+      await window.fetch(CHAT_URL);
+      await flushInterceptor();
+      expect(onMessages).toHaveBeenCalledOnce();
+
+      for (nextBody = 1; nextBody <= 64; nextBody++) {
+        await window.fetch(CHAT_URL);
+        await flushInterceptor();
+      }
+      expect(onMessages).toHaveBeenCalledTimes(65);
+      nextBody = 0;
+      await window.fetch(CHAT_URL);
+      await flushInterceptor();
+      expect(onMessages).toHaveBeenCalledTimes(66);
+      expect(mocks.getLiveChatPayload).toHaveBeenCalledTimes(66);
+    } finally {
+      restore();
+    }
+  });
+
   it('bounds concurrent clone reads and skips excess matching responses', async () => {
     const bodies = Array.from({ length: 4 }, () => {
       let resolve!: (value: string) => void;
@@ -302,6 +381,41 @@ describe('fetch interceptor response identities', () => {
     await flushInterceptor();
     expect(newMessages).toHaveBeenCalledOnce();
     restoreNew();
+  });
+
+  it('resets duplicate identity on reinstall while preserving a later page fetch wrapper', async () => {
+    const body = JSON.stringify({ continuationContents: {} });
+    const original = vi.fn(async () => responseWithText(body));
+    window.fetch = original;
+    const firstMessages = vi.fn();
+    const restoreFirst = installFetchInterceptor(window, () => settings, firstMessages);
+
+    await window.fetch(CHAT_URL);
+    await flushInterceptor();
+    expect(firstMessages).toHaveBeenCalledOnce();
+
+    const thirdPartyWrapper = vi.fn(window.fetch);
+    window.fetch = thirdPartyWrapper;
+    const secondMessages = vi.fn();
+    const restoreSecond = installFetchInterceptor(window, () => settings, secondMessages);
+
+    try {
+      await window.fetch(CHAT_URL);
+      await flushInterceptor();
+      expect(secondMessages).toHaveBeenCalledOnce();
+      expect(firstMessages).toHaveBeenCalledOnce();
+      expect(thirdPartyWrapper).toHaveBeenCalledOnce();
+      expect(original).toHaveBeenCalledTimes(2);
+    } finally {
+      restoreSecond();
+      restoreFirst();
+    }
+
+    expect(window.fetch).toBe(thirdPartyWrapper);
+    await expect(window.fetch(CHAT_URL)).resolves.toBeDefined();
+    expect(thirdPartyWrapper).toHaveBeenCalledTimes(2);
+    expect(original).toHaveBeenCalledTimes(3);
+    expect(secondMessages).toHaveBeenCalledOnce();
   });
 
   it('ignores response work that completes after teardown', async () => {

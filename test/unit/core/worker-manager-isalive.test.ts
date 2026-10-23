@@ -39,6 +39,7 @@ function createMockWorker(): MockWorker {
 
 describe('RenderWorkerManager isAlive after destroy', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     Reflect.deleteProperty(window, '__ytExtensionBridge');
@@ -102,6 +103,69 @@ describe('RenderWorkerManager isAlive after destroy', () => {
 
     // Worker never initialized — not applicable, main thread is fine
     expect(manager.isAlive()).toBe(true);
+  });
+
+  it.each([
+    [9_999, true],
+    [10_000, false],
+    [10_001, false],
+  ])('uses the first-pong deadline at %i ms even while paused', (elapsed, expected) => {
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(100);
+    const worker = createMockWorker();
+    stubWorkerEnvironment(worker);
+    const manager = createManager();
+    const canvas = {
+      transferControlToOffscreen: vi.fn(() => ({})),
+    } as unknown as HTMLCanvasElement;
+    const overlay = {
+      getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+      onDimensionsChanged: vi.fn(() => vi.fn()),
+    };
+
+    try {
+      expect(manager.init(canvas, settings, overlay as never, 'worker.js').started).toBe(true);
+      manager.setPaused(true);
+      manager.setUserPaused(true);
+      vi.advanceTimersByTime(elapsed);
+
+      expect(manager.isAlive()).toBe(expected);
+      expect(worker.postMessage).toHaveBeenCalledWith({ type: 'ping' });
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  it.each([
+    [4_999, true],
+    [5_000, false],
+    [5_001, false],
+  ])('uses the last-pong deadline at %i ms with no chat ingress', (elapsed, expected) => {
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(100);
+    const worker = createMockWorker();
+    stubWorkerEnvironment(worker);
+    const manager = createManager();
+    const canvas = {
+      transferControlToOffscreen: vi.fn(() => ({})),
+    } as unknown as HTMLCanvasElement;
+    const overlay = {
+      getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+      onDimensionsChanged: vi.fn(() => vi.fn()),
+    };
+
+    try {
+      expect(manager.init(canvas, settings, overlay as never, 'worker.js').started).toBe(true);
+      vi.advanceTimersByTime(1_000);
+      worker.onmessage?.({ data: { type: 'pong' } } as MessageEvent);
+      expect(manager.isAlive()).toBe(true);
+      vi.advanceTimersByTime(elapsed);
+
+      expect(manager.isAlive()).toBe(expected);
+      expect(worker.postMessage).toHaveBeenCalledWith({ type: 'ping' });
+    } finally {
+      manager.destroy();
+    }
   });
 
   it('notifies the fatal callback once after the third consecutive messageerror', () => {

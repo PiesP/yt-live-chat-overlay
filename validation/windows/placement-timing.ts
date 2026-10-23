@@ -2963,8 +2963,10 @@ async function runScenario({
         if (!app) throw new Error('Placement runtime settings are unavailable');
         app.applySettings({
           burstElevatedThreshold: 2,
-          burstHighThreshold: 5,
-          burstExtremeThreshold: 10,
+          // Keep the elevated speed stimulus without changing the lane grid.
+          // High/extreme density reflow has its own capacity/drop contract.
+          burstHighThreshold: 100,
+          burstExtremeThreshold: 200,
           speedBoostThreshold: 2,
         });
       });
@@ -2992,6 +2994,11 @@ async function runScenario({
         (entry) => entry.id === TOKENS[17] && entry.kind === 'activated'
       );
       assertBacklogMotion(long, forceFallback ? 'main' : 'worker', comparisonOnly);
+      assert.equal(
+        backlog.exact.config.laneDensityFactor,
+        1,
+        'Spacing/speed fixture did not isolate burst lane-density changes'
+      );
       phaseObservations.push({
         phase: 'backlog-burst',
         motion: long,
@@ -3037,6 +3044,8 @@ async function runScenario({
         { timeout: 5000 }
       );
       const grown = await issueSnapshot();
+      assert.equal(resumed.exact.config.laneDensityFactor, 1);
+      assert.equal(grown.exact.config.laneDensityFactor, 1);
       assertBacklogReflow(resumed.exact, grown.exact, TOKENS[17]);
       phaseObservations.push({
         phase: 'resize-expanded',
