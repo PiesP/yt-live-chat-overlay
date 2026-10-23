@@ -3,6 +3,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import {
   appendFile,
   mkdir,
@@ -17,10 +18,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import type { Page } from '@playwright/test';
+import type { BrowserContext, CDPSession, Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import {
+  beginExtensionRuntimeScriptCapture,
   boundedFile,
   extensionUpgradeTransition,
   extensionInventory,
@@ -53,9 +55,37 @@ const FILES = [
   'workers/renderer.js',
 ] as const;
 const roots: string[] = [];
+const EXTENSION_ID = 'a'.repeat(32);
 
 function sha(bytes: string | Buffer) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function runtimeCaptureFixture(
+  sources: Record<string, string>,
+  { failDisable = false }: { failDisable?: boolean } = {}
+) {
+  const session = new EventEmitter() as EventEmitter & {
+    send: ReturnType<typeof vi.fn>;
+    detach: ReturnType<typeof vi.fn>;
+  };
+  session.send = vi.fn(async (method: string, parameters?: { scriptId?: string }) => {
+    if (method === 'Debugger.disable' && failDisable) throw new Error('disable failed');
+    if (method === 'Debugger.getScriptSource')
+      return { scriptSource: sources[parameters?.scriptId ?? ''] };
+    return {};
+  });
+  session.detach = vi.fn(async () => {});
+  const context = {
+    newCDPSession: vi.fn(async () => session as unknown as CDPSession),
+  } as unknown as Pick<BrowserContext, 'newCDPSession'>;
+  const parsed = (name: string, scriptId: string) => {
+    session.emit('Debugger.scriptParsed', {
+      url: `chrome-extension://${EXTENSION_ID}/${name}`,
+      scriptId,
+    });
+  };
+  return { session, context, parsed };
 }
 
 /** Small store-only ZIP with the same fixed file and directory layout as the public asset. */
@@ -155,6 +185,98 @@ afterEach(async () => {
 });
 
 describe('optional public Chrome extension update inputs', () => {
+  it('binds both parsed extension scripts to their inventoried executed source', async () => {
+    const sources = { content: 'public content', page: 'public page' };
+    const harness = runtimeCaptureFixture(sources);
+    const expected = {
+      sha256: '0'.repeat(64),
+      files: {
+        'content-script.js': sha(sources.content),
+        'page-script.js': sha(sources.page),
+      },
+    };
+    const capture = await beginExtensionRuntimeScriptCapture(
+      harness.context,
+      {} as Page,
+      EXTENSION_ID,
+      expected
+    );
+    expect(harness.session.send).toHaveBeenCalledWith('Debugger.enable');
+    harness.session.emit('Debugger.scriptParsed', {
+      url: `chrome-extension://${EXTENSION_ID}/other.js`,
+      scriptId: 'ignored',
+    });
+    harness.parsed('content-script.js', 'content');
+    harness.parsed('page-script.js', 'page');
+    const records = await capture.verify();
+    expect(records['content-script.js']).toMatchObject({
+      expectedSha256: sha(sources.content),
+      observedSha256: sha(sources.content),
+      parsedCount: 1,
+    });
+    expect(records['page-script.js']).toMatchObject({
+      observedSha256: sha(sources.page),
+      observedBytes: Buffer.byteLength(sources.page),
+      parsedCount: 1,
+    });
+    expect(harness.session.send).not.toHaveBeenCalledWith('Debugger.getScriptSource', {
+      scriptId: 'ignored',
+    });
+    await capture.close();
+    expect(harness.session.send).toHaveBeenCalledWith('Debugger.disable');
+    expect(harness.session.detach).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an old executed page script even when the expected candidate version is unchanged', async () => {
+    const harness = runtimeCaptureFixture({
+      content: 'candidate content',
+      page: 'old public page',
+    });
+    const capture = await beginExtensionRuntimeScriptCapture(
+      harness.context,
+      {} as Page,
+      EXTENSION_ID,
+      {
+        sha256: '0'.repeat(64),
+        files: {
+          'content-script.js': sha('candidate content'),
+          'page-script.js': sha('new candidate page'),
+        },
+      }
+    );
+    harness.parsed('content-script.js', 'content');
+    harness.parsed('page-script.js', 'page');
+    await expect(capture.verify()).rejects.toThrow(
+      'Executed extension script differs from inventory: page-script.js'
+    );
+    expect(capture.snapshot()['page-script.js'].observedSha256).toBe(sha('old public page'));
+    await capture.close();
+  });
+
+  it('fails closed on missing or ambiguous script execution and detaches after cleanup error', async () => {
+    const harness = runtimeCaptureFixture({ page: 'candidate page' }, { failDisable: true });
+    const capture = await beginExtensionRuntimeScriptCapture(
+      harness.context,
+      {} as Page,
+      EXTENSION_ID,
+      {
+        sha256: '0'.repeat(64),
+        files: {
+          'content-script.js': sha('candidate content'),
+          'page-script.js': sha('candidate page'),
+        },
+      }
+    );
+    harness.parsed('page-script.js', 'page');
+    await expect(capture.verify(20)).rejects.toThrow(
+      'Executed extension scripts were not observed: content-script.js'
+    );
+    harness.parsed('page-script.js', 'page-again');
+    await expect(capture.verify(20)).rejects.toThrow('Ambiguous executed extension script');
+    await expect(capture.close()).rejects.toThrow('Extension script debugger cleanup failed');
+    expect(harness.session.detach).toHaveBeenCalledOnce();
+  });
+
   it.skipIf(process.platform === 'win32')(
     'rejects an unwritten FIFO without blocking the input read',
     async () => {
@@ -280,6 +402,22 @@ describe('optional public Chrome extension update inputs', () => {
     );
     await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow(
       'Published and candidate extension inventories are identical'
+    );
+  });
+
+  it('rejects unchanged page execution even if other packaged files changed', async () => {
+    const fixture = await makeFixture('0.45.8');
+    await writeFile(join(fixture.candidate, 'page-script.js'), fixture.files['page-script.js']!);
+    const inventory = await extensionInventory(fixture.candidate);
+    await writeFile(
+      join(fixture.root, INPUT),
+      JSON.stringify({
+        ...fixture.input,
+        candidateExtension: { inventorySha256: inventory.sha256 },
+      })
+    );
+    await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow(
+      'Published and candidate page scripts are identical'
     );
   });
 

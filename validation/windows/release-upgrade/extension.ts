@@ -37,6 +37,29 @@ const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsExtensionUpgrade';
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
+const RUNTIME_SCRIPT_NAMES = ['content-script.js', 'page-script.js'] as const;
+type RuntimeScriptName = (typeof RUNTIME_SCRIPT_NAMES)[number];
+type RuntimeScriptRecord = {
+  expectedSha256: string;
+  observedSha256: string | null;
+  observedBytes: number | null;
+  parsedCount: number;
+};
+type RuntimeScriptEvidence = Record<RuntimeScriptName, RuntimeScriptRecord>;
+
+async function runtimeCommandDeadline<T>(request: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), 10_000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 const FILES = [
   'background.js',
   'content-script.js',
@@ -399,6 +422,11 @@ export async function readExtensionUpgradeInput(root: string): Promise<{
     candidate.sha256,
     'Published and candidate extension inventories are identical'
   );
+  assert.notEqual(
+    baseline.files['page-script.js'],
+    candidate.files['page-script.js'],
+    'Published and candidate page scripts are identical'
+  );
   assert.equal(
     manifestVersion(await boundedFile(join(root, release.baseline, 'manifest.json'), 64_000)),
     input.previousVersion
@@ -428,8 +456,156 @@ type UpgradeReceipt = {
   candidateStorageFontSize: number | null;
   candidateUiFontSize: number | null;
   restoredFontSize: number | null;
+  baselineRuntimeScripts: RuntimeScriptEvidence | null;
+  candidateRuntimeScripts: RuntimeScriptEvidence | null;
   errorType?: string;
 };
+
+/** Hash the exact script source parsed by this page, with the CDP session attached before navigation. */
+export async function beginExtensionRuntimeScriptCapture(
+  context: Pick<BrowserContext, 'newCDPSession'>,
+  page: Page,
+  extensionId: string,
+  expected: Inventory
+): Promise<{
+  verify: (timeoutMs?: number) => Promise<RuntimeScriptEvidence>;
+  snapshot: () => RuntimeScriptEvidence;
+  close: () => Promise<void>;
+}> {
+  assert.match(extensionId, /^[a-p]{32}$/u, 'Extension ID is invalid');
+  const records: RuntimeScriptEvidence = {
+    'content-script.js': {
+      expectedSha256: expected.files['content-script.js'] ?? '',
+      observedSha256: null,
+      observedBytes: null,
+      parsedCount: 0,
+    },
+    'page-script.js': {
+      expectedSha256: expected.files['page-script.js'] ?? '',
+      observedSha256: null,
+      observedBytes: null,
+      parsedCount: 0,
+    },
+  };
+  for (const name of RUNTIME_SCRIPT_NAMES)
+    assert.match(records[name].expectedSha256, /^[0-9a-f]{64}$/u, `Missing ${name} inventory`);
+  const urls = new Map(
+    RUNTIME_SCRIPT_NAMES.map((name) => [`chrome-extension://${extensionId}/${name}`, name])
+  );
+  const session = await runtimeCommandDeadline(context.newCDPSession(page), 'Debugger attach');
+  const errors: unknown[] = [];
+  let matchedCount = 0;
+  let waiting: (() => void) | null = null;
+  let closed = false;
+  const changed = () => {
+    const notify = waiting;
+    waiting = null;
+    notify?.();
+  };
+  const recordError = (error: unknown) => {
+    if (errors.length < RUNTIME_SCRIPT_NAMES.length) errors.push(error);
+    changed();
+  };
+  const onScriptParsed = ({ url, scriptId }: { url?: unknown; scriptId?: unknown }) => {
+    const name = typeof url === 'string' ? urls.get(url) : undefined;
+    if (!name || closed || errors.length) return;
+    matchedCount = Math.min(matchedCount + 1, RUNTIME_SCRIPT_NAMES.length + 1);
+    const record = records[name];
+    record.parsedCount = Math.min(record.parsedCount + 1, 2);
+    if (matchedCount > RUNTIME_SCRIPT_NAMES.length || record.parsedCount > 1) {
+      recordError(new Error(`Ambiguous executed extension script: ${name}`));
+      return;
+    }
+    if (typeof scriptId !== 'string' || scriptId.length === 0) {
+      recordError(new Error(`Missing parsed script ID: ${name}`));
+      return;
+    }
+    void session
+      .send('Debugger.getScriptSource', { scriptId })
+      .then((result: unknown) => {
+        assert(result && typeof result === 'object' && 'scriptSource' in result);
+        const source = result.scriptSource;
+        assert(typeof source === 'string', `Missing executed script source: ${name}`);
+        const bytes = Buffer.byteLength(source, 'utf8');
+        assert(bytes > 0 && bytes <= MAX_FILE_BYTES, `Executed script size is invalid: ${name}`);
+        record.observedBytes = bytes;
+        record.observedSha256 = digest(source);
+        assert.equal(
+          record.observedSha256,
+          record.expectedSha256,
+          `Executed extension script differs from inventory: ${name}`
+        );
+      })
+      .catch(recordError)
+      .finally(changed);
+  };
+  session.on('Debugger.scriptParsed', onScriptParsed);
+  try {
+    await runtimeCommandDeadline(session.send('Debugger.enable'), 'Debugger enable');
+  } catch (error) {
+    session.removeListener('Debugger.scriptParsed', onScriptParsed);
+    try {
+      await runtimeCommandDeadline(session.detach(), 'Debugger setup detach');
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Debugger setup and cleanup failed');
+    }
+    throw error;
+  }
+  return {
+    snapshot: () => ({
+      'content-script.js': { ...records['content-script.js'] },
+      'page-script.js': { ...records['page-script.js'] },
+    }),
+    verify: async (timeoutMs = 10_000) => {
+      assert(Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 10_000);
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        if (errors.length) throw errors[0];
+        if (RUNTIME_SCRIPT_NAMES.every((name) => records[name].observedSha256 !== null))
+          return {
+            'content-script.js': { ...records['content-script.js'] },
+            'page-script.js': { ...records['page-script.js'] },
+          };
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          const missing = RUNTIME_SCRIPT_NAMES.filter(
+            (name) => records[name].observedSha256 === null
+          );
+          throw new Error(`Executed extension scripts were not observed: ${missing.join(', ')}`);
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            waiting = null;
+            resolve();
+          }, remaining);
+          waiting = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+      }
+    },
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      session.removeListener('Debugger.scriptParsed', onScriptParsed);
+      changed();
+      const cleanupErrors: unknown[] = [];
+      try {
+        await runtimeCommandDeadline(session.send('Debugger.disable'), 'Debugger disable');
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+      try {
+        await runtimeCommandDeadline(session.detach(), 'Debugger detach');
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+      if (cleanupErrors.length)
+        throw new AggregateError(cleanupErrors, 'Extension script debugger cleanup failed');
+    },
+  };
+}
 
 async function extensionDetails(page: Page, id: string): Promise<{ id: string; version: string }> {
   await page.goto(`chrome-extension://${id}/manifest.json`, {
@@ -484,85 +660,78 @@ async function waitForStoredFont(page: Page, expected: number): Promise<void> {
   assert.fail('Extension UI preference did not persist to chrome.storage.local');
 }
 
-async function openWatchFixture(context: BrowserContext, root: string, id: string): Promise<Page> {
+async function openWatchFixture(page: Page, root: string, id: string): Promise<void> {
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   const html = buildVisibleWatchHtml(preview, 'Extension upgrade fixture video');
-  const page = await context.newPage();
-  try {
-    await page.route('**/*', async (route) => {
-      const url = new URL(route.request().url());
-      if (url.protocol === 'chrome-extension:' && url.hostname === id) {
-        await route.continue();
-      } else if (
-        url.hostname === 'www.youtube.com' &&
-        route.request().resourceType() === 'document'
-      ) {
-        await route.fulfill({ status: 200, contentType: 'text/html', body: html });
-      } else if (url.hostname === 'www.youtube.com' && url.pathname.includes('/live_chat/')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          json: {
-            continuationContents: {
-              liveChatContinuation: {
-                actions: [],
-                continuations: [
-                  {
-                    timedContinuationData: {
-                      continuation: 'extension-upgrade-next',
-                      timeoutMs: 30_000,
-                    },
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.protocol === 'chrome-extension:' && url.hostname === id) {
+      await route.continue();
+    } else if (
+      url.hostname === 'www.youtube.com' &&
+      route.request().resourceType() === 'document'
+    ) {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: html });
+    } else if (url.hostname === 'www.youtube.com' && url.pathname.includes('/live_chat/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        json: {
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [],
+              continuations: [
+                {
+                  timedContinuationData: {
+                    continuation: 'extension-upgrade-next',
+                    timeoutMs: 30_000,
                   },
-                ],
-              },
-            },
-          },
-        });
-      } else {
-        await route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by fixture' });
-      }
-    });
-    await page.addInitScript(() => {
-      window.ytcfg = {
-        data_: {
-          INNERTUBE_API_KEY: 'extension-upgrade-key',
-          INNERTUBE_CONTEXT_CLIENT_NAME: '1',
-          INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
-          INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } },
-        },
-      };
-      window.ytInitialData = {
-        currentVideoEndpoint: {
-          watchEndpoint: { videoId: 'windowsExtensionUpgrade' },
-        },
-        contents: {
-          twoColumnWatchNextResults: {
-            conversationBar: {
-              liveChatRenderer: {
-                isReplay: false,
-                continuations: [
-                  {
-                    timedContinuationData: {
-                      continuation: 'extension-upgrade-live',
-                      timeoutMs: 30_000,
-                    },
-                  },
-                ],
-              },
+                },
+              ],
             },
           },
         },
-      };
-    });
-    await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page
-      .locator('#yt-chat-overlay-settings-button')
-      .waitFor({ state: 'visible', timeout: 20_000 });
-    return page;
-  } catch (error) {
-    await page.close().catch(() => {});
-    throw error;
-  }
+      });
+    } else {
+      await route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by fixture' });
+    }
+  });
+  await page.addInitScript(() => {
+    window.ytcfg = {
+      data_: {
+        INNERTUBE_API_KEY: 'extension-upgrade-key',
+        INNERTUBE_CONTEXT_CLIENT_NAME: '1',
+        INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
+        INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } },
+      },
+    };
+    window.ytInitialData = {
+      currentVideoEndpoint: {
+        watchEndpoint: { videoId: 'windowsExtensionUpgrade' },
+      },
+      contents: {
+        twoColumnWatchNextResults: {
+          conversationBar: {
+            liveChatRenderer: {
+              isReplay: false,
+              continuations: [
+                {
+                  timedContinuationData: {
+                    continuation: 'extension-upgrade-live',
+                    timeoutMs: 30_000,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+  });
+  await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page
+    .locator('#yt-chat-overlay-settings-button')
+    .waitFor({ state: 'visible', timeout: 20_000 });
 }
 
 async function settingsFontSize(page: Page): Promise<number> {
@@ -646,11 +815,18 @@ export async function runExtensionUpgrade({
     candidateStorageFontSize: null,
     candidateUiFontSize: null,
     restoredFontSize: null,
+    baselineRuntimeScripts: null,
+    candidateRuntimeScripts: null,
   };
   let baselinePage: Page | null = null;
   let extensionPage: Page | null = null;
   let candidatePage: Page | null = null;
   let candidateExtensionPage: Page | null = null;
+  let baselineCapture: Awaited<ReturnType<typeof beginExtensionRuntimeScriptCapture>> | null = null;
+  let candidateCapture: Awaited<ReturnType<typeof beginExtensionRuntimeScriptCapture>> | null =
+    null;
+  let primaryFailure: Error | null = null;
+  let completed: { extensionId: string; receipt: UpgradeReceipt } | null = null;
   try {
     await mkdir(profile, { recursive: true });
     await cp(join(root, release.baseline), installedPath, {
@@ -674,8 +850,19 @@ export async function runExtensionUpgrade({
     const baselineDetails = await extensionDetails(extensionPage, id);
     assert.equal(baselineDetails.id, id);
     assert.equal(baselineDetails.version, verified.input.previousVersion);
+    receipt.activeStage = 'verify-public-runtime-scripts';
+    baselinePage = await context.newPage();
+    baselineCapture = await beginExtensionRuntimeScriptCapture(
+      context,
+      baselinePage,
+      id,
+      verified.baseline
+    );
+    await openWatchFixture(baselinePage, root, id);
+    receipt.baselineRuntimeScripts = await baselineCapture.verify();
+    await baselineCapture.close();
+    baselineCapture = null;
     receipt.activeStage = 'save-baseline-settings-through-ui';
-    baselinePage = await openWatchFixture(context, root, id);
     const original = await settingsFontSize(baselinePage);
     const selected = original === 36 ? 38 : 36;
     receipt.originalFontSize = original;
@@ -735,7 +922,19 @@ export async function runExtensionUpgrade({
       selected,
       'Extension storage preference changed across update'
     );
-    candidatePage = await openWatchFixture(context, root, id);
+    receipt.activeStage = 'verify-candidate-runtime-scripts';
+    candidatePage = await context.newPage();
+    candidateCapture = await beginExtensionRuntimeScriptCapture(
+      context,
+      candidatePage,
+      id,
+      verified.candidate
+    );
+    await openWatchFixture(candidatePage, root, id);
+    receipt.candidateRuntimeScripts = await candidateCapture.verify();
+    await candidateCapture.close();
+    candidateCapture = null;
+    receipt.activeStage = 'verify-candidate-settings';
     receipt.candidateUiFontSize = await settingsFontSize(candidatePage);
     assert.equal(
       receipt.candidateUiFontSize,
@@ -759,20 +958,41 @@ export async function runExtensionUpgrade({
     );
     receipt.status = 'passed';
     receipt.activeStage = 'complete';
-    return { extensionId: id, receipt };
+    completed = { extensionId: id, receipt };
   } catch (error) {
+    receipt.baselineRuntimeScripts ??= baselineCapture?.snapshot() ?? null;
+    receipt.candidateRuntimeScripts ??= candidateCapture?.snapshot() ?? null;
     receipt.errorType = error instanceof Error ? error.name : 'Error';
     const failure = new Error(`Extension update failed at ${receipt.activeStage}`, {
       cause: error,
     });
     (failure as Error & { extensionUpgrade: UpgradeReceipt }).extensionUpgrade = receipt;
-    throw failure;
-  } finally {
-    await Promise.allSettled([
-      baselinePage?.close(),
-      extensionPage?.close(),
-      candidatePage?.close(),
-      candidateExtensionPage?.close(),
-    ]);
+    primaryFailure = failure;
   }
+  const sessions = await Promise.allSettled([baselineCapture?.close(), candidateCapture?.close()]);
+  const pages = await Promise.allSettled([
+    baselinePage?.close(),
+    extensionPage?.close(),
+    candidatePage?.close(),
+    candidateExtensionPage?.close(),
+  ]);
+  const cleanupErrors = [...sessions, ...pages]
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason);
+  if (cleanupErrors.length) {
+    receipt.status = 'failed';
+    if (!primaryFailure) {
+      receipt.activeStage = 'cleanup';
+      receipt.errorType = 'AggregateError';
+    }
+    const failure = new AggregateError(
+      primaryFailure ? [primaryFailure, ...cleanupErrors] : cleanupErrors,
+      `Extension update failed at ${receipt.activeStage}`
+    );
+    (failure as AggregateError & { extensionUpgrade: UpgradeReceipt }).extensionUpgrade = receipt;
+    throw failure;
+  }
+  if (primaryFailure) throw primaryFailure;
+  assert(completed, 'Extension update did not complete');
+  return completed;
 }
