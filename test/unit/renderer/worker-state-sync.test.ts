@@ -1318,6 +1318,109 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it.each([
+    [249, false],
+    [250, true],
+    [251, true],
+  ])(
+    'settles a held recovery snapshot at the 250 ms boundary (%i ms)',
+    async (elapsed, settled) => {
+      vi.useFakeTimers();
+      const { manager, worker } = initializedManager();
+      const message: ChatMessage = {
+        id: 'snapshot-time-boundary',
+        text: 'recover at deadline',
+        content: [{ type: 'text', content: 'recover at deadline' }],
+        timestamp: 1,
+        kind: 'text',
+        authorType: 'normal',
+      };
+
+      try {
+        expect(manager.sendToWorker(message, message.id)).toBe(true);
+        await flushMicrotasks();
+        const resolved = vi.fn();
+        const snapshot = manager.snapshotMessages().then((messages) => {
+          resolved(messages);
+          return messages;
+        });
+        vi.advanceTimersByTime(elapsed);
+        await flushMicrotasks();
+
+        expect(resolved).toHaveBeenCalledTimes(settled ? 1 : 0);
+        if (!settled) {
+          const request = worker.postMessage.mock.calls
+            .map(([value]) => value as { type?: string; requestId?: number })
+            .findLast((value) => value.type === 'snapshotMessages');
+          worker.emitMessage({
+            type: 'messageSnapshot',
+            requestId: request?.requestId,
+            epoch: 0,
+            activeMessageIds: [message.id],
+            pendingMessageIds: [],
+            processedBatchSequence: 1,
+          });
+          await expect(snapshot).resolves.toEqual([{ message, trackDrops: false }]);
+        } else {
+          await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
+        }
+      } finally {
+        manager.destroy();
+        worker.acknowledgeDestroy();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('ignores wrong-request, malformed, and future-sequence snapshots until a valid reply', async () => {
+    vi.useFakeTimers();
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'snapshot-valid-reply',
+      text: 'recover valid reply',
+      content: [{ type: 'text', content: 'recover valid reply' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+
+    try {
+      expect(manager.sendToWorker(message, message.id)).toBe(true);
+      await flushMicrotasks();
+      const resolved = vi.fn();
+      const snapshot = manager.snapshotMessages().then((messages) => {
+        resolved(messages);
+        return messages;
+      });
+      const request = worker.postMessage.mock.calls
+        .map(([value]) => value as { type?: string; requestId?: number })
+        .findLast((value) => value.type === 'snapshotMessages');
+      expect(request?.requestId).toBeDefined();
+      const valid = {
+        type: 'messageSnapshot',
+        requestId: request?.requestId,
+        epoch: 0,
+        activeMessageIds: [message.id],
+        pendingMessageIds: [],
+        processedBatchSequence: 1,
+      };
+      worker.emitMessage({ ...valid, requestId: (request?.requestId ?? 0) + 1 });
+      worker.emitMessage({ ...valid, pendingMessageIds: [null] });
+      worker.emitMessage({ ...valid, processedBatchSequence: 2 });
+      vi.advanceTimersByTime(249);
+      await flushMicrotasks();
+      expect(resolved).not.toHaveBeenCalled();
+
+      worker.emitMessage(valid);
+      await expect(snapshot).resolves.toEqual([{ message, trackDrops: false }]);
+      expect(resolved).toHaveBeenCalledTimes(1);
+    } finally {
+      manager.destroy();
+      worker.acknowledgeDestroy();
+      vi.useRealTimers();
+    }
+  });
+
   it('attaches validated active motion only to the retained current-epoch message', async () => {
     const { manager, worker } = initializedManager();
     const message: ChatMessage = {

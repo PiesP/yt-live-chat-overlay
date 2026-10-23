@@ -180,7 +180,14 @@ describe('RenderWorkerManager', () => {
           onDimensionsChanged,
         };
 
-        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        expect(
+          manager.init(
+            canvas,
+            DEFAULT_SETTINGS,
+            overlay as unknown as Parameters<RenderWorkerManager['init']>[2],
+            'worker.js'
+          )
+        ).toEqual({
           started: false,
           canvasTransferred: false,
         });
@@ -610,6 +617,96 @@ describe('RenderWorkerManager', () => {
       vi.advanceTimersByTime(500);
       expect(worker.terminate).toHaveBeenCalledOnce();
       vi.useRealTimers();
+    });
+
+    it.each([
+      { label: 'ACK at 499 ms', ackAtMs: 499 },
+      { label: 'late ACK at 501 ms', ackAtMs: 501 },
+      { label: 'no ACK', ackAtMs: null },
+    ])('terminates only retired worker A with $label after B starts', ({ ackAtMs }) => {
+      vi.useFakeTimers();
+      const originalWorker = globalThis.Worker;
+      const instances: RecordingWorker[] = [];
+      class RecordingWorker {
+        postMessage = vi.fn();
+        terminate = vi.fn();
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onerror: ((event: ErrorEvent) => void) | null = null;
+        onmessageerror: ((event: MessageEvent) => void) | null = null;
+        private readonly listeners = new Set<EventListener>();
+
+        constructor() {
+          instances.push(this);
+        }
+
+        addEventListener = vi.fn((_type: string, listener: EventListener) => {
+          this.listeners.add(listener);
+        });
+        removeEventListener = vi.fn((_type: string, listener: EventListener) => {
+          this.listeners.delete(listener);
+        });
+
+        emitMessage(data: unknown): void {
+          const event = { data } as MessageEvent;
+          this.onmessage?.(event);
+          for (const listener of this.listeners) listener(event);
+        }
+      }
+      vi.stubGlobal('Worker', RecordingWorker);
+
+      const init = (): void => {
+        const canvas = {
+          transferControlToOffscreen: vi.fn(() => ({ getContext: vi.fn() })),
+        } as unknown as HTMLCanvasElement;
+        const overlay = {
+          getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+          onDimensionsChanged: vi.fn(() => vi.fn()),
+        };
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+          started: true,
+          canvasTransferred: true,
+        });
+      };
+
+      try {
+        init();
+        const workerA = instances[0];
+        expect(workerA).toBeDefined();
+        manager.destroy();
+        expect(manager.workerRef).toBeNull();
+        expect(workerA?.postMessage).toHaveBeenLastCalledWith({ type: 'destroy' });
+        expect(workerA?.terminate).not.toHaveBeenCalled();
+
+        init();
+        const workerB = instances[1];
+        expect(workerB).toBeDefined();
+        expect(manager.workerRef).toBe(workerB);
+
+        vi.advanceTimersByTime(499);
+        expect(workerA?.terminate).not.toHaveBeenCalled();
+        expect(workerB?.terminate).not.toHaveBeenCalled();
+        if (ackAtMs === 499) workerA?.emitMessage({ type: 'ack' });
+        expect(workerA?.terminate).toHaveBeenCalledTimes(ackAtMs === 499 ? 1 : 0);
+
+        vi.advanceTimersByTime(1);
+        expect(workerA?.terminate).toHaveBeenCalledOnce();
+        if (ackAtMs === 501) {
+          vi.advanceTimersByTime(1);
+          workerA?.emitMessage({ type: 'ack' });
+        }
+        workerA?.emitMessage({ type: 'error', error: 'stale worker' });
+        workerA?.onerror?.(new ErrorEvent('error', { message: 'stale worker' }));
+        workerA?.onmessageerror?.(new MessageEvent('messageerror', { data: null }));
+        expect(workerA?.terminate).toHaveBeenCalledOnce();
+        expect(workerB?.terminate).not.toHaveBeenCalled();
+        expect(manager.workerRef).toBe(workerB);
+        expect(manager.isActive).toBe(true);
+      } finally {
+        manager.destroy();
+        instances[1]?.emitMessage({ type: 'ack' });
+        vi.stubGlobal('Worker', originalWorker);
+        vi.useRealTimers();
+      }
     });
   });
 });

@@ -2,11 +2,20 @@
 // @vitest-environment jsdom
 
 import type { ChatMessage } from '@app-types';
+import { ReplayBuffer } from '@chat/replay-buffer';
+import { LiveChatProtocolError } from '@chat/source-base';
 import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+
+const bootstrapMocks = vi.hoisted(() => ({ refreshBootstrap: vi.fn() }));
+
+vi.mock('@app/bootstrap-resolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@app/bootstrap-resolver')>()),
+  refreshBootstrap: bootstrapMocks.refreshBootstrap,
+}));
 
 function makeReplayMessage(id: string, offsetMs: number): ChatMessage {
   return {
@@ -41,6 +50,18 @@ function makeReplayAction(id: string, offsetMs: number): unknown {
   };
 }
 
+function makeMessageWithEstimatedBytes(bytes: number): ChatMessage {
+  const message = makeReplayMessage('byte-boundary', 12_000);
+  message.text = '';
+  const calibration = new ReplayBuffer();
+  calibration.insert(message, 12_000);
+  const characters = (bytes - calibration.estimatedByteSize) / 2;
+  if (!Number.isInteger(characters) || characters < 0)
+    throw new Error('Replay byte boundary cannot be represented by this fixture');
+  message.text = 'x'.repeat(characters);
+  return message;
+}
+
 /**
  * Tests for ReplayChatSource seek+prefetch behavior.
  *
@@ -55,6 +76,7 @@ describe('ReplayChatSource', () => {
 
   beforeEach(() => {
     source = new ReplayChatSource(() => DEFAULT_SETTINGS);
+    bootstrapMocks.refreshBootstrap.mockReset();
   });
 
   afterEach(() => {
@@ -295,6 +317,76 @@ describe('ReplayChatSource', () => {
     large.content = [{ type: 'text', content: large.text }];
     internals.replayBuffer.insert(large, 1000);
     expect(internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false })).toBe(false);
+  });
+
+  it('resumes count-limited prefetch only at the low count with time and bytes also low', () => {
+    const internals = source as unknown as {
+      prefetchContinuation: InnertubeContinuationData | null;
+      replayBuffer: ReplayBuffer;
+      shouldPrefetch: (
+        now: number,
+        signal: AbortSignal | undefined,
+        playback: { offsetMs: number; paused: boolean }
+      ) => boolean;
+    };
+    internals.prefetchContinuation = { continuation: 'next' };
+    const eligible = () => internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false });
+
+    for (let index = 0; index < 2000; index++) {
+      internals.replayBuffer.insert(makeReplayMessage(`high-${index}`, 12_000), 12_000);
+    }
+    expect(internals.replayBuffer.messageCount).toBe(2000);
+    expect(eligible()).toBe(false);
+
+    internals.replayBuffer.clear();
+    internals.replayBuffer.insert(makeReplayMessage('first', 1), 1);
+    internals.replayBuffer.insert(makeReplayMessage('second', 2), 2);
+    for (let index = 0; index < 999; index++) {
+      internals.replayBuffer.insert(makeReplayMessage(`low-${index}`, 12_000), 12_000);
+    }
+    expect(internals.replayBuffer.messageCount).toBe(1001);
+    expect(internals.replayBuffer.aheadHorizonMs(0)).toBe(12_000);
+    expect(internals.replayBuffer.estimatedByteSize).toBeLessThan(3 * 1024 * 1024);
+    expect(eligible()).toBe(false);
+
+    internals.replayBuffer.drainUpTo(1);
+    expect(internals.replayBuffer.messageCount).toBe(1000);
+    expect(eligible()).toBe(true);
+    internals.replayBuffer.drainUpTo(2);
+    expect(internals.replayBuffer.messageCount).toBe(999);
+    expect(eligible()).toBe(true);
+  });
+
+  it('resumes byte-limited prefetch at the measured low byte boundary', () => {
+    const internals = source as unknown as {
+      prefetchContinuation: InnertubeContinuationData | null;
+      replayBuffer: ReplayBuffer;
+      shouldPrefetch: (
+        now: number,
+        signal: AbortSignal | undefined,
+        playback: { offsetMs: number; paused: boolean }
+      ) => boolean;
+    };
+    internals.prefetchContinuation = { continuation: 'next' };
+    const eligible = () => internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false });
+    const high = 6 * 1024 * 1024;
+    const low = 3 * 1024 * 1024;
+    internals.replayBuffer.insert(makeMessageWithEstimatedBytes(high), 12_000);
+    expect(internals.replayBuffer.estimatedByteSize).toBe(high);
+    expect(eligible()).toBe(false);
+
+    for (const [bytes, expected] of [
+      [low + 2, false],
+      [low, true],
+      [low - 2, true],
+    ] as const) {
+      internals.replayBuffer.clear();
+      internals.replayBuffer.insert(makeMessageWithEstimatedBytes(bytes), 12_000);
+      expect(internals.replayBuffer.messageCount).toBe(1);
+      expect(internals.replayBuffer.estimatedByteSize).toBe(bytes);
+      expect(internals.replayBuffer.aheadHorizonMs(0)).toBe(12_000);
+      expect(eligible()).toBe(expected);
+    }
   });
 
   it('keeps mandatory player polling eligible after optional prefetch reaches its page cap', async () => {
@@ -589,6 +681,63 @@ describe('ReplayChatSource', () => {
     expect(internals.lastReplayRequestedOffsetMs).toBe(-1000);
   });
 
+  it('keeps a late failed seek from changing the replacement seek or its messages', async () => {
+    const pendingRequests: Array<{
+      signal: AbortSignal | undefined;
+      resolve: (payload: LiveChatPayload) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const received: string[] = [];
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      replayConsecutiveFailures: number;
+      replayTotalFailuresSinceSuccess: number;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      requestReplayPayload: (
+        continuation: InnertubeContinuationData,
+        signal?: AbortSignal
+      ) => Promise<LiveChatPayload>;
+      handleSeeked: (offsetMs: number) => void;
+    };
+    internals.callback = (messages) => {
+      received.push(
+        ...(Array.isArray(messages) ? messages : [messages]).flatMap((m) => m.id ?? [])
+      );
+    };
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'seek' };
+    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 2000, paused: false });
+    vi.spyOn(internals, 'requestReplayPayload').mockImplementation(
+      (_continuation, signal) =>
+        new Promise<LiveChatPayload>((resolve, reject) => {
+          pendingRequests.push({ signal, resolve, reject });
+        })
+    );
+
+    internals.handleSeeked(1000);
+    await vi.waitFor(() => expect(pendingRequests).toHaveLength(1));
+    internals.handleSeeked(2000);
+    await vi.waitFor(() => expect(pendingRequests).toHaveLength(2));
+    expect(pendingRequests[0]?.signal?.aborted).toBe(true);
+    expect(pendingRequests[1]?.signal?.aborted).toBe(false);
+
+    pendingRequests[0]?.reject(new Error('late body failure'));
+    pendingRequests[1]?.resolve({
+      actions: [makeReplayAction('current-seek', 2000)],
+      continuations: [{ playerSeekContinuationData: { continuation: 'next' } }],
+    });
+    await vi.waitFor(() => expect(received).toEqual(['current-seek']));
+    expect(internals.replayPlayerSeekContinuation).toEqual({ continuation: 'next' });
+    expect(internals.replayConsecutiveFailures).toBe(0);
+    expect(internals.replayTotalFailuresSinceSuccess).toBe(0);
+    expect(source.drainPendingMessages()).toEqual([]);
+
+    source.stop();
+    expect(pendingRequests[1]?.signal?.aborted).toBe(true);
+  });
+
   it('discards a continuation response invalidated by a later seek', async () => {
     const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
     const currentContinuation = { continuation: 'current' };
@@ -802,6 +951,73 @@ describe('ReplayChatSource', () => {
     expect(internals.replayContinuation).toEqual({ continuation: 'current-next' });
   });
 
+  it.each(['success', 'error'] as const)(
+    'aborts a stopped replay body and ignores its late %s after a new session starts',
+    async (lateResult) => {
+      const bootstrap = {
+        initialContinuation: { continuation: 'initial' },
+        isReplay: true,
+      } as ChatBootstrapData;
+      let resolveOld!: (payload: LiveChatPayload) => void;
+      let rejectOld!: (error: Error) => void;
+      const requestSignals: AbortSignal[] = [];
+      const internals = source as unknown as {
+        getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+        requestPayload: (...args: unknown[]) => Promise<LiveChatPayload>;
+      };
+      vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 1000, paused: false });
+      const request = vi.spyOn(internals, 'requestPayload').mockImplementation((...args) => {
+        requestSignals.push(args.at(-1) as AbortSignal);
+        if (requestSignals.length === 1) {
+          return new Promise<LiveChatPayload>((resolve, reject) => {
+            resolveOld = resolve;
+            rejectOld = reject;
+          });
+        }
+        return Promise.resolve({
+          actions: [makeReplayAction('current-session', 1000)],
+          continuations: [{ liveChatReplayContinuationData: { continuation: 'current-next' } }],
+        });
+      });
+
+      source.setInitialBootstrap(bootstrap);
+      const stoppedStart = source.start(vi.fn());
+      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      source.stop();
+      expect(requestSignals[0]?.aborted).toBe(true);
+
+      source.setInitialBootstrap(bootstrap);
+      const received: string[] = [];
+      const currentStart = source.start((messages) => {
+        received.push(
+          ...(Array.isArray(messages) ? messages : [messages]).flatMap((message) =>
+            message.id ? [message.id] : []
+          )
+        );
+      });
+      expect(request).toHaveBeenCalledOnce();
+      if (lateResult === 'success') {
+        resolveOld({
+          actions: [makeReplayAction('stopped-session', 1000)],
+          continuations: [{ liveChatReplayContinuationData: { continuation: 'stopped-next' } }],
+        });
+      } else {
+        rejectOld(new Error('late body failure'));
+      }
+
+      await expect(stoppedStart).resolves.toBe('retryable');
+      await expect(currentStart).resolves.toBe('started');
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(requestSignals[1]?.aborted).toBe(false);
+      expect(received).toEqual(['current-session']);
+      expect(source.getLatestMessages(2).map((message) => message.id)).not.toContain(
+        'stopped-session'
+      );
+      source.stop();
+      expect(requestSignals[1]?.aborted).toBe(true);
+    }
+  );
+
   it('follows initial continuations until the buffer reaches current playback', async () => {
     const internals = source as unknown as {
       bootstrap: ChatBootstrapData | null;
@@ -833,6 +1049,158 @@ describe('ReplayChatSource', () => {
     expect(requestReplayPayload).toHaveBeenCalledTimes(2);
     expect(source.drainPendingMessages().map((message) => message.id)).toEqual(['current']);
   });
+
+  it('rejects replay startup when its initial page has neither token mode', async () => {
+    source.setInitialBootstrap({
+      initialContinuation: { continuation: 'initial' },
+      isReplay: true,
+    } as ChatBootstrapData);
+    const internals = source as unknown as {
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+    };
+    const request = vi.spyOn(internals, 'requestReplayPayload').mockResolvedValue({
+      actions: [],
+      continuations: [],
+    });
+
+    await expect(source.start(vi.fn())).resolves.toBe('retryable');
+    expect(request).toHaveBeenCalledOnce();
+    expect(source.getHealthSnapshot().observerAlive).toBe(false);
+    source.stop();
+  });
+
+  it.each([{}, { continuationContents: { liveChatContinuation: null } }])(
+    'does not count an invalid replay response as activity, but accepts a valid empty page: %j',
+    async (invalidResponse) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
+      source.setInitialBootstrap({
+        initialContinuation: { continuation: 'initial' },
+        isReplay: true,
+      } as ChatBootstrapData);
+      const internals = source as unknown as {
+        requestPayload: (
+          fetchFn: () => Promise<unknown>,
+          continuation: InnertubeContinuationData
+        ) => Promise<LiveChatPayload | null>;
+      };
+
+      await expect(
+        internals.requestPayload(async () => invalidResponse, { continuation: 'initial' })
+      ).rejects.toThrow('Live chat response is missing its continuation payload');
+      expect(source.getHealthSnapshot().recentlyActive).toBe(false);
+
+      const validEmptyPage = {
+        continuationContents: { liveChatContinuation: { actions: [], continuations: [] } },
+      };
+      await expect(
+        internals.requestPayload(async () => validEmptyPage, { continuation: 'initial' })
+      ).resolves.toEqual({ actions: [], continuations: [] });
+      expect(source.getHealthSnapshot().recentlyActive).toBe(true);
+    }
+  );
+
+  it.each(['playerSeek', 'continuation'] as const)(
+    'counts an invalid %s replay page as a failure and resets on a valid empty page',
+    async (mode) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
+      const current = { continuation: 'current' };
+      const internals = source as unknown as {
+        replayMode: 'playerSeek' | 'continuation' | null;
+        replayPlayerSeekContinuation: InnertubeContinuationData | null;
+        replayContinuation: InnertubeContinuationData | null;
+        replayConsecutiveFailures: number;
+        replayTotalFailuresSinceSuccess: number;
+        replayNextAllowedFetchAt: number;
+        requestReplayPayload: () => Promise<LiveChatPayload | null>;
+        fetchReplayPlayerSeek: (offsetMs: number) => Promise<boolean>;
+        fetchNextReplayFallbackBatch: (minimumOffsetMs: number) => Promise<boolean>;
+      };
+      internals.replayMode = mode;
+      internals.replayPlayerSeekContinuation = mode === 'playerSeek' ? current : null;
+      internals.replayContinuation = mode === 'continuation' ? current : null;
+      internals.replayConsecutiveFailures = 4;
+      internals.replayTotalFailuresSinceSuccess = 14;
+      const request = vi.spyOn(internals, 'requestReplayPayload');
+      request
+        .mockRejectedValueOnce(new LiveChatProtocolError('invalid continuation payload'))
+        .mockResolvedValueOnce({
+          actions: [],
+          continuations: [
+            mode === 'playerSeek'
+              ? { playerSeekContinuationData: { continuation: 'healthy' } }
+              : { liveChatReplayContinuationData: { continuation: 'healthy' } },
+          ],
+        });
+      const fetchPage = (): Promise<boolean> =>
+        mode === 'playerSeek'
+          ? internals.fetchReplayPlayerSeek(1000)
+          : internals.fetchNextReplayFallbackBatch(0);
+
+      await expect(fetchPage()).resolves.toBe(false);
+      expect(internals.replayConsecutiveFailures).toBe(0);
+      expect(internals.replayTotalFailuresSinceSuccess).toBe(15);
+      expect(source.getHealthSnapshot().isInBackoff).toBe(true);
+      expect(
+        mode === 'playerSeek'
+          ? internals.replayPlayerSeekContinuation
+          : internals.replayContinuation
+      ).toBe(current);
+
+      await expect(fetchPage()).resolves.toBe(true);
+      expect(internals.replayConsecutiveFailures).toBe(0);
+      expect(internals.replayTotalFailuresSinceSuccess).toBe(0);
+      expect(internals.replayNextAllowedFetchAt).toBe(0);
+      expect(source.getHealthSnapshot().isInBackoff).toBe(false);
+      expect(
+        mode === 'playerSeek'
+          ? internals.replayPlayerSeekContinuation
+          : internals.replayContinuation
+      ).toEqual({ continuation: 'healthy' });
+      expect(source.drainPendingMessages()).toEqual([]);
+    }
+  );
+
+  it.each([3, 12])(
+    'bounds empty sequential catch-up to the effective replayBatchLimit of %i pages',
+    async (limit) => {
+      expect(DEFAULT_SETTINGS.replayBatchLimit).toBe(12);
+      const settings =
+        limit === 12 ? DEFAULT_SETTINGS : { ...DEFAULT_SETTINGS, replayBatchLimit: limit };
+      source = new ReplayChatSource(() => settings);
+      source.setInitialBootstrap({
+        initialContinuation: { continuation: 'initial' },
+        isReplay: true,
+      } as ChatBootstrapData);
+      const internals = source as unknown as {
+        getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+        requestReplayPayload: (continuation: InnertubeContinuationData) => Promise<LiveChatPayload>;
+      };
+      vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+        offsetMs: 20_000,
+        paused: false,
+      });
+      const requests: string[] = [];
+      vi.spyOn(internals, 'requestReplayPayload').mockImplementation(async (continuation) => {
+        requests.push(continuation.continuation);
+        return {
+          actions: [],
+          continuations: [
+            { liveChatReplayContinuationData: { continuation: `page-${requests.length}` } },
+          ],
+        };
+      });
+
+      await expect(source.start(vi.fn())).resolves.toBe('started');
+      expect(requests).toEqual([
+        'initial',
+        ...Array.from({ length: limit }, (_, index) => `page-${index + 1}`),
+      ]);
+      expect(source.drainPendingMessages()).toEqual([]);
+      source.stop();
+    }
+  );
 
   it('does not refetch an empty player-seek buffer until playback advances', () => {
     const internals = source as unknown as {
@@ -911,6 +1279,120 @@ describe('ReplayChatSource', () => {
       true
     );
     expect(fetchReplay).toHaveBeenCalledOnce();
+  });
+
+  it('backs off after five player-seek failures and recovers from a rejected live bootstrap', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    const video = document.createElement('video');
+    player.append(video);
+    document.body.append(player);
+    const originalBootstrap = {
+      initialContinuation: { continuation: 'old-initial' },
+      isReplay: true,
+    } as ChatBootstrapData;
+    const validBootstrap = {
+      initialContinuation: { continuation: 'new-initial' },
+      isReplay: true,
+    } as ChatBootstrapData;
+    source.setInitialBootstrap(originalBootstrap);
+    bootstrapMocks.refreshBootstrap
+      .mockResolvedValueOnce({ isReplay: false } as ChatBootstrapData)
+      .mockResolvedValueOnce(validBootstrap);
+
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      bootstrap: ChatBootstrapData | null;
+      replayMode: 'playerSeek' | 'continuation' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      replayContinuation: InnertubeContinuationData | null;
+      pollPlayerSeekReplay: (playback: { offsetMs: number; paused: boolean }) => Promise<boolean>;
+      pollContinuationReplay: (offsetMs: number) => Promise<boolean>;
+      requestReplayPayload: (continuation: InnertubeContinuationData) => Promise<LiveChatPayload>;
+    };
+    internals.callback = vi.fn();
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'old-seek' };
+    let requests = 0;
+    const request = vi.spyOn(internals, 'requestReplayPayload').mockImplementation(async () => {
+      requests++;
+      if (requests <= 16) throw new Error('transient replay transport failure');
+      return {
+        actions: requests === 17 ? [makeReplayAction('recovered-sequential', 0)] : [],
+        continuations: [
+          {
+            liveChatReplayContinuationData: {
+              continuation: requests === 17 ? 'new-sequential' : 'next-sequential',
+            },
+          },
+        ],
+      };
+    });
+    const playback = { offsetMs: 1000, paused: false };
+
+    for (let attempt = 1; attempt <= 15; attempt++) {
+      if (attempt === 6 || attempt === 11) vi.setSystemTime(Date.now() + 5000);
+      await expect(internals.pollPlayerSeekReplay(playback)).resolves.toBe(false);
+      expect(request).toHaveBeenCalledTimes(attempt);
+      if (attempt === 5 || attempt === 10) {
+        expect(source.getHealthSnapshot().isInBackoff).toBe(true);
+        vi.setSystemTime(Date.now() + 4999);
+        await expect(internals.pollPlayerSeekReplay(playback)).resolves.toBe(false);
+        expect(request).toHaveBeenCalledTimes(attempt);
+        vi.setSystemTime(Date.now() - 4999);
+      }
+    }
+
+    expect(bootstrapMocks.refreshBootstrap).toHaveBeenCalledOnce();
+    expect(internals.bootstrap).toBe(originalBootstrap);
+    expect(internals.replayMode).toBe('playerSeek');
+    expect(source.getHealthSnapshot().isInBackoff).toBe(true);
+
+    vi.setSystemTime(Date.now() + 5000);
+    await expect(internals.pollPlayerSeekReplay(playback)).resolves.toBe(true);
+    expect(request).toHaveBeenCalledTimes(17);
+    expect(bootstrapMocks.refreshBootstrap).toHaveBeenCalledTimes(2);
+    expect(internals.bootstrap).toBe(validBootstrap);
+    expect(internals.replayMode).toBe('continuation');
+    expect(internals.replayContinuation).toEqual({ continuation: 'new-sequential' });
+    expect(source.getHealthSnapshot().observerAlive).toBe(true);
+
+    await expect(internals.pollContinuationReplay(1000)).resolves.toBe(true);
+    expect(request).toHaveBeenCalledTimes(18);
+    expect(internals.replayContinuation).toEqual({ continuation: 'next-sequential' });
+
+    const onSeek = vi.fn();
+    source.onSeek = onSeek;
+    video.dispatchEvent(new Event('seeked'));
+    expect(onSeek).toHaveBeenCalledOnce();
+    source.stop();
+  });
+
+  it('does not apply player-seek session refresh to accumulated sequential failures', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
+    const internals = source as unknown as {
+      replayMode: 'playerSeek' | 'continuation' | null;
+      replayContinuation: InnertubeContinuationData | null;
+      pollContinuationReplay: (offsetMs: number) => Promise<boolean>;
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+    };
+    internals.replayMode = 'continuation';
+    internals.replayContinuation = { continuation: 'sequential' };
+    const request = vi
+      .spyOn(internals, 'requestReplayPayload')
+      .mockRejectedValue(new Error('sequential transport failure'));
+
+    for (let attempt = 1; attempt <= 15; attempt++) {
+      if (attempt === 6 || attempt === 11) vi.setSystemTime(Date.now() + 5000);
+      await expect(internals.pollContinuationReplay(1000)).resolves.toBe(false);
+      expect(request).toHaveBeenCalledTimes(attempt);
+    }
+
+    expect(bootstrapMocks.refreshBootstrap).not.toHaveBeenCalled();
+    expect(internals.replayMode).toBe('continuation');
   });
 
   it('stop() is idempotent', () => {
