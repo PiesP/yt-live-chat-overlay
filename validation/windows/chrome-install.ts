@@ -21,6 +21,7 @@ import type {
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
+import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
 import {
   assessPublicImage,
@@ -44,6 +45,7 @@ import type {
   PublicImageResponse,
 } from './live-rendering.ts';
 import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
+import { runNativeWorkerRetirementFixture } from './native-worker-retirement.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import {
@@ -180,6 +182,8 @@ type ChromeResult<Live = LiveObservation> = {
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
   videoPiP?: Awaited<ReturnType<typeof runVideoPiPFixture>> | null;
   nativeTabInstallation?: ChromeResult | null;
+  chromiumBootstrapBoundaries?: Awaited<ReturnType<typeof runChromiumBootstrapBoundaries>> | null;
+  nativeWorkerRetirement?: Awaited<ReturnType<typeof runNativeWorkerRetirementFixture>> | null;
   mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
@@ -2386,6 +2390,21 @@ export async function runChromeInstallation({
       };
     }
     if (browserName === 'msedge' && installation === 'extension') {
+      // Exercise document and realm ownership before the longer media campaign.
+      result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
+      result.nativeWorkerRetirement = await runNativeWorkerRetirementFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.nativeWorkerRetirement.status, 'passed');
       result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
       assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
       result.bitmapLifecycle = await runBitmapLifecycleFixture({

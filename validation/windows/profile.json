@@ -11,6 +11,7 @@
     "assets": [
       "validation/windows/chrome-install.ts",
       "validation/windows/chromium-network-diagnostics.ts",
+      "validation/windows/chromium-bootstrap-boundaries.ts",
       "validation/windows/profile.ts",
       "validation/windows/release-upgrade",
       "validation/windows/placement-timing.ts",
@@ -18,6 +19,7 @@
       "validation/windows/worker-redirect-transport.ts",
       "validation/windows/video-pip.ts",
       "validation/windows/native-tab-lifetime.ts",
+      "validation/windows/native-worker-retirement.ts",
       "validation/windows/main-image-recovery.ts",
       "validation/windows/native-page-script-probe.ts",
       "validation/windows/chrome-process.ts",
