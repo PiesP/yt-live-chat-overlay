@@ -49,6 +49,7 @@ describe('installDomChatWatcher', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('forwards every renderer from a single added mutation node', async () => {
@@ -164,5 +165,72 @@ describe('installDomChatWatcher', () => {
       text: 'm'.repeat(80),
     });
     unsubscribe?.();
+  });
+
+  it('cancels pending rAF work on hide and reobserves once on return', async () => {
+    const container = createChatContainer();
+    const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe');
+    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame');
+    const onMessages = vi.fn();
+    const unsubscribe = installDomChatWatcher(onMessages);
+
+    try {
+      expect(observe).toHaveBeenCalledOnce();
+      const stale = createTextRenderer('alice', 'before hide', 'stale');
+      container.append(stale);
+      await Promise.resolve();
+      expect(onMessages).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      stale.remove();
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(cancelFrame).toHaveBeenCalledOnce();
+      await vi.runAllTimersAsync();
+      expect(onMessages).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(observe).toHaveBeenCalledTimes(2);
+      container.append(createTextRenderer('bob', 'after return', 'fresh'));
+      await vi.runAllTimersAsync();
+      expect(onMessages).toHaveBeenCalledOnce();
+      expect(onMessages.mock.calls[0]?.[0]?.map((message: { id: string }) => message.id)).toEqual([
+        'fresh',
+      ]);
+    } finally {
+      unsubscribe?.();
+      if (originalVisibility) {
+        Object.defineProperty(document, 'visibilityState', originalVisibility);
+      } else {
+        Reflect.deleteProperty(document, 'visibilityState');
+      }
+    }
+  });
+
+  it('does not publish a renderer removed after its mutation but before rAF', async () => {
+    const container = createChatContainer();
+    const onMessages = vi.fn();
+    const unsubscribe = installDomChatWatcher(onMessages);
+
+    try {
+      const removed = createTextRenderer('alice', 'removed before frame', 'removed');
+      container.append(removed);
+      await Promise.resolve();
+      removed.remove();
+      await vi.runAllTimersAsync();
+      expect(onMessages).not.toHaveBeenCalled();
+
+      container.append(createTextRenderer('bob', 'healthy after removal', 'fresh'));
+      await vi.runAllTimersAsync();
+      expect(onMessages).toHaveBeenCalledOnce();
+      expect(onMessages.mock.calls[0]?.[0]?.map((message: { id: string }) => message.id)).toEqual([
+        'fresh',
+      ]);
+    } finally {
+      unsubscribe?.();
+    }
   });
 });
