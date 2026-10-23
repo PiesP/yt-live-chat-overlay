@@ -104,7 +104,7 @@ describe('installed Chrome acceptance outcomes', () => {
     );
     expect(evidence.extensionUpgrade).toEqual({
       status: 'failed',
-      transition: 'public-0.45.7-to-candidate-0.45.8',
+      transition: 'extension-input-unverified',
       activeStage: 'input-preflight',
     });
     expect(evidence.cleanup).toMatchObject({

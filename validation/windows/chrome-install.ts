@@ -45,7 +45,11 @@ import type {
 } from './live-rendering.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
-import { readExtensionUpgradeInput, runExtensionUpgrade } from './release-upgrade/extension.ts';
+import {
+  extensionUpgradeTransition,
+  readExtensionUpgradeInput,
+  runExtensionUpgrade,
+} from './release-upgrade/extension.ts';
 import {
   loadUpgradeInputs,
   readUserscriptMetadata,
@@ -2245,7 +2249,7 @@ export async function runChromeInstallation({
       installation === 'extension'
         ? {
             status: 'failed',
-            transition: 'public-0.45.7-to-candidate-0.45.8',
+            transition: 'extension-input-unverified',
             activeStage: 'input-preflight',
           }
         : null,
@@ -2260,7 +2264,7 @@ export async function runChromeInstallation({
       result.extensionUpgrade = extensionUpgradeInput
         ? {
             status: 'failed',
-            transition: 'public-0.45.7-to-candidate-0.45.8',
+            transition: extensionUpgradeTransition(extensionUpgradeInput.input),
             activeStage: 'browser-launch',
           }
         : { status: 'not-requested', transition: 'fresh-candidate-install' };
@@ -2304,7 +2308,10 @@ export async function runChromeInstallation({
             error.extensionUpgrade &&
             typeof error.extensionUpgrade === 'object'
               ? (error.extensionUpgrade as Record<string, unknown>)
-              : { status: 'failed', transition: 'public-0.45.7-to-candidate-0.45.8' };
+              : {
+                  status: 'failed',
+                  transition: extensionUpgradeTransition(extensionUpgradeInput.input),
+                };
           throw error;
         }
         result.installationMethod = 'same-path-unpacked-extension-upgrade';

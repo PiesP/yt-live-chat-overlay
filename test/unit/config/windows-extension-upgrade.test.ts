@@ -22,6 +22,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import {
   boundedFile,
+  extensionUpgradeTransition,
   extensionInventory,
   readExtensionStoredFontSize,
   readExtensionUpgradeInput,
@@ -31,6 +32,7 @@ import {
 
 const INPUT = 'validation/windows/release-upgrade/extension-input.json';
 const PUBLIC = 'validation/windows/release-upgrade/public-v0.45.7-chrome';
+const SAME_VERSION_PUBLIC = 'validation/windows/release-upgrade/public-v0.45.8-chrome';
 const extensionModule = new globalThis.URL(
   '../../../validation/windows/release-upgrade/extension.ts',
   import.meta.url
@@ -38,6 +40,8 @@ const extensionModule = new globalThis.URL(
 const execFileAsync = promisify(execFile);
 const URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip';
+const SAME_VERSION_URL =
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip';
 const FILES = [
   'background.js',
   'content-script.js',
@@ -92,10 +96,12 @@ function archive(files: Record<string, Buffer>, replacement?: { name: string; by
   return Buffer.concat([...local, centralBytes, end]);
 }
 
-async function makeFixture() {
+async function makeFixture(previousVersion: '0.45.7' | '0.45.8' = '0.45.7') {
   const root = await mkdtemp(join(tmpdir(), 'yt-extension-upgrade-'));
   roots.push(root);
-  const baseline = join(root, PUBLIC, 'unpacked');
+  const publicPath = previousVersion === '0.45.7' ? PUBLIC : SAME_VERSION_PUBLIC;
+  const publicUrl = previousVersion === '0.45.7' ? URL : SAME_VERSION_URL;
+  const baseline = join(root, publicPath, 'unpacked');
   const candidate = join(root, 'dist-extension');
   for (const directory of [baseline, candidate]) {
     await mkdir(join(directory, 'icons'), { recursive: true });
@@ -108,7 +114,7 @@ async function makeFixture() {
         ? JSON.stringify({
             manifest_version: 3,
             name: 'YouTube Live Chat Overlay',
-            version: '0.45.7',
+            version: previousVersion,
           })
         : `public-${name}`;
     const next =
@@ -128,14 +134,17 @@ async function makeFixture() {
   const candidateInventory = await extensionInventory(candidate);
   const input = {
     schemaVersion: 1,
-    previousVersion: '0.45.7',
+    previousVersion,
     candidateVersion: '0.45.8',
-    publicAssetUrl: URL,
-    publicArchive: { path: `${PUBLIC}/artifact.zip`, sha256: sha(zip) },
-    previousExtension: { path: `${PUBLIC}/unpacked`, inventorySha256: baselineInventory.sha256 },
+    publicAssetUrl: publicUrl,
+    publicArchive: { path: `${publicPath}/artifact.zip`, sha256: sha(zip) },
+    previousExtension: {
+      path: `${publicPath}/unpacked`,
+      inventorySha256: baselineInventory.sha256,
+    },
     candidateExtension: { inventorySha256: candidateInventory.sha256 },
   };
-  await writeFile(join(root, PUBLIC, 'artifact.zip'), zip);
+  await writeFile(join(root, publicPath, 'artifact.zip'), zip);
   await writeFile(join(root, INPUT), JSON.stringify(input));
   return { root, baseline, candidate, files, input, zip };
 }
@@ -236,8 +245,54 @@ describe('optional public Chrome extension update inputs', () => {
     const fixture = await makeFixture();
     const checked = await readExtensionUpgradeInput(fixture.root);
     expect(checked?.input.publicAssetUrl).toBe(URL);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.45.7-to-candidate-0.45.8'
+    );
     expect(checked?.baseline.files['manifest.json']).toBe(sha(fixture.files['manifest.json']!));
     expect(Object.keys(checked?.candidate.files ?? {})).toHaveLength(8);
+  });
+
+  it('admits a pinned public 0.45.8 to candidate 0.45.8 update with different bytes', async () => {
+    const fixture = await makeFixture('0.45.8');
+    const checked = await readExtensionUpgradeInput(fixture.root);
+    expect(checked?.input.publicAssetUrl).toBe(SAME_VERSION_URL);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.45.8-to-candidate-0.45.8'
+    );
+    expect(checked?.input.publicArchive.path).toBe(`${SAME_VERSION_PUBLIC}/artifact.zip`);
+    expect(checked?.input.previousExtension.path).toBe(`${SAME_VERSION_PUBLIC}/unpacked`);
+    expect(checked?.baseline.sha256).not.toBe(checked?.candidate.sha256);
+    expect(checked?.baseline.files['manifest.json']).toBe(
+      checked?.candidate.files['manifest.json']
+    );
+  });
+
+  it('rejects a same-version update when the actual inventories are identical', async () => {
+    const fixture = await makeFixture('0.45.8');
+    for (const name of FILES) await writeFile(join(fixture.candidate, name), fixture.files[name]!);
+    const inventory = await extensionInventory(fixture.candidate);
+    await writeFile(
+      join(fixture.root, INPUT),
+      JSON.stringify({
+        ...fixture.input,
+        candidateExtension: { inventorySha256: inventory.sha256 },
+      })
+    );
+    await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow(
+      'Published and candidate extension inventories are identical'
+    );
+  });
+
+  it('rejects mixed public versions, URLs, paths, and candidate versions', async () => {
+    const fixture = await makeFixture('0.45.8');
+    for (const changed of [
+      { previousVersion: '0.45.7' },
+      { candidateVersion: '0.45.7' },
+      { publicAssetUrl: URL },
+      { publicArchive: { ...fixture.input.publicArchive, path: `${PUBLIC}/artifact.zip` } },
+      { previousExtension: { ...fixture.input.previousExtension, path: `${PUBLIC}/unpacked` } },
+    ])
+      expect(() => validateExtensionUpgradeInput({ ...fixture.input, ...changed })).toThrow();
   });
 
   it('rejects unapproved identity fields and changed versions', async () => {
@@ -355,6 +410,7 @@ describe('optional public Chrome extension update inputs', () => {
     const ignore = await readFile('.gitignore', 'utf8');
     expect(ignore).toContain('/validation/windows/release-upgrade/extension-input.json');
     expect(ignore).toContain('/validation/windows/release-upgrade/public-v0.45.7-chrome/');
+    expect(ignore).toContain('/validation/windows/release-upgrade/public-v0.45.8-chrome/');
   });
 
   it('reads only the saved font size from the extension storage JSON string', async () => {

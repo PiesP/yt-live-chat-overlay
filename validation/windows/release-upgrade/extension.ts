@@ -14,11 +14,25 @@ import type { BrowserContext, CDPSession, Page } from '@playwright/test';
 import { buildVisibleWatchHtml } from '../visible-watch.ts';
 
 const INPUT = 'validation/windows/release-upgrade/extension-input.json';
-const ARCHIVE = 'validation/windows/release-upgrade/public-v0.45.7-chrome/artifact.zip';
-const BASELINE = 'validation/windows/release-upgrade/public-v0.45.7-chrome/unpacked';
 const CANDIDATE = 'dist-extension';
-const PUBLIC_URL =
-  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip';
+const PUBLIC_RELEASES = {
+  '0.45.7': {
+    candidateVersion: '0.45.8',
+    archive: 'validation/windows/release-upgrade/public-v0.45.7-chrome/artifact.zip',
+    baseline: 'validation/windows/release-upgrade/public-v0.45.7-chrome/unpacked',
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip',
+    transition: 'public-0.45.7-to-candidate-0.45.8',
+  },
+  '0.45.8': {
+    candidateVersion: '0.45.8',
+    archive: 'validation/windows/release-upgrade/public-v0.45.8-chrome/artifact.zip',
+    baseline: 'validation/windows/release-upgrade/public-v0.45.8-chrome/unpacked',
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip',
+    transition: 'public-0.45.8-to-candidate-0.45.8',
+  },
+} as const;
+type PublicVersion = keyof typeof PUBLIC_RELEASES;
+type PublicRelease = (typeof PUBLIC_RELEASES)[PublicVersion];
 const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsExtensionUpgrade';
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
@@ -37,11 +51,11 @@ const DIRECTORIES = ['icons', 'workers'] as const;
 
 type ExtensionInput = {
   schemaVersion: 1;
-  previousVersion: '0.45.7';
+  previousVersion: PublicVersion;
   candidateVersion: '0.45.8';
-  publicAssetUrl: typeof PUBLIC_URL;
-  publicArchive: { path: typeof ARCHIVE; sha256: string };
-  previousExtension: { path: typeof BASELINE; inventorySha256: string };
+  publicAssetUrl: PublicRelease['url'];
+  publicArchive: { path: PublicRelease['archive']; sha256: string };
+  previousExtension: { path: PublicRelease['baseline']; inventorySha256: string };
   candidateExtension: { inventorySha256: string };
 };
 type Inventory = { sha256: string; files: Record<string, string> };
@@ -79,21 +93,26 @@ export function validateExtensionUpgradeInput(value: unknown): ExtensionInput {
     'candidateExtension',
   ]);
   assert.equal(input.schemaVersion, 1);
-  assert.equal(input.previousVersion, '0.45.7');
-  assert.equal(input.candidateVersion, '0.45.8');
-  assert.equal(input.publicAssetUrl, PUBLIC_URL);
+  assert(input.previousVersion === '0.45.7' || input.previousVersion === '0.45.8');
+  const release = PUBLIC_RELEASES[input.previousVersion];
+  assert.equal(input.candidateVersion, release.candidateVersion);
+  assert.equal(input.publicAssetUrl, release.url);
   const archive = object(input.publicArchive);
   keys(archive, ['path', 'sha256']);
-  assert.equal(archive.path, ARCHIVE);
+  assert.equal(archive.path, release.archive);
   sha(archive.sha256);
   const baseline = object(input.previousExtension);
   keys(baseline, ['path', 'inventorySha256']);
-  assert.equal(baseline.path, BASELINE);
+  assert.equal(baseline.path, release.baseline);
   sha(baseline.inventorySha256);
   const candidate = object(input.candidateExtension);
   keys(candidate, ['inventorySha256']);
   sha(candidate.inventorySha256);
   return input as ExtensionInput;
+}
+
+export function extensionUpgradeTransition(input: ExtensionInput): PublicRelease['transition'] {
+  return PUBLIC_RELEASES[input.previousVersion].transition;
 }
 
 function sameFile(before: BigIntStats, after: BigIntStats): boolean {
@@ -357,11 +376,12 @@ export async function readExtensionUpgradeInput(root: string): Promise<{
     throw error;
   }
   const input = validateExtensionUpgradeInput(JSON.parse(raw.toString('utf8')));
-  await ordinaryParents(root, ARCHIVE);
-  await ordinaryParents(root, BASELINE);
-  const archive = await boundedFile(join(root, ARCHIVE), MAX_ARCHIVE_BYTES);
+  const release = PUBLIC_RELEASES[input.previousVersion];
+  await ordinaryParents(root, release.archive);
+  await ordinaryParents(root, release.baseline);
+  const archive = await boundedFile(join(root, release.archive), MAX_ARCHIVE_BYTES);
   assert.equal(digest(archive), input.publicArchive.sha256, 'Public Chrome ZIP SHA-256 differs');
-  const baseline = await extensionInventory(join(root, BASELINE));
+  const baseline = await extensionInventory(join(root, release.baseline));
   assert.equal(
     baseline.sha256,
     input.previousExtension.inventorySha256,
@@ -374,8 +394,13 @@ export async function readExtensionUpgradeInput(root: string): Promise<{
     input.candidateExtension.inventorySha256,
     'Candidate Chrome inventory differs'
   );
+  assert.notEqual(
+    baseline.sha256,
+    candidate.sha256,
+    'Published and candidate extension inventories are identical'
+  );
   assert.equal(
-    manifestVersion(await boundedFile(join(root, BASELINE, 'manifest.json'), 64_000)),
+    manifestVersion(await boundedFile(join(root, release.baseline, 'manifest.json'), 64_000)),
     input.previousVersion
   );
   assert.equal(
@@ -388,9 +413,9 @@ export async function readExtensionUpgradeInput(root: string): Promise<{
 type VerifiedInput = NonNullable<Awaited<ReturnType<typeof readExtensionUpgradeInput>>>;
 type UpgradeReceipt = {
   status: 'failed' | 'passed';
-  transition: 'public-0.45.7-to-candidate-0.45.8';
+  transition: PublicRelease['transition'];
   method: 'same-path-unpacked-runtime-reload';
-  publicAssetUrl: typeof PUBLIC_URL;
+  publicAssetUrl: PublicRelease['url'];
   publicArchiveSha256: string;
   previousInventorySha256: string;
   candidateInventorySha256: string;
@@ -603,11 +628,12 @@ export async function runExtensionUpgrade({
   onLoaded: (id: string) => void;
 }): Promise<{ extensionId: string; receipt: UpgradeReceipt }> {
   const installedPath = join(profile, 'task-owned-extension');
+  const release = PUBLIC_RELEASES[verified.input.previousVersion];
   const receipt: UpgradeReceipt = {
     status: 'failed',
-    transition: 'public-0.45.7-to-candidate-0.45.8',
+    transition: extensionUpgradeTransition(verified.input),
     method: 'same-path-unpacked-runtime-reload',
-    publicAssetUrl: PUBLIC_URL,
+    publicAssetUrl: release.url,
     publicArchiveSha256: verified.input.publicArchive.sha256,
     previousInventorySha256: verified.baseline.sha256,
     candidateInventorySha256: verified.candidate.sha256,
@@ -627,7 +653,7 @@ export async function runExtensionUpgrade({
   let candidateExtensionPage: Page | null = null;
   try {
     await mkdir(profile, { recursive: true });
-    await cp(join(root, BASELINE), installedPath, {
+    await cp(join(root, release.baseline), installedPath, {
       recursive: true,
       force: false,
       errorOnExist: true,
