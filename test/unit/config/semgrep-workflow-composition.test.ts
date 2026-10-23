@@ -13,7 +13,7 @@ if (!section) throw new Error('Missing Semgrep workflow job');
 const action = join(root, '.github/actions/validate-semgrep-sarif/index.mjs');
 const runtime = process.env.SEMGREP_ACTION_NODE ?? process.execPath;
 const actionReference =
-  'PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@0c7fea5ab60757cad50520cf5ace89eb6396fabd';
+  'PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@a8172948afb80cbb030216ee6bd5f64bb062c489';
 
 function step(name: string): string {
   const body = section?.split(`      - name: ${name}\n`)[1]?.split('\n      - name: ')[0];
