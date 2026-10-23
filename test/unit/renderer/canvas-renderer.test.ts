@@ -1595,6 +1595,77 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('restores the newest image URL once through bounded fallback ingress', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 1 }));
+    let resolveSnapshot!: (messages: WorkerRecoveryMessage[]) => void;
+    const snapshot = new Promise<WorkerRecoveryMessage[]>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      fallbackIngressQueue: { size: number; toArray(): Array<{ message: ChatMessage }> };
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+    };
+    renderer.pause();
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockReturnValue(snapshot);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    const original = {
+      ...makeMessage('replacement-image', 'original'),
+      authorPhotoUrl: 'https://yt3.ggpht.com/old-image.png',
+    };
+    const replacement = {
+      ...original,
+      text: 'replacement',
+      content: [{ type: 'text' as const, content: 'replacement' }],
+      authorPhotoUrl: 'https://yt3.ggpht.com/new-image.png',
+      actionType: 'replace' as const,
+    };
+
+    try {
+      renderer.addMessage(original);
+      renderer.fallbackToMainThread('held-image-snapshot');
+      renderer.addMessage(makeMessage('displaced-ingress', 'displaced'));
+      renderer.addMessage(replacement);
+      expect(internals.fallbackIngressQueue.size).toBe(1);
+      expect(internals.fallbackIngressQueue.toArray().map(({ message }) => message)).toEqual([
+        replacement,
+      ]);
+
+      resolveSnapshot([{ message: original, trackDrops: false }]);
+      await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+      const recovered = internals.pendingQueue.toArray();
+      expect(recovered.filter((message) => message.id === original.id)).toHaveLength(1);
+      expect(recovered[0]).toMatchObject({
+        id: original.id,
+        text: 'replacement',
+        authorPhotoUrl: replacement.authorPhotoUrl,
+      });
+      expect(worker.postMessage).not.toHaveBeenCalled();
+    } finally {
+      renderer.destroy();
+    }
+  });
+
   it.each([
     { paused: false, backlog: false },
     { paused: true, backlog: false },

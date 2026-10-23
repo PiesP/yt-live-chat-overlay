@@ -76,6 +76,7 @@ const internalsOf = (source: LiveChatSource): LiveSourceInternals =>
 describe('LiveChatSource empty-response polling', () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -299,4 +300,164 @@ describe('LiveChatSource empty-response polling', () => {
     ).rejects.toMatchObject({ name: 'LiveChatProtocolError' });
     expect(internals.consecutiveErrors).toBe(2);
   });
+
+  it.each([
+    { name: 'array', body: '[]' },
+    { name: 'missing payload', body: '{"continuationContents":{}}' },
+  ])('classifies HTTP 200 $name and recovers on a valid empty live payload', async ({ body }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const source = new LiveChatSource(makeSettings);
+    const internals = internalsOf(source);
+    internals.bootstrap = makeBootstrap();
+    internals.consecutiveErrors = 2;
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(internals.requestLivePayload({ continuation: 'current' })).rejects.toMatchObject({
+      name: 'LiveChatProtocolError',
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(source.isActive(1_000)).toBe(false);
+    expect(internals.consecutiveErrors).toBe(2);
+
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ continuationContents: { liveChatContinuation: makePayload(null) } }),
+          { status: 200 }
+        )
+    );
+    const recovered = await internals.requestLivePayload({ continuation: 'current' });
+    expect(recovered).toEqual(makePayload(null));
+    if (!recovered) throw new Error('Expected a valid empty live payload');
+    await internals.handleLivePayload(recovered);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(internals.consecutiveErrors).toBe(0);
+    expect(source.isActive(1_000)).toBe(true);
+  });
+
+  it('aborts a stalled live response body on stop and starts a healthy session', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const source = new LiveChatSource(makeSettings);
+    const oldCallback = vi.fn();
+    const newCallback = vi.fn();
+    let bodyAborted = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchMock.mock.calls.length !== 2) {
+        const id = fetchMock.mock.calls.length === 1 ? null : 'new-session';
+        return new Response(
+          JSON.stringify({ continuationContents: { liveChatContinuation: makePayload(id) } })
+        );
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"continuationContents":'));
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                bodyAborted += 1;
+                controller.error(new DOMException('Aborted', 'AbortError'));
+              },
+              { once: true }
+            );
+          },
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    source.setInitialBootstrap(makeBootstrap());
+    await expect(source.start(oldCallback)).resolves.toBe('started');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(source.getHealthSnapshot().observerAlive).toBe(true);
+
+    source.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodyAborted).toBe(1);
+    expect(source.getHealthSnapshot().observerAlive).toBe(false);
+    expect(source.getLatestMessages(10)).toEqual([]);
+
+    source.setInitialBootstrap(makeBootstrap());
+    await expect(source.start(newCallback)).resolves.toBe('started');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(oldCallback).not.toHaveBeenCalled();
+    expect(newCallback).toHaveBeenCalledOnce();
+    expect(source.getLatestMessages(10)).toHaveLength(1);
+    expect(source.getHealthSnapshot().recentlyActive).toBe(true);
+    source.stop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['late success', 'late error'])(
+    'ignores a cancelled live request $name after a healthy restart',
+    async (lateResult) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(100_000);
+      const source = new LiveChatSource(makeSettings);
+      const oldCallback = vi.fn();
+      const newCallback = vi.fn();
+      let settleLate: (() => void) | undefined;
+      let requestAborted = 0;
+      const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        if (fetchMock.mock.calls.length !== 2) {
+          const id = fetchMock.mock.calls.length === 1 ? null : 'new-session';
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ continuationContents: { liveChatContinuation: makePayload(id) } })
+            )
+          );
+        }
+        return new Promise<Response>((resolve, reject) => {
+          settleLate =
+            lateResult === 'late success'
+              ? () =>
+                  resolve(
+                    new Response(
+                      JSON.stringify({
+                        continuationContents: { liveChatContinuation: makePayload('stale') },
+                      })
+                    )
+                  )
+              : () => reject(new TypeError('late request failure'));
+          init?.signal?.addEventListener(
+            'abort',
+            () => {
+              requestAborted += 1;
+              reject(new DOMException('Aborted', 'AbortError'));
+            },
+            { once: true }
+          );
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      source.setInitialBootstrap(makeBootstrap());
+      await expect(source.start(oldCallback)).resolves.toBe('started');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      source.stop();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requestAborted).toBe(1);
+      expect(source.getHealthSnapshot().observerAlive).toBe(false);
+
+      source.setInitialBootstrap(makeBootstrap());
+      await expect(source.start(newCallback)).resolves.toBe('started');
+      settleLate?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(oldCallback).not.toHaveBeenCalled();
+      expect(newCallback).toHaveBeenCalledOnce();
+      expect(source.getLatestMessages(10)).toHaveLength(1);
+      expect(source.getHealthSnapshot().consecutiveErrors).toBe(0);
+      source.stop();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    }
+  );
 });

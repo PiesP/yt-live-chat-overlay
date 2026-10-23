@@ -164,6 +164,107 @@ describe('RenderWorkerManager', () => {
   });
 
   describe('init', () => {
+    it.each(['Worker', 'OffscreenCanvas'] as const)(
+      'keeps the original canvas usable when %s is unavailable',
+      (missingApi) => {
+        const original = globalThis[missingApi];
+        const context = {} as CanvasRenderingContext2D;
+        const canvas = {
+          getContext: vi.fn(() => context),
+          transferControlToOffscreen: vi.fn(),
+        } as unknown as HTMLCanvasElement;
+        const overlay = {
+          getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+          onDimensionsChanged: vi.fn(() => vi.fn()),
+        };
+        vi.stubGlobal(missingApi, undefined);
+
+        try {
+          expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+            started: false,
+            canvasTransferred: false,
+          });
+          expect(canvas.transferControlToOffscreen).not.toHaveBeenCalled();
+          expect(canvas.getContext('2d')).toBe(context);
+          expect(manager.isActive).toBe(false);
+        } finally {
+          vi.stubGlobal(missingApi, original);
+        }
+      }
+    );
+
+    it.each([
+      ['CSP SecurityError', () => new DOMException('blocked', 'SecurityError')],
+      ['TrustedScriptURL TypeError', () => new TypeError('TrustedScriptURL required')],
+    ])(
+      'leaves the original canvas available after %s during Worker construction',
+      (_label, error) => {
+        const originalWorker = globalThis.Worker;
+        const context = {} as CanvasRenderingContext2D;
+        const canvas = {
+          getContext: vi.fn(() => context),
+          transferControlToOffscreen: vi.fn(),
+        } as unknown as HTMLCanvasElement;
+        const overlay = {
+          getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+          onDimensionsChanged: vi.fn(() => vi.fn()),
+        };
+        const constructorAttempt = vi.fn(() => {
+          throw error();
+        });
+        vi.stubGlobal('Worker', constructorAttempt);
+
+        try {
+          expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+            started: false,
+            canvasTransferred: false,
+          });
+          expect(constructorAttempt).toHaveBeenCalledOnce();
+          expect(canvas.transferControlToOffscreen).not.toHaveBeenCalled();
+          expect(canvas.getContext('2d')).toBe(context);
+          expect(manager.isActive).toBe(false);
+        } finally {
+          vi.stubGlobal('Worker', originalWorker);
+        }
+      }
+    );
+
+    it('terminates the Worker and preserves the original canvas after transfer failure', () => {
+      const originalWorker = globalThis.Worker;
+      const terminate = vi.fn();
+      vi.stubGlobal(
+        'Worker',
+        class {
+          terminate = terminate;
+        }
+      );
+      const context = {} as CanvasRenderingContext2D;
+      const transferControlToOffscreen = vi.fn(() => {
+        throw new DOMException('transfer denied', 'InvalidStateError');
+      });
+      const canvas = {
+        getContext: vi.fn(() => context),
+        transferControlToOffscreen,
+      } as unknown as HTMLCanvasElement;
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged: vi.fn(() => vi.fn()),
+      };
+
+      try {
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+          started: false,
+          canvasTransferred: false,
+        });
+        expect(transferControlToOffscreen).toHaveBeenCalledOnce();
+        expect(terminate).toHaveBeenCalledOnce();
+        expect(canvas.getContext('2d')).toBe(context);
+        expect(manager.isActive).toBe(false);
+      } finally {
+        vi.stubGlobal('Worker', originalWorker);
+      }
+    });
+
     it.each([
       ['missing', null],
       ['zero-width', { width: 0, height: 360 }],
@@ -180,7 +281,14 @@ describe('RenderWorkerManager', () => {
           onDimensionsChanged,
         };
 
-        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        expect(
+          manager.init(
+            canvas,
+            DEFAULT_SETTINGS,
+            overlay as unknown as Parameters<RenderWorkerManager['init']>[2],
+            'worker.js'
+          )
+        ).toEqual({
           started: false,
           canvasTransferred: false,
         });
@@ -610,6 +718,96 @@ describe('RenderWorkerManager', () => {
       vi.advanceTimersByTime(500);
       expect(worker.terminate).toHaveBeenCalledOnce();
       vi.useRealTimers();
+    });
+
+    it.each([
+      { label: 'ACK at 499 ms', ackAtMs: 499 },
+      { label: 'late ACK at 501 ms', ackAtMs: 501 },
+      { label: 'no ACK', ackAtMs: null },
+    ])('terminates only retired worker A with $label after B starts', ({ ackAtMs }) => {
+      vi.useFakeTimers();
+      const originalWorker = globalThis.Worker;
+      const instances: RecordingWorker[] = [];
+      class RecordingWorker {
+        postMessage = vi.fn();
+        terminate = vi.fn();
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onerror: ((event: ErrorEvent) => void) | null = null;
+        onmessageerror: ((event: MessageEvent) => void) | null = null;
+        private readonly listeners = new Set<EventListener>();
+
+        constructor() {
+          instances.push(this);
+        }
+
+        addEventListener = vi.fn((_type: string, listener: EventListener) => {
+          this.listeners.add(listener);
+        });
+        removeEventListener = vi.fn((_type: string, listener: EventListener) => {
+          this.listeners.delete(listener);
+        });
+
+        emitMessage(data: unknown): void {
+          const event = { data } as MessageEvent;
+          this.onmessage?.(event);
+          for (const listener of this.listeners) listener(event);
+        }
+      }
+      vi.stubGlobal('Worker', RecordingWorker);
+
+      const init = (): void => {
+        const canvas = {
+          transferControlToOffscreen: vi.fn(() => ({ getContext: vi.fn() })),
+        } as unknown as HTMLCanvasElement;
+        const overlay = {
+          getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+          onDimensionsChanged: vi.fn(() => vi.fn()),
+        };
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+          started: true,
+          canvasTransferred: true,
+        });
+      };
+
+      try {
+        init();
+        const workerA = instances[0];
+        expect(workerA).toBeDefined();
+        manager.destroy();
+        expect(manager.workerRef).toBeNull();
+        expect(workerA?.postMessage).toHaveBeenLastCalledWith({ type: 'destroy' });
+        expect(workerA?.terminate).not.toHaveBeenCalled();
+
+        init();
+        const workerB = instances[1];
+        expect(workerB).toBeDefined();
+        expect(manager.workerRef).toBe(workerB);
+
+        vi.advanceTimersByTime(499);
+        expect(workerA?.terminate).not.toHaveBeenCalled();
+        expect(workerB?.terminate).not.toHaveBeenCalled();
+        if (ackAtMs === 499) workerA?.emitMessage({ type: 'ack' });
+        expect(workerA?.terminate).toHaveBeenCalledTimes(ackAtMs === 499 ? 1 : 0);
+
+        vi.advanceTimersByTime(1);
+        expect(workerA?.terminate).toHaveBeenCalledOnce();
+        if (ackAtMs === 501) {
+          vi.advanceTimersByTime(1);
+          workerA?.emitMessage({ type: 'ack' });
+        }
+        workerA?.emitMessage({ type: 'error', error: 'stale worker' });
+        workerA?.onerror?.(new ErrorEvent('error', { message: 'stale worker' }));
+        workerA?.onmessageerror?.(new MessageEvent('messageerror', { data: null }));
+        expect(workerA?.terminate).toHaveBeenCalledOnce();
+        expect(workerB?.terminate).not.toHaveBeenCalled();
+        expect(manager.workerRef).toBe(workerB);
+        expect(manager.isActive).toBe(true);
+      } finally {
+        manager.destroy();
+        instances[1]?.emitMessage({ type: 'ack' });
+        vi.stubGlobal('Worker', originalWorker);
+        vi.useRealTimers();
+      }
     });
   });
 });

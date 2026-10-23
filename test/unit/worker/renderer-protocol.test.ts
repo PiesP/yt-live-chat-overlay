@@ -1591,43 +1591,124 @@ describe('Worker message protocol', () => {
       expect(internals.emojiCache.has(url)).toBe(true);
     });
 
-    it('rejects an over-limit stream before decode, then frees the queue slot', async () => {
+    it('rejects declared and streamed over-limit images, releasing each slot for a healthy image', async () => {
       const renderer = initializeRenderer({ emojiFetchLimit: 1 });
       const internals = renderer as unknown as {
         emojiCache: { has(url: string): boolean };
         failedImageFetches: Map<string, number>;
+        fetchControllers: Set<AbortController>;
+        imageFetchTasks: Map<string, unknown>;
         prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
       };
-      const largeUrl = 'https://yt3.ggpht.com/over-limit';
-      const nextUrl = 'https://yt3.ggpht.com/after-rejection';
+      const declaredUrl = 'https://yt3.ggpht.com/declared-over-limit';
+      const streamedUrl = 'https://yt3.ggpht.com/streamed-over-limit';
+      const firstHealthyUrl = 'https://yt3.ggpht.com/after-declared-rejection';
+      const secondHealthyUrl = 'https://yt3.ggpht.com/after-streamed-rejection';
+      const declaredCancel = vi.fn();
+      const streamedCancel = vi.fn();
+      const rejectedBodies: ReadableStream<Uint8Array>[] = [];
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-        if (input === largeUrl) {
+        if (input === declaredUrl) {
+          const response = new Response(
+            new ReadableStream<Uint8Array>({ cancel: declaredCancel }),
+            {
+              headers: { 'content-length': '17' },
+            }
+          );
+          Object.defineProperty(response, 'url', { value: declaredUrl });
+          if (response.body) rejectedBodies.push(response.body);
+          return response;
+        }
+        if (input === streamedUrl) {
           const response = new Response(
             new ReadableStream<Uint8Array>({
               start(controller) {
                 controller.enqueue(new Uint8Array(10));
                 controller.enqueue(new Uint8Array(10));
-                controller.close();
               },
+              cancel: streamedCancel,
             })
           );
-          Object.defineProperty(response, 'url', { value: largeUrl });
+          Object.defineProperty(response, 'url', { value: streamedUrl });
+          if (response.body) rejectedBodies.push(response.body);
           return response;
         }
-        return imageResponse(true, nextUrl);
+        return imageResponse(true, String(input));
       });
       const decoder = vi.mocked(createImageBitmap);
       decoder.mockClear();
-      decoder.mockResolvedValue({ width: 1, height: 1, close: vi.fn() } as unknown as ImageBitmap);
+      const firstBitmap = { width: 1, height: 1, close: vi.fn() };
+      const secondBitmap = { width: 1, height: 1, close: vi.fn() };
+      decoder
+        .mockResolvedValueOnce(firstBitmap as unknown as ImageBitmap)
+        .mockResolvedValueOnce(secondBitmap as unknown as ImageBitmap);
 
-      await internals.prefetchImages([largeUrl], internals.emojiCache);
-      await internals.prefetchImages([largeUrl, nextUrl], internals.emojiCache);
+      for (const { failedUrl, healthyUrl } of [
+        { failedUrl: declaredUrl, healthyUrl: firstHealthyUrl },
+        { failedUrl: streamedUrl, healthyUrl: secondHealthyUrl },
+      ]) {
+        await internals.prefetchImages([failedUrl], internals.emojiCache);
+        expect(internals.failedImageFetches.has(failedUrl)).toBe(true);
+        expect(internals.emojiCache.has(failedUrl)).toBe(false);
+        expect(internals.fetchControllers.size).toBe(0);
+        expect(internals.imageFetchTasks.size).toBe(0);
+        await internals.prefetchImages([failedUrl, healthyUrl], internals.emojiCache);
+        expect(internals.emojiCache.has(healthyUrl)).toBe(true);
+      }
 
-      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([largeUrl, nextUrl]);
-      expect(internals.failedImageFetches.has(largeUrl)).toBe(true);
-      expect(internals.emojiCache.has(largeUrl)).toBe(false);
-      expect(internals.emojiCache.has(nextUrl)).toBe(true);
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+        declaredUrl,
+        firstHealthyUrl,
+        streamedUrl,
+        secondHealthyUrl,
+      ]);
+      await vi.waitFor(() => expect(declaredCancel).toHaveBeenCalledOnce());
+      expect(streamedCancel).toHaveBeenCalledOnce();
+      expect(rejectedBodies.map((body) => body.locked)).toEqual([false, false]);
+      expect(decoder).toHaveBeenCalledTimes(2);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(firstBitmap.close).toHaveBeenCalledOnce();
+      expect(secondBitmap.close).toHaveBeenCalledOnce();
+    });
+
+    it('settles a null-body image task and uses its fetch slot for the next healthy asset', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        failedImageFetches: Map<string, number>;
+        fetchControllers: Set<AbortController>;
+        fetching: Set<string>;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const emptyUrl = 'https://yt3.ggpht.com/null-body';
+      const healthyUrl = 'https://yt3.ggpht.com/after-null-body';
+      const emptyResponse = new Response(null, { status: 200 });
+      Object.defineProperty(emptyResponse, 'url', { value: emptyUrl });
+      const blobFallback = vi.spyOn(emptyResponse, 'blob');
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (input) =>
+          input === emptyUrl ? emptyResponse : imageResponse(true, healthyUrl)
+        );
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+      const healthyBitmap = { width: 1, height: 1, close: vi.fn() };
+      decoder.mockResolvedValueOnce(healthyBitmap as unknown as ImageBitmap);
+
+      await internals.prefetchImages([emptyUrl, healthyUrl], internals.emojiCache);
+
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([emptyUrl, healthyUrl]);
+      expect(blobFallback).not.toHaveBeenCalled();
       expect(decoder).toHaveBeenCalledOnce();
+      expect(internals.failedImageFetches.has(emptyUrl)).toBe(true);
+      expect(internals.emojiCache.has(emptyUrl)).toBe(false);
+      expect(internals.emojiCache.has(healthyUrl)).toBe(true);
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(healthyBitmap.close).toHaveBeenCalledOnce();
     });
 
     it('accepts allowed final redirects and rejects an off-allowlist final URL before reading', async () => {
@@ -1659,6 +1740,41 @@ describe('Worker message protocol', () => {
       expect(decoder).toHaveBeenCalledOnce();
     });
 
+    it('rejects untrusted direct loader URLs without fetching or delaying an allowed neighbor', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        imageFetchTasks: Map<string, unknown>;
+        fetching: Set<string>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const healthyUrl = 'https://yt3.ggpht.com/healthy-neighbor';
+      const rejected = [
+        '',
+        'not a url',
+        'data:image/png;base64,AA==',
+        'blob:https://yt3.ggpht.com/opaque',
+        'http://yt3.ggpht.com/insecure.png',
+        '//yt3.ggpht.com/protocol-relative.png',
+        'https://yt3.ggpht.com.evil.example/image.png',
+        'https://evil.example/yt3.ggpht.com/image.png',
+      ];
+      const bitmap = { width: 1, height: 1, close: vi.fn() };
+      vi.mocked(createImageBitmap).mockResolvedValueOnce(bitmap as unknown as ImageBitmap);
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(imageResponse(true, healthyUrl));
+
+      await internals.prefetchImages([...rejected, healthyUrl], internals.emojiCache);
+
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([healthyUrl]);
+      expect(internals.emojiCache.has(healthyUrl)).toBe(true);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
     it.each([
       ['HTTP failure', false],
       ['decode failure', true],
@@ -1683,6 +1799,51 @@ describe('Worker message protocol', () => {
       nowSpy.mockReturnValue(61_001);
       await internals.prefetchImages([url], internals.emojiCache);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('decodes the same image URL after its negative-cache TTL and releases the recovered bitmap', async () => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { get(url: string): ImageBitmap | undefined };
+        failedImageFetches: Map<string, number>;
+        fetchControllers: Set<AbortController>;
+        fetching: Set<string>;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/decode-recovery';
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse(true, url));
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+      const recoveredBitmap = { width: 10, height: 10, close: vi.fn() };
+      decoder
+        .mockRejectedValueOnce(new Error('decode failed'))
+        .mockResolvedValueOnce(recoveredBitmap as unknown as ImageBitmap);
+
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(internals.failedImageFetches.get(url)).toBe(1_000);
+      expect(internals.emojiCache.get(url)).toBeUndefined();
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
+
+      nowSpy.mockReturnValue(60_999);
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+
+      nowSpy.mockReturnValue(61_000);
+      await internals.prefetchImages([url], internals.emojiCache);
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(decoder).toHaveBeenCalledTimes(2);
+      expect(internals.failedImageFetches.has(url)).toBe(false);
+      expect(internals.emojiCache.get(url)).toBe(recoveredBitmap);
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(recoveredBitmap.close).toHaveBeenCalledOnce();
     });
 
     it('negative-caches worker image fetch timeouts', async () => {
@@ -1716,14 +1877,20 @@ describe('Worker message protocol', () => {
       const internals = renderer as unknown as {
         emojiCache: { has(url: string): boolean };
         failedImageFetches: Map<string, number>;
+        fetchControllers: Set<AbortController>;
         fetching: Set<string>;
+        imageFetchTasks: Map<string, unknown>;
         prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
       };
       const url = 'https://yt3.ggpht.com/stalled-body';
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const healthyUrl = 'https://yt3.ggpht.com/after-stalled-body';
+      const stalledBodies: ReadableStream<Uint8Array>[] = [];
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        if (input === healthyUrl) return imageResponse(true, healthyUrl);
         const response = new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
+              controller.enqueue(new Uint8Array(4));
               init?.signal?.addEventListener('abort', () =>
                 controller.error(new DOMException('Aborted', 'AbortError'))
               );
@@ -1731,20 +1898,30 @@ describe('Worker message protocol', () => {
           })
         );
         Object.defineProperty(response, 'url', { value: url });
+        if (response.body) stalledBodies.push(response.body);
         return response;
       });
       const decoder = vi.mocked(createImageBitmap);
       decoder.mockClear();
+      const healthyBitmap = { width: 1, height: 1, close: vi.fn() };
+      decoder.mockResolvedValueOnce(healthyBitmap as unknown as ImageBitmap);
 
       const prefetch = internals.prefetchImages([url], internals.emojiCache);
       await vi.advanceTimersByTimeAsync(5_000);
       await prefetch;
+      await internals.prefetchImages([url, healthyUrl], internals.emojiCache);
 
-      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(fetchSpy.mock.calls.map(([input]) => input)).toEqual([url, healthyUrl]);
       expect(internals.failedImageFetches.has(url)).toBe(true);
+      expect(internals.fetchControllers.size).toBe(0);
       expect(internals.fetching.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
       expect(internals.emojiCache.has(url)).toBe(false);
-      expect(decoder).not.toHaveBeenCalled();
+      expect(internals.emojiCache.has(healthyUrl)).toBe(true);
+      expect(stalledBodies.map((body) => body.locked)).toEqual([false]);
+      expect(decoder).toHaveBeenCalledOnce();
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(healthyBitmap.close).toHaveBeenCalledOnce();
     });
 
     it('aborts a pending image body on destroy without decoding or retaining the task', async () => {
@@ -1894,6 +2071,60 @@ describe('Worker message protocol', () => {
       expect(bitmap.close).toHaveBeenCalledOnce();
     });
 
+    it('re-evaluates an oversized URL per target cache after capacity increases and decreases', async () => {
+      const renderer = initializeRenderer({ emojiCacheMb: 1, photoCacheMb: 4 });
+      const internals = renderer as unknown as {
+        emojiCache: { get(url: string): ImageBitmap | undefined };
+        authorPhotoCache: { get(url: string): ImageBitmap | undefined };
+        fetchControllers: Set<AbortController>;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/shared-large-image';
+      const bitmaps = Array.from({ length: 4 }, () => ({
+        width: 800,
+        height: 800,
+        close: vi.fn(),
+      }));
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockClear();
+      for (const bitmap of bitmaps) {
+        decoder.mockResolvedValueOnce(bitmap as unknown as ImageBitmap);
+      }
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse(true, url));
+
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(internals.emojiCache.get(url)).toBeUndefined();
+      expect(bitmaps[0]?.close).toHaveBeenCalledOnce();
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+
+      await internals.prefetchImages([url], internals.authorPhotoCache);
+      expect(internals.authorPhotoCache.get(url)).toBe(bitmaps[1]);
+      expect(bitmaps[1]?.close).not.toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { emojiCacheMb: 3 } }));
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(internals.emojiCache.get(url)).toBe(bitmaps[2]);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { emojiCacheMb: 1 } }));
+      expect(internals.emojiCache.get(url)).toBeUndefined();
+      expect(bitmaps[2]?.close).toHaveBeenCalledOnce();
+      await internals.prefetchImages([url], internals.emojiCache);
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+      expect(decoder).toHaveBeenCalledTimes(4);
+      expect(bitmaps[3]?.close).toHaveBeenCalledOnce();
+      expect(internals.authorPhotoCache.get(url)).toBe(bitmaps[1]);
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.imageFetchTasks.size).toBe(0);
+
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      for (const bitmap of bitmaps) expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
     it('discards obsolete queued asset owners before a fetch slot opens', async () => {
       const renderer = initializeRenderer({ emojiFetchLimit: 1 });
       const internals = renderer as unknown as {
@@ -1931,6 +2162,117 @@ describe('Worker message protocol', () => {
       expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([firstUrl, liveUrl]);
       releases.shift()?.();
       await Promise.all([first, live]);
+    });
+
+    it('retains a shared queued image for its live owner and drops a final-owner image', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown, ownerId?: string) => Promise<void>;
+        releaseQueuedAssetsForOwner(ownerId: string): void;
+      };
+      const holderUrl = 'https://yt3.ggpht.com/shared-owner-holder';
+      const sharedUrl = 'https://yt3.ggpht.com/shared-owner-image';
+      const retiredUrl = 'https://yt3.ggpht.com/final-owner-retired';
+      const recoveredUrl = 'https://yt3.ggpht.com/shared-owner-recovered';
+      const releases: Array<() => void> = [];
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (input) =>
+          new Promise<Response>((resolve) => {
+            releases.push(() => resolve(imageResponse(true, String(input))));
+          })
+      );
+      vi.mocked(createImageBitmap).mockImplementation(
+        async () => ({ width: 1, height: 1, close: vi.fn() }) as unknown as ImageBitmap
+      );
+
+      const holder = internals.prefetchImages([holderUrl], internals.emojiCache, 'holder');
+      const retiredShared = internals.prefetchImages([sharedUrl], internals.emojiCache, 'retired');
+      const liveShared = internals.prefetchImages([sharedUrl], internals.emojiCache, 'live');
+      const finalOwner = internals.prefetchImages([retiredUrl], internals.emojiCache, 'final');
+      expect(internals.imageFetchTasks.size).toBe(3);
+      expect(fetchSpy.mock.calls.map(([input]) => input)).toEqual([holderUrl]);
+
+      internals.releaseQueuedAssetsForOwner('retired');
+      internals.releaseQueuedAssetsForOwner('final');
+      await finalOwner;
+      expect(internals.imageFetchTasks.size).toBe(2);
+      releases.shift()?.();
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(fetchSpy.mock.calls.map(([input]) => input)).toEqual([holderUrl, sharedUrl]);
+      releases.shift()?.();
+      await Promise.all([holder, retiredShared, liveShared]);
+      expect(internals.emojiCache.has(sharedUrl)).toBe(true);
+      expect(internals.emojiCache.has(retiredUrl)).toBe(false);
+
+      const recovered = internals.prefetchImages([recoveredUrl], internals.emojiCache, 'new');
+      expect(fetchSpy.mock.calls.map(([input]) => input)).toEqual([
+        holderUrl,
+        sharedUrl,
+        recoveredUrl,
+      ]);
+      releases.shift()?.();
+      await recovered;
+      expect(internals.emojiCache.has(recoveredUrl)).toBe(true);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(internals.emojiCache.has(sharedUrl)).toBe(false);
+    });
+
+    it('caps 1,200 pending image tasks while retaining shared owners and recovering capacity', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        authorPhotoCache: unknown;
+        imageFetchTasks: Map<string, unknown>;
+        prefetchImages: (urls: string[], cache: unknown, ownerId?: string) => Promise<void>;
+        releaseQueuedAssetsForOwner(ownerId: string): void;
+      };
+      const urls = Array.from(
+        { length: 1_200 },
+        (_, index) => `https://yt3.ggpht.com/cap-${index}`
+      );
+      const sharedUrl = 'https://yt3.ggpht.com/cap-1199';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted')));
+          })
+      );
+
+      const bulk = internals.prefetchImages(urls, internals.emojiCache, 'bulk');
+      expect(internals.imageFetchTasks.size).toBe(1_200);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+
+      await internals.prefetchImages(['https://yt3.ggpht.com/cap-refused'], internals.emojiCache);
+      expect(internals.imageFetchTasks.size).toBe(1_200);
+      const shared = internals.prefetchImages([sharedUrl], internals.emojiCache, 'shared');
+      expect(internals.imageFetchTasks.size).toBe(1_200);
+
+      internals.releaseQueuedAssetsForOwner('bulk');
+      expect(internals.imageFetchTasks.size).toBe(2);
+      const otherTarget = internals.prefetchImages(
+        [sharedUrl],
+        internals.authorPhotoCache,
+        'author'
+      );
+      expect(internals.imageFetchTasks.size).toBe(3);
+
+      internals.releaseQueuedAssetsForOwner('shared');
+      await shared;
+      expect(internals.imageFetchTasks.size).toBe(2);
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([urls[0]]);
+
+      const recovered = internals.prefetchImages(
+        ['https://yt3.ggpht.com/cap-recovered'],
+        internals.emojiCache,
+        'recovered'
+      );
+      expect(internals.imageFetchTasks.size).toBe(3);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      await Promise.all([bulk, otherTarget, recovered]);
+      expect(internals.imageFetchTasks.size).toBe(0);
     });
 
     it('bounds and cleans worker image failure state on config update and destroy', () => {
@@ -1986,6 +2328,37 @@ describe('Worker message protocol', () => {
       expect(internals.fetchControllers.size).toBe(0);
       expect(internals.fetching.size).toBe(0);
       fetchSpy.mockRestore();
+    });
+
+    it('settles a prefetch waiter on destroy even while bitmap decoding remains pending', async () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/pending-decode';
+      const bitmap = { width: 10, height: 10, close: vi.fn() };
+      let resolveBitmap!: (value: typeof bitmap) => void;
+      const bitmapPromise = new Promise<typeof bitmap>((resolve) => {
+        resolveBitmap = resolve;
+      });
+      const decoder = vi.mocked(createImageBitmap);
+      decoder.mockImplementationOnce(() => bitmapPromise as Promise<ImageBitmap>);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(imageResponse());
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.waitFor(() => expect(decoder).toHaveBeenCalledOnce());
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      const settledBeforeDecode = await Promise.race([
+        prefetch.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 0)),
+      ]);
+
+      resolveBitmap(bitmap);
+      await prefetch;
+      expect(settledBeforeDecode).toBe(true);
+      expect(bitmap.close).toHaveBeenCalledOnce();
+      expect(internals.emojiCache.has(url)).toBe(false);
     });
   });
 

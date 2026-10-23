@@ -42,7 +42,8 @@ export class VideoPauseController {
     const handlePlay = (): void => {
       if (callbacks.isDisposed()) return;
       log.debug('app.video.playing');
-      callbacks.pauseable.setPaused(false);
+      // Playback in PiP must not resume rendering in the page viewport.
+      callbacks.pauseable.setPaused(document.pictureInPictureElement === currentVideo);
     };
 
     // M5: Handle video buffering — pause comment flow during 'waiting' to

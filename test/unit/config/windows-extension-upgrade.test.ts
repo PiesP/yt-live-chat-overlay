@@ -3,6 +3,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import {
   appendFile,
   mkdir,
@@ -17,11 +18,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import type { Page } from '@playwright/test';
+import type { BrowserContext, CDPSession, Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import {
+  beginExtensionRuntimeScriptCapture,
   boundedFile,
+  extensionUpgradeTransition,
   extensionInventory,
   readExtensionStoredFontSize,
   readExtensionUpgradeInput,
@@ -31,6 +34,7 @@ import {
 
 const INPUT = 'validation/windows/release-upgrade/extension-input.json';
 const PUBLIC = 'validation/windows/release-upgrade/public-v0.45.7-chrome';
+const SAME_VERSION_PUBLIC = 'validation/windows/release-upgrade/public-v0.45.8-chrome';
 const extensionModule = new globalThis.URL(
   '../../../validation/windows/release-upgrade/extension.ts',
   import.meta.url
@@ -38,6 +42,8 @@ const extensionModule = new globalThis.URL(
 const execFileAsync = promisify(execFile);
 const URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip';
+const SAME_VERSION_URL =
+  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip';
 const FILES = [
   'background.js',
   'content-script.js',
@@ -49,9 +55,37 @@ const FILES = [
   'workers/renderer.js',
 ] as const;
 const roots: string[] = [];
+const EXTENSION_ID = 'a'.repeat(32);
 
 function sha(bytes: string | Buffer) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function runtimeCaptureFixture(
+  sources: Record<string, string>,
+  { failDisable = false }: { failDisable?: boolean } = {}
+) {
+  const session = new EventEmitter() as EventEmitter & {
+    send: ReturnType<typeof vi.fn>;
+    detach: ReturnType<typeof vi.fn>;
+  };
+  session.send = vi.fn(async (method: string, parameters?: { scriptId?: string }) => {
+    if (method === 'Debugger.disable' && failDisable) throw new Error('disable failed');
+    if (method === 'Debugger.getScriptSource')
+      return { scriptSource: sources[parameters?.scriptId ?? ''] };
+    return {};
+  });
+  session.detach = vi.fn(async () => {});
+  const context = {
+    newCDPSession: vi.fn(async () => session as unknown as CDPSession),
+  } as unknown as Pick<BrowserContext, 'newCDPSession'>;
+  const parsed = (name: string, scriptId: string) => {
+    session.emit('Debugger.scriptParsed', {
+      url: `chrome-extension://${EXTENSION_ID}/${name}`,
+      scriptId,
+    });
+  };
+  return { session, context, parsed };
 }
 
 /** Small store-only ZIP with the same fixed file and directory layout as the public asset. */
@@ -92,10 +126,12 @@ function archive(files: Record<string, Buffer>, replacement?: { name: string; by
   return Buffer.concat([...local, centralBytes, end]);
 }
 
-async function makeFixture() {
+async function makeFixture(previousVersion: '0.45.7' | '0.45.8' = '0.45.7') {
   const root = await mkdtemp(join(tmpdir(), 'yt-extension-upgrade-'));
   roots.push(root);
-  const baseline = join(root, PUBLIC, 'unpacked');
+  const publicPath = previousVersion === '0.45.7' ? PUBLIC : SAME_VERSION_PUBLIC;
+  const publicUrl = previousVersion === '0.45.7' ? URL : SAME_VERSION_URL;
+  const baseline = join(root, publicPath, 'unpacked');
   const candidate = join(root, 'dist-extension');
   for (const directory of [baseline, candidate]) {
     await mkdir(join(directory, 'icons'), { recursive: true });
@@ -108,7 +144,7 @@ async function makeFixture() {
         ? JSON.stringify({
             manifest_version: 3,
             name: 'YouTube Live Chat Overlay',
-            version: '0.45.7',
+            version: previousVersion,
           })
         : `public-${name}`;
     const next =
@@ -128,14 +164,17 @@ async function makeFixture() {
   const candidateInventory = await extensionInventory(candidate);
   const input = {
     schemaVersion: 1,
-    previousVersion: '0.45.7',
+    previousVersion,
     candidateVersion: '0.45.8',
-    publicAssetUrl: URL,
-    publicArchive: { path: `${PUBLIC}/artifact.zip`, sha256: sha(zip) },
-    previousExtension: { path: `${PUBLIC}/unpacked`, inventorySha256: baselineInventory.sha256 },
+    publicAssetUrl: publicUrl,
+    publicArchive: { path: `${publicPath}/artifact.zip`, sha256: sha(zip) },
+    previousExtension: {
+      path: `${publicPath}/unpacked`,
+      inventorySha256: baselineInventory.sha256,
+    },
     candidateExtension: { inventorySha256: candidateInventory.sha256 },
   };
-  await writeFile(join(root, PUBLIC, 'artifact.zip'), zip);
+  await writeFile(join(root, publicPath, 'artifact.zip'), zip);
   await writeFile(join(root, INPUT), JSON.stringify(input));
   return { root, baseline, candidate, files, input, zip };
 }
@@ -146,6 +185,100 @@ afterEach(async () => {
 });
 
 describe('optional public Chrome extension update inputs', () => {
+  it('binds both parsed extension scripts to their inventoried executed source', async () => {
+    const sources = { content: 'public content', page: 'public page' };
+    const harness = runtimeCaptureFixture(sources);
+    const expected = {
+      sha256: '0'.repeat(64),
+      files: {
+        'content-script.js': sha(sources.content),
+        'page-script.js': sha(sources.page),
+      },
+    };
+    const capture = await beginExtensionRuntimeScriptCapture(
+      harness.context,
+      {} as Page,
+      EXTENSION_ID,
+      expected
+    );
+    expect(harness.session.send).toHaveBeenCalledWith('Debugger.enable');
+    harness.session.emit('Debugger.scriptParsed', {
+      url: `chrome-extension://${EXTENSION_ID}/other.js`,
+      scriptId: 'ignored',
+    });
+    harness.parsed('content-script.js', 'content');
+    harness.parsed('page-script.js', 'page');
+    const records = await capture.verify();
+    expect(records['content-script.js']).toMatchObject({
+      expectedSha256: sha(sources.content),
+      observedSha256: sha(sources.content),
+      parsedCount: 1,
+    });
+    expect(records['page-script.js']).toMatchObject({
+      observedSha256: sha(sources.page),
+      observedBytes: Buffer.byteLength(sources.page),
+      parsedCount: 1,
+    });
+    expect(harness.session.send).not.toHaveBeenCalledWith('Debugger.getScriptSource', {
+      scriptId: 'ignored',
+    });
+    await capture.close();
+    expect(harness.session.send).toHaveBeenCalledWith('Debugger.disable');
+    expect(harness.session.detach).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an old executed page script even when the expected candidate version is unchanged', async () => {
+    const harness = runtimeCaptureFixture({
+      content: 'candidate content',
+      page: 'old public page',
+    });
+    const capture = await beginExtensionRuntimeScriptCapture(
+      harness.context,
+      {} as Page,
+      EXTENSION_ID,
+      {
+        sha256: '0'.repeat(64),
+        files: {
+          'content-script.js': sha('candidate content'),
+          'page-script.js': sha('new candidate page'),
+        },
+      }
+    );
+    harness.parsed('content-script.js', 'content');
+    harness.parsed('page-script.js', 'page');
+    // Observe parsed source before the rejection handler gets its microtask.
+    await Promise.resolve();
+    await expect(capture.verify()).rejects.toThrow(
+      'Executed extension script differs from inventory: page-script.js'
+    );
+    expect(capture.snapshot()['page-script.js'].observedSha256).toBe(sha('old public page'));
+    await capture.close();
+  });
+
+  it('fails closed on missing or ambiguous script execution and detaches after cleanup error', async () => {
+    const harness = runtimeCaptureFixture({ page: 'candidate page' }, { failDisable: true });
+    const capture = await beginExtensionRuntimeScriptCapture(
+      harness.context,
+      {} as Page,
+      EXTENSION_ID,
+      {
+        sha256: '0'.repeat(64),
+        files: {
+          'content-script.js': sha('candidate content'),
+          'page-script.js': sha('candidate page'),
+        },
+      }
+    );
+    harness.parsed('page-script.js', 'page');
+    await expect(capture.verify(20)).rejects.toThrow(
+      'Executed extension scripts were not observed: content-script.js'
+    );
+    harness.parsed('page-script.js', 'page-again');
+    await expect(capture.verify(20)).rejects.toThrow('Ambiguous executed extension script');
+    await expect(capture.close()).rejects.toThrow('Extension script debugger cleanup failed');
+    expect(harness.session.detach).toHaveBeenCalledOnce();
+  });
+
   it.skipIf(process.platform === 'win32')(
     'rejects an unwritten FIFO without blocking the input read',
     async () => {
@@ -236,8 +369,70 @@ describe('optional public Chrome extension update inputs', () => {
     const fixture = await makeFixture();
     const checked = await readExtensionUpgradeInput(fixture.root);
     expect(checked?.input.publicAssetUrl).toBe(URL);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.45.7-to-candidate-0.45.8'
+    );
     expect(checked?.baseline.files['manifest.json']).toBe(sha(fixture.files['manifest.json']!));
     expect(Object.keys(checked?.candidate.files ?? {})).toHaveLength(8);
+  });
+
+  it('admits a pinned public 0.45.8 to candidate 0.45.8 update with different bytes', async () => {
+    const fixture = await makeFixture('0.45.8');
+    const checked = await readExtensionUpgradeInput(fixture.root);
+    expect(checked?.input.publicAssetUrl).toBe(SAME_VERSION_URL);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.45.8-to-candidate-0.45.8'
+    );
+    expect(checked?.input.publicArchive.path).toBe(`${SAME_VERSION_PUBLIC}/artifact.zip`);
+    expect(checked?.input.previousExtension.path).toBe(`${SAME_VERSION_PUBLIC}/unpacked`);
+    expect(checked?.baseline.sha256).not.toBe(checked?.candidate.sha256);
+    expect(checked?.baseline.files['manifest.json']).toBe(
+      checked?.candidate.files['manifest.json']
+    );
+  });
+
+  it('rejects a same-version update when the actual inventories are identical', async () => {
+    const fixture = await makeFixture('0.45.8');
+    for (const name of FILES) await writeFile(join(fixture.candidate, name), fixture.files[name]!);
+    const inventory = await extensionInventory(fixture.candidate);
+    await writeFile(
+      join(fixture.root, INPUT),
+      JSON.stringify({
+        ...fixture.input,
+        candidateExtension: { inventorySha256: inventory.sha256 },
+      })
+    );
+    await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow(
+      'Published and candidate extension inventories are identical'
+    );
+  });
+
+  it('rejects unchanged page execution even if other packaged files changed', async () => {
+    const fixture = await makeFixture('0.45.8');
+    await writeFile(join(fixture.candidate, 'page-script.js'), fixture.files['page-script.js']!);
+    const inventory = await extensionInventory(fixture.candidate);
+    await writeFile(
+      join(fixture.root, INPUT),
+      JSON.stringify({
+        ...fixture.input,
+        candidateExtension: { inventorySha256: inventory.sha256 },
+      })
+    );
+    await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow(
+      'Published and candidate page scripts are identical'
+    );
+  });
+
+  it('rejects mixed public versions, URLs, paths, and candidate versions', async () => {
+    const fixture = await makeFixture('0.45.8');
+    for (const changed of [
+      { previousVersion: '0.45.7' },
+      { candidateVersion: '0.45.7' },
+      { publicAssetUrl: URL },
+      { publicArchive: { ...fixture.input.publicArchive, path: `${PUBLIC}/artifact.zip` } },
+      { previousExtension: { ...fixture.input.previousExtension, path: `${PUBLIC}/unpacked` } },
+    ])
+      expect(() => validateExtensionUpgradeInput({ ...fixture.input, ...changed })).toThrow();
   });
 
   it('rejects unapproved identity fields and changed versions', async () => {
@@ -355,6 +550,7 @@ describe('optional public Chrome extension update inputs', () => {
     const ignore = await readFile('.gitignore', 'utf8');
     expect(ignore).toContain('/validation/windows/release-upgrade/extension-input.json');
     expect(ignore).toContain('/validation/windows/release-upgrade/public-v0.45.7-chrome/');
+    expect(ignore).toContain('/validation/windows/release-upgrade/public-v0.45.8-chrome/');
   });
 
   it('reads only the saved font size from the extension storage JSON string', async () => {
