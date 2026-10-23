@@ -105,7 +105,6 @@ export function assessLiveContentPrerequisite(
     sample.readyState >= 2 &&
     sample.errorCode === null &&
     sample.paused === false &&
-    sample.muted === true &&
     sample.currentTime !== null &&
     Number.isFinite(sample.currentTime) &&
     sample.videoWidth !== null &&

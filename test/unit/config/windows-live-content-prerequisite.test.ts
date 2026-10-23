@@ -72,6 +72,30 @@ describe('public content prerequisite assessment', () => {
     });
   });
 
+  it('accepts progressing requested content when a replacement player unmutes itself', () => {
+    const first = contentSample({
+      elapsedMs: 5695,
+      currentTime: 46793.528193,
+      totalVideoFrames: 107,
+      seekable: { start: 0, end: 50390.106562 },
+      sameVideoAsPrevious: null,
+      muted: false,
+    });
+    const second = contentSample({
+      elapsedMs: 6521,
+      currentTime: 46794.282075,
+      totalVideoFrames: 130,
+      seekable: first.seekable,
+      muted: false,
+    });
+
+    expect(assessLiveContentPrerequisite([first, second], VIDEO_ID)).toMatchObject({
+      status: 'passed',
+      qualifyingPair: [0, 1],
+      adTransition: 'not-observed',
+    });
+  });
+
   it('records an observed ad without claiming that it ended when content never qualifies', () => {
     const ad = contentSample({ adShowing: true, currentTime: 1, totalVideoFrames: 20 });
     const stalled = contentSample({
