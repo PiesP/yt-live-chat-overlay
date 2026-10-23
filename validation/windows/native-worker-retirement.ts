@@ -62,6 +62,7 @@ type PageState = {
   overflow: number;
   workerSource: string | null;
   restartError: string | null;
+  restartComplete: boolean;
 };
 
 declare global {
@@ -208,7 +209,13 @@ function installPagePrelude({
   probeSource: string;
   maxEvents: number;
 }): void {
-  const state: PageState = { workers: [], overflow: 0, workerSource: null, restartError: null };
+  const state: PageState = {
+    workers: [],
+    overflow: 0,
+    workerSource: null,
+    restartError: null,
+    restartComplete: false,
+  };
   window.__ytNativeWorkerRetirement = state;
   // This isolated fixture supplies a playing prerequisite; it is not a player test.
   Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
@@ -436,6 +443,7 @@ export async function runNativeWorkerRetirementFixture({
       return {
         overflow: state?.overflow ?? null,
         restartError: state?.restartError ?? null,
+        restartComplete: state?.restartComplete ?? false,
         workers:
           state?.workers.map((worker) => ({
             ready: worker.ready,
@@ -528,10 +536,16 @@ export async function runNativeWorkerRetirementFixture({
     await page.evaluate(() => {
       const app = window.__ytChatOverlay;
       if (!app) throw new Error('Installed app is unavailable for supported restart');
-      void app.restartRuntime().catch((error: unknown) => {
-        if (window.__ytNativeWorkerRetirement)
-          window.__ytNativeWorkerRetirement.restartError = String(error).slice(0, 200);
-      });
+      void app
+        .restartRuntime()
+        .then(() => {
+          if (window.__ytNativeWorkerRetirement)
+            window.__ytNativeWorkerRetirement.restartComplete = true;
+        })
+        .catch((error: unknown) => {
+          if (window.__ytNativeWorkerRetirement)
+            window.__ytNativeWorkerRetirement.restartError = String(error).slice(0, 200);
+        });
     });
     const releaseHandle = await page.waitForFunction(
       () => {
@@ -624,14 +638,10 @@ export async function runNativeWorkerRetirementFixture({
       { timeout: 8_000 }
     );
     await page.waitForFunction(
-      () => {
-        const app = window.__ytChatOverlay as unknown as
-          | {
-              runtimeManager?: { domWatcherUnsubscribe?: unknown };
-            }
-          | undefined;
-        return typeof app?.runtimeManager?.domWatcherUnsubscribe === 'function';
-      },
+      // The supported public handle intentionally hides App internals. Its
+      // restart Promise resolves after session reconciliation; the DOM control
+      // below independently proves that the replacement source is receiving.
+      () => window.__ytNativeWorkerRetirement?.restartComplete === true,
       undefined,
       { timeout: 8_000 }
     );
@@ -669,6 +679,7 @@ export async function runNativeWorkerRetirementFixture({
     assert.equal(final.workers.length, 2);
     assert.equal(final.overflow, 0);
     assert.equal(final.restartError, null);
+    assert.equal(final.restartComplete, true);
     assert.equal(final.workers[0]?.destroyPosts, 1);
     assert.equal(final.workers[0]?.acks, 1);
     assert.equal(final.workers[0]?.terminations, 1);
