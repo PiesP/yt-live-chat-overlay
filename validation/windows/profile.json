@@ -38,7 +38,8 @@
       "validation/windows/native-player-boundaries.ts",
       "validation/windows/recovery-continuity.ts",
       "validation/windows/live-content-prerequisite.ts",
-      "validation/windows/fixture-settings.ts"
+      "validation/windows/fixture-settings.ts",
+      "validation/windows/fixtures/autoplay-av.webm"
     ],
     "build_commands": [
       ["pnpm", "build:ci"],

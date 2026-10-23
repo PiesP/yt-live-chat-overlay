@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -14,6 +15,8 @@ import {
 import { buildVisibleWatchHtml } from './visible-watch.ts';
 
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsPlayerBoundaries';
+const ADMISSION_URL = 'https://www.youtube.com/windows-player-admission.webm';
+const ADMISSION_SHA = '38d4e4e22c8aa3712a75c92bc70d461e3d6d0568fb75a146dfec2b91bd1b9cfe';
 const IMAGE_URL = 'https://yt3.ggpht.com/windows-player-independent-image.png';
 const ENTRY_MARKER = '\n\tmain();\n';
 const EVENT_LIMIT = 80;
@@ -68,7 +71,13 @@ type PlayerFixture = {
   events: PlayerEvent[];
   eventOverflow: number;
   actionErrors: string[];
-  autoplay: { activationBefore: boolean; rejection: string | null } | null;
+  autoplay: {
+    activationBefore: boolean;
+    rejection: string | null;
+    currentSrc: string;
+    metadataReady: boolean;
+    recovery: { currentSrc: string; time: number; frames: number } | null;
+  } | null;
   trustedActions: string[];
   recordedMime: string | null;
   pendingChunkReads: Promise<void>[];
@@ -315,6 +324,8 @@ export async function runNativePlayerBoundaries({
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
   const instrumentedSource = instrumentPageScript(source);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
+  const admissionVideo = await readFile(join(root, 'validation/windows/fixtures/autoplay-av.webm'));
+  assert.equal(createHash('sha256').update(admissionVideo).digest('hex'), ADMISSION_SHA);
   const html = buildVisibleWatchHtml(preview, 'Native player boundary video')
     .replace(
       '<div id="chat">',
@@ -339,6 +350,7 @@ export async function runNativePlayerBoundaries({
   let documentRequests = 0;
   let chatRequests = 0;
   let imageRequests = 0;
+  let admissionRequests = 0;
   let imageControl: { currentSrc: string; width: number; height: number } | null = null;
   let probe: NativePageScriptProbe | undefined;
   let probeProvenance: NativePageScriptProbe['provenance'] | null = null;
@@ -367,6 +379,10 @@ export async function runNativePlayerBoundaries({
     }
     if (url.hostname === 'www.youtube.com' && url.pathname === '/favicon.ico')
       return route.fulfill({ status: 204 });
+    if (url.href === ADMISSION_URL && route.request().resourceType() === 'media') {
+      admissionRequests++;
+      return route.fulfill({ status: 200, contentType: 'video/webm', body: admissionVideo });
+    }
     if (url.href === IMAGE_URL && route.request().resourceType() === 'image') {
       imageRequests++;
       return route.fulfill({
@@ -441,7 +457,7 @@ export async function runNativePlayerBoundaries({
     // Playwright function evaluation grants user activation. Decide autoplay
     // inside the document before using any page evaluation or locator polling.
     await page.addInitScript(
-      ({ eventLimit, byteLimit }) => {
+      ({ eventLimit, byteLimit, admissionUrl }) => {
         document.addEventListener(
           'DOMContentLoaded',
           () => {
@@ -454,6 +470,49 @@ export async function runNativePlayerBoundaries({
                 throw new Error('Native video frame callbacks are unavailable');
               if (!navigator.userActivation || navigator.userActivation.hasBeenActive)
                 throw new Error('Autoplay admission is contaminated by a prior user activation');
+              video.playsInline = true;
+              video.muted = false;
+              video.volume = 0.01;
+              video.src = admissionUrl;
+              const deadline = performance.now() + 5000;
+              while (
+                window.__ytNativePlayerProbe?.starts !== 1 ||
+                video.readyState < 1 ||
+                video.videoWidth === 0
+              ) {
+                if (performance.now() >= deadline)
+                  throw new Error(
+                    'Native controller or encoded media metadata was not ready before autoplay'
+                  );
+                await new Promise((resolve) => setTimeout(resolve, 25));
+              }
+              window.__ytNativePlayerProbe.phase = 'autoplay-denial';
+
+              const activationBefore = navigator.userActivation.hasBeenActive;
+              let rejection: string | null = null;
+              let timeout: ReturnType<typeof setTimeout> | undefined;
+              try {
+                await Promise.race([
+                  video.play(),
+                  new Promise<never>((_, reject) => {
+                    timeout = setTimeout(
+                      () => reject(new Error('Autoplay decision timed out')),
+                      5_000
+                    );
+                  }),
+                ]);
+              } catch (error) {
+                rejection = error instanceof DOMException ? error.name : String(error);
+              } finally {
+                clearTimeout(timeout);
+              }
+              const admission = {
+                activationBefore,
+                rejection,
+                currentSrc: video.currentSrc,
+                metadataReady: video.readyState >= 1 && video.videoWidth > 0,
+                recovery: null,
+              };
               const canvas = document.createElement('canvas');
               canvas.width = 160;
               canvas.height = 90;
@@ -522,7 +581,7 @@ export async function runNativePlayerBoundaries({
                 events: [],
                 eventOverflow: 0,
                 actionErrors: [],
-                autoplay: null,
+                autoplay: admission,
                 trustedActions: [],
                 recordedMime: null,
                 pendingChunkReads: [],
@@ -582,6 +641,23 @@ export async function runNativePlayerBoundaries({
               };
               action('native-play', async () => {
                 await audio.resume();
+                await video.play();
+                const recoveryDeadline = performance.now() + 5000;
+                while (video.currentTime <= 0.05 || fixture.videoFrames.first === 0) {
+                  if (performance.now() >= recoveryDeadline)
+                    throw new Error('Trusted Play did not decode the same encoded media');
+                  await new Promise((resolve) => setTimeout(resolve, 25));
+                }
+                if (!fixture.autoplay || video.currentSrc !== admissionUrl)
+                  throw new Error('Encoded autoplay recovery changed media identity');
+                fixture.autoplay.recovery = {
+                  currentSrc: video.currentSrc,
+                  time: video.currentTime,
+                  frames: fixture.videoFrames.first,
+                };
+                video.pause();
+                video.removeAttribute('src');
+                video.srcObject = stream;
                 await video.play();
                 if (!MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
                   throw new Error('Native VP8/Opus MediaRecorder is unavailable');
@@ -650,35 +726,6 @@ export async function runNativePlayerBoundaries({
               video.playsInline = true;
               video.muted = false;
               video.volume = 0.01;
-              video.srcObject = stream;
-
-              const deadline = performance.now() + 5000;
-              while (window.__ytNativePlayerProbe?.starts !== 1) {
-                if (performance.now() >= deadline)
-                  throw new Error('Native controller did not start before autoplay');
-                await new Promise((resolve) => setTimeout(resolve, 25));
-              }
-              window.__ytNativePlayerProbe.phase = 'autoplay-denial';
-
-              const activationBefore = navigator.userActivation.hasBeenActive;
-              let rejection: string | null = null;
-              let timeout: ReturnType<typeof setTimeout> | undefined;
-              try {
-                await Promise.race([
-                  fixture.first.play(),
-                  new Promise<never>((_, reject) => {
-                    timeout = setTimeout(
-                      () => reject(new Error('Autoplay decision timed out')),
-                      5_000
-                    );
-                  }),
-                ]);
-              } catch (error) {
-                rejection = error instanceof DOMException ? error.name : String(error);
-              } finally {
-                clearTimeout(timeout);
-              }
-              fixture.autoplay = { activationBefore, rejection };
             })().catch((error: unknown) => {
               window.__ytNativePlayerSetupError = String(error);
             });
@@ -686,7 +733,7 @@ export async function runNativePlayerBoundaries({
           { once: true }
         );
       },
-      { eventLimit: EVENT_LIMIT, byteLimit: BYTE_LIMIT }
+      { eventLimit: EVENT_LIMIT, byteLimit: BYTE_LIMIT, admissionUrl: ADMISSION_URL }
     );
     probe = await installNativePageScriptProbe({
       context,
@@ -716,6 +763,9 @@ export async function runNativePlayerBoundaries({
     const denied = await snapshot(page, 'autoplay-denial');
     states.push(denied);
     assert.equal(denied.autoplay?.activationBefore, false);
+    assert.equal(denied.autoplay?.currentSrc, ADMISSION_URL);
+    assert.equal(denied.autoplay?.metadataReady, true);
+    assert(admissionRequests > 0, 'Encoded audio/video admission input was not requested');
     assert.equal(
       denied.autoplay?.rejection,
       'NotAllowedError',
@@ -761,6 +811,9 @@ export async function runNativePlayerBoundaries({
     states.push(healthy);
     assertHealthy(healthy, 'first');
     assert.equal(healthy.currentSrcKind, 'stream');
+    assert.equal(healthy.autoplay?.recovery?.currentSrc, ADMISSION_URL);
+    assert((healthy.autoplay?.recovery?.time ?? 0) > 0.05);
+    assert((healthy.autoplay?.recovery?.frames ?? 0) > 0);
     assert(healthy.trustedActions.includes('native-play'));
     assert(healthy.liveIds.includes(DENIED_ID));
     assert(healthy.liveIds.includes(HEALTHY_ID));
@@ -1051,6 +1104,12 @@ export async function runNativePlayerBoundaries({
       chatRequests,
       imageRequests,
       imageControl,
+      admissionInput: {
+        url: ADMISSION_URL,
+        sha256: ADMISSION_SHA,
+        bytes: admissionVideo.length,
+        requests: admissionRequests,
+      },
       imageControlScope:
         'native image transport and decode while video alone is starved; app image rendering is assessed by the separate image fixture',
       states,
@@ -1160,6 +1219,12 @@ export async function runNativePlayerBoundaries({
             chatRequests,
             imageRequests,
             imageControl,
+            admissionInput: {
+              url: ADMISSION_URL,
+              sha256: ADMISSION_SHA,
+              bytes: admissionVideo.length,
+              requests: admissionRequests,
+            },
             states,
             currentState,
             pageErrors,
