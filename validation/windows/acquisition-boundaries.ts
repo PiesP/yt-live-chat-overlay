@@ -628,6 +628,11 @@ export async function runAcquisitionBoundaries({
   let oldImageReleased = false;
   let oldImageDisposition: 'pending' | 'fulfilled' | 'unavailable' = 'pending';
   let oldImageError: string | null = null;
+  let oldImageRequestFailure: string | null = null;
+  page.on('requestfailed', (request) => {
+    if (request.url() === OLD_IMAGE)
+      oldImageRequestFailure = request.failure()?.errorText.slice(0, 300) ?? 'unknown failure';
+  });
   page.on('pageerror', (error) => {
     if (pageErrors.length < 10) pageErrors.push(error.name);
     else overflow++;
@@ -897,8 +902,20 @@ export async function runAcquisitionBoundaries({
     assert.deepEqual(consoleErrors, []);
     assert.equal(oldImageReleased, true);
     assert.notEqual(oldImageDisposition, 'pending');
+    const imageDisposition = oldImageDisposition as 'fulfilled' | 'unavailable';
+    const lateImageCompletion = {
+      status: imageDisposition === 'fulfilled' ? 'passed' : 'inconclusive',
+      scope: 'held old-image route delivery and absence from the current canvas',
+      routeDisposition: imageDisposition,
+      routeError: oldImageError,
+      requestFailure: oldImageRequestFailure,
+      cancellationObserved: Boolean(
+        oldImageRequestFailure && /ERR_ABORTED|NS_BINDING_ABORTED/i.test(oldImageRequestFailure)
+      ),
+    };
     result = {
-      status: 'passed',
+      status: lateImageCompletion.status === 'passed' ? 'passed' : 'partial',
+      controlStatus: 'passed',
       scope: 'installed Edge extension, source-bound production interceptor/parser/Main Canvas',
       sourceBound: final,
       pageScriptProbeProvenance: provenance,
@@ -908,17 +925,20 @@ export async function runAcquisitionBoundaries({
         afterRelease: capAfterRelease.streams.cap,
       },
       sessions: { a1, a1Held, b, bHeld, a2, beforeLateRelease, final },
-      oldImageDisposition,
-      oldImageError,
+      lateImageCompletion,
       imageRequests,
       pageErrors,
       consoleErrors,
       videoPrerequisite:
         'paused property overridden only for this isolated renderer fixture; no playback claim',
       remainingScope: [
-        'Old image response may become unavailable after browser navigation; fulfilled versus unavailable is reported separately',
+        ...(lateImageCompletion.status === 'inconclusive'
+          ? [
+              'Old-image late completion was not proven because its route could not fulfill after navigation',
+            ]
+          : []),
         'No same-session cross-source replacement or old-image redraw count (EVT-02)',
-        'No replay seek/body lifecycle or stale Worker completion (RPL-02 and full SES-01)',
+        'No replay seek/body lifecycle or stale Worker completion (RPL-02 and full SES-01 remain open)',
         'No held bootstrap window identity mismatch (UP-01)',
       ],
     };
@@ -937,6 +957,7 @@ export async function runAcquisitionBoundaries({
             oldImageReleased,
             oldImageDisposition,
             oldImageError,
+            oldImageRequestFailure,
             imageRequests,
             routeErrors,
             pageErrors,
