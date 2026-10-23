@@ -201,12 +201,14 @@ barrels just to shorten paths. Safe fixes must converge on a second run.
 
 Keep the recommended lint preset and explicitly stronger correctness and
 performance severities. Oxlint type-aware lint is disabled because automatic
-project discovery does not cover all five custom TypeScript contexts reliably;
-all five explicit `tsc --noEmit` checks remain mandatory in `pnpm quality`.
-Oxlint 1.88 has no equivalent rule for no-substitution template literals, and
-strict `tsc` accepts evolving-any declarations such as `let value; value = 1`.
-Pinned Biome 2.5.15 remains only for `noUnusedTemplateLiteral` and
-`noImplicitAnyLet` over first-party TypeScript/JavaScript sources. Run
+project discovery does not cover all six TypeScript contexts reliably;
+all six explicit `tsc --noEmit` checks, including `check:windows`, remain
+mandatory in `pnpm quality`. Oxlint has no equivalent rule for no-substitution
+template literals, and strict `tsc` accepts evolving-any declarations such as
+`let value; value = 1`.
+The manifest-selected Biome remains only for `noUnusedTemplateLiteral` and
+`noImplicitAnyLet` over first-party TypeScript/JavaScript sources, including
+Windows validation helpers and GitHub Action code in both `.ts` and `.mjs`. Run
 `pnpm lint:residual`; `pnpm quality` includes it after `vp check`. Biome
 formatting and every other Biome lint rule are disabled. The real-tool negative
 fixtures in `test/unit/config/vite-plus-quality.test.ts` protect both rules.

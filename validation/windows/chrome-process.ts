@@ -86,7 +86,7 @@ export function isOwnedChromeProcess(
   const name =
     typeof executablePath === 'string' ? win32.basename(executablePath).toLowerCase() : '';
   const profile = commandProfile(record.CommandLine);
-  let normalizedCommandProfile;
+  let normalizedCommandProfile: string | null;
   try {
     normalizedCommandProfile = profile === null ? null : normalizeProfile(profile);
   } catch {

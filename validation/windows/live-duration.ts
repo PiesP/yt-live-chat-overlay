@@ -291,7 +291,7 @@ async function waitForVideoState(
   delay: (ms: number) => Promise<void>
 ) {
   const deadline = performance.now() + timeoutMs;
-  let state;
+  let state: VideoState;
   do {
     state = (await evaluatePublicVideo(binding, 'read')).after;
     if (predicate(state)) return state;

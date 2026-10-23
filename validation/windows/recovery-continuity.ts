@@ -658,40 +658,40 @@ export async function runRecoveryContinuityFixture({
   assert(pageSource.includes('var CanvasRenderer = class CanvasRenderer'));
   const instrumented = pageSource.replace(
     ENTRY_MARKER,
-    `\n\tconst continuityState = window.__ytRecoveryContinuity;\n` +
+    '\n\tconst continuityState = window.__ytRecoveryContinuity;\n' +
       `\tif (!continuityState) throw new Error('Continuity prelude missing');\n` +
-      `\tcontinuityState.sourceBound = true;\n` +
-      `\tconst originalContinuityAdd = CanvasRenderer.prototype.addMessage;\n` +
-      `\tCanvasRenderer.prototype.addMessage = function(message) {\n` +
-      `\t\tcontinuityState.renderer = this;\n` +
-      `\t\treturn originalContinuityAdd.call(this, message);\n` +
-      `\t};\n` +
-      `\tconst originalContinuityFallback = CanvasRenderer.prototype.fallbackToMainThread;\n` +
-      `\tCanvasRenderer.prototype.fallbackToMainThread = function(reason) {\n` +
-      `\t\tcontinuityState.fallbackReasons.push(reason);\n` +
-      `\t\tconst manager = this.workerManager;\n` +
-      `\t\tconst originalSnapshotMessages = manager.snapshotMessages;\n` +
-      `\t\tconst originalTakeSnapshotMessages = manager.takeSnapshotMessages;\n` +
+      '\tcontinuityState.sourceBound = true;\n' +
+      '\tconst originalContinuityAdd = CanvasRenderer.prototype.addMessage;\n' +
+      '\tCanvasRenderer.prototype.addMessage = function(message) {\n' +
+      '\t\tcontinuityState.renderer = this;\n' +
+      '\t\treturn originalContinuityAdd.call(this, message);\n' +
+      '\t};\n' +
+      '\tconst originalContinuityFallback = CanvasRenderer.prototype.fallbackToMainThread;\n' +
+      '\tCanvasRenderer.prototype.fallbackToMainThread = function(reason) {\n' +
+      '\t\tcontinuityState.fallbackReasons.push(reason);\n' +
+      '\t\tconst manager = this.workerManager;\n' +
+      '\t\tconst originalSnapshotMessages = manager.snapshotMessages;\n' +
+      '\t\tconst originalTakeSnapshotMessages = manager.takeSnapshotMessages;\n' +
       `\t\tif (typeof originalSnapshotMessages !== 'function' || typeof originalTakeSnapshotMessages !== 'function') throw new Error('Packaged manager snapshot seam changed');\n` +
-      `\t\tmanager.snapshotMessages = function(...args) {\n` +
-      `\t\t\tcontinuityState.managerSnapshotStartedAtMs = performance.now();\n` +
-      `\t\t\treturn originalSnapshotMessages.apply(this, args);\n` +
-      `\t\t};\n` +
-      `\t\tmanager.takeSnapshotMessages = function(...args) {\n` +
-      `\t\t\tconst messages = originalTakeSnapshotMessages.apply(this, args);\n` +
-      `\t\t\tcontinuityState.acceptedSnapshots.push({\n` +
-      `\t\t\t\tatMs: performance.now(), activeIds: [...args[0]], pendingIds: [...args[1]],\n` +
-      `\t\t\t\tprocessedBatchSequence: args[2], epoch: args[5],\n` +
-      `\t\t\t\tmessages: messages.map((entry) => ({ id: entry.message.id, activeMotionStartEpochMs: entry.activeMotion?.startEpochMs ?? null })),\n` +
-      `\t\t\t});\n` +
-      `\t\t\treturn messages;\n` +
-      `\t\t};\n` +
-      `\t\treturn originalContinuityFallback.call(this, reason);\n` +
-      `\t};\n` +
-      `\tconst originalContinuityFrame = CanvasRenderer.prototype.renderFrame;\n` +
-      `\tCanvasRenderer.prototype.renderFrame = function(...args) {\n` +
-      `\t\tif (!this.workerManager.isActive) continuityState.mainFrames++;\n` +
-      `\t\treturn originalContinuityFrame.apply(this, args);\n` +
+      '\t\tmanager.snapshotMessages = function(...args) {\n' +
+      '\t\t\tcontinuityState.managerSnapshotStartedAtMs = performance.now();\n' +
+      '\t\t\treturn originalSnapshotMessages.apply(this, args);\n' +
+      '\t\t};\n' +
+      '\t\tmanager.takeSnapshotMessages = function(...args) {\n' +
+      '\t\t\tconst messages = originalTakeSnapshotMessages.apply(this, args);\n' +
+      '\t\t\tcontinuityState.acceptedSnapshots.push({\n' +
+      '\t\t\t\tatMs: performance.now(), activeIds: [...args[0]], pendingIds: [...args[1]],\n' +
+      '\t\t\t\tprocessedBatchSequence: args[2], epoch: args[5],\n' +
+      '\t\t\t\tmessages: messages.map((entry) => ({ id: entry.message.id, activeMotionStartEpochMs: entry.activeMotion?.startEpochMs ?? null })),\n' +
+      '\t\t\t});\n' +
+      '\t\t\treturn messages;\n' +
+      '\t\t};\n' +
+      '\t\treturn originalContinuityFallback.call(this, reason);\n' +
+      '\t};\n' +
+      '\tconst originalContinuityFrame = CanvasRenderer.prototype.renderFrame;\n' +
+      '\tCanvasRenderer.prototype.renderFrame = function(...args) {\n' +
+      '\t\tif (!this.workerManager.isActive) continuityState.mainFrames++;\n' +
+      '\t\treturn originalContinuityFrame.apply(this, args);\n' +
       `\t};${ENTRY_MARKER}`
   );
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');

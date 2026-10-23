@@ -575,28 +575,28 @@ export async function runAcquisitionBoundaries({
     assert(source.includes(marker), `Packaged acquisition seam changed: ${marker}`);
   const instrumented = source.replace(
     ENTRY_MARKER,
-    `\n\tconst acquisitionState = window.__ytAcquisitionBoundary;\n` +
+    '\n\tconst acquisitionState = window.__ytAcquisitionBoundary;\n' +
       `\tif (!acquisitionState) throw new Error('Acquisition prelude unavailable');\n` +
-      `\tconst nativeInstallAcquisition = installFetchInterceptor;\n` +
-      `\tinstallFetchInterceptor = function(...args) {\n` +
-      `\t\tconst restore = nativeInstallAcquisition(...args); acquisitionState.installs++;\n` +
-      `\t\treturn function() { acquisitionState.restores++; return restore(); };\n` +
-      `\t};\n` +
-      `\tconst nativeAcquisitionStart = RuntimeManager.prototype.start;\n` +
-      `\tRuntimeManager.prototype.start = function(...args) {\n` +
-      `\t\tacquisitionState.manager = this; return nativeAcquisitionStart.apply(this, args);\n` +
-      `\t};\n` +
-      `\tconst nativeAcquisitionAdd = CanvasRenderer.prototype.addMessage;\n` +
-      `\tCanvasRenderer.prototype.addMessage = function(message) {\n` +
+      '\tconst nativeInstallAcquisition = installFetchInterceptor;\n' +
+      '\tinstallFetchInterceptor = function(...args) {\n' +
+      '\t\tconst restore = nativeInstallAcquisition(...args); acquisitionState.installs++;\n' +
+      '\t\treturn function() { acquisitionState.restores++; return restore(); };\n' +
+      '\t};\n' +
+      '\tconst nativeAcquisitionStart = RuntimeManager.prototype.start;\n' +
+      '\tRuntimeManager.prototype.start = function(...args) {\n' +
+      '\t\tacquisitionState.manager = this; return nativeAcquisitionStart.apply(this, args);\n' +
+      '\t};\n' +
+      '\tconst nativeAcquisitionAdd = CanvasRenderer.prototype.addMessage;\n' +
+      '\tCanvasRenderer.prototype.addMessage = function(message) {\n' +
       `\t\tif (typeof message?.id === 'string' && message.id.startsWith('windows306-acq-')) {\n` +
       `\t\t\tif (acquisitionState.accepted.length < ${MAX_RECORDS}) acquisitionState.accepted.push({\n` +
-      `\t\t\t\tid: message.id, photo: message.authorPhotoUrl ?? null, action: message.actionType ?? null,\n` +
-      `\t\t\t\tgeneration: acquisitionState.manager?.sessionGeneration ?? null,\n` +
-      `\t\t\t\tcurrent: acquisitionState.manager?.renderer === this\n` +
-      `\t\t\t}); else acquisitionState.overflow++;\n` +
-      `\t\t}\n` +
-      `\t\treturn nativeAcquisitionAdd.call(this, message);\n` +
-      `\t};\n` +
+      '\t\t\t\tid: message.id, photo: message.authorPhotoUrl ?? null, action: message.actionType ?? null,\n' +
+      '\t\t\t\tgeneration: acquisitionState.manager?.sessionGeneration ?? null,\n' +
+      '\t\t\t\tcurrent: acquisitionState.manager?.renderer === this\n' +
+      '\t\t\t}); else acquisitionState.overflow++;\n' +
+      '\t\t}\n' +
+      '\t\treturn nativeAcquisitionAdd.call(this, message);\n' +
+      '\t};\n' +
       `\tacquisitionState.sourceBound = true;${ENTRY_MARKER}`
   );
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');

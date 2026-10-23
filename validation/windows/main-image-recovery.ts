@@ -511,14 +511,14 @@ export async function runMainImageRecoveryFixture({
   );
   const instrumented = source.replace(
     ENTRY_MARKER,
-    `\n\tconst mainImageState = window.__ytMainImageRecovery;\n` +
+    '\n\tconst mainImageState = window.__ytMainImageRecovery;\n' +
       `\tif (!mainImageState) throw new Error('Main image prelude is unavailable');\n` +
-      `\tconst nativeMainFrame = CanvasRenderer.prototype.renderFrame;\n` +
-      `\tCanvasRenderer.prototype.renderFrame = function(...args) {\n` +
-      `\t\tmainImageState.renderer = this;\n` +
-      `\t\tmainImageState.renderFrames++;\n` +
-      `\t\treturn nativeMainFrame.apply(this, args);\n` +
-      `\t};\n` +
+      '\tconst nativeMainFrame = CanvasRenderer.prototype.renderFrame;\n' +
+      '\tCanvasRenderer.prototype.renderFrame = function(...args) {\n' +
+      '\t\tmainImageState.renderer = this;\n' +
+      '\t\tmainImageState.renderFrames++;\n' +
+      '\t\treturn nativeMainFrame.apply(this, args);\n' +
+      '\t};\n' +
       `\tmainImageState.sourceBound = true;${ENTRY_MARKER}`
   );
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');

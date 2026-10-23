@@ -106,6 +106,65 @@ describe('Vite+ quality coverage', () => {
     expect(scripts.quality).toContain('pnpm -s lint:residual');
   });
 
+  it('applies both residual rules to Windows and Action TypeScript while retaining legacy and excluded paths', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'yt-residual-paths-'));
+    try {
+      copyFileSync(join(root, 'biome-residual.json'), join(directory, 'biome-residual.json'));
+      for (const excluded of [
+        'packages/core/src/excluded.ts',
+        'validation/windows/dist-generated/excluded.ts',
+        'validation/windows/vendor/excluded.ts',
+      ]) {
+        const file = join(directory, excluded);
+        mkdirSync(resolve(file, '..'), { recursive: true });
+        writeFileSync(file, 'export const value = `excluded`;\n');
+      }
+      const run = () =>
+        spawnSync(
+          resolve(root, 'node_modules/.bin/biome'),
+          ['lint', '--config-path=biome-residual.json', '--error-on-warnings', '.'],
+          { cwd: directory, encoding: 'utf8' }
+        );
+      for (const path of [
+        'validation/windows/residual-fixture.ts',
+        'validation/windows/release-upgrade/residual-fixture.ts',
+        '.github/actions/validate-semgrep-sarif/residual-fixture.ts',
+        'validation/windows/legacy-fixture.mjs',
+        '.github/actions/prepare-semgrep/legacy-fixture.mjs',
+      ]) {
+        const file = join(directory, path);
+        mkdirSync(resolve(file, '..'), { recursive: true });
+        const cases = [
+          [
+            'noUnusedTemplateLiteral',
+            'export const value = `unchanged`;\n',
+            "export const value = 'unchanged';\n",
+          ],
+          [
+            'noImplicitAnyLet',
+            'let value;\nvalue = 1;\nvoid value;\n',
+            'let value = 1;\nvoid value;\n',
+          ],
+        ] as const;
+        for (const [rule, negative, corrected] of path.endsWith('.ts')
+          ? cases
+          : cases.slice(0, 1)) {
+          writeFileSync(file, negative);
+          const rejected = run();
+          const diagnostic = rejected.stdout + rejected.stderr;
+          expect(rejected.status, `${path} ${rule}: ${diagnostic}`).toBe(1);
+          expect(diagnostic, path).toContain(path);
+          expect(diagnostic, path).toContain(rule);
+          writeFileSync(file, corrected);
+          const accepted = run();
+          expect(accepted.status, accepted.stdout + accepted.stderr).toBe(0);
+        }
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('keeps first-party format boundaries and generated/dependency exclusions', () => {
     const scope = [
       'src',
