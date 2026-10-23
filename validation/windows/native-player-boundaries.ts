@@ -309,7 +309,7 @@ async function waitForAutoplayDecision(context: BrowserContext, page: Page): Pro
   }
 }
 
-/** Installed Chrome, natural autoplay policy, actual media starvation and element rebinding. */
+/** Installed Chrome, scoped gesture-required policy, media starvation and element rebinding. */
 export async function runNativePlayerBoundaries({
   context,
   root,
@@ -1097,7 +1097,7 @@ export async function runNativePlayerBoundaries({
     result = {
       status: 'passed',
       scope:
-        'installed Chrome extension; native unmuted autoplay denial, trusted play, encoded MediaSource starvation and recovery, video element rebinding',
+        'installed Chrome extension in an owned gesture-required-policy process; actual unmuted autoplay denial, trusted play, encoded MediaSource starvation/recovery and element rebinding',
       fixtureUrl: FIXTURE_URL,
       probeProvenance,
       documentRequests,

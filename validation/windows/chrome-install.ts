@@ -2576,7 +2576,14 @@ async function runNativeTabInstallation({
   let extensionId: string | undefined;
   let primaryError: unknown;
   try {
-    ownedChrome = await launchOwnedNaturalChrome({ chromium, root, output });
+    ownedChrome = await launchOwnedNaturalChrome({
+      chromium,
+      root,
+      output,
+      requireAutoplayGesture: true,
+    });
+    assert.equal(ownedChrome.launchEvidence.autoplayPolicy, 'user-gesture-required');
+    assert.equal(ownedChrome.launchEvidence.autoplayArgumentObserved, true);
     assert.equal(ownedChrome.launchEvidence.noDefaults, true);
     const { browser, context } = ownedChrome;
     result.browserVersion = browser.version();

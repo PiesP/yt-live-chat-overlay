@@ -71,7 +71,7 @@ async function boundedProtocolOperation<T>(operation: () => Promise<T>, label: s
   }
 }
 
-export function naturalChromeArguments(profile: string) {
+export function naturalChromeArguments(profile: string, requireAutoplayGesture = false) {
   return [
     `--user-data-dir=${profile}`,
     '--remote-debugging-port=27683',
@@ -80,6 +80,7 @@ export function naturalChromeArguments(profile: string) {
     '--no-default-browser-check',
     '--enable-unsafe-extension-debugging',
     '--mute-audio',
+    ...(requireAutoplayGesture ? ['--autoplay-policy=user-gesture-required'] : []),
     '--lang=en-US',
     `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
     'about:blank',
@@ -578,21 +579,27 @@ export async function launchOwnedNaturalChrome({
   root,
   output,
   checkpoint = async (_name: string, _phase: 'before' | 'after') => {},
+  requireAutoplayGesture = false,
 }: {
   chromium: BrowserType;
   root: string;
   output: string;
   checkpoint?: Checkpoint;
+  requireAutoplayGesture?: boolean;
 }) {
   const discovered = await discoverInstalledChrome(chromium, root, output, checkpoint);
   await assertFixedPortUnused();
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(discovered.executablePath, naturalChromeArguments(profile), {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: false,
-    });
+    child = spawn(
+      discovered.executablePath,
+      naturalChromeArguments(profile, requireAutoplayGesture),
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: false,
+      }
+    );
   } catch (error) {
     await removeOwnedChromeProfile(root, profile).catch((cleanupError) => {
       throw new AggregateError([error, cleanupError], 'Owned Chrome spawn and cleanup failed');
@@ -665,6 +672,10 @@ export async function launchOwnedNaturalChrome({
       await verifyOwnedFixedPort(child, childState, browserProcessIdentity),
       'Owned IPv4 DevTools listener changed after CDP verification'
     );
+    const autoplayArgumentObserved = currentIdentity.commandLine.includes(
+      '--autoplay-policy=user-gesture-required'
+    );
+    assert.equal(autoplayArgumentObserved, requireAutoplayGesture);
     const cleanupCdp: Protocol = {
       send: (method, parameters) =>
         boundedProtocolOperation(
@@ -694,6 +705,8 @@ export async function launchOwnedNaturalChrome({
         remoteDebuggingPort: FIXED_DEBUG_PORT,
         endpointDiscovery: 'owned-loopback-json-version',
         noDefaults: true,
+        autoplayPolicy: requireAutoplayGesture ? 'user-gesture-required' : 'default',
+        autoplayArgumentObserved,
         spawnedProcessMatchedCdp: true,
         stderrBytes,
         stderrTruncated: stderrBytes > stderrTail.length,
