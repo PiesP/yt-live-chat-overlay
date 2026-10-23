@@ -139,6 +139,7 @@ describe('MAIN-world one-shot claim and worker lifetime', () => {
   afterEach(() => {
     delete window.__ytExtensionBootstrapClaim;
     delete window.__ytExtensionBridge;
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -169,6 +170,41 @@ describe('MAIN-world one-shot claim and worker lifetime', () => {
       storageType: 'chrome.storage.local',
     });
   });
+
+  it.each(['Blob construction', 'object URL creation'])(
+    'preserves the authenticated bridge when %s fails',
+    (failure) => {
+      const createObjectURL = vi.spyOn(URL, 'createObjectURL');
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      if (failure === 'Blob construction') {
+        vi.stubGlobal(
+          'Blob',
+          class {
+            constructor() {
+              throw new TypeError('Blob construction blocked');
+            }
+          }
+        );
+      } else {
+        createObjectURL.mockImplementation(() => {
+          throw new DOMException('Blob URL blocked', 'SecurityError');
+        });
+      }
+
+      expect(claimNativePageBootstrap(nonce, 'worker source')).toBe('claimed');
+      expect(window.__ytExtensionBootstrapClaim).toBe(true);
+      expect(window.__ytExtensionBridge).toEqual({
+        nonce,
+        workerSupported: false,
+        storageType: 'chrome.storage.local',
+      });
+      expect(createObjectURL).toHaveBeenCalledTimes(failure === 'Blob construction' ? 0 : 1);
+      expect(claimNativePageBootstrap(crypto.randomUUID(), null)).toBe('already');
+      expect(window.__ytExtensionBridge?.nonce).toBe(nonce);
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe('Chrome isolated-world entry', () => {
