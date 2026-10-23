@@ -16,6 +16,44 @@ const MAX_SAMPLES = 79;
 const MIN_SAMPLE_GAP_MS = 250;
 const MIN_PROGRESS_SECONDS = 0.15;
 const MIN_SEEKABLE_SECONDS = 2;
+const SEEKABLE_EDGE_TOLERANCE_SECONDS = 0.5;
+const PAGE_CREATION_LIMIT_MS = 5_000;
+const HANDLE_DISPOSAL_LIMIT_MS = 1_500;
+const PAGE_CLOSE_LIMIT_MS = 4_000;
+
+class BoundaryTimeoutError extends Error {
+  constructor(stage: string) {
+    super(`${stage} exceeded its bounded operation time`);
+    this.name = 'BoundaryTimeoutError';
+  }
+}
+
+function within<T>(
+  operation: Promise<T>,
+  limitMs: number,
+  stage: string,
+  onTimeout?: () => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => {
+        onTimeout?.();
+        reject(new BoundaryTimeoutError(stage));
+      },
+      Math.max(1, limitMs)
+    );
+    void operation.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
+}
 
 export type LiveContentSample = {
   elapsedMs: number;
@@ -68,6 +106,8 @@ export function assessLiveContentPrerequisite(
     sample.errorCode === null &&
     sample.paused === false &&
     sample.muted === true &&
+    sample.currentTime !== null &&
+    Number.isFinite(sample.currentTime) &&
     sample.videoWidth !== null &&
     sample.videoWidth > 0 &&
     sample.videoHeight !== null &&
@@ -75,7 +115,9 @@ export function assessLiveContentPrerequisite(
     sample.seekable !== null &&
     Number.isFinite(sample.seekable.start) &&
     Number.isFinite(sample.seekable.end) &&
-    sample.seekable.end - sample.seekable.start >= MIN_SEEKABLE_SECONDS;
+    sample.seekable.end - sample.seekable.start >= MIN_SEEKABLE_SECONDS &&
+    sample.currentTime >= sample.seekable.start - SEEKABLE_EDGE_TOLERANCE_SECONDS &&
+    sample.currentTime <= sample.seekable.end + SEEKABLE_EDGE_TOLERANCE_SECONDS;
 
   for (let index = 1; index < samples.length; index++) {
     const previous = samples[index - 1];
@@ -101,7 +143,7 @@ export function assessLiveContentPrerequisite(
     );
     return {
       status: 'passed',
-      reason: 'public-content-identity-playback-and-seekable-range-observed',
+      reason: 'public-player-associated-identity-playback-and-seekable-range-observed',
       qualifyingPair: [index - 1, index],
       adTransition: adSampleIndex >= 0 ? 'observed' : 'not-observed',
       adSampleIndex: adSampleIndex >= 0 ? adSampleIndex : null,
@@ -273,7 +315,7 @@ async function readSample(
   };
 }
 
-/** Inspect one real public URL without claiming a chat or product result. */
+/** Inspect player-associated public evidence without binding decoded frames to content. */
 export async function runLiveContentPrerequisite({
   context,
   url,
@@ -295,7 +337,7 @@ export async function runLiveContentPrerequisite({
   const filename = `live-content-prerequisite-${index}.json`;
   const result = {
     schemaVersion: 1,
-    kind: 'public-youtube-content-prerequisite',
+    kind: 'public-youtube-player-associated-content-prerequisite',
     status: 'unverified' as 'passed' | 'unverified',
     statusReason: 'public-player-not-observed',
     classification: 'environment-prerequisite',
@@ -315,11 +357,23 @@ export async function runLiveContentPrerequisite({
     failureStage: null as string | null,
     failureType: null as string | null,
     writeErrorType: null as string | null,
-    cleanup: { pageClosed: false, handleDisposeErrors: 0, errorType: null as string | null },
+    cleanup: {
+      pageClosed: false,
+      pageCloseTimedOut: false,
+      pageCreationTimedOut: false,
+      latePageCloseGuardAttached: false,
+      callerContextCleanupRequired: false,
+      pendingOperationUncertain: false,
+      handleDisposeErrors: 0,
+      handleDisposeTimedOut: false,
+      errorType: null as string | null,
+    },
     elapsedMs: 0,
     limitations: [
       'One public YouTube URL and one caller-owned browser context are observed.',
       'Absence of an observed ad does not prove ad completion or ad behavior.',
+      'An ad transition means observed ad-showing then site ad state false with player-associated playback; it does not prove frame or ad/content parity.',
+      'Matching player IDs and a currentSrc hash do not cryptographically bind decoded frames to content.',
       'No chat, image rendering, account state, or player defect is inferred.',
     ],
   };
@@ -334,15 +388,53 @@ export async function runLiveContentPrerequisite({
   let previousVideo: ElementHandle<HTMLVideoElement> | null = null;
   let previousSourceSha256: string | null = null;
   let stage = 'create-page';
+  const releaseHandle = async (
+    handle: ElementHandle<HTMLVideoElement> | null
+  ): Promise<boolean> => {
+    if (!handle) return true;
+    try {
+      await within(handle.dispose(), HANDLE_DISPOSAL_LIMIT_MS, 'dispose-video-handle', () => {
+        result.cleanup.handleDisposeTimedOut = true;
+        result.cleanup.callerContextCleanupRequired = true;
+      });
+      return true;
+    } catch {
+      result.cleanup.handleDisposeErrors++;
+      result.cleanup.callerContextCleanupRequired = true;
+      return false;
+    }
+  };
   try {
     await save();
-    page = await context.newPage();
     deadlineWatchdog = setTimeout(
       () => {
         deadlineExpired = true;
         void page?.close({ runBeforeUnload: false }).catch(() => {});
       },
       Math.max(1, deadline - performance.now())
+    );
+    const creation = context.newPage();
+    void creation.then(
+      (latePage) => {
+        if (!result.cleanup.pageCreationTimedOut) return;
+        // A late page belongs to this call, but its closure remains unverified.
+        void within(
+          Promise.resolve().then(() => latePage.close({ runBeforeUnload: false })),
+          PAGE_CLOSE_LIMIT_MS,
+          'late-page-close'
+        ).catch(() => {});
+      },
+      () => {}
+    );
+    page = await within(
+      creation,
+      Math.min(PAGE_CREATION_LIMIT_MS, deadline - performance.now()),
+      'create-page',
+      () => {
+        result.cleanup.pageCreationTimedOut = true;
+        result.cleanup.latePageCloseGuardAttached = true;
+        result.cleanup.callerContextCleanupRequired = true;
+      }
     );
     stage = 'navigate';
     await page.goto(liveUrl, {
@@ -366,6 +458,7 @@ export async function runLiveContentPrerequisite({
     while (performance.now() < deadline && result.samples.length < MAX_SAMPLES) {
       const elapsedMs = performance.now() - started;
       let currentVideo: ElementHandle<HTMLVideoElement> | null = null;
+      let handleReleaseFailed = false;
       try {
         currentVideo = (await page
           .locator('#movie_player video')
@@ -379,40 +472,57 @@ export async function runLiveContentPrerequisite({
       try {
         if (currentVideo && !result.playbackControl.playInvoked) {
           try {
-            await currentVideo.evaluate((video, id) => {
-              const currentUrl = new URL(location.href);
-              const routeId =
-                currentUrl.pathname === '/watch'
-                  ? currentUrl.searchParams.get('v')
-                  : currentUrl.pathname === `/live/${id}`
-                    ? id
-                    : null;
-              if (
-                currentUrl.origin !== 'https://www.youtube.com' ||
-                routeId !== id ||
-                !video.isConnected ||
-                document.querySelectorAll('#movie_player video').length !== 1 ||
-                document.querySelector('#movie_player video') !== video
-              ) {
-                throw new Error('Owned public video disappeared before play');
+            await within(
+              currentVideo.evaluate((video, id) => {
+                const currentUrl = new URL(location.href);
+                const routeId =
+                  currentUrl.pathname === '/watch'
+                    ? currentUrl.searchParams.get('v')
+                    : currentUrl.pathname === `/live/${id}`
+                      ? id
+                      : null;
+                if (
+                  currentUrl.origin !== 'https://www.youtube.com' ||
+                  routeId !== id ||
+                  !video.isConnected ||
+                  document.querySelectorAll('#movie_player video').length !== 1 ||
+                  document.querySelector('#movie_player video') !== video
+                ) {
+                  throw new Error('Owned public video disappeared before play');
+                }
+                video.muted = true;
+                void video.play().catch(() => {});
+              }, expectedVideoId),
+              Math.min(3_000, deadline - performance.now()),
+              'native-play-control',
+              () => {
+                result.cleanup.pendingOperationUncertain = true;
+                result.cleanup.callerContextCleanupRequired = true;
               }
-              video.muted = true;
-              void video.play().catch(() => {});
-            }, expectedVideoId);
+            );
             result.playbackControl.mutedSet = true;
             result.playbackControl.playInvoked = true;
           } catch (error) {
             result.playbackControl.actionErrorType =
               error instanceof Error ? error.name : typeof error;
+            if (error instanceof BoundaryTimeoutError) throw error;
           }
         }
-        const sample = await readSample(
-          page,
-          currentVideo,
-          previousVideo,
-          expectedVideoId,
-          elapsedMs,
-          previousSourceSha256
+        const sample: LiveContentSample = await within(
+          readSample(
+            page,
+            currentVideo,
+            previousVideo,
+            expectedVideoId,
+            elapsedMs,
+            previousSourceSha256
+          ),
+          Math.min(3_000, deadline - performance.now()),
+          'read-public-sample',
+          () => {
+            result.cleanup.pendingOperationUncertain = true;
+            result.cleanup.callerContextCleanupRequired = true;
+          }
         );
         result.samples.push(sample);
         result.assessment = assessLiveContentPrerequisite(result.samples, expectedVideoId);
@@ -420,11 +530,10 @@ export async function runLiveContentPrerequisite({
         if (result.samples.length % 10 === 0) await save();
         if (result.assessment.status === 'passed') break;
       } finally {
-        await previousVideo?.dispose().catch(() => {
-          result.cleanup.handleDisposeErrors++;
-        });
+        handleReleaseFailed = !(await releaseHandle(previousVideo));
         previousVideo = currentVideo;
       }
+      if (handleReleaseFailed) throw new Error('Owned video handle disposal unverified');
       await new Promise<void>((resolve) =>
         setTimeout(resolve, Math.max(1, Math.min(SAMPLE_INTERVAL_MS, deadline - performance.now())))
       );
@@ -459,29 +568,38 @@ export async function runLiveContentPrerequisite({
     result.failureType = error instanceof Error ? error.name : typeof error;
     result.statusReason = `observation-${stage}-unverified`;
   } finally {
-    if (deadlineWatchdog) clearTimeout(deadlineWatchdog);
-    await previousVideo?.dispose().catch(() => {
-      result.cleanup.handleDisposeErrors++;
-    });
+    await releaseHandle(previousVideo);
     if (page) {
       try {
-        await page.close({ runBeforeUnload: false });
+        await within(
+          page.close({ runBeforeUnload: false }),
+          PAGE_CLOSE_LIMIT_MS,
+          'close-owned-page',
+          () => {
+            result.cleanup.pageCloseTimedOut = true;
+            result.cleanup.callerContextCleanupRequired = true;
+          }
+        );
         result.cleanup.pageClosed = true;
       } catch (error) {
         result.cleanup.errorType = error instanceof Error ? error.name : typeof error;
+        result.cleanup.callerContextCleanupRequired = true;
       }
     }
+    if (deadlineWatchdog) clearTimeout(deadlineWatchdog);
     if (
       (page !== null && !result.cleanup.pageClosed) ||
       result.cleanup.errorType ||
-      result.cleanup.handleDisposeErrors > 0
+      result.cleanup.handleDisposeErrors > 0 ||
+      result.cleanup.pageCreationTimedOut ||
+      result.cleanup.pendingOperationUncertain
     ) {
       result.status = 'unverified';
-      result.statusReason = 'owned-page-cleanup-unverified';
+      if (!result.failureStage) result.statusReason = 'owned-page-cleanup-unverified';
     }
     if (deadlineExpired) {
       result.status = 'unverified';
-      result.statusReason = 'observation-deadline-exceeded';
+      if (!result.failureStage) result.statusReason = 'observation-deadline-exceeded';
     }
     result.elapsedMs = performance.now() - started;
     try {

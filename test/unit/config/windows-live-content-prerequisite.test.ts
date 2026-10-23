@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, expect, it } from 'vite-plus/test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { assessLiveContentPrerequisite } from '../../../validation/windows/live-content-prerequisite.ts';
+import type { BrowserContext, Page } from '@playwright/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
+
+import {
+  assessLiveContentPrerequisite,
+  runLiveContentPrerequisite,
+} from '../../../validation/windows/live-content-prerequisite.ts';
 import type { LiveContentSample } from '../../../validation/windows/live-content-prerequisite.ts';
 
 const VIDEO_ID = 'exampleVideoId';
@@ -44,14 +52,14 @@ describe('public content prerequisite assessment', () => {
 
     expect(assessLiveContentPrerequisite([first, second], VIDEO_ID)).toEqual({
       status: 'passed',
-      reason: 'public-content-identity-playback-and-seekable-range-observed',
+      reason: 'public-player-associated-identity-playback-and-seekable-range-observed',
       qualifyingPair: [0, 1],
       adTransition: 'not-observed',
       adSampleIndex: null,
     });
   });
 
-  it('credits an ad transition only after a real ad sample precedes qualifying content', () => {
+  it('marks a site ad-state transition only after an ad sample precedes qualifying player playback', () => {
     const ad = contentSample({ adShowing: true, currentTime: 1, totalVideoFrames: 20 });
     const first = contentSample({ elapsedMs: 1750, currentTime: 10, totalVideoFrames: 240 });
     const second = contentSample({ elapsedMs: 2500, currentTime: 10.75, totalVideoFrames: 258 });
@@ -90,6 +98,8 @@ describe('public content prerequisite assessment', () => {
     ['time progress', { currentTime: 10 }],
     ['frame progress', { totalVideoFrames: 240 }],
     ['seekable range', { seekable: { start: 19, end: 20 } }],
+    ['current time above seekable range', { currentTime: 50 }],
+    ['non-finite current time', { currentTime: Number.NaN }],
     ['media error', { errorCode: 3 }],
     ['consent barrier', { routeMatched: false, pageBarrier: 'consent' as const }],
     ['login barrier', { routeMatched: false, pageBarrier: 'login' as const }],
@@ -104,4 +114,95 @@ describe('public content prerequisite assessment', () => {
 
     expect(assessLiveContentPrerequisite([first, second], VIDEO_ID).status).toBe('unverified');
   });
+
+  it.each([
+    ['below', -3, -2.25],
+    ['above', 25, 25.75],
+  ])(
+    'rejects progressing time and frames %s the seekable range',
+    (_label, firstTime, secondTime) => {
+      const first = contentSample({ sameVideoAsPrevious: null, currentTime: firstTime });
+      const second = contentSample({
+        elapsedMs: 1750,
+        currentTime: secondTime,
+        totalVideoFrames: 258,
+      });
+
+      expect(assessLiveContentPrerequisite([first, second], VIDEO_ID).status).toBe('unverified');
+    }
+  );
+
+  it('leaves late page creation uncertain while attaching a bounded close guard', async () => {
+    const output = await mkdtemp(join(tmpdir(), 'yt-public-prerequisite-'));
+    let resolveCreation: (page: Page) => void = () => {};
+    const creation = new Promise<Page>((resolve) => {
+      resolveCreation = resolve;
+    });
+    const context = { newPage: () => creation } as unknown as BrowserContext;
+    const latePage = { close: vi.fn().mockResolvedValue(undefined) } as unknown as Page;
+    try {
+      const result = await runLiveContentPrerequisite({
+        context,
+        url: `https://www.youtube.com/watch?v=${VIDEO_ID}`,
+        output,
+        index: 1,
+      });
+      expect(result.status).toBe('unverified');
+      expect(result.failureStage).toBe('create-page');
+      expect(result.failureType).toBe('BoundaryTimeoutError');
+      expect(result.cleanup).toMatchObject({
+        pageClosed: false,
+        pageCreationTimedOut: true,
+        latePageCloseGuardAttached: true,
+        callerContextCleanupRequired: true,
+      });
+      const receipt = JSON.parse(
+        await readFile(join(output, 'live-content-prerequisite-1.json'), 'utf8')
+      ) as { status: string; cleanup: { pageClosed: boolean } };
+      expect(receipt.status).toBe('unverified');
+      expect(receipt.cleanup.pageClosed).toBe(false);
+      resolveCreation(latePage);
+      await vi.waitFor(() => expect(latePage.close).toHaveBeenCalledOnce());
+    } finally {
+      await rm(output, { recursive: true, force: true });
+    }
+  }, 12_000);
+
+  it('bounds page cleanup and retains the primary navigation failure in the receipt', async () => {
+    const output = await mkdtemp(join(tmpdir(), 'yt-public-prerequisite-'));
+    let resolveClose: () => void = () => {};
+    const close = new Promise<void>((resolve) => {
+      resolveClose = resolve;
+    });
+    const page = {
+      goto: vi.fn().mockRejectedValue(new Error('navigation blocked')),
+      close: vi.fn(() => close),
+    } as unknown as Page;
+    const context = { newPage: vi.fn().mockResolvedValue(page) } as unknown as BrowserContext;
+    try {
+      const result = await runLiveContentPrerequisite({
+        context,
+        url: `https://www.youtube.com/watch?v=${VIDEO_ID}`,
+        output,
+        index: 2,
+      });
+      expect(result.status).toBe('unverified');
+      expect(result.failureStage).toBe('navigate');
+      expect(result.failureType).toBe('Error');
+      expect(result.statusReason).toBe('observation-navigate-unverified');
+      expect(result.cleanup).toMatchObject({
+        pageClosed: false,
+        pageCloseTimedOut: true,
+        callerContextCleanupRequired: true,
+      });
+      const receipt = JSON.parse(
+        await readFile(join(output, 'live-content-prerequisite-2.json'), 'utf8')
+      ) as { failureStage: string; cleanup: { pageCloseTimedOut: boolean } };
+      expect(receipt.failureStage).toBe('navigate');
+      expect(receipt.cleanup.pageCloseTimedOut).toBe(true);
+    } finally {
+      resolveClose();
+      await rm(output, { recursive: true, force: true });
+    }
+  }, 12_000);
 });
