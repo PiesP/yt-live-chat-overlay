@@ -34,13 +34,13 @@ const EMOJI_URL = 'https://yt3.ggpht.com/emoji.png';
 const AUTHOR_URL = 'https://yt4.ggpht.com/author.png';
 const STICKER_URL = 'https://yt3.ggpht.com/sticker.png';
 
-function message(): ChatMessage {
+function message(emojiUrl = EMOJI_URL): ChatMessage {
   return {
     text: ':emoji:',
     content: [
       {
         type: 'emoji',
-        emoji: { url: EMOJI_URL, alt: ':emoji:' },
+        emoji: { url: emojiUrl, alt: ':emoji:' },
       },
     ],
     kind: 'text',
@@ -244,6 +244,247 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(vi.getTimerCount()).toBe(1);
 
     manager.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retires an emoji only on the first five-second sweep after its strict timeout', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(
+      { ...DEFAULT_SETTINGS, emojiFetchTimeoutMs: 10_000, emojiFetchLimit: 1 } as OverlaySettings,
+      null
+    );
+    const ready = vi.fn();
+    manager.setOnImageReady(ready);
+    manager.prefetchImages(message());
+    const stalled = PendingImage.instances[0];
+    if (!stalled) throw new Error('Expected a stalled emoji image');
+
+    vi.advanceTimersByTime(9_999);
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(true);
+    manager.prefetchImages(message('https://yt3.ggpht.com/blocked-by-stall.png'));
+    expect(PendingImage.instances).toHaveLength(1);
+
+    vi.advanceTimersByTime(4_999);
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(false);
+    expect(manager.emojiFetchingStarted.has(EMOJI_URL)).toBe(false);
+    expect(stalled.src).toBe('');
+    expect(stalled.onload).toBeNull();
+    expect(stalled.onerror).toBeNull();
+    expect(ready).not.toHaveBeenCalled();
+
+    manager.prefetchImages(message());
+    const restored = PendingImage.instances[1];
+    if (!restored) throw new Error('Expected restored emoji request');
+    restored.onload?.();
+    expect(manager.emojiCache.get(EMOJI_URL)).toBe(restored);
+    expect(ready).toHaveBeenCalledOnce();
+    expect(ready).toHaveBeenCalledWith(EMOJI_URL, 'emoji');
+    manager.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('expires author and sticker loads on their own exact deadlines and frees the shared cap', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(
+      { ...DEFAULT_SETTINGS, emojiFetchTimeoutMs: 10_000, emojiFetchLimit: 2 } as OverlaySettings,
+      null
+    );
+    manager.loadImage(AUTHOR_URL, manager.authorPhotoCache);
+    const author = PendingImage.instances[0];
+    if (!author) throw new Error('Expected pending author image');
+    vi.advanceTimersByTime(5_000);
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const sticker = PendingImage.instances[1];
+    if (!sticker) throw new Error('Expected pending sticker image');
+    expect(manager.imageLoading.size).toBe(2);
+    manager.prefetchImages(message());
+    expect(PendingImage.instances).toHaveLength(2);
+
+    vi.advanceTimersByTime(4_999);
+    expect(author.src).toBe(AUTHOR_URL);
+    expect(sticker.src).toBe(STICKER_URL);
+    vi.advanceTimersByTime(1);
+    expect(author.src).toBe('');
+    expect(author.onload).toBeNull();
+    expect(author.onerror).toBeNull();
+    expect(manager.imageLoading.has(AUTHOR_URL)).toBe(false);
+    expect(manager.imageLoading.has(STICKER_URL)).toBe(true);
+    expect(vi.getTimerCount()).toBe(2); // Sticker timeout plus emoji sweep.
+
+    manager.prefetchImages(message());
+    const emoji = PendingImage.instances[2];
+    if (!emoji) throw new Error('Expected emoji after author slot retirement');
+    emoji.onload?.();
+    expect(manager.emojiCache.get(EMOJI_URL)).toBe(emoji);
+    vi.advanceTimersByTime(4_999);
+    expect(sticker.src).toBe(STICKER_URL);
+    vi.advanceTimersByTime(1);
+    expect(sticker.src).toBe('');
+    expect(sticker.onload).toBeNull();
+    expect(sticker.onerror).toBeNull();
+    expect(manager.imageLoading.size).toBe(0);
+    expect(manager.failedEmojiFetches.size).toBe(0);
+
+    manager.loadImage(AUTHOR_URL, manager.authorPhotoCache);
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const restoredAuthor = PendingImage.instances[3];
+    const restoredSticker = PendingImage.instances[4];
+    if (!restoredAuthor || !restoredSticker) throw new Error('Expected restored paid assets');
+    restoredAuthor.onload?.();
+    restoredSticker.onload?.();
+    expect(manager.authorPhotoCache.get(AUTHOR_URL)).toBe(restoredAuthor);
+    expect(manager.stickerCache.get(STICKER_URL)).toBe(restoredSticker);
+    manager.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retains emoji failure through the retry cutoff and accepts it just after a config change', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, failedEmojiRetryMins: 2 } as OverlaySettings, null);
+    manager.prefetchImages(message());
+    const failed = PendingImage.instances[0];
+    if (!failed) throw new Error('Expected emoji request to fail');
+    failed.onerror?.();
+    expect(manager.failedEmojiFetches.has(EMOJI_URL)).toBe(true);
+    expect(manager.emojiFetching.size).toBe(0);
+
+    vi.advanceTimersByTime(59_999);
+    manager.updateConfig({ ...DEFAULT_SETTINGS, failedEmojiRetryMins: 1 } as OverlaySettings, null);
+    manager.cleanupStaleEmojiFetching();
+    expect(manager.failedEmojiFetches.has(EMOJI_URL)).toBe(true);
+    manager.prefetchImages(message());
+    expect(PendingImage.instances).toHaveLength(1);
+
+    vi.advanceTimersByTime(1);
+    manager.cleanupStaleEmojiFetching();
+    expect(manager.failedEmojiFetches.has(EMOJI_URL)).toBe(true);
+    vi.advanceTimersByTime(1);
+    manager.cleanupStaleEmojiFetching();
+    expect(manager.failedEmojiFetches.has(EMOJI_URL)).toBe(false);
+
+    manager.prefetchImages(message());
+    const restored = PendingImage.instances[1];
+    if (!restored) throw new Error('Expected emoji retry after TTL');
+    restored.onload?.();
+    expect(manager.emojiCache.get(EMOJI_URL)).toBe(restored);
+    manager.destroy();
+  });
+
+  it('evicts the least recently used 250 entries on the 501st emoji failure', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
+    const urlAt = (index: number) => `https://yt3.ggpht.com/failed-${index}.png`;
+    for (let index = 0; index < 500; index++) {
+      manager.prefetchImages(message(urlAt(index)));
+      PendingImage.instances[index]?.onerror?.();
+    }
+    expect(manager.failedEmojiFetches.size).toBe(500);
+    manager.prefetchImages(message(urlAt(0))); // A failed lookup refreshes LRU recency.
+    expect(PendingImage.instances).toHaveLength(500);
+
+    manager.prefetchImages(message(urlAt(500)));
+    PendingImage.instances[500]?.onerror?.();
+    expect(manager.failedEmojiFetches.size).toBe(251);
+    expect(manager.failedEmojiFetches.has(urlAt(0))).toBe(true);
+    expect(manager.failedEmojiFetches.has(urlAt(1))).toBe(false);
+    expect(manager.failedEmojiFetches.has(urlAt(250))).toBe(false);
+    expect(manager.failedEmojiFetches.has(urlAt(251))).toBe(true);
+    expect(manager.failedEmojiFetches.has(urlAt(500))).toBe(true);
+
+    manager.prefetchImages(message(urlAt(1)));
+    const restored = PendingImage.instances[501];
+    if (!restored) throw new Error('Expected retry for evicted failed URL');
+    restored.onload?.();
+    expect(manager.emojiCache.get(urlAt(1))).toBe(restored);
+    manager.destroy();
+  });
+
+  it('keeps emoji sweep paused while independent author timeout runs, then resumes once', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(
+      { ...DEFAULT_SETTINGS, emojiFetchTimeoutMs: 10_000 } as OverlaySettings,
+      null
+    );
+    manager.prefetchImages(message());
+    manager.loadImage(AUTHOR_URL, manager.authorPhotoCache);
+    const emoji = PendingImage.instances[0];
+    const author = PendingImage.instances[1];
+    if (!emoji || !author) throw new Error('Expected both pending image types');
+    expect(vi.getTimerCount()).toBe(2);
+
+    manager.pause();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(10_001);
+    expect(author.src).toBe('');
+    expect(manager.imageLoading.size).toBe(0);
+    expect(emoji.src).toBe(EMOJI_URL);
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+
+    manager.resume();
+    manager.resume();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(4_999);
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(emoji.src).toBe('');
+    expect(manager.emojiFetching.has(EMOJI_URL)).toBe(false);
+    manager.prefetchImages(message());
+    PendingImage.instances[2]?.onload?.();
+    expect(manager.emojiCache.has(EMOJI_URL)).toBe(true);
+    manager.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ignores saved late load/error callbacks after destruction and a fresh manager recovers', () => {
+    const retired = new ImageFetchManager();
+    retired.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
+    const retiredReady = vi.fn();
+    retired.setOnImageReady(retiredReady);
+    retired.prefetchImages(message());
+    retired.loadImage(AUTHOR_URL, retired.authorPhotoCache);
+    const oldEmoji = PendingImage.instances[0];
+    const oldAuthor = PendingImage.instances[1];
+    if (!oldEmoji || !oldAuthor) throw new Error('Expected retiring image requests');
+    const lateEmojiLoad = oldEmoji.onload;
+    const lateEmojiError = oldEmoji.onerror;
+    const lateAuthorLoad = oldAuthor.onload;
+    const lateAuthorError = oldAuthor.onerror;
+
+    retired.destroy();
+    lateEmojiLoad?.();
+    lateEmojiError?.();
+    lateAuthorLoad?.();
+    lateAuthorError?.();
+    expect(retiredReady).not.toHaveBeenCalled();
+    expect(retired.emojiCache.size).toBe(0);
+    expect(retired.authorPhotoCache.size).toBe(0);
+    expect(retired.failedEmojiFetches.size).toBe(0);
+    expect(retired.emojiFetching.size).toBe(0);
+    expect(retired.imageLoading.size).toBe(0);
+    expect(oldEmoji.src).toBe('');
+    expect(oldAuthor.src).toBe('');
+
+    const fresh = new ImageFetchManager();
+    fresh.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
+    const freshReady = vi.fn();
+    fresh.setOnImageReady(freshReady);
+    fresh.prefetchImages(message());
+    fresh.loadImage(AUTHOR_URL, fresh.authorPhotoCache);
+    const newEmoji = PendingImage.instances[2];
+    const newAuthor = PendingImage.instances[3];
+    if (!newEmoji || !newAuthor) throw new Error('Expected fresh image requests');
+    newEmoji.onload?.();
+    newAuthor.onload?.();
+    expect(fresh.emojiCache.get(EMOJI_URL)).toBe(newEmoji);
+    expect(fresh.authorPhotoCache.get(AUTHOR_URL)).toBe(newAuthor);
+    expect(freshReady).toHaveBeenCalledOnce();
+    expect(freshReady).toHaveBeenCalledWith(EMOJI_URL, 'emoji');
+    fresh.destroy();
     expect(vi.getTimerCount()).toBe(0);
   });
 
