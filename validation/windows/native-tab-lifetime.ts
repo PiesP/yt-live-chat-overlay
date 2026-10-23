@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { BrowserContext, Page, Request } from '@playwright/test';
+import type { BrowserContext, CDPSession, Page, Request } from '@playwright/test';
 
 type TabEvent = {
   type: string;
@@ -150,6 +150,7 @@ export async function verifyNativeTabLifetime({
     return structuredClone(app.getSettings());
   });
   let cover: Page | undefined;
+  let focusSession: CDPSession | undefined;
   let stage = 'setup';
   let primaryError: unknown;
   const states: TabSnapshot[] = [];
@@ -173,6 +174,10 @@ export async function verifyNativeTabLifetime({
     await page.waitForFunction(() => document.visibilityState === 'visible', undefined, {
       timeout: 5_000,
     });
+    // Pinned Playwright enables focus emulation on attached pages, which keeps
+    // background tabs visible. Restore native visibility for this owned page.
+    focusSession = await context.newCDPSession(page);
+    await focusSession.send('Emulation.setFocusEmulationEnabled', { enabled: false });
     await page.evaluate(() => {
       const app = window.__ytChatOverlay;
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
@@ -429,6 +434,20 @@ export async function verifyNativeTabLifetime({
       await cover.close();
       cleanup.coverClosed = cover.isClosed();
       assert.equal(cleanup.coverClosed, true);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (focusSession) {
+    try {
+      await focusSession.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+      cleanup.playwrightFocusDefaultRestored = true;
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await focusSession.detach();
+      cleanup.focusSessionDetached = true;
     } catch (error) {
       cleanupErrors.push(error);
     }

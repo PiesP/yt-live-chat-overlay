@@ -37,6 +37,9 @@ type NativeDraw = {
   url: string;
   sourceType: 'image' | 'derived-canvas';
   pixelAlpha: number | null;
+  imagePixelChanged: boolean;
+  pixelBefore: number[] | null;
+  pixelAfter: number[] | null;
   pixelError: string | null;
 };
 type NativeState = {
@@ -247,14 +250,18 @@ function installPagePrelude({
   canvas.drawImage = function (image: CanvasImageSource, ...args: number[]): void {
     const url = sourceUrl(image);
     const overlay = this.canvas.closest('#yt-live-chat-overlay') !== null;
-    Reflect.apply(nativeDraw, this, [image, ...args]);
-    if (!url?.startsWith(imagePrefix)) return;
-    if (!overlay) {
-      derivedUrls.set(this.canvas, url);
+    if (!url?.startsWith(imagePrefix) || !overlay) {
+      Reflect.apply(nativeDraw, this, [image, ...args]);
+      if (url?.startsWith(imagePrefix)) derivedUrls.set(this.canvas, url);
       return;
     }
     let pixelAlpha: number | null = null;
+    let imagePixelChanged = false;
+    let pixelBefore: number[] | null = null;
+    let pixelAfter: number[] | null = null;
     let pixelError: string | null = null;
+    let before: ImageData | undefined;
+    let rectangle: { x: number; y: number; width: number; height: number } | undefined;
     const width =
       image instanceof HTMLImageElement
         ? image.naturalWidth
@@ -278,26 +285,81 @@ function installPagePrelude({
     if (destination.length === 4) {
       const [dx = 0, dy = 0, dw = 0, dh = 0] = destination;
       const transform = this.getTransform();
-      const x = Math.floor(transform.a * (dx + dw / 2) + transform.c * (dy + dh / 2) + transform.e);
-      const y = Math.floor(transform.b * (dx + dw / 2) + transform.d * (dy + dh / 2) + transform.f);
-      if (x >= 0 && y >= 0 && x < this.canvas.width && y < this.canvas.height) {
+      const corners = [
+        [dx, dy],
+        [dx + dw, dy],
+        [dx, dy + dh],
+        [dx + dw, dy + dh],
+      ].map(([x = 0, y = 0]) => ({
+        x: transform.a * x + transform.c * y + transform.e,
+        y: transform.b * x + transform.d * y + transform.f,
+      }));
+      const x = Math.max(0, Math.floor(Math.min(...corners.map((point) => point.x))));
+      const y = Math.max(0, Math.floor(Math.min(...corners.map((point) => point.y))));
+      const right = Math.min(
+        this.canvas.width,
+        Math.ceil(Math.max(...corners.map((point) => point.x)))
+      );
+      const bottom = Math.min(
+        this.canvas.height,
+        Math.ceil(Math.max(...corners.map((point) => point.y)))
+      );
+      const width = right - x;
+      const height = bottom - y;
+      if (width > 0 && height > 0 && width * height <= 65_536) {
+        rectangle = { x, y, width, height };
         try {
-          pixelAlpha = this.getImageData(x, y, 1, 1).data[3] ?? null;
+          before = this.getImageData(x, y, width, height);
         } catch (error) {
           pixelError = error instanceof Error ? error.name : String(error);
         }
+      }
+    }
+    Reflect.apply(nativeDraw, this, [image, ...args]);
+    if (before && rectangle) {
+      try {
+        const after = this.getImageData(
+          rectangle.x,
+          rectangle.y,
+          rectangle.width,
+          rectangle.height
+        );
+        for (let index = 0; index < after.data.length; index += 4) {
+          // The fixture PNG is opaque red. Require a changed red pixel from
+          // this exact draw, rather than opacity from a paid-card background.
+          if (
+            (after.data[index] ?? 0) >= 240 &&
+            (after.data[index + 1] ?? 255) <= 15 &&
+            (after.data[index + 2] ?? 255) <= 15 &&
+            (after.data[index + 3] ?? 0) > 0 &&
+            after.data
+              .slice(index, index + 4)
+              .some((value, offset) => value !== before.data[index + offset])
+          ) {
+            imagePixelChanged = true;
+            pixelBefore = Array.from(before.data.slice(index, index + 4));
+            pixelAfter = Array.from(after.data.slice(index, index + 4));
+            pixelAlpha = pixelAfter[3] ?? null;
+            break;
+          }
+        }
+      } catch (error) {
+        pixelError = error instanceof Error ? error.name : String(error);
       }
     }
     const draw: NativeDraw = {
       url,
       sourceType: image instanceof HTMLImageElement ? 'image' : 'derived-canvas',
       pixelAlpha,
+      imagePixelChanged,
+      pixelBefore,
+      pixelAfter,
       pixelError,
     };
     const previousIndex = state.draws.findIndex((candidate) => candidate.url === url);
     if (previousIndex >= 0) {
       const previous = state.draws[previousIndex];
-      if (previous && (previous.pixelAlpha ?? 0) < (pixelAlpha ?? 0))
+      if (previous && !previous.imagePixelChanged && imagePixelChanged)
         state.draws[previousIndex] = draw;
     } else if (state.draws.length < maxDraws) state.draws.push(draw);
     else state.drawOverflow++;
@@ -645,7 +707,7 @@ export async function runMainImageRecoveryFixture({
         await page.waitForFunction(
           (url) =>
             window.__ytMainImageRecovery?.draws.some(
-              (draw) => draw.url === url && (draw.pixelAlpha ?? 0) > 0
+              (draw) => draw.url === url && draw.imagePixelChanged
             ) === true,
           entry.url,
           { timeout: 15_000 }
@@ -672,7 +734,7 @@ export async function runMainImageRecoveryFixture({
             cacheHit: cache.has(url),
             negativeEmoji: manager.failedEmojiFetches.has(url),
             drawnOnOverlay: draws.length > 0,
-            positivePixel: draws.some((draw) => (draw.pixelAlpha ?? 0) > 0),
+            positivePixel: draws.some((draw) => draw.imagePixelChanged),
             textObserved: state.textDraws.some((text) => text.includes(textToken)),
           };
         },
