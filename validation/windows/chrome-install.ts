@@ -18,7 +18,9 @@ import type {
   Response,
 } from '@playwright/test';
 
+import { runAcquisitionBoundaries } from './acquisition-boundaries.ts';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
+import { runCanvasRecoveryFixture } from './canvas-recovery.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
@@ -45,9 +47,11 @@ import type {
   PublicImageResponse,
 } from './live-rendering.ts';
 import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
+import { runNativePlayerBoundaries } from './native-player-boundaries.ts';
 import { runNativeWorkerRetirementFixture } from './native-worker-retirement.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
+import { runRecoveryContinuityFixture } from './recovery-continuity.ts';
 import {
   extensionUpgradeTransition,
   readExtensionUpgradeInput,
@@ -184,6 +188,10 @@ type ChromeResult<Live = LiveObservation> = {
   nativeTabInstallation?: ChromeResult | null;
   chromiumBootstrapBoundaries?: Awaited<ReturnType<typeof runChromiumBootstrapBoundaries>> | null;
   nativeWorkerRetirement?: Awaited<ReturnType<typeof runNativeWorkerRetirementFixture>> | null;
+  canvasRecovery?: Awaited<ReturnType<typeof runCanvasRecoveryFixture>> | null;
+  nativePlayerBoundaries?: Awaited<ReturnType<typeof runNativePlayerBoundaries>> | null;
+  acquisitionBoundaries?: Awaited<ReturnType<typeof runAcquisitionBoundaries>> | null;
+  recoveryContinuity?: Awaited<ReturnType<typeof runRecoveryContinuityFixture>> | null;
   mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
@@ -2405,6 +2413,28 @@ export async function runChromeInstallation({
         extensionId,
       });
       assert.equal(result.nativeWorkerRetirement.status, 'passed');
+      result.canvasRecovery = await runCanvasRecoveryFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.canvasRecovery.status, 'passed');
+      result.recoveryContinuity = await runRecoveryContinuityFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.recoveryContinuity.status, 'passed');
+      result.acquisitionBoundaries = await runAcquisitionBoundaries({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      // Late image route cancellation remains explicitly partial evidence.
+      assert.equal(result.acquisitionBoundaries.controlStatus, 'passed');
       result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
       assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
@@ -2552,6 +2582,14 @@ async function runNativeTabInstallation({
     })) as { id: string });
     assert.match(extensionId, /^[a-p]{32}$/u);
     result.installationMethod = 'cdp-unpacked-extension-natural-visibility';
+    // This fresh context must exercise autoplay before any trusted PiP/Play action.
+    result.nativePlayerBoundaries = await runNativePlayerBoundaries({
+      context,
+      root,
+      output,
+      extensionId,
+    });
+    assert.equal(result.nativePlayerBoundaries.status, 'passed');
     result.videoPiP = await runVideoPiPFixture({
       context,
       root,
