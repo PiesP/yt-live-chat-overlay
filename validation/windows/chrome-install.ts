@@ -25,6 +25,7 @@ import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
+import { runLiveContentPrerequisite } from './live-content-prerequisite.ts';
 import {
   assessPublicImage,
   assessPublicResize,
@@ -196,6 +197,7 @@ type ChromeResult<Live = LiveObservation> = {
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
+  liveContentPrerequisites?: Array<Awaited<ReturnType<typeof runLiveContentPrerequisite>>>;
   liveWorkflowCoverage?: {
     observedModes: (string | undefined)[];
     crossWatch: boolean;
@@ -2491,6 +2493,10 @@ export async function runChromeInstallation({
         ? (upgradeInputs?.candidate.version ?? (await readBundledUserscriptVersion(root)))
         : '';
     for (const [index, url] of liveUrls.entries()) {
+      result.liveContentPrerequisites ??= [];
+      result.liveContentPrerequisites.push(
+        await runLiveContentPrerequisite({ context, url, output, index })
+      );
       const nextUrl = liveUrls.length > 1 ? liveUrls[(index + 1) % liveUrls.length] : url;
       result.live.push(
         await inspectLivePage(
