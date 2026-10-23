@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { BrowserContext, Route } from '@playwright/test';
@@ -242,10 +242,12 @@ function attachWorkerBitmapProbe(renderer: {
 export async function runBitmapLifecycleFixture({
   context,
   root,
+  output,
   extensionId,
 }: {
   context: BrowserContext;
   root: string;
+  output: string;
   extensionId: string;
 }) {
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
@@ -330,7 +332,11 @@ export async function runBitmapLifecycleFixture({
       contentType: plan.kind === 'html' ? 'text/html' : 'image/png',
       headers:
         plan.kind === 'cors'
-          ? { 'cache-control': 'no-store' }
+          ? {
+              // Playwright fills a missing ACAO header with the request origin.
+              'access-control-allow-origin': 'https://cors-denied.example.test',
+              'cache-control': 'no-store',
+            }
           : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
       body,
     });
@@ -775,7 +781,8 @@ export async function runBitmapLifecycleFixture({
           ? Number(kind.slice(5))
           : kind === 'abort' || kind === 'cors'
             ? null
-            : 200
+            : 200,
+        `${id}: unexpected fetch response status`
       );
       assert.equal(
         fault.finalUrl,
@@ -939,6 +946,42 @@ export async function runBitmapLifecycleFixture({
     result = await execute();
   } catch (error) {
     primaryError = error;
+    try {
+      const workerObservations = await page.evaluate(() =>
+        window.__ytBitmapWorkers.map((worker) => ({
+          ready: worker.ready,
+          attached: worker.attached,
+          results: worker.results,
+          overflow: worker.overflow,
+        }))
+      );
+      await writeFile(
+        join(output, 'bitmap-lifecycle-failure.json'),
+        JSON.stringify(
+          {
+            status: 'failed',
+            error: String(error),
+            pageScriptProbeProvenance,
+            imageRequests,
+            imageRequestOverflow,
+            workerObservations,
+            pageErrors,
+            pageErrorOverflow,
+            consoleErrors,
+            consoleErrorOverflow,
+            requestFailures,
+            requestFailureOverflow,
+          },
+          null,
+          2
+        )
+      );
+    } catch (diagnosticError) {
+      primaryError = new AggregateError(
+        [error, diagnosticError],
+        'Bitmap fixture and failure diagnostic collection failed'
+      );
+    }
   }
   const cleanupErrors: unknown[] = [];
   for (const cleanup of [

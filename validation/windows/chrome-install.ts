@@ -2381,6 +2381,7 @@ export async function runChromeInstallation({
       result.bitmapLifecycle = await runBitmapLifecycleFixture({
         context,
         root,
+        output,
         extensionId,
       });
       assert.equal(
