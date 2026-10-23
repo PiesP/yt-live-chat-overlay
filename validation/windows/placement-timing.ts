@@ -2612,7 +2612,7 @@ async function runScenario({
     );
     await page.waitForTimeout(300);
     if (mixedGap) {
-      let configured;
+      let configured: Awaited<ReturnType<typeof mixedSnapshot>> | undefined;
       for (let attempt = 0; attempt < 40; attempt++) {
         configured = await mixedSnapshot();
         if (hasMixedConfig(configured.exact.config)) break;
@@ -2738,7 +2738,7 @@ async function runScenario({
         priorFrameId: number,
         acceptsConfig: (config: FrameConfig | null) => boolean
       ) => {
-        let clearance;
+        let clearance: ReturnType<typeof measureMixedHeightClearance> | undefined;
         for (let attempt = 0; attempt < 40; attempt++) {
           const selected = await mixedSnapshot();
           const frame = selected.latestRenderFrame;
@@ -2853,8 +2853,8 @@ async function runScenario({
         };
       };
       const visibleGap = async (prefix: string, laneSpacing: number) => {
-        let snapshot;
-        let visibleRowPitch;
+        let snapshot: Awaited<ReturnType<typeof issueSnapshot>> | undefined;
+        let visibleRowPitch: ReturnType<typeof measureVisibleRowPitch> | undefined;
         for (let attempt = 0; attempt < 40; attempt++) {
           snapshot = await issueSnapshot();
           visibleRowPitch = measureVisibleRowPitch(snapshot.renderFrame, prefix);
@@ -2972,7 +2972,7 @@ async function runScenario({
       });
       await sendBatch('3'); // >50 parsed chat actions take the production Backlog path.
       await sendBatch('4'); // Ordinary live ingress raises the real burst detector.
-      let backlog;
+      let backlog: Awaited<ReturnType<typeof issueSnapshot>> | undefined;
       for (let attempt = 0; attempt < 30; attempt++) {
         backlog = await issueSnapshot();
         if (

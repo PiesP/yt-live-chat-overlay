@@ -370,25 +370,25 @@ async function runVariant({
   const fixtureUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const instrumented = source.replace(
     ENTRY_MARKER,
-    `\n\tconst recoveryState = window.__ytCanvasRecovery;\n` +
+    '\n\tconst recoveryState = window.__ytCanvasRecovery;\n' +
       `\tif (!recoveryState) throw new Error('Canvas recovery prelude unavailable');\n` +
-      `\tconst nativeRecoveryFrame = CanvasRenderer.prototype.renderFrame;\n` +
-      `\tCanvasRenderer.prototype.renderFrame = function(...args) {\n` +
-      `\t\tif (recoveryState.renderer && recoveryState.renderer !== this) recoveryState.rendererIdentityChanges++;\n` +
-      `\t\trecoveryState.renderer = this; recoveryState.frames++;\n` +
-      `\t\treturn nativeRecoveryFrame.apply(this, args);\n` +
-      `\t};\n` +
-      `\tconst nativeRecoveryFallback = CanvasRenderer.prototype.fallbackToMainThread;\n` +
-      `\tCanvasRenderer.prototype.fallbackToMainThread = function(reason) {\n` +
+      '\tconst nativeRecoveryFrame = CanvasRenderer.prototype.renderFrame;\n' +
+      '\tCanvasRenderer.prototype.renderFrame = function(...args) {\n' +
+      '\t\tif (recoveryState.renderer && recoveryState.renderer !== this) recoveryState.rendererIdentityChanges++;\n' +
+      '\t\trecoveryState.renderer = this; recoveryState.frames++;\n' +
+      '\t\treturn nativeRecoveryFrame.apply(this, args);\n' +
+      '\t};\n' +
+      '\tconst nativeRecoveryFallback = CanvasRenderer.prototype.fallbackToMainThread;\n' +
+      '\tCanvasRenderer.prototype.fallbackToMainThread = function(reason) {\n' +
       `\t\tif (recoveryState.fallbackReasons.length < ${MAX_RECORDS}) recoveryState.fallbackReasons.push(reason);\n` +
-      `\t\telse recoveryState.overflow++;\n` +
-      `\t\treturn nativeRecoveryFallback.call(this, reason);\n` +
-      `\t};\n` +
-      `\tconst nativeRecoveryRestored = CanvasRenderer.prototype.handleContextRestored;\n` +
-      `\tCanvasRenderer.prototype.handleContextRestored = function(...args) {\n` +
-      `\t\trecoveryState.restorationCalls++;\n` +
-      `\t\treturn nativeRecoveryRestored.apply(this, args);\n` +
-      `\t};\n` +
+      '\t\telse recoveryState.overflow++;\n' +
+      '\t\treturn nativeRecoveryFallback.call(this, reason);\n' +
+      '\t};\n' +
+      '\tconst nativeRecoveryRestored = CanvasRenderer.prototype.handleContextRestored;\n' +
+      '\tCanvasRenderer.prototype.handleContextRestored = function(...args) {\n' +
+      '\t\trecoveryState.restorationCalls++;\n' +
+      '\t\treturn nativeRecoveryRestored.apply(this, args);\n' +
+      '\t};\n' +
       `\trecoveryState.sourceBound = true;${ENTRY_MARKER}`
   );
   const html = buildVisibleWatchHtml(preview, 'Canvas recovery fixture video');

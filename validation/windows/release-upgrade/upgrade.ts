@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
+import type { BigIntStats } from 'node:fs';
 import { lstat, open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -186,7 +187,7 @@ async function readBoundedFile(root: string, relativePath: string) {
   const file = join(root, relativePath);
   const flags =
     process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>>;
   try {
     handle = await open(file, flags);
   } catch (error) {
@@ -211,7 +212,7 @@ async function readBoundedFile(root: string, relativePath: string) {
       opened.size > 0n && opened.size <= BigInt(MAX_SCRIPT_BYTES),
       `Upgrade file size rejected: ${relativePath}`
     );
-    let entry;
+    let entry: BigIntStats;
     try {
       entry = await lstat(file, { bigint: true });
     } catch (error) {
@@ -254,7 +255,7 @@ async function readBoundedFile(root: string, relativePath: string) {
 
 /** No input means the existing fresh installation path. A supplied input is all-or-nothing. */
 export async function loadUpgradeInputs(root: string) {
-  let inputBytes;
+  let inputBytes: Buffer;
   try {
     inputBytes = await readBoundedFile(root, INPUT_FILE);
   } catch (error) {
@@ -666,7 +667,7 @@ async function waitForStoredSettings(
     await page.bringToFront();
     const deadline = Date.now() + 10_000;
     let consecutiveReads = 0;
-    let lastStored;
+    let lastStored: Settings | undefined;
     while (Date.now() < deadline) {
       lastStored = await openSettingsAndRead(readback, Math.max(1, deadline - Date.now()));
       consecutiveReads = matchesStoredSettings(lastStored, values) ? consecutiveReads + 1 : 0;

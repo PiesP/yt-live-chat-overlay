@@ -128,10 +128,10 @@ function inspectFixedPort(processId?: number): Promise<PortInspection> {
     assert(Number.isSafeInteger(processId) && processId > 0, 'Invalid owned Chrome process id');
   const script = [
     "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'",
-    `$listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | ` +
+    '$listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | ' +
       `Where-Object { [int]$_.LocalPort -eq ${FIXED_DEBUG_PORT} } | ` +
-      `ForEach-Object { @{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;` +
-      `state=[string]$_.State;owningProcess=[int]$_.OwningProcess} })`,
+      'ForEach-Object { @{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;' +
+      'state=[string]$_.State;owningProcess=[int]$_.OwningProcess} })',
     processId === undefined
       ? '$record=$null'
       : `$record=Get-CimInstance Win32_Process -Filter 'ProcessId = ${processId}' ` +
@@ -472,7 +472,7 @@ export async function captureSpawnedChromeIdentity(
   } = {}
 ) {
   const deadline = Date.now() + timeoutMs;
-  let lastError;
+  let lastError: unknown;
   do {
     if (childState.spawnError) throw childState.spawnError;
     if (child.exitCode !== null || child.signalCode !== null) {

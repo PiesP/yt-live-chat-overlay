@@ -279,7 +279,7 @@ export function parseFirefoxProfileEndpoint(data: unknown) {
 
 export async function readOwnedFirefoxEndpoint(profileDir: string, spawnedAt: number) {
   const path = join(profileDir, ENDPOINT_FILE);
-  let file;
+  let file: Awaited<ReturnType<typeof open>>;
   try {
     file = await open(
       path,
@@ -690,7 +690,7 @@ export async function waitForWindowsEndpoint(
   try {
     while (Date.now() < deadline) {
       if (spawnError) throw spawnError;
-      let metadata;
+      let metadata: Awaited<ReturnType<typeof readEndpoint>> | undefined;
       try {
         metadata = await readEndpoint(ownership.profileDir, ownership.spawnedAt);
       } catch (error) {
@@ -699,7 +699,7 @@ export async function waitForWindowsEndpoint(
       }
       if (metadata) {
         const inspected = await inspect(metadata.port);
-        let owner;
+        let owner: FirefoxProcess;
         try {
           owner = selectOwnedFirefoxListener(
             inspected,
@@ -811,7 +811,7 @@ export class FirefoxBidiSession {
 
   #handleMessage = (event: MessageEvent) => {
     if (typeof event.data !== 'string') return;
-    let message;
+    let message: Record<string, unknown>;
     try {
       message = JSON.parse(event.data);
     } catch (error) {
@@ -840,7 +840,9 @@ export class FirefoxBidiSession {
     const listeners = this.#eventListeners.get(message.method);
     if (!listeners) return;
     const params =
-      typeof message.params === 'object' && message.params !== null ? message.params : {};
+      typeof message.params === 'object' && message.params !== null
+        ? (message.params as Record<string, unknown>)
+        : {};
     for (const listener of listeners) {
       void Promise.resolve()
         .then(() => listener(params))
@@ -1177,8 +1179,8 @@ export class FirefoxBidiSession {
 
   async close() {
     if (this.#closed) return;
-    let shutdownError;
-    let cleanupError;
+    let shutdownError: unknown;
+    let cleanupError: unknown;
     try {
       if (process.platform === 'win32') {
         try {

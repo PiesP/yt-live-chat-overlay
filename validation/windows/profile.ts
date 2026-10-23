@@ -652,9 +652,9 @@ async function verifyFontGroupsAndPreferences(
         reducedMotion: 'no-preference',
         ...scenario.media,
       });
-      let zoom;
-      let previousLanguage;
-      let previousModalLanguage;
+      let zoom: BrowserZoom | undefined;
+      let previousLanguage: string | undefined;
+      let previousModalLanguage: string | null | undefined;
       try {
         if (scenario.zoom && setBrowserZoom) zoom = await setBrowserZoom(scenario.zoom);
         if (scenario.language) {
@@ -1944,7 +1944,7 @@ export async function run({
     assert(accessibleMessages.some((text) => text.includes('Super Chat')));
     assert(accessibleMessages.some((text) => text.includes('Membership')));
     assert(customEmojiAssetRequests > 0, 'The custom emoji asset was not requested');
-    let rendererStatus;
+    let rendererStatus: typeof expectedRenderer | undefined;
     if (expectedRenderer) {
       await page.waitForFunction((worker) => {
         const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
@@ -1981,7 +1981,12 @@ export async function run({
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
 
-    let settings;
+    let settings:
+      | (Pick<
+          ReturnType<NonNullable<Window['__ytChatOverlay']>['getSettings']>,
+          'fontSize' | 'opacity' | 'safeTop' | 'safeBottom' | 'outline' | 'depthLayersEnabled'
+        > & { danmakuMode: string })
+      | undefined;
     if (installedContext) {
       assert(installedFixtureDelivered, 'The installed application did not consume fixture data');
       // Reload proves persistence through the real extension/userscript manager.
@@ -2178,7 +2183,7 @@ export async function run({
     const installedLifecycle =
       lifecycleDiagnostic && page
         ? await (async () => {
-            let deadline;
+            let deadline: ReturnType<typeof setTimeout> | undefined;
             try {
               return await Promise.race([
                 (async () => {

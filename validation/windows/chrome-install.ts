@@ -578,7 +578,7 @@ export async function readBoundedPackagedResource(
 ) {
   const flags =
     process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW;
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>>;
   try {
     handle = await open(file, flags);
   } catch (error) {
@@ -602,7 +602,7 @@ export async function readBoundedPackagedResource(
       entry.size === opened.size &&
       entry.mtimeNs === opened.mtimeNs;
     const requirePathIdentity = async () => {
-      let entry;
+      let entry: BigIntStats;
       try {
         entry = await lstat(file, { bigint: true });
       } catch (error) {
@@ -684,8 +684,8 @@ export function beginOwnedExtensionResourceCapture(
       overflow++;
       return;
     }
-    let documentUrl;
-    let documentUrlSha256;
+    let documentUrl: string | null;
+    let documentUrlSha256: string | null;
     try {
       const document = new URL(request.frame().url());
       documentUrl =
@@ -2168,8 +2168,8 @@ export async function cleanupChromeInstallation(
       recordError('browser-process-exit-check', error);
     }
     if (!browserProcessExited) {
-      let terminationError;
-      let terminationErrorStage;
+      let terminationError: unknown;
+      let terminationErrorStage: string | undefined;
       try {
         await terminateProcessTree(browserProcessId);
       } catch (error) {
