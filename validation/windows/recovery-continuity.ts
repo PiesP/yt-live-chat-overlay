@@ -93,6 +93,7 @@ type RendererProbe = {
   pendingQueue: { toArray(): ChatMessage[] };
   settings: {
     maxConcurrentMessages: number;
+    topBottomDurationMs: number;
     danmakuMode: string;
     outline: { enabled: boolean };
   };
@@ -615,6 +616,7 @@ async function snapshot(page: Page): Promise<Snapshot> {
         (node) => node.getAttribute('data-message-id') ?? ''
       ).slice(-64),
       timeOrigin: performance.timeOrigin,
+      observedAtMs: performance.now(),
     };
   });
 }
@@ -815,7 +817,8 @@ export async function runRecoveryContinuityFixture({
       const settings = structuredClone(app.getSettings());
       app.applySettings({
         danmakuMode: 'top',
-        topBottomDurationMs: 4_000,
+        // Keep real active/future reservations within the bounded draw window.
+        topBottomDurationMs: 1_000,
         maxConcurrentMessages: 30,
         authorRateLimit: 'off',
         allowShortTextMessages: true,
@@ -837,6 +840,7 @@ export async function runRecoveryContinuityFixture({
           renderer.workerManager.workerRef !== null &&
           renderer.settings.maxConcurrentMessages === 30 &&
           renderer.settings.danmakuMode === 'top' &&
+          renderer.settings.topBottomDurationMs === 1_000 &&
           renderer.settings.outline.enabled === false &&
           state.workers.some(
             (worker) =>
