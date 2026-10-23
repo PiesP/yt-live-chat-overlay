@@ -182,8 +182,7 @@ export async function installWorkerRedirectTransport({
     assert(sessionId, 'Bitmap Worker CDP session is unavailable');
     assert(browserCdp, 'Browser CDP session is unavailable');
     const id = nextCommandId++;
-    let waitForResponse: Promise<unknown>;
-    waitForResponse = new Promise((resolve, reject) => {
+    const waitForResponse = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`${method} timed out`));
