@@ -32,7 +32,7 @@ type RendererProbe = {
   };
   fallbackInProgress: boolean;
   fallbackRecoveryFailed: boolean;
-  fallbackIngressQueue: { size: number };
+  fallbackIngressQueue: { size: number; toArray(): Array<{ message: { id?: string } }> };
   pendingQueue: { size: number; toArray(): Array<{ id?: string }> };
   activeMessages: Array<{ message: { id?: string } }>;
   imageFetchManager: { authorPhotoCache: { has(url: string): boolean } };
@@ -271,6 +271,10 @@ async function snapshot(page: Page) {
       fallbackInProgress: renderer.fallbackInProgress,
       fallbackRecoveryFailed: renderer.fallbackRecoveryFailed,
       fallbackIngressSize: renderer.fallbackIngressQueue.size,
+      fallbackIngressIds: renderer.fallbackIngressQueue
+        .toArray()
+        .map((entry) => entry.message.id ?? null)
+        .slice(0, 32),
       pendingIds: renderer.pendingQueue
         .toArray()
         .map((entry) => entry.id ?? null)
@@ -659,6 +663,7 @@ async function runVariant({
       assert.equal(failed.fallbackReasons[0], 'worker-dead');
       assert.equal(failed.canvasCount, 1);
       assert.equal(failed.textDraws.length, 0);
+      assert.deepEqual(failed.fallbackIngressIds, ['worker-before']);
       stage = 'bounded-failed-state-and-retry';
       await page.evaluate(() => {
         const renderer = window.__ytCanvasRecovery?.renderer;
@@ -675,7 +680,12 @@ async function runVariant({
         });
       });
       const held = await snapshot(page);
-      assert.equal(held.fallbackIngressSize, 1);
+      assert.equal(held.fallbackIngressSize, failed.fallbackIngressSize + 1);
+      assert.deepEqual(
+        new Set(held.fallbackIngressIds),
+        new Set([...failed.fallbackIngressIds, 'worker-retained'])
+      );
+      assert.equal(new Set(held.fallbackIngressIds).size, held.fallbackIngressSize);
       assert(held.fallbackIngressSize <= held.queueMaxSize);
       assert.equal(held.textDraws.length, 0);
       await page.evaluate(() => {
