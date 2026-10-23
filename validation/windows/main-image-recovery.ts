@@ -41,6 +41,10 @@ type NativeDraw = {
   pixelBefore: number[] | null;
   pixelAfter: number[] | null;
   pixelError: string | null;
+  destination: number[];
+  transform: number[];
+  canvasDimensions: number[];
+  sampledRectangle: { x: number; y: number; width: number; height: number } | null;
 };
 type NativeState = {
   workerAttempts: Array<{ url: string; type: string; error: string }>;
@@ -325,15 +329,15 @@ function installPagePrelude({
           rectangle.height
         );
         for (let index = 0; index < after.data.length; index += 4) {
-          // The fixture PNG is opaque red. Require a changed red pixel from
-          // this exact draw, rather than opacity from a paid-card background.
+          // This exact draw must move a pixel toward the fixture's red colour.
+          // Native fade/opacity can blend it with an existing paid-card background.
           if (
-            (after.data[index] ?? 0) >= 240 &&
-            (after.data[index + 1] ?? 255) <= 15 &&
-            (after.data[index + 2] ?? 255) <= 15 &&
+            (after.data[index] ?? 0) >= (before.data[index] ?? 0) &&
+            (after.data[index + 1] ?? 255) <= (before.data[index + 1] ?? 0) &&
+            (after.data[index + 2] ?? 255) <= (before.data[index + 2] ?? 0) &&
             (after.data[index + 3] ?? 0) > 0 &&
             after.data
-              .slice(index, index + 4)
+              .slice(index, index + 3)
               .some((value, offset) => value !== before.data[index + offset])
           ) {
             imagePixelChanged = true;
@@ -355,12 +359,15 @@ function installPagePrelude({
       pixelBefore,
       pixelAfter,
       pixelError,
+      destination: destination.filter((value): value is number => value !== undefined),
+      transform: Array.from(this.getTransform().toFloat64Array()),
+      canvasDimensions: [this.canvas.width, this.canvas.height],
+      sampledRectangle: rectangle ?? null,
     };
     const previousIndex = state.draws.findIndex((candidate) => candidate.url === url);
     if (previousIndex >= 0) {
       const previous = state.draws[previousIndex];
-      if (previous && !previous.imagePixelChanged && imagePixelChanged)
-        state.draws[previousIndex] = draw;
+      if (previous && !previous.imagePixelChanged) state.draws[previousIndex] = draw;
     } else if (state.draws.length < maxDraws) state.draws.push(draw);
     else state.drawOverflow++;
   };
