@@ -127,9 +127,10 @@ describe('Vite+ quality coverage', () => {
         );
       for (const path of [
         'validation/windows/residual-fixture.ts',
-        '.github/actions/residual-fixture.ts',
+        'validation/windows/release-upgrade/residual-fixture.ts',
+        '.github/actions/validate-semgrep-sarif/residual-fixture.ts',
         'validation/windows/legacy-fixture.mjs',
-        '.github/actions/legacy-fixture.mjs',
+        '.github/actions/prepare-semgrep/legacy-fixture.mjs',
       ]) {
         const file = join(directory, path);
         mkdirSync(resolve(file, '..'), { recursive: true });
