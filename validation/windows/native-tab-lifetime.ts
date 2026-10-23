@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { BrowserContext, CDPSession, Page, Request } from '@playwright/test';
+import type { BrowserContext, Page, Request } from '@playwright/test';
 
 type TabEvent = {
   type: string;
@@ -134,7 +134,7 @@ function assertHealthy(state: TabSnapshot, initial: TabSnapshot): void {
   assert.deepEqual(state.mediaActionErrors, [], 'Native media action failed');
 }
 
-/** Observe native tab switches against the existing installed Edge PiP page. */
+/** Observe native switches in a caller-owned context attached with noDefaults. */
 export async function verifyNativeTabLifetime({
   context,
   page,
@@ -150,7 +150,6 @@ export async function verifyNativeTabLifetime({
     return structuredClone(app.getSettings());
   });
   let cover: Page | undefined;
-  let focusSession: CDPSession | undefined;
   let stage = 'setup';
   let primaryError: unknown;
   const states: TabSnapshot[] = [];
@@ -174,10 +173,6 @@ export async function verifyNativeTabLifetime({
     await page.waitForFunction(() => document.visibilityState === 'visible', undefined, {
       timeout: 5_000,
     });
-    // Pinned Playwright enables focus emulation on attached pages, which keeps
-    // background tabs visible. Restore native visibility for this owned page.
-    focusSession = await context.newCDPSession(page);
-    await focusSession.send('Emulation.setFocusEmulationEnabled', { enabled: false });
     await page.evaluate(() => {
       const app = window.__ytChatOverlay;
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
@@ -438,20 +433,6 @@ export async function verifyNativeTabLifetime({
       cleanupErrors.push(error);
     }
   }
-  if (focusSession) {
-    try {
-      await focusSession.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-      cleanup.playwrightFocusDefaultRestored = true;
-    } catch (error) {
-      cleanupErrors.push(error);
-    }
-    try {
-      await focusSession.detach();
-      cleanup.focusSessionDetached = true;
-    } catch (error) {
-      cleanupErrors.push(error);
-    }
-  }
   try {
     cleanup.settingsRestored = await page.evaluate((settings) => {
       const app = window.__ytChatOverlay;
@@ -506,7 +487,7 @@ export async function verifyNativeTabLifetime({
     );
   return {
     status: 'passed',
-    scope: 'installed Edge extension, native trusted tab visibility and media controls',
+    scope: 'installed Chrome extension, native trusted tab visibility and media controls',
     nativeFreezeClaim: false,
     syntheticLifecycleEvents: false,
     hiddenDurationsMs,
