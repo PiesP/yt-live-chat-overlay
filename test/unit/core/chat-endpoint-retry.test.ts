@@ -2,7 +2,12 @@
 // Copyright (c) 2026 PiesP
 // @vitest-environment jsdom
 
-import { fetchLiveChat, fetchReplayChat, type ChatBootstrapData } from '@chat/youtube/api';
+import {
+  fetchLiveChat,
+  fetchReplayChat,
+  getLiveChatPayload,
+  type ChatBootstrapData,
+} from '@chat/youtube/api';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const bootstrap: ChatBootstrapData = {
@@ -147,8 +152,13 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
     expect(fetchMock).toHaveBeenCalledTimes(attempts + 1);
   });
 
-  it('does not retry malformed JSON and recovers on a later request', async () => {
-    const fetchMock = vi.fn(async () => new Response('{malformed'));
+  it.each([
+    { name: 'HTML', body: '<!doctype html><title>Unavailable</title>' },
+    { name: 'truncated JSON', body: '{"continuationContents":' },
+  ])('does not retry HTTP 200 $name and recovers on a later request', async ({ body }) => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) => new Response(body, { status: 200 })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(request()).rejects.toBeInstanceOf(SyntaxError);
@@ -157,4 +167,26 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
     await expect(request()).resolves.toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    { name: 'array', body: '[]' },
+    { name: 'absent live payload', body: '{"continuationContents":{}}' },
+  ])(
+    'returns HTTP 200 $name for protocol classification without a physical retry',
+    async ({ body }) => {
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL) => new Response(body, { status: 200 })
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await request();
+      expect(getLiveChatPayload(response)).toBeNull();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(path);
+
+      fetchMock.mockImplementation(async () => goodResponse());
+      expect(getLiveChatPayload(await request())).toEqual({ actions: [], continuations: [] });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+  );
 });
