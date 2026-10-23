@@ -11,6 +11,7 @@ import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
 } from './native-page-script-probe.ts';
+import { verifyNativeTabLifetime } from './native-tab-lifetime.ts';
 import { buildVisibleWatchHtml } from './visible-watch.ts';
 
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsVideoPiP';
@@ -301,17 +302,21 @@ async function verifyDomFallbackLifetime(page: Page, output: string) {
   };
 }
 
-/** Installed Edge: exercise actual PiP media events against the compiled controller. */
+/** Installed Chromium: exercise native PiP events against the compiled controller. */
 export async function runVideoPiPFixture({
   context,
   root,
   output,
   extensionId,
+  nativeTabVisibility = false,
+  artifactPrefix = 'video-pip',
 }: {
   context: BrowserContext;
   root: string;
   output: string;
   extensionId: string;
+  nativeTabVisibility?: boolean;
+  artifactPrefix?: 'video-pip' | 'native-tab-chrome';
 }) {
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
   const instrumentedSource = instrumentPageScript(source);
@@ -545,7 +550,10 @@ export async function runVideoPiPFixture({
       ),
       'Native PiP entry event was not observed'
     );
-    await page.screenshot({ path: join(output, 'video-pip-active.png'), animations: 'disabled' });
+    await page.screenshot({
+      path: join(output, `${artifactPrefix}-active.png`),
+      animations: 'disabled',
+    });
 
     await setPhase(page, 'pip-user-pause');
     await page.locator('#pip-pause').click();
@@ -675,20 +683,28 @@ export async function runVideoPiPFixture({
     assert.deepEqual(consoleErrors, []);
     assert.equal(consoleErrorOverflow, 0);
     const domFallbackLifetime = await verifyDomFallbackLifetime(page, output);
+    const nativeTabLifetime = nativeTabVisibility
+      ? await verifyNativeTabLifetime({ context, page, output })
+      : { status: 'not-requested', reason: 'requires a context attached with noDefaults' };
+    assert.deepEqual(pageErrors, []);
+    assert.equal(pageErrorOverflow, 0);
+    assert.deepEqual(consoleErrors, []);
+    assert.equal(consoleErrorOverflow, 0);
     result = {
       status: 'passed',
-      scope: 'installed Edge extension, native Picture-in-Picture, routed YouTube fixture',
+      scope: 'installed Chromium extension, native Picture-in-Picture, routed YouTube fixture',
       fixtureUrl: FIXTURE_URL,
       probeProvenance,
       documentRequests,
       chatRequests,
       states,
       domFallbackLifetime,
+      nativeTabLifetime,
       pageErrors,
       pageErrorOverflow,
       consoleErrors,
       consoleErrorOverflow,
-      screenshot: 'video-pip-active.png',
+      screenshot: `${artifactPrefix}-active.png`,
       screenshotScope: 'page viewport while native PiP is active; external PiP window excluded',
     };
   } catch (error) {
@@ -777,7 +793,7 @@ export async function runVideoPiPFixture({
   if (primaryError) {
     try {
       await writeFile(
-        join(output, 'video-pip-failure.json'),
+        join(output, `${artifactPrefix}-failure.json`),
         JSON.stringify(
           {
             status: 'failed',

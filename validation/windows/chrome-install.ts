@@ -43,9 +43,14 @@ import type {
   PublicImageDraw,
   PublicImageResponse,
 } from './live-rendering.ts';
+import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
-import { readExtensionUpgradeInput, runExtensionUpgrade } from './release-upgrade/extension.ts';
+import {
+  extensionUpgradeTransition,
+  readExtensionUpgradeInput,
+  runExtensionUpgrade,
+} from './release-upgrade/extension.ts';
 import {
   loadUpgradeInputs,
   readUserscriptMetadata,
@@ -174,6 +179,8 @@ type ChromeResult<Live = LiveObservation> = {
   placementTiming?: Awaited<ReturnType<typeof runPlacementTimingFixture>> | null;
   bitmapLifecycle?: Awaited<ReturnType<typeof runBitmapLifecycleFixture>> | null;
   videoPiP?: Awaited<ReturnType<typeof runVideoPiPFixture>> | null;
+  nativeTabInstallation?: ChromeResult | null;
+  mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
   live: Live[];
@@ -2245,7 +2252,7 @@ export async function runChromeInstallation({
       installation === 'extension'
         ? {
             status: 'failed',
-            transition: 'public-0.45.7-to-candidate-0.45.8',
+            transition: 'extension-input-unverified',
             activeStage: 'input-preflight',
           }
         : null,
@@ -2260,7 +2267,7 @@ export async function runChromeInstallation({
       result.extensionUpgrade = extensionUpgradeInput
         ? {
             status: 'failed',
-            transition: 'public-0.45.7-to-candidate-0.45.8',
+            transition: extensionUpgradeTransition(extensionUpgradeInput.input),
             activeStage: 'browser-launch',
           }
         : { status: 'not-requested', transition: 'fresh-candidate-install' };
@@ -2304,7 +2311,10 @@ export async function runChromeInstallation({
             error.extensionUpgrade &&
             typeof error.extensionUpgrade === 'object'
               ? (error.extensionUpgrade as Record<string, unknown>)
-              : { status: 'failed', transition: 'public-0.45.7-to-candidate-0.45.8' };
+              : {
+                  status: 'failed',
+                  transition: extensionUpgradeTransition(extensionUpgradeInput.input),
+                };
           throw error;
         }
         result.installationMethod = 'same-path-unpacked-extension-upgrade';
@@ -2403,6 +2413,25 @@ export async function runChromeInstallation({
         'passed',
         'Installed Edge placement or replay fixture did not satisfy its observations'
       );
+      result.mainImageRecovery = await runMainImageRecoveryFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.mainImageRecovery.status, 'passed', 'Installed Main recovery failed');
+      result.nativeTabInstallation = {
+        installation: 'extension',
+        fixture: null,
+        live: [],
+        cleanup: {},
+      };
+      await runNativeTabInstallation({
+        chromium,
+        root,
+        output,
+        result: result.nativeTabInstallation,
+      });
     }
     const extensionResources =
       installation === 'extension' && liveUrls.length > 0
@@ -2476,6 +2505,68 @@ export async function runChromeInstallation({
       if (primaryError)
         throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');
       throw cleanupError;
+    }
+  }
+}
+
+/** A separate natural browser avoids persistent-launch focus-emulation leases. */
+async function runNativeTabInstallation({
+  chromium,
+  root,
+  output,
+  result,
+}: Pick<ChromeOptions, 'chromium' | 'root' | 'output'> & { result: ChromeResult }) {
+  const { launchOwnedNaturalChrome } = await import('./natural-chrome.ts');
+  let ownedChrome: Awaited<ReturnType<typeof launchOwnedNaturalChrome>> | undefined;
+  let extensionId: string | undefined;
+  let primaryError: unknown;
+  try {
+    ownedChrome = await launchOwnedNaturalChrome({ chromium, root, output });
+    assert.equal(ownedChrome.launchEvidence.noDefaults, true);
+    const { browser, context } = ownedChrome;
+    result.browserVersion = browser.version();
+    result.naturalChrome = ownedChrome.launchEvidence;
+    result.cleanup.browserProcessIdentified = true;
+    await enableDeveloperMode(context, 'chrome');
+    ({ id: extensionId } = (await ownedChrome.cleanupCdp.send('Extensions.loadUnpacked', {
+      path: join(root, 'dist-extension'),
+    })) as { id: string });
+    assert.match(extensionId, /^[a-p]{32}$/u);
+    result.installationMethod = 'cdp-unpacked-extension-natural-visibility';
+    result.videoPiP = await runVideoPiPFixture({
+      context,
+      root,
+      output,
+      extensionId,
+      nativeTabVisibility: true,
+      artifactPrefix: 'native-tab-chrome',
+    });
+    assert.equal(result.videoPiP.status, 'passed');
+    const tabLifetime = result.videoPiP.nativeTabLifetime;
+    assert(tabLifetime && typeof tabLifetime === 'object' && 'status' in tabLifetime);
+    assert.equal(tabLifetime.status, 'passed');
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    if (ownedChrome) {
+      try {
+        await cleanupChromeInstallation({
+          browserProcessId: ownedChrome.browserProcessId,
+          browserProcessIdentity: ownedChrome.browserProcessIdentity,
+          context: ownedChrome.cleanupContext,
+          cdp: ownedChrome.cleanupCdp,
+          extensionId,
+          profile: ownedChrome.profile,
+          output,
+          result,
+          root,
+        });
+      } catch (cleanupError) {
+        if (primaryError)
+          throw new AggregateError([primaryError, cleanupError], 'Native tab and cleanup failed');
+        throw cleanupError;
+      }
     }
   }
 }
