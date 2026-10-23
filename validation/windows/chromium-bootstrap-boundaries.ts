@@ -588,7 +588,10 @@ export async function runChromiumBootstrapBoundaries({
       child.src = url;
       document.body.appendChild(child);
     }, FRAME_URL);
-    await page.frameLocator('#bootstrap-boundary-child').locator('body').waitFor();
+    await page
+      .frameLocator('#bootstrap-boundary-child')
+      .locator('body')
+      .waitFor({ state: 'attached' });
     const frameSenders = await worker.evaluate<
       Array<{ frameId: number; documentId: string; result: unknown }>
     >(`chrome.scripting.executeScript({
