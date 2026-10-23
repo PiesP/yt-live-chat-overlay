@@ -206,12 +206,13 @@ function prelude({
     if (!url?.startsWith(imagePrefix)) return;
     if (!this.canvas.closest('#yt-live-chat-overlay')) return;
     if (state.imageDraws.some((entry) => entry.url === url)) return;
+    const matrix = this.getTransform();
     if (state.imageDraws.length < maxRecords)
       state.imageDraws.push({
         url,
         width: this.canvas.width,
         height: this.canvas.height,
-        transform: Array.from(this.getTransform().toFloat64Array()),
+        transform: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
       });
     else state.overflow++;
   };
@@ -284,7 +285,9 @@ async function snapshot(page: Page) {
       cssWidth: canvas?.getBoundingClientRect().width ?? null,
       cssHeight: canvas?.getBoundingClientRect().height ?? null,
       dpr: devicePixelRatio,
-      transform: transform ? Array.from(transform.toFloat64Array()) : null,
+      transform: transform
+        ? [transform.a, transform.b, transform.c, transform.d, transform.e, transform.f]
+        : null,
       replacementNulls: state.replacementNulls,
       fallbackReasons: state.fallbackReasons,
       textDraws: state.textDraws,
