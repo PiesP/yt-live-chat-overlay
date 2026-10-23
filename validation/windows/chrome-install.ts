@@ -45,6 +45,7 @@ import type {
   PublicImageResponse,
 } from './live-rendering.ts';
 import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
+import { runNativeWorkerRetirementFixture } from './native-worker-retirement.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
 import { run as runFixture } from './profile.ts';
 import {
@@ -182,6 +183,7 @@ type ChromeResult<Live = LiveObservation> = {
   videoPiP?: Awaited<ReturnType<typeof runVideoPiPFixture>> | null;
   nativeTabInstallation?: ChromeResult | null;
   chromiumBootstrapBoundaries?: Awaited<ReturnType<typeof runChromiumBootstrapBoundaries>> | null;
+  nativeWorkerRetirement?: Awaited<ReturnType<typeof runNativeWorkerRetirementFixture>> | null;
   mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
   extensionUpgrade?: Record<string, unknown> | null;
@@ -2441,6 +2443,13 @@ export async function runChromeInstallation({
         extensionId,
       });
       assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
+      result.nativeWorkerRetirement = await runNativeWorkerRetirementFixture({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.nativeWorkerRetirement.status, 'passed');
     }
     const extensionResources =
       installation === 'extension' && liveUrls.length > 0
