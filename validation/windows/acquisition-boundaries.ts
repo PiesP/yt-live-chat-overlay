@@ -905,7 +905,8 @@ export async function runAcquisitionBoundaries({
     assert.notEqual(oldImageDisposition, 'pending');
     const imageDisposition = oldImageDisposition as 'fulfilled' | 'unavailable';
     const lateImageCompletion = {
-      status: imageDisposition === 'fulfilled' ? 'passed' : 'inconclusive',
+      status: 'inconclusive',
+      routeDeliveryStatus: imageDisposition === 'fulfilled' ? 'passed' : 'inconclusive',
       scope: 'held old-image route delivery and absence from the current canvas',
       routeDisposition: imageDisposition,
       routeError: oldImageError,
@@ -915,7 +916,7 @@ export async function runAcquisitionBoundaries({
       ),
     };
     result = {
-      status: lateImageCompletion.status === 'passed' ? 'passed' : 'partial',
+      status: 'partial',
       controlStatus: 'passed',
       scope: 'installed Edge extension, source-bound production interceptor/parser/Main Canvas',
       sourceBound: final,
@@ -933,11 +934,7 @@ export async function runAcquisitionBoundaries({
       videoPrerequisite:
         'paused property overridden only for this isolated renderer fixture; no playback claim',
       remainingScope: [
-        ...(lateImageCompletion.status === 'inconclusive'
-          ? [
-              'Old-image late completion was not proven because its route could not fulfill after navigation',
-            ]
-          : []),
+        'A route fulfillment does not prove the retired native Image load/callback; cancellation may still occur',
         'No same-session cross-source replacement or old-image redraw count (EVT-02)',
         'No replay seek/body lifecycle or stale Worker completion (RPL-02 and full SES-01 remain open)',
         'No held bootstrap window identity mismatch (UP-01)',

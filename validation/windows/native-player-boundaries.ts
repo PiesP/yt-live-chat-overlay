@@ -120,6 +120,7 @@ declare global {
   interface Window {
     __ytNativePlayerProbe?: PlayerProbe;
     __ytNativePlayerFixture?: PlayerFixture;
+    __ytNativePlayerSetupError?: string;
   }
 }
 
@@ -275,6 +276,30 @@ async function waitForCall(page: Page, phase: string, paused: boolean): Promise<
   );
 }
 
+/** Observe readiness without granting the user activation under test. */
+async function waitForAutoplayDecision(context: BrowserContext, page: Page): Promise<void> {
+  const session = await context.newCDPSession(page);
+  try {
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      const reply = await session.send('Runtime.evaluate', {
+        expression:
+          '({ ready: Boolean(window.__ytNativePlayerFixture?.autoplay), error: window.__ytNativePlayerSetupError ?? null })',
+        userGesture: false,
+        returnByValue: true,
+      });
+      assert(!reply.exceptionDetails, 'Native autoplay decision readback failed');
+      const value = reply.result.value as { ready: boolean; error: string | null };
+      assert.equal(value.error, null, 'Native autoplay setup failed: ' + value.error);
+      if (value.ready) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('Native autoplay decision was not recorded before its deadline');
+  } finally {
+    await session.detach();
+  }
+}
+
 /** Installed Chrome, natural autoplay policy, actual media starvation and element rebinding. */
 export async function runNativePlayerBoundaries({
   context,
@@ -413,6 +438,256 @@ export async function runNativePlayerBoundaries({
         },
       };
     });
+    // Playwright function evaluation grants user activation. Decide autoplay
+    // inside the document before using any page evaluation or locator polling.
+    await page.addInitScript(
+      ({ eventLimit, byteLimit }) => {
+        document.addEventListener(
+          'DOMContentLoaded',
+          () => {
+            void (async () => {
+              const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+              if (!video) throw new Error('Owned video is absent');
+              if (typeof HTMLCanvasElement.prototype.captureStream !== 'function')
+                throw new Error('Native canvas capture is unavailable');
+              if (typeof video.requestVideoFrameCallback !== 'function')
+                throw new Error('Native video frame callbacks are unavailable');
+              if (!navigator.userActivation || navigator.userActivation.hasBeenActive)
+                throw new Error('Autoplay admission is contaminated by a prior user activation');
+              const canvas = document.createElement('canvas');
+              canvas.width = 160;
+              canvas.height = 90;
+              const drawing = canvas.getContext('2d');
+              if (!drawing) throw new Error('Native canvas drawing is unavailable');
+              const audio = new AudioContext();
+              const destination = audio.createMediaStreamDestination();
+              const oscillator = audio.createOscillator();
+              const gain = audio.createGain();
+              gain.gain.value = 0.01;
+              oscillator.frequency.value = 220;
+              oscillator.connect(gain);
+              gain.connect(destination);
+              oscillator.start();
+              const capture = canvas.captureStream(20);
+              const stream = new MediaStream([
+                ...capture.getVideoTracks(),
+                ...destination.stream.getAudioTracks(),
+              ]);
+              if (stream.getVideoTracks().length !== 1 || stream.getAudioTracks().length !== 1)
+                throw new Error('Owned stream lacks its native video or audio track');
+              const waitForEvent = (
+                target: EventTarget,
+                success: string,
+                failure: string,
+                trigger: () => void
+              ) =>
+                new Promise<void>((resolve, reject) => {
+                  const finish = (error?: unknown) => {
+                    clearTimeout(timer);
+                    target.removeEventListener(success, onSuccess);
+                    target.removeEventListener(failure, onFailure);
+                    if (error) reject(error);
+                    else resolve();
+                  };
+                  const onSuccess = () => finish();
+                  const onFailure = () => finish(new Error(`Native ${failure} event`));
+                  const timer = setTimeout(
+                    () => finish(new Error(`Native ${success} event timed out`)),
+                    5_000
+                  );
+                  target.addEventListener(success, onSuccess);
+                  target.addEventListener(failure, onFailure);
+                  try {
+                    trigger();
+                  } catch (error) {
+                    finish(error);
+                  }
+                });
+              const fixture: PlayerFixture = {
+                first: video,
+                replacement: null,
+                stream,
+                audio,
+                oscillator,
+                recorder: null,
+                chunks: [],
+                recordedBytes: 0,
+                mediaSource: null,
+                sourceBuffer: null,
+                objectUrl: null,
+                animationFrame: 0,
+                frameCallbacks: { first: null, replacement: null },
+                sourceFrames: 0,
+                videoFrames: { first: 0, replacement: 0 },
+                events: [],
+                eventOverflow: 0,
+                actionErrors: [],
+                autoplay: null,
+                trustedActions: [],
+                recordedMime: null,
+                pendingChunkReads: [],
+                waitForEvent,
+                headChunks: 0,
+                headBufferedEnd: null,
+                oldPauseBefore: null,
+              };
+              window.__ytNativePlayerFixture = fixture;
+              const paint = () => {
+                drawing.fillStyle = fixture.sourceFrames % 2 ? '#088' : '#880';
+                drawing.fillRect(0, 0, canvas.width, canvas.height);
+                fixture.sourceFrames++;
+                fixture.animationFrame = requestAnimationFrame(paint);
+              };
+              paint();
+              const recordVideo = (item: HTMLVideoElement, source: 'first' | 'replacement') => {
+                for (const type of ['pause', 'play', 'playing', 'waiting', 'stalled', 'error']) {
+                  item.addEventListener(type, (event) => {
+                    const record: PlayerEvent = {
+                      phase: window.__ytNativePlayerProbe?.phase ?? 'missing',
+                      source,
+                      type,
+                      trusted: event.isTrusted,
+                      paused: item.paused,
+                      time: item.currentTime,
+                      readyState: item.readyState,
+                      atMs: performance.now(),
+                    };
+                    if (fixture.events.length < eventLimit) fixture.events.push(record);
+                    else fixture.eventOverflow++;
+                  });
+                }
+                const nextFrame = () => {
+                  fixture.videoFrames[source]++;
+                  fixture.frameCallbacks[source] = item.requestVideoFrameCallback(nextFrame);
+                };
+                fixture.frameCallbacks[source] = item.requestVideoFrameCallback(nextFrame);
+              };
+              recordVideo(video, 'first');
+              const action = (id: string, callback: () => Promise<unknown> | void) => {
+                const button = document.getElementById(id);
+                if (!(button instanceof HTMLButtonElement))
+                  throw new Error(`Missing ${id} control`);
+                button.addEventListener('click', (event) => {
+                  if (!event.isTrusted) {
+                    fixture.actionErrors.push(`${id}: untrusted click`);
+                    return;
+                  }
+                  fixture.trustedActions.push(id);
+                  void Promise.resolve()
+                    .then(callback)
+                    .catch((error: unknown) =>
+                      fixture.actionErrors.push(`${id}: ${String(error)}`.slice(0, 180))
+                    );
+                });
+              };
+              action('native-play', async () => {
+                await audio.resume();
+                await video.play();
+                if (!MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
+                  throw new Error('Native VP8/Opus MediaRecorder is unavailable');
+                const recorder = new MediaRecorder(stream, {
+                  mimeType: 'video/webm;codecs=vp8,opus',
+                });
+                fixture.recorder = recorder;
+                fixture.recordedMime = recorder.mimeType;
+                recorder.addEventListener('dataavailable', (event) => {
+                  if (event.data.size === 0) return;
+                  const chunkIndex = fixture.pendingChunkReads.length;
+                  const read = event.data
+                    .arrayBuffer()
+                    .then((buffer) => {
+                      fixture.recordedBytes += buffer.byteLength;
+                      if (fixture.recordedBytes > byteLimit)
+                        fixture.actionErrors.push('Recorded native bytes exceeded fixture bound');
+                      else fixture.chunks[chunkIndex] = new Uint8Array(buffer);
+                    })
+                    .catch((error: unknown) => {
+                      fixture.actionErrors.push(
+                        `Native chunk read failed: ${String(error)}`.slice(0, 180)
+                      );
+                    });
+                  fixture.pendingChunkReads.push(read);
+                });
+                recorder.addEventListener('error', (event) => {
+                  fixture.actionErrors.push(`Native recorder error: ${event.type}`);
+                });
+                recorder.start(500);
+              });
+              action('native-stall-play', () => video.play());
+              action('native-replace', async () => {
+                if (fixture.replacement) throw new Error('Video replacement repeated');
+                const next = document.createElement('video');
+                next.setAttribute('aria-label', 'Replacement native video');
+                next.style.cssText = video.style.cssText;
+                next.playsInline = true;
+                next.muted = false;
+                recordVideo(next, 'replacement');
+                fixture.replacement = next;
+                video.replaceWith(next);
+                document.body.append(video);
+                video.style.display = 'none';
+                next.srcObject = stream;
+                await next.play();
+              });
+              action('native-old-play', async () => {
+                if (!fixture.replacement) throw new Error('Replacement video is absent');
+                video.srcObject = stream;
+                await video.play();
+              });
+              action('native-old-pause', () => {
+                fixture.oldPauseBefore = video.paused;
+                if (video.paused) throw new Error('Retired video was already paused');
+                video.pause();
+              });
+              action('native-new-pause', () => {
+                if (!fixture.replacement) throw new Error('Replacement video is absent');
+                fixture.replacement.pause();
+              });
+              action('native-new-play', () => {
+                if (!fixture.replacement) throw new Error('Replacement video is absent');
+                return fixture.replacement.play();
+              });
+              video.playsInline = true;
+              video.muted = false;
+              video.volume = 0.01;
+              video.srcObject = stream;
+
+              const deadline = performance.now() + 5000;
+              while (window.__ytNativePlayerProbe?.starts !== 1) {
+                if (performance.now() >= deadline)
+                  throw new Error('Native controller did not start before autoplay');
+                await new Promise((resolve) => setTimeout(resolve, 25));
+              }
+              window.__ytNativePlayerProbe.phase = 'autoplay-denial';
+
+              const activationBefore = navigator.userActivation.hasBeenActive;
+              let rejection: string | null = null;
+              let timeout: ReturnType<typeof setTimeout> | undefined;
+              try {
+                await Promise.race([
+                  fixture.first.play(),
+                  new Promise<never>((_, reject) => {
+                    timeout = setTimeout(
+                      () => reject(new Error('Autoplay decision timed out')),
+                      5_000
+                    );
+                  }),
+                ]);
+              } catch (error) {
+                rejection = error instanceof DOMException ? error.name : String(error);
+              } finally {
+                clearTimeout(timeout);
+              }
+              fixture.autoplay = { activationBefore, rejection };
+            })().catch((error: unknown) => {
+              window.__ytNativePlayerSetupError = String(error);
+            });
+          },
+          { once: true }
+        );
+      },
+      { eventLimit: EVENT_LIMIT, byteLimit: BYTE_LIMIT }
+    );
     probe = await installNativePageScriptProbe({
       context,
       root,
@@ -423,6 +698,7 @@ export async function runNativePlayerBoundaries({
     probeProvenance = probe.provenance;
     await probe.assertReady();
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await waitForAutoplayDecision(context, page);
     await page.bringToFront();
     await page.waitForFunction(() => document.visibilityState === 'visible', undefined, {
       timeout: 5_000,
@@ -437,234 +713,6 @@ export async function runNativePlayerBoundaries({
     await probe.restore();
     probe = undefined;
 
-    await page.evaluate(
-      ({ eventLimit, byteLimit }) => {
-        const video = document.querySelector<HTMLVideoElement>('#movie_player video');
-        if (!video) throw new Error('Owned video is absent');
-        if (typeof HTMLCanvasElement.prototype.captureStream !== 'function')
-          throw new Error('Native canvas capture is unavailable');
-        if (typeof video.requestVideoFrameCallback !== 'function')
-          throw new Error('Native video frame callbacks are unavailable');
-        if (!navigator.userActivation || navigator.userActivation.hasBeenActive)
-          throw new Error('Autoplay admission is contaminated by a prior user activation');
-        const canvas = document.createElement('canvas');
-        canvas.width = 160;
-        canvas.height = 90;
-        const drawing = canvas.getContext('2d');
-        if (!drawing) throw new Error('Native canvas drawing is unavailable');
-        const audio = new AudioContext();
-        const destination = audio.createMediaStreamDestination();
-        const oscillator = audio.createOscillator();
-        const gain = audio.createGain();
-        gain.gain.value = 0.01;
-        oscillator.frequency.value = 220;
-        oscillator.connect(gain);
-        gain.connect(destination);
-        oscillator.start();
-        const capture = canvas.captureStream(20);
-        const stream = new MediaStream([
-          ...capture.getVideoTracks(),
-          ...destination.stream.getAudioTracks(),
-        ]);
-        if (stream.getVideoTracks().length !== 1 || stream.getAudioTracks().length !== 1)
-          throw new Error('Owned stream lacks its native video or audio track');
-        const waitForEvent = (
-          target: EventTarget,
-          success: string,
-          failure: string,
-          trigger: () => void
-        ) =>
-          new Promise<void>((resolve, reject) => {
-            const finish = (error?: unknown) => {
-              clearTimeout(timer);
-              target.removeEventListener(success, onSuccess);
-              target.removeEventListener(failure, onFailure);
-              if (error) reject(error);
-              else resolve();
-            };
-            const onSuccess = () => finish();
-            const onFailure = () => finish(new Error(`Native ${failure} event`));
-            const timer = setTimeout(
-              () => finish(new Error(`Native ${success} event timed out`)),
-              5_000
-            );
-            target.addEventListener(success, onSuccess);
-            target.addEventListener(failure, onFailure);
-            try {
-              trigger();
-            } catch (error) {
-              finish(error);
-            }
-          });
-        const fixture: PlayerFixture = {
-          first: video,
-          replacement: null,
-          stream,
-          audio,
-          oscillator,
-          recorder: null,
-          chunks: [],
-          recordedBytes: 0,
-          mediaSource: null,
-          sourceBuffer: null,
-          objectUrl: null,
-          animationFrame: 0,
-          frameCallbacks: { first: null, replacement: null },
-          sourceFrames: 0,
-          videoFrames: { first: 0, replacement: 0 },
-          events: [],
-          eventOverflow: 0,
-          actionErrors: [],
-          autoplay: null,
-          trustedActions: [],
-          recordedMime: null,
-          pendingChunkReads: [],
-          waitForEvent,
-          headChunks: 0,
-          headBufferedEnd: null,
-          oldPauseBefore: null,
-        };
-        window.__ytNativePlayerFixture = fixture;
-        const paint = () => {
-          drawing.fillStyle = fixture.sourceFrames % 2 ? '#088' : '#880';
-          drawing.fillRect(0, 0, canvas.width, canvas.height);
-          fixture.sourceFrames++;
-          fixture.animationFrame = requestAnimationFrame(paint);
-        };
-        paint();
-        const recordVideo = (item: HTMLVideoElement, source: 'first' | 'replacement') => {
-          for (const type of ['pause', 'play', 'playing', 'waiting', 'stalled', 'error']) {
-            item.addEventListener(type, (event) => {
-              const record: PlayerEvent = {
-                phase: window.__ytNativePlayerProbe?.phase ?? 'missing',
-                source,
-                type,
-                trusted: event.isTrusted,
-                paused: item.paused,
-                time: item.currentTime,
-                readyState: item.readyState,
-                atMs: performance.now(),
-              };
-              if (fixture.events.length < eventLimit) fixture.events.push(record);
-              else fixture.eventOverflow++;
-            });
-          }
-          const nextFrame = () => {
-            fixture.videoFrames[source]++;
-            fixture.frameCallbacks[source] = item.requestVideoFrameCallback(nextFrame);
-          };
-          fixture.frameCallbacks[source] = item.requestVideoFrameCallback(nextFrame);
-        };
-        recordVideo(video, 'first');
-        const action = (id: string, callback: () => Promise<unknown> | void) => {
-          const button = document.getElementById(id);
-          if (!(button instanceof HTMLButtonElement)) throw new Error(`Missing ${id} control`);
-          button.addEventListener('click', (event) => {
-            if (!event.isTrusted) {
-              fixture.actionErrors.push(`${id}: untrusted click`);
-              return;
-            }
-            fixture.trustedActions.push(id);
-            void Promise.resolve()
-              .then(callback)
-              .catch((error: unknown) =>
-                fixture.actionErrors.push(`${id}: ${String(error)}`.slice(0, 180))
-              );
-          });
-        };
-        action('native-play', async () => {
-          await audio.resume();
-          await video.play();
-          if (!MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
-            throw new Error('Native VP8/Opus MediaRecorder is unavailable');
-          const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
-          fixture.recorder = recorder;
-          fixture.recordedMime = recorder.mimeType;
-          recorder.addEventListener('dataavailable', (event) => {
-            if (event.data.size === 0) return;
-            const chunkIndex = fixture.pendingChunkReads.length;
-            const read = event.data
-              .arrayBuffer()
-              .then((buffer) => {
-                fixture.recordedBytes += buffer.byteLength;
-                if (fixture.recordedBytes > byteLimit)
-                  fixture.actionErrors.push('Recorded native bytes exceeded fixture bound');
-                else fixture.chunks[chunkIndex] = new Uint8Array(buffer);
-              })
-              .catch((error: unknown) => {
-                fixture.actionErrors.push(
-                  `Native chunk read failed: ${String(error)}`.slice(0, 180)
-                );
-              });
-            fixture.pendingChunkReads.push(read);
-          });
-          recorder.addEventListener('error', (event) => {
-            fixture.actionErrors.push(`Native recorder error: ${event.type}`);
-          });
-          recorder.start(500);
-        });
-        action('native-stall-play', () => video.play());
-        action('native-replace', async () => {
-          if (fixture.replacement) throw new Error('Video replacement repeated');
-          const next = document.createElement('video');
-          next.setAttribute('aria-label', 'Replacement native video');
-          next.style.cssText = video.style.cssText;
-          next.playsInline = true;
-          next.muted = false;
-          recordVideo(next, 'replacement');
-          fixture.replacement = next;
-          video.replaceWith(next);
-          document.body.append(video);
-          video.style.display = 'none';
-          next.srcObject = stream;
-          await next.play();
-        });
-        action('native-old-play', async () => {
-          if (!fixture.replacement) throw new Error('Replacement video is absent');
-          video.srcObject = stream;
-          await video.play();
-        });
-        action('native-old-pause', () => {
-          fixture.oldPauseBefore = video.paused;
-          if (video.paused) throw new Error('Retired video was already paused');
-          video.pause();
-        });
-        action('native-new-pause', () => {
-          if (!fixture.replacement) throw new Error('Replacement video is absent');
-          fixture.replacement.pause();
-        });
-        action('native-new-play', () => {
-          if (!fixture.replacement) throw new Error('Replacement video is absent');
-          return fixture.replacement.play();
-        });
-        video.playsInline = true;
-        video.muted = false;
-        video.volume = 0.01;
-        video.srcObject = stream;
-      },
-      { eventLimit: EVENT_LIMIT, byteLimit: BYTE_LIMIT }
-    );
-    await setPhase(page, 'autoplay-denial');
-    await page.evaluate(async () => {
-      const fixture = window.__ytNativePlayerFixture;
-      if (!fixture) throw new Error('Native player fixture disappeared');
-      const activationBefore = navigator.userActivation.hasBeenActive;
-      let rejection: string | null = null;
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          fixture.first.play(),
-          new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => reject(new Error('Autoplay decision timed out')), 5_000);
-          }),
-        ]);
-      } catch (error) {
-        rejection = error instanceof DOMException ? error.name : String(error);
-      } finally {
-        clearTimeout(timeout);
-      }
-      fixture.autoplay = { activationBefore, rejection };
-    });
     const denied = await snapshot(page, 'autoplay-denial');
     states.push(denied);
     assert.equal(denied.autoplay?.activationBefore, false);
