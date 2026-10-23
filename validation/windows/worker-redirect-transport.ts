@@ -154,9 +154,11 @@ export async function installWorkerRedirectTransport({
       if (!command) return;
       pending.delete(protocolMessage.id);
       clearTimeout(command.timer);
-      if (protocolMessage.error)
-        command.reject(new Error(`Worker CDP command ${protocolMessage.id} failed`));
-      else command.resolve(protocolMessage.result);
+      if (protocolMessage.error) {
+        const error = record(protocolMessage.error);
+        const detail = typeof error?.message === 'string' ? error.message.slice(0, 500) : 'unknown';
+        command.reject(new Error(`Worker CDP command ${protocolMessage.id} failed: ${detail}`));
+      } else command.resolve(protocolMessage.result);
       return;
     }
     if (protocolMessage.method !== 'Fetch.requestPaused') return;

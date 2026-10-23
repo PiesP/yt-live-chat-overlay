@@ -85,6 +85,17 @@ const RED_PNG = Buffer.from(
   'base64'
 );
 
+function describeFailure(error: unknown, depth = 0): unknown {
+  if (depth >= 4) return 'Nested error depth limit';
+  return {
+    error: String(error).slice(0, 2_000),
+    stack: error instanceof Error ? error.stack?.slice(0, 4_000) : null,
+    ...(error instanceof AggregateError
+      ? { errors: error.errors.slice(0, 8).map((nested) => describeFailure(nested, depth + 1)) }
+      : {}),
+  };
+}
+
 // This suffix receives the real WorkerRenderer instance from the packaged Blob.
 // The existing addMessages receiver performs insertion before these probes run.
 function attachWorkerBitmapProbe(renderer: {
@@ -1046,6 +1057,7 @@ export async function runBitmapLifecycleFixture({
           {
             status: 'failed',
             error: String(error),
+            failure: describeFailure(error),
             pageScriptProbeProvenance,
             imageRequests,
             imageRequestOverflow,
@@ -1097,7 +1109,7 @@ export async function runBitmapLifecycleFixture({
             status: 'failed',
             scenarioError: primaryError ? String(primaryError) : null,
             scenarioResult: result ?? null,
-            cleanupErrors: cleanupErrors.map(String),
+            cleanupErrors: cleanupErrors.map((error) => describeFailure(error)),
           },
           null,
           2
