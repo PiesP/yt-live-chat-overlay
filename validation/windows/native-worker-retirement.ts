@@ -533,35 +533,57 @@ export async function runNativeWorkerRetirementFixture({
           window.__ytNativeWorkerRetirement.restartError = String(error).slice(0, 200);
       });
     });
-    await page.waitForFunction(
+    const releaseHandle = await page.waitForFunction(
       () => {
         const workers = window.__ytNativeWorkerRetirement?.workers;
-        return (
-          workers?.length === 2 &&
-          workers[0]?.destroyPosts === 1 &&
-          workers[0]?.events.some((event) => event.phase === 'ack-held') &&
-          workers[0]?.events.some((event) => event.phase === 'waiter-settled')
-        );
+        const a = workers?.[0];
+        if (!a || a.destroyAtMs === null) return false;
+        const elapsedMs = performance.now() - a.destroyAtMs;
+        if (a.terminations > 0) return { status: 'terminated-before-release', elapsedMs };
+        // Reserve 150 ms for the native decode continuation and real ACK.
+        if (elapsedMs >= 350) return { status: 'deadline-expired', elapsedMs };
+        const ack = a.events.find((event) => event.phase === 'ack-held');
+        const waiter = a.events.find((event) => event.phase === 'waiter-settled');
+        if (workers?.length !== 2 || a.destroyPosts !== 1 || !ack || !waiter) return false;
+        if (ack.pendingTasks !== 0 || waiter.destroyed !== true)
+          return { status: 'retirement-precondition-failed', elapsedMs };
+        // Detection and release run in one page task. No Playwright RPC may
+        // consume A's remaining safety window between these operations.
+        a.worker.postMessage({ type: 'ytWorkerRetirementCommand', phase: 'release' });
+        return {
+          status: 'released',
+          elapsedMs,
+          aTerminations: a.terminations,
+          aPendingTasks: ack.pendingTasks,
+          waiterDestroyed: waiter.destroyed,
+          bCreatedAtMs: workers[1]?.createdAtMs ?? null,
+          releaseAtMs: a.releaseAtMs,
+        };
       },
       undefined,
-      { timeout: 450 }
+      { timeout: 1_000, polling: 10 }
     );
-    const beforeRelease = await observations();
-    assert.equal(beforeRelease.workers[0]?.terminations, 0);
+    const releaseGuard = (await releaseHandle.jsonValue()) as {
+      status: string;
+      elapsedMs: number;
+      aTerminations?: number;
+      aPendingTasks?: number;
+      waiterDestroyed?: boolean;
+      bCreatedAtMs?: number | null;
+      releaseAtMs?: number | null;
+    };
+    await releaseHandle.dispose();
     assert.equal(
-      beforeRelease.workers[0]?.events.find((event) => event.phase === 'ack-held')?.pendingTasks,
-      0
+      releaseGuard.status,
+      'released',
+      `A release guard did not meet its safety deadline: ${releaseGuard.status}`
     );
-    assert.equal(
-      beforeRelease.workers[0]?.events.find((event) => event.phase === 'waiter-settled')?.destroyed,
-      true
-    );
-    await page.evaluate(() =>
-      window.__ytNativeWorkerRetirement?.workers[0]?.worker.postMessage({
-        type: 'ytWorkerRetirementCommand',
-        phase: 'release',
-      })
-    );
+    assert(releaseGuard.elapsedMs >= 0 && releaseGuard.elapsedMs < 350);
+    assert.equal(releaseGuard.aTerminations, 0);
+    assert.equal(releaseGuard.aPendingTasks, 0);
+    assert.equal(releaseGuard.waiterDestroyed, true);
+    assert(releaseGuard.bCreatedAtMs !== null && releaseGuard.bCreatedAtMs !== undefined);
+    assert(releaseGuard.releaseAtMs !== null && releaseGuard.releaseAtMs !== undefined);
     await page.waitForFunction(
       () =>
         window.__ytNativeWorkerRetirement?.workers[0]?.events.some(
@@ -713,7 +735,7 @@ export async function runNativeWorkerRetirementFixture({
       packagedWorkerSha256: observedWorkerSha256,
       workerProbeFunctionSha256: sha256(attachWorkerRetirementProbe.toString()),
       pageScriptProbeProvenance: probeProvenance,
-      beforeRelease,
+      releaseGuard,
       final,
       requestCounts,
       pageErrors,
@@ -761,18 +783,22 @@ export async function runNativeWorkerRetirementFixture({
     }
   }
   if (cleanupErrors.length > 0) {
-    await writeFile(
-      join(output, 'native-worker-retirement-cleanup-failure.json'),
-      JSON.stringify(
-        {
-          status: 'failed',
-          primaryError: primaryError ? errorText(primaryError) : null,
-          cleanupErrors: cleanupErrors.map(errorText),
-        },
-        null,
-        2
-      )
-    );
+    try {
+      await writeFile(
+        join(output, 'native-worker-retirement-cleanup-failure.json'),
+        JSON.stringify(
+          {
+            status: 'failed',
+            primaryError: primaryError ? errorText(primaryError) : null,
+            cleanupErrors: cleanupErrors.map(errorText),
+          },
+          null,
+          2
+        )
+      );
+    } catch (sidecarError) {
+      cleanupErrors.push(sidecarError);
+    }
     throw new AggregateError(
       primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
       'Worker retirement fixture cleanup failed'
