@@ -629,16 +629,90 @@ describe('extractChatEvents message-boundary normalization', () => {
       },
     });
 
-    expect(
-      extractChatEvents([makeAction(MAX_RENDER_CONTENT_SEGMENTS)], () =>
-        mkSettings({ allowShortTextMessages: true })
-      )
-    ).toHaveLength(1);
-    expect(
-      extractChatEvents([makeAction(MAX_RENDER_CONTENT_SEGMENTS + 1)], () =>
-        mkSettings({ allowShortTextMessages: true })
-      )
-    ).toEqual([]);
+    let stats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const events = extractChatEvents(
+      [
+        makeAction(MAX_RENDER_CONTENT_SEGMENTS),
+        makeAction(MAX_RENDER_CONTENT_SEGMENTS + 1),
+        makeAction(1),
+      ],
+      () => mkSettings({ allowShortTextMessages: true, queueMaxSize: 10 }),
+      (value) => {
+        stats = value;
+      }
+    );
+    expect(events.map((event) => event.message.id)).toEqual([
+      `runs-${MAX_RENDER_CONTENT_SEGMENTS}`,
+      'runs-1',
+    ]);
+    expect(stats?.resourceDrops).toBe(1);
+  });
+
+  it('isolates oversized author, paid amount, and membership header from healthy neighbors', () => {
+    const action = (key: string, id: string, renderer: Record<string, unknown>) => ({
+      addChatItemAction: { item: { [key]: { id, ...renderer } } },
+    });
+    const healthy = (id: string) =>
+      action('liveChatTextMessageRenderer', id, {
+        authorName: { simpleText: 'Viewer' },
+        message: { simpleText: 'hello' },
+      });
+    let stats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const events = extractChatEvents(
+      [
+        healthy('before'),
+        action('liveChatTextMessageRenderer', 'large-author', {
+          authorName: { simpleText: 'a'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1) },
+          message: { simpleText: 'hello' },
+        }),
+        action('liveChatPaidMessageRenderer', 'large-amount', {
+          authorName: { simpleText: 'Supporter' },
+          purchaseAmountText: { simpleText: 'a'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1) },
+          message: { simpleText: 'thanks' },
+        }),
+        action('liveChatMembershipItemRenderer', 'large-header', {
+          authorName: { simpleText: 'Member' },
+          headerPrimaryText: { simpleText: 'a'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1) },
+          message: { simpleText: 'joined' },
+        }),
+        healthy('after'),
+      ],
+      () => mkSettings({ allowShortTextMessages: true, queueMaxSize: 10 }),
+      (value) => {
+        stats = value;
+      }
+    );
+
+    expect(events.map((event) => event.message.id)).toEqual(['before', 'after']);
+    expect(stats?.resourceDrops).toBe(3);
+    expect(stats?.traversedActions).toBe(5);
+  });
+
+  it('admits the combined paid-card limit and recovers after a one-point aggregate overage', () => {
+    const paidAction = (id: string, bodyLength: number) => ({
+      addChatItemAction: {
+        item: {
+          liveChatPaidMessageRenderer: {
+            id,
+            authorName: { simpleText: 'a'.repeat(2000) },
+            purchaseAmountText: { simpleText: 'b'.repeat(1000) },
+            message: { simpleText: 'c'.repeat(bodyLength) },
+          },
+        },
+      },
+    });
+    let stats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const events = extractChatEvents(
+      [paidAction('exact', 1096), paidAction('over', 1097), paidAction('recovered', 1)],
+      () => mkSettings({ allowShortTextMessages: true, queueMaxSize: 10 }),
+      (value) => {
+        stats = value;
+      }
+    );
+
+    expect(events.map((event) => event.message.id)).toEqual(['exact', 'recovered']);
+    expect(events[0]?.message.text).toHaveLength(1096);
+    expect(stats?.resourceDrops).toBe(1);
   });
 });
 
