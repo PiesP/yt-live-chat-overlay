@@ -329,8 +329,7 @@ describe('ReplayChatSource', () => {
       ) => boolean;
     };
     internals.prefetchContinuation = { continuation: 'next' };
-    const eligible = () =>
-      internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false });
+    const eligible = () => internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false });
 
     for (let index = 0; index < 2000; index++) {
       internals.replayBuffer.insert(makeReplayMessage(`high-${index}`, 12_000), 12_000);
@@ -368,8 +367,7 @@ describe('ReplayChatSource', () => {
       ) => boolean;
     };
     internals.prefetchContinuation = { continuation: 'next' };
-    const eligible = () =>
-      internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false });
+    const eligible = () => internals.shouldPrefetch(0, undefined, { offsetMs: 0, paused: false });
     const high = 6 * 1024 * 1024;
     const low = 3 * 1024 * 1024;
     internals.replayBuffer.insert(makeMessageWithEstimatedBytes(high), 12_000);
@@ -959,9 +957,7 @@ describe('ReplayChatSource', () => {
       } as ChatBootstrapData);
       const internals = source as unknown as {
         getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
-        requestReplayPayload: (
-          continuation: InnertubeContinuationData
-        ) => Promise<LiveChatPayload>;
+        requestReplayPayload: (continuation: InnertubeContinuationData) => Promise<LiveChatPayload>;
       };
       vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
         offsetMs: 20_000,
@@ -1096,9 +1092,7 @@ describe('ReplayChatSource', () => {
       replayContinuation: InnertubeContinuationData | null;
       pollPlayerSeekReplay: (playback: { offsetMs: number; paused: boolean }) => Promise<boolean>;
       pollContinuationReplay: (offsetMs: number) => Promise<boolean>;
-      requestReplayPayload: (
-        continuation: InnertubeContinuationData
-      ) => Promise<LiveChatPayload>;
+      requestReplayPayload: (continuation: InnertubeContinuationData) => Promise<LiveChatPayload>;
     };
     internals.callback = vi.fn();
     internals.replayMode = 'playerSeek';
