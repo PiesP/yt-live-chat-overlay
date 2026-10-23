@@ -800,7 +800,7 @@ export async function runBitmapLifecycleFixture({
     ] as const;
     const targets = ['emoji', 'author', 'sticker'] as const;
     const expectedConsoleFaultUrls = new Set<string>();
-    const expectedRequestFailureUrls = new Set<string>();
+    const expectedRequestFailures = new Map<string, string>();
     const cases: Array<{
       id: string;
       target: 'emoji' | 'author' | 'sticker';
@@ -827,9 +827,13 @@ export async function runBitmapLifecycleFixture({
       if (kind.startsWith('http-')) {
         imageRoutes.set(faultUrl, { kind: 'http', status: Number(kind.slice(5)) });
         expectedConsoleFaultUrls.add(faultUrl);
+        // Production explicitly cancels rejected HTTP response bodies.
+        expectedRequestFailures.set(faultUrl, 'net::ERR_ABORTED');
       } else if (redirectUrl) {
         imageRoutes.set(faultUrl, { kind: 'redirect', location: redirectUrl });
         imageRoutes.set(redirectUrl, { kind: 'png' });
+        if (kind === 'redirect-offhost')
+          expectedRequestFailures.set(redirectUrl, 'net::ERR_ABORTED');
       } else if (
         kind === 'malformed' ||
         kind === 'truncated' ||
@@ -844,7 +848,7 @@ export async function runBitmapLifecycleFixture({
       }
       if (kind === 'abort' || kind === 'cors') {
         expectedConsoleFaultUrls.add(faultUrl);
-        expectedRequestFailureUrls.add(faultUrl);
+        expectedRequestFailures.set(faultUrl, 'net::ERR_FAILED');
       }
       imageRoutes.set(recoveryUrl, { kind: 'png' });
 
@@ -993,9 +997,11 @@ export async function runBitmapLifecycleFixture({
     );
     assert.equal(consoleErrorOverflow, 0);
     assert.deepEqual(
-      requestFailures.filter((failure) => !expectedRequestFailureUrls.has(failure.url)),
+      requestFailures.filter(
+        (failure) => expectedRequestFailures.get(failure.url) !== failure.errorText
+      ),
       [],
-      'Unexpected network failure outside exact abort/CORS URLs'
+      'Unexpected network failure outside exact injected faults or rejected-body cancellation'
     );
     assert.equal(requestFailureOverflow, 0);
     assert.equal(requestObservationOverflow, 0);
