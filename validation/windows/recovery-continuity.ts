@@ -68,8 +68,18 @@ type WorkerRecord = {
   errors: string[];
   destroyPosts: number;
   terminations: number;
+  snapshotPosts: Array<{ requestId: number; epoch: number; atMs: number }>;
+  snapshotArrivals: Array<{ requestId: number; epoch: number; atMs: number }>;
   events: WorkerProbeEvent[];
   overflow: number;
+};
+type AcceptedSnapshot = {
+  atMs: number;
+  activeIds: string[];
+  pendingIds: string[];
+  processedBatchSequence: number;
+  epoch: number;
+  messages: Array<{ id: string; activeMotionStartEpochMs: number | null }>;
 };
 type RendererProbe = {
   addMessage(message: ChatMessage): void;
@@ -81,7 +91,11 @@ type RendererProbe = {
   };
   activeMessages: Array<{ message: ChatMessage; startTime: number }>;
   pendingQueue: { toArray(): ChatMessage[] };
-  settings: { maxConcurrentMessages: number; danmakuMode: string };
+  settings: {
+    maxConcurrentMessages: number;
+    danmakuMode: string;
+    outline: { enabled: boolean };
+  };
   canvas: HTMLCanvasElement | null;
 };
 type Draw = {
@@ -99,6 +113,8 @@ type ContinuityState = {
   sourceBound: boolean;
   mainFrames: number;
   fallbackReasons: string[];
+  managerSnapshotStartedAtMs: number | null;
+  acceptedSnapshots: AcceptedSnapshot[];
   heldCallback: (() => void) | null;
   transitionError: string | null;
   transitionIngress: string[];
@@ -117,6 +133,8 @@ type Snapshot = {
     errors: string[];
     destroyPosts: number;
     terminations: number;
+    snapshotPosts: WorkerRecord['snapshotPosts'];
+    snapshotArrivals: WorkerRecord['snapshotArrivals'];
     events: WorkerProbeEvent[];
     overflow: number;
   }>;
@@ -128,6 +146,8 @@ type Snapshot = {
   fallbackRecoveryFailed: boolean;
   mainFrames: number;
   fallbackReasons: string[];
+  managerSnapshotStartedAtMs: number | null;
+  acceptedSnapshots: AcceptedSnapshot[];
   transitionError: string | null;
   transitionIngress: string[];
   transitionAtMs: number | null;
@@ -266,6 +286,8 @@ function installPagePrelude({
     sourceBound: false,
     mainFrames: 0,
     fallbackReasons: [],
+    managerSnapshotStartedAtMs: null,
+    acceptedSnapshots: [],
     heldCallback: null,
     transitionError: null,
     transitionIngress: [],
@@ -323,6 +345,8 @@ function installPagePrelude({
         errors: [],
         destroyPosts: 0,
         terminations: 0,
+        snapshotPosts: [],
+        snapshotArrivals: [],
         events: [],
         overflow: 0,
       };
@@ -330,13 +354,18 @@ function installPagePrelude({
       else state.workerOverflow++;
       const post = worker.postMessage.bind(worker);
       worker.postMessage = ((message: unknown, ...transfer: unknown[]) => {
-        if (
-          typeof message === 'object' &&
-          message !== null &&
-          'type' in message &&
-          message.type === 'destroy'
-        )
-          record.destroyPosts++;
+        if (typeof message === 'object' && message !== null && 'type' in message) {
+          if (message.type === 'destroy') record.destroyPosts++;
+          if (message.type === 'snapshotMessages') {
+            if (record.snapshotPosts.length < 4)
+              record.snapshotPosts.push({
+                requestId: Number('requestId' in message ? message.requestId : NaN),
+                epoch: Number('epoch' in message ? message.epoch : NaN),
+                atMs: performance.now(),
+              });
+            else record.overflow++;
+          }
+        }
         Reflect.apply(post, worker, [message, ...transfer]);
       }) as typeof worker.postMessage;
       const terminate = worker.terminate.bind(worker);
@@ -351,6 +380,15 @@ function installPagePrelude({
       worker.addEventListener('message', (event: MessageEvent) => {
         if (event.data?.type === 'ready') record.ready = true;
         if (event.data?.type === 'pong') record.pongs++;
+        if (event.data?.type === 'messageSnapshot') {
+          if (record.snapshotArrivals.length < 4)
+            record.snapshotArrivals.push({
+              requestId: Number(event.data.requestId),
+              epoch: Number(event.data.epoch),
+              atMs: performance.now(),
+            });
+          else record.overflow++;
+        }
         if (event.data?.type !== 'continuityProbe') return;
         const entry = event.data as WorkerProbeEvent;
         if (record.events.length < maxEvents) record.events.push(entry);
@@ -485,7 +523,12 @@ function installPagePrelude({
   const nativeFill = canvas.fillText;
   canvas.fillText = function (text: string, x: number, y: number, maxWidth?: number): void {
     Reflect.apply(nativeFill, this, maxWidth === undefined ? [text, x, y] : [text, x, y, maxWidth]);
-    if (!text.includes('WIN306_') || state.textDraws.includes(text)) return;
+    if (
+      this.canvas.closest('#yt-live-chat-overlay') === null ||
+      !text.includes('WIN306_') ||
+      state.textDraws.includes(text)
+    )
+      return;
     if (state.textDraws.length < maxEvents) state.textDraws.push(text.slice(0, 120));
     else state.textOverflow++;
   };
@@ -531,6 +574,8 @@ async function snapshot(page: Page): Promise<Snapshot> {
         errors: [...record.errors],
         destroyPosts: record.destroyPosts,
         terminations: record.terminations,
+        snapshotPosts: [...record.snapshotPosts],
+        snapshotArrivals: [...record.snapshotArrivals],
         events: [...record.events],
         overflow: record.overflow,
       })),
@@ -542,6 +587,8 @@ async function snapshot(page: Page): Promise<Snapshot> {
       fallbackRecoveryFailed: renderer?.fallbackRecoveryFailed ?? false,
       mainFrames: state.mainFrames,
       fallbackReasons: [...state.fallbackReasons],
+      managerSnapshotStartedAtMs: state.managerSnapshotStartedAtMs,
+      acceptedSnapshots: [...state.acceptedSnapshots],
       transitionError: state.transitionError,
       transitionIngress: [...state.transitionIngress],
       transitionAtMs: state.transitionAtMs,
@@ -619,6 +666,23 @@ export async function runRecoveryContinuityFixture({
       `\tconst originalContinuityFallback = CanvasRenderer.prototype.fallbackToMainThread;\n` +
       `\tCanvasRenderer.prototype.fallbackToMainThread = function(reason) {\n` +
       `\t\tcontinuityState.fallbackReasons.push(reason);\n` +
+      `\t\tconst manager = this.workerManager;\n` +
+      `\t\tconst originalSnapshotMessages = manager.snapshotMessages;\n` +
+      `\t\tconst originalTakeSnapshotMessages = manager.takeSnapshotMessages;\n` +
+      `\t\tif (typeof originalSnapshotMessages !== 'function' || typeof originalTakeSnapshotMessages !== 'function') throw new Error('Packaged manager snapshot seam changed');\n` +
+      `\t\tmanager.snapshotMessages = function(...args) {\n` +
+      `\t\t\tcontinuityState.managerSnapshotStartedAtMs = performance.now();\n` +
+      `\t\t\treturn originalSnapshotMessages.apply(this, args);\n` +
+      `\t\t};\n` +
+      `\t\tmanager.takeSnapshotMessages = function(...args) {\n` +
+      `\t\t\tconst messages = originalTakeSnapshotMessages.apply(this, args);\n` +
+      `\t\t\tcontinuityState.acceptedSnapshots.push({\n` +
+      `\t\t\t\tatMs: performance.now(), activeIds: [...args[0]], pendingIds: [...args[1]],\n` +
+      `\t\t\t\tprocessedBatchSequence: args[2], epoch: args[5],\n` +
+      `\t\t\t\tmessages: messages.map((entry) => ({ id: entry.message.id, activeMotionStartEpochMs: entry.activeMotion?.startEpochMs ?? null })),\n` +
+      `\t\t\t});\n` +
+      `\t\t\treturn messages;\n` +
+      `\t\t};\n` +
       `\t\treturn originalContinuityFallback.call(this, reason);\n` +
       `\t};\n` +
       `\tconst originalContinuityFrame = CanvasRenderer.prototype.renderFrame;\n` +
@@ -757,6 +821,7 @@ export async function runRecoveryContinuityFixture({
         allowShortTextMessages: true,
         translationEnabled: false,
         depthLayersEnabled: false,
+        outline: { ...settings.outline, enabled: false },
         showAuthor: { ...settings.showAuthor, normal: true, superChat: true },
       });
       return settings;
@@ -772,6 +837,7 @@ export async function runRecoveryContinuityFixture({
           renderer.workerManager.workerRef !== null &&
           renderer.settings.maxConcurrentMessages === 30 &&
           renderer.settings.danmakuMode === 'top' &&
+          renderer.settings.outline.enabled === false &&
           state.workers.some(
             (worker) =>
               worker.worker === renderer.workerManager.workerRef &&
@@ -947,7 +1013,8 @@ export async function runRecoveryContinuityFixture({
             state.workers.some((worker) => worker.events.some((event) => event.phase === 'held')) &&
             state.workers.some((worker) =>
               worker.events.some((event) => event.phase === 'released')
-            ))
+            ) &&
+            state.acceptedSnapshots.length === 1)
         );
       },
       undefined,
@@ -970,16 +1037,62 @@ export async function runRecoveryContinuityFixture({
     const nativeReleased = held.workers
       .flatMap((worker) => worker.events)
       .find((event) => event.phase === 'released');
+    const nativeWorker = held.workers.find((worker) =>
+      worker.events.some((event) => event.phase === 'held')
+    );
     assert(nativeHeld && nativeReleased, 'Actual Worker snapshot was not held and released');
+    assert(nativeWorker, 'Snapshot did not belong to an observed packaged Worker');
     assert(nativeHeld.activeIds?.includes(CONTROL_ID));
     assert(nativeHeld.activeIds?.includes(TARGET_ID));
     assert(nativeHeld.pendingIds?.includes(FUTURE_ID));
     assert(nativeHeld.motions?.some((motion) => motion.id === CONTROL_ID));
     assert(Number.isSafeInteger(nativeHeld.requestId) && (nativeHeld.requestId ?? 0) > 0);
     assert(Number.isSafeInteger(nativeHeld.epoch) && (nativeHeld.epoch ?? -1) >= 0);
+    const requestPost = nativeWorker.snapshotPosts.find(
+      (entry) => entry.requestId === nativeHeld.requestId && entry.epoch === nativeHeld.epoch
+    );
+    const nativeArrival = nativeWorker.snapshotArrivals.find(
+      (entry) => entry.requestId === nativeHeld.requestId && entry.epoch === nativeHeld.epoch
+    );
+    const accepted = held.acceptedSnapshots[0];
+    const snapshotStartedAtMs = held.managerSnapshotStartedAtMs;
+    assert(
+      requestPost && nativeArrival && accepted && snapshotStartedAtMs !== null,
+      'Packaged manager did not request, receive, and accept the same Worker snapshot'
+    );
+    assert.equal(nativeWorker.snapshotPosts.length, 1);
+    assert.equal(nativeWorker.snapshotArrivals.length, 1);
+    assert.equal(held.acceptedSnapshots.length, 1);
+    assert(snapshotStartedAtMs <= requestPost.atMs && requestPost.atMs <= nativeArrival.atMs);
+    assert(requestPost.atMs <= accepted.atMs);
+    assert(
+      nativeArrival.atMs - snapshotStartedAtMs < 250,
+      'Native response arrived after the manager snapshot deadline'
+    );
+    assert(
+      accepted.atMs - snapshotStartedAtMs < 250,
+      'Packaged manager accepted the Worker snapshot after its deadline'
+    );
+    assert.deepEqual(accepted.activeIds, nativeHeld.activeIds);
+    assert.deepEqual(accepted.pendingIds, nativeHeld.pendingIds);
+    assert.equal(accepted.processedBatchSequence, nativeHeld.processedBatchSequence);
+    assert.equal(accepted.epoch, nativeHeld.epoch);
+    assert(
+      accepted.messages.some(
+        (entry) =>
+          entry.id === CONTROL_ID &&
+          entry.activeMotionStartEpochMs ===
+            nativeHeld.motions?.find((motion) => motion.id === CONTROL_ID)?.startEpochMs
+      ),
+      'Manager did not use the native active-motion snapshot'
+    );
+    assert(
+      accepted.messages.some((entry) => entry.id === FUTURE_ID),
+      'Manager did not accept the native pending snapshot'
+    );
     assert(
       nativeReleased.atMs - nativeHeld.atMs < 250,
-      'Worker response exceeded the validated snapshot deadline'
+      'Held Worker snapshot release took too long'
     );
 
     await page.waitForFunction(
