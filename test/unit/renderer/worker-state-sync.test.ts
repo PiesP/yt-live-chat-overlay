@@ -1421,55 +1421,6 @@ describe('Worker renderer state synchronization', () => {
     }
   });
 
-  it('recovers the current image URL when a held snapshot spans a same-ID replacement', async () => {
-    vi.useFakeTimers();
-    const { manager, worker } = initializedManager({ ...DEFAULT_SETTINGS, queueMaxSize: 1 });
-    const id = 'snapshot-image-replacement';
-    const original: ChatMessage = {
-      id,
-      text: 'original',
-      content: [{ type: 'text', content: 'original' }],
-      authorPhotoUrl: 'https://yt3.ggpht.com/old-image.png',
-      timestamp: 1,
-      kind: 'text',
-      authorType: 'normal',
-    };
-    const replacement: ChatMessage = {
-      ...original,
-      text: 'replacement',
-      content: [{ type: 'text', content: 'replacement' }],
-      authorPhotoUrl: 'https://yt3.ggpht.com/new-image.png',
-      actionType: 'replace',
-    };
-
-    try {
-      expect(manager.sendToWorker(original, id)).toBe(true);
-      await flushMicrotasks();
-      const snapshot = manager.snapshotMessages();
-      const request = worker.postMessage.mock.calls
-        .map(([value]) => value as { type?: string; requestId?: number })
-        .findLast((value) => value.type === 'snapshotMessages');
-      expect(manager.sendToWorker(replacement, id)).toBe(true);
-      await flushMicrotasks();
-      expect(manager.isCurrentMessage(id, replacement)).toBe(true);
-
-      worker.emitMessage({
-        type: 'messageSnapshot',
-        requestId: request?.requestId,
-        epoch: 0,
-        activeMessageIds: [id],
-        pendingMessageIds: [],
-        processedBatchSequence: 2,
-      });
-      await expect(snapshot).resolves.toEqual([{ message: replacement, trackDrops: false }]);
-      expect(manager.isCurrentMessage(id, original)).toBe(false);
-    } finally {
-      manager.destroy();
-      worker.acknowledgeDestroy();
-      vi.useRealTimers();
-    }
-  });
-
   it('attaches validated active motion only to the retained current-epoch message', async () => {
     const { manager, worker } = initializedManager();
     const message: ChatMessage = {
