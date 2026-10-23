@@ -26,18 +26,13 @@ export type WorkerRedirectBinding = {
   browserContextId: string | null;
   finalUrls: readonly string[];
   terminalRequests: string[];
+  interceptionScope: string;
 };
 
 export type WorkerRedirectTransport = {
   binding: WorkerRedirectBinding;
   assertHealthy(): void;
   close(): Promise<void>;
-};
-
-type PendingCommand = {
-  resolve(value: unknown): void;
-  reject(reason: Error): void;
-  timer: ReturnType<typeof setTimeout>;
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -83,7 +78,7 @@ function cleanupFailure(primary: unknown, cleanupErrors: unknown[]): unknown {
     : primary;
 }
 
-/** Intercept only the final requests made by the existing packaged Blob Worker. */
+/** Intercept exact redirect finals in the fixture page after verifying its packaged Worker. */
 export async function installWorkerRedirectTransport({
   context,
   page,
@@ -111,12 +106,9 @@ export async function installWorkerRedirectTransport({
   assert(browser, 'Bitmap context has no browser');
   let pageCdp: CDPSession | undefined;
   let browserCdp: CDPSession | undefined;
-  let sessionId: string | undefined;
   let fetchEnableAttempted = false;
   let closed = false;
-  let nextCommandId = 1;
   let healthError: Error | undefined;
-  const pending = new Map<number, PendingCommand>();
   const inFlight = new Set<Promise<void>>();
   let binding: WorkerRedirectBinding | undefined;
   const allowedUrls = new Set<string>(FINAL_URLS);
@@ -126,43 +118,8 @@ export async function installWorkerRedirectTransport({
       healthError = error instanceof Error ? error : new Error('Worker redirect transport failed');
   }
 
-  function rejectPending(reason: Error): void {
-    for (const command of pending.values()) {
-      clearTimeout(command.timer);
-      command.reject(reason);
-    }
-    pending.clear();
-  }
-
-  function onTargetMessage(payload: unknown): void {
-    const messageEvent = record(payload);
-    if (!messageEvent || messageEvent.sessionId !== sessionId) return;
-    let message: unknown;
-    try {
-      message = JSON.parse(String(messageEvent.message));
-    } catch {
-      markUnhealthy(new Error('Malformed Worker CDP message'));
-      return;
-    }
-    const protocolMessage = record(message);
-    if (!protocolMessage) {
-      markUnhealthy(new Error('Invalid Worker CDP message'));
-      return;
-    }
-    if (typeof protocolMessage.id === 'number') {
-      const command = pending.get(protocolMessage.id);
-      if (!command) return;
-      pending.delete(protocolMessage.id);
-      clearTimeout(command.timer);
-      if (protocolMessage.error) {
-        const error = record(protocolMessage.error);
-        const detail = typeof error?.message === 'string' ? error.message.slice(0, 500) : 'unknown';
-        command.reject(new Error(`Worker CDP command ${protocolMessage.id} failed: ${detail}`));
-      } else command.resolve(protocolMessage.result);
-      return;
-    }
-    if (protocolMessage.method !== 'Fetch.requestPaused') return;
-    const request = handleRequest(protocolMessage.params);
+  function onRequestPaused(payload: unknown): void {
+    const request = handleRequest(payload);
     inFlight.add(request);
     void request.then(
       () => inFlight.delete(request),
@@ -173,44 +130,12 @@ export async function installWorkerRedirectTransport({
     );
   }
 
-  function onTargetDetached(payload: unknown): void {
-    const event = record(payload);
-    if (event?.sessionId !== sessionId || closed) return;
-    markUnhealthy(new Error('Bitmap Worker CDP target detached'));
-    rejectPending(new Error('Bitmap Worker CDP target detached'));
-  }
-
-  async function workerCommand(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    assert(sessionId, 'Bitmap Worker CDP session is unavailable');
-    assert(browserCdp, 'Browser CDP session is unavailable');
-    const id = nextCommandId++;
-    const waitForResponse = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`${method} timed out`));
-      }, COMMAND_TIMEOUT_MS);
-      pending.set(id, { resolve, reject, timer });
-    });
-    // Keep a browser-send failure from leaving an unobserved nested rejection.
-    void waitForResponse.catch(() => undefined);
-    try {
-      await commandDeadline(
-        browserCdp.send('Target.sendMessageToTarget', {
-          sessionId,
-          message: JSON.stringify({ id, method, params: params ?? {} }),
-        }),
-        'Target.sendMessageToTarget'
-      );
-    } catch (error) {
-      const command = pending.get(id);
-      if (command) {
-        pending.delete(id);
-        clearTimeout(command.timer);
-        command.reject(error instanceof Error ? error : new Error(`${method} send failed`));
-      }
-      throw error;
-    }
-    return waitForResponse;
+  async function pageCommand(
+    method: Parameters<CDPSession['send']>[0],
+    params?: Record<string, unknown>
+  ): Promise<unknown> {
+    assert(pageCdp, 'Fixture page CDP session is unavailable');
+    return commandDeadline(pageCdp.send(method, params), method);
   }
 
   async function handleRequest(value: unknown): Promise<void> {
@@ -230,14 +155,14 @@ export async function installWorkerRedirectTransport({
     ) {
       markUnhealthy(new Error('Unexpected bitmap Worker Fetch pause'));
       try {
-        await workerCommand('Fetch.failRequest', { requestId, errorReason: 'Aborted' });
+        await pageCommand('Fetch.failRequest', { requestId, errorReason: 'Aborted' });
       } catch (error) {
         markUnhealthy(error);
       }
       return;
     }
     try {
-      await workerCommand('Fetch.fulfillRequest', {
+      await pageCommand('Fetch.fulfillRequest', {
         requestId,
         responseCode: 200,
         responseHeaders: [
@@ -269,24 +194,17 @@ export async function installWorkerRedirectTransport({
     }
     if (fetchEnableAttempted) {
       try {
-        await workerCommand('Fetch.disable');
+        await pageCommand('Fetch.disable');
       } catch (error) {
         errors.push(error);
       }
     }
-    rejectPending(new Error('Worker redirect transport closed'));
-    browserCdp?.off('Target.receivedMessageFromTarget', onTargetMessage);
-    browserCdp?.off('Target.detachedFromTarget', onTargetDetached);
-    if (sessionId && browserCdp) {
-      try {
-        await commandDeadline(
-          browserCdp.send('Target.detachFromTarget', { sessionId }),
-          'Target.detachFromTarget'
-        );
-      } catch (error) {
-        errors.push(error);
-      }
+    try {
+      await commandDeadline(Promise.allSettled(inFlight), 'Final redirect in-flight requests');
+    } catch (error) {
+      errors.push(error);
     }
+    pageCdp?.off('Fetch.requestPaused', onRequestPaused);
     if (pageCdp) {
       try {
         await commandDeadline(pageCdp.detach(), 'Page CDP detach');
@@ -338,22 +256,14 @@ export async function installWorkerRedirectTransport({
       browserContextId: workerTarget.browserContextId ?? pageTarget.browserContextId ?? null,
       finalUrls: [...FINAL_URLS],
       terminalRequests: [],
+      interceptionScope:
+        'exact final URLs in the owned fixture page Fetch domain; Worker identity verified separately',
     };
-    browserCdp.on('Target.receivedMessageFromTarget', onTargetMessage);
-    browserCdp.on('Target.detachedFromTarget', onTargetDetached);
-    const attached = record(
-      await commandDeadline(
-        browserCdp.send('Target.attachToTarget', {
-          targetId: workerTarget.targetId,
-          flatten: false,
-        }),
-        'Target.attachToTarget'
-      )
-    );
-    assert(typeof attached?.sessionId === 'string', 'Bitmap Worker target did not attach');
-    sessionId = attached.sessionId;
+    // Dedicated Worker targets expose Network but not Fetch in installed Edge.
+    // The parent page's Fetch domain owns interception for its Worker requests.
+    pageCdp.on('Fetch.requestPaused', onRequestPaused);
     fetchEnableAttempted = true;
-    await workerCommand('Fetch.enable', {
+    await pageCommand('Fetch.enable', {
       patterns: FINAL_URLS.map((urlPattern) => ({ urlPattern, requestStage: 'Request' })),
     });
     return {
