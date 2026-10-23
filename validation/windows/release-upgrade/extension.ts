@@ -561,7 +561,11 @@ export async function beginExtensionRuntimeScriptCapture(
       const deadline = Date.now() + timeoutMs;
       for (;;) {
         if (errors.length) throw errors[0];
-        if (RUNTIME_SCRIPT_NAMES.every((name) => records[name].observedSha256 !== null))
+        if (
+          RUNTIME_SCRIPT_NAMES.every(
+            (name) => records[name].observedSha256 === records[name].expectedSha256
+          )
+        )
           return {
             'content-script.js': { ...records['content-script.js'] },
             'page-script.js': { ...records['page-script.js'] },

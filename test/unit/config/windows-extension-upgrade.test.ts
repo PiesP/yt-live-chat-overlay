@@ -246,6 +246,8 @@ describe('optional public Chrome extension update inputs', () => {
     );
     harness.parsed('content-script.js', 'content');
     harness.parsed('page-script.js', 'page');
+    // Observe parsed source before the rejection handler gets its microtask.
+    await Promise.resolve();
     await expect(capture.verify()).rejects.toThrow(
       'Executed extension script differs from inventory: page-script.js'
     );
