@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Page, Request, Route } from '@playwright/test';
 
+import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
@@ -931,11 +932,7 @@ export async function runMainImageRecoveryFixture({
     async () => nativePageProbe?.restore(),
     async () => {
       if (originalSettings && !page.isClosed()) {
-        await page.evaluate((settings) => {
-          const app = window.__ytChatOverlay;
-          if (!app) throw new Error('Main settings runtime was lost before restore');
-          app.applySettings(settings);
-        }, originalSettings);
+        await restoreFixtureSettings(context, page, extensionId, originalSettings);
       }
     },
     async () => {

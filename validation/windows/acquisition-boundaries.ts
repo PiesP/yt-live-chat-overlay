@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
@@ -996,11 +997,7 @@ export async function runAcquisitionBoundaries({
     async () => probe?.restore(),
     async () => {
       if (!originalSettings || page.isClosed()) return;
-      await page.evaluate((settings) => {
-        const app = window.__ytChatOverlay;
-        if (!app) throw new Error('Installed app disappeared before settings restoration');
-        app.applySettings(settings);
-      }, originalSettings);
+      await restoreFixtureSettings(context, page, extensionId, originalSettings);
     },
     async () => {
       if (routeInstalled) await page.unroute('**/*', routeHandler);

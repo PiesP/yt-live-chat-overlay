@@ -37,7 +37,8 @@
       "validation/windows/canvas-recovery.ts",
       "validation/windows/native-player-boundaries.ts",
       "validation/windows/recovery-continuity.ts",
-      "validation/windows/live-content-prerequisite.ts"
+      "validation/windows/live-content-prerequisite.ts",
+      "validation/windows/fixture-settings.ts"
     ],
     "build_commands": [
       ["pnpm", "build:ci"],

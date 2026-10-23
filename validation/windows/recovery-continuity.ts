@@ -8,6 +8,7 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
@@ -1244,12 +1245,8 @@ export async function runRecoveryContinuityFixture({
   const cleanupErrors: unknown[] = [];
   try {
     if (originalSettings) {
-      cleanup.settingsRestored = await page.evaluate((settings) => {
-        const app = window.__ytChatOverlay;
-        if (!app) throw new Error('Installed app disappeared before settings restoration');
-        app.applySettings(settings);
-        return true;
-      }, originalSettings);
+      await restoreFixtureSettings(context, page, extensionId, originalSettings);
+      cleanup.settingsRestored = true;
     }
   } catch (error) {
     cleanupErrors.push(error);
