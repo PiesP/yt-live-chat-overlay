@@ -677,6 +677,10 @@ export async function runVideoPiPFixture({
     assert.equal(consoleErrorOverflow, 0);
     const domFallbackLifetime = await verifyDomFallbackLifetime(page, output);
     const nativeTabLifetime = await verifyNativeTabLifetime({ context, page, output });
+    assert.deepEqual(pageErrors, []);
+    assert.equal(pageErrorOverflow, 0);
+    assert.deepEqual(consoleErrors, []);
+    assert.equal(consoleErrorOverflow, 0);
     result = {
       status: 'passed',
       scope: 'installed Edge extension, native Picture-in-Picture, routed YouTube fixture',

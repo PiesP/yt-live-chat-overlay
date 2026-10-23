@@ -359,6 +359,8 @@ export async function verifyNativeTabLifetime({
       if (event.visibility === expected[nextExpected] && event.trusted) nextExpected++;
     }
     assert.equal(nextExpected, expected.length, 'Native trusted tab transitions were absent');
+    assert.equal(requestFailureOverflow, 0, 'Native tab request failure record overflowed');
+    assert.deepEqual(requestFailures, [], 'Unexpected request failure during native tab lifetime');
   } catch (error) {
     primaryError = error;
     let observations: unknown = null;
@@ -458,6 +460,25 @@ export async function verifyNativeTabLifetime({
     assert.equal(cleanup.probeRemoved, true);
   } catch (error) {
     cleanupErrors.push(error);
+  }
+  if (cleanupErrors.length > 0) {
+    try {
+      await writeFile(
+        join(output, 'native-tab-lifetime-cleanup-failure.json'),
+        JSON.stringify(
+          {
+            stage,
+            scenarioError: primaryError ? errorText(primaryError) : null,
+            cleanupErrors: cleanupErrors.map(errorText),
+            cleanup,
+          },
+          null,
+          2
+        )
+      );
+    } catch (diagnosticError) {
+      cleanupErrors.push(diagnosticError);
+    }
   }
   if (primaryError || cleanupErrors.length > 0)
     throw new AggregateError(

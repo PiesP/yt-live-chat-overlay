@@ -579,6 +579,7 @@ export async function runMainImageRecoveryFixture({
         showDebugOverlay: true,
         allowShortTextMessages: true,
         translationEnabled: false,
+        depthLayersEnabled: false,
         maxConcurrentMessages: 50,
       });
       return settings;
