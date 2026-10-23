@@ -1740,6 +1740,41 @@ describe('Worker message protocol', () => {
       expect(decoder).toHaveBeenCalledOnce();
     });
 
+    it('rejects untrusted direct loader URLs without fetching or delaying an allowed neighbor', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: { has(url: string): boolean };
+        imageFetchTasks: Map<string, unknown>;
+        fetching: Set<string>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const healthyUrl = 'https://yt3.ggpht.com/healthy-neighbor';
+      const rejected = [
+        '',
+        'not a url',
+        'data:image/png;base64,AA==',
+        'blob:https://yt3.ggpht.com/opaque',
+        'http://yt3.ggpht.com/insecure.png',
+        '//yt3.ggpht.com/protocol-relative.png',
+        'https://yt3.ggpht.com.evil.example/image.png',
+        'https://evil.example/yt3.ggpht.com/image.png',
+      ];
+      const bitmap = { width: 1, height: 1, close: vi.fn() };
+      vi.mocked(createImageBitmap).mockResolvedValueOnce(bitmap as unknown as ImageBitmap);
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(imageResponse(true, healthyUrl));
+
+      await internals.prefetchImages([...rejected, healthyUrl], internals.emojiCache);
+
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([healthyUrl]);
+      expect(internals.emojiCache.has(healthyUrl)).toBe(true);
+      expect(internals.imageFetchTasks.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
     it.each([
       ['HTTP failure', false],
       ['decode failure', true],

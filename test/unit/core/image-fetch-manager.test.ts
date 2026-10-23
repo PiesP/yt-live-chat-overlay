@@ -62,6 +62,50 @@ describe('ImageFetchManager terminal lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
+  it('rejects untrusted direct image URLs without consuming the healthy image slot', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, emojiFetchLimit: 1 } as OverlaySettings, null);
+    const rejected = [
+      '',
+      'not a url',
+      'data:image/png;base64,AA==',
+      'blob:https://yt3.ggpht.com/opaque',
+      'http://yt3.ggpht.com/insecure.png',
+      '//yt3.ggpht.com/protocol-relative.png',
+      'https://yt3.ggpht.com.evil.example/image.png',
+      'https://evil.example/yt3.ggpht.com/image.png',
+    ];
+
+    for (const url of rejected) manager.loadImage(url, manager.stickerCache);
+
+    expect(PendingImage.instances).toHaveLength(0);
+    expect(manager.imageLoading.size).toBe(0);
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    expect(PendingImage.instances.map((image) => image.src)).toEqual([STICKER_URL]);
+    PendingImage.instances[0]?.onload?.();
+    expect(manager.stickerCache.has(STICKER_URL)).toBe(true);
+    manager.destroy();
+  });
+
+  it('skips refused emoji URLs while prefetching an allowed neighbor', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
+    const rejectedUrl = 'https://yt3.ggpht.com.evil.example/emoji.png';
+    manager.prefetchImages({
+      ...message(),
+      content: [
+        { type: 'emoji', emoji: { url: rejectedUrl, alt: ':bad:' } },
+        { type: 'emoji', emoji: { url: EMOJI_URL, alt: ':good:' } },
+      ],
+    });
+
+    expect(PendingImage.instances.map((image) => image.src)).toEqual([EMOJI_URL]);
+    expect(manager.emojiFetching.has(rejectedUrl)).toBe(false);
+    PendingImage.instances[0]?.onload?.();
+    expect(manager.emojiCache.has(EMOJI_URL)).toBe(true);
+    manager.destroy();
+  });
+
   it('releases every in-flight tracking collection during destruction', () => {
     const manager = new ImageFetchManager();
     manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
