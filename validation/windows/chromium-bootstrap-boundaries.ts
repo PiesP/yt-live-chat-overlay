@@ -50,6 +50,7 @@ type PageState = {
   overlayCount: number;
   canvasCount: number;
   sourceStatus: string | null;
+  deliveredIds: string[];
 };
 
 function errorText(error: unknown): string {
@@ -71,17 +72,83 @@ function sourceState(page: Page): Promise<PageState> {
       canvasCount: document.querySelectorAll('#yt-live-chat-overlay canvas').length,
       sourceStatus:
         document.querySelector('#yt-chat-overlay-debug')?.textContent?.slice(0, 500) ?? null,
+      deliveredIds: Array.from(
+        document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
+        (element) => element.getAttribute('data-message-id') ?? ''
+      ).slice(0, 8),
     };
   });
 }
 
-function assertHealthy(state: PageState, url: string): void {
+function assertHealthy(state: PageState, url: string, deliveredId?: string): void {
   assert.equal(state.url, url);
   assert.match(state.bridgeNonce ?? '', /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
   assert.equal(state.claimed, true);
   assert.equal(state.app, true, 'Packaged page entry did not start');
   assert.equal(state.overlayCount, 1, 'Installed app did not own exactly one overlay');
   assert.equal(state.canvasCount, 1, 'Installed app did not own exactly one canvas');
+  if (deliveredId !== undefined)
+    assert.deepEqual(
+      state.deliveredIds,
+      [deliveredId],
+      'Current document source delivery was not singular'
+    );
+}
+
+async function deliverSourceControl(page: Page, id: string): Promise<PageState> {
+  await page.evaluate(async (messageId) => {
+    const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+    const items = document.querySelector('yt-live-chat-item-list-renderer #items');
+    if (!video || !items) throw new Error('Current document video or chat tree is missing');
+    if (typeof HTMLCanvasElement.prototype.captureStream !== 'function')
+      throw new Error('Native captureStream unavailable for source control');
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 36;
+    const drawing = canvas.getContext('2d');
+    if (!drawing) throw new Error('Source control canvas unavailable');
+    let frames = 0;
+    const paint = () => {
+      drawing.fillStyle = frames++ % 2 === 0 ? '#123456' : '#654321';
+      drawing.fillRect(0, 0, canvas.width, canvas.height);
+    };
+    paint();
+    const timer = window.setInterval(paint, 100);
+    const stream = canvas.captureStream(10);
+    const cleanup = () => {
+      clearInterval(timer);
+      for (const track of stream.getTracks()) track.stop();
+      video.srcObject = null;
+    };
+    window.addEventListener('pagehide', cleanup, { once: true });
+    (window as Window & { __ytBootstrapSourceCleanup?: () => void }).__ytBootstrapSourceCleanup =
+      cleanup;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play();
+    if (video.paused || stream.getVideoTracks().length !== 1)
+      throw new Error('Native source control video did not play');
+    const renderer = document.createElement('yt-live-chat-text-message-renderer');
+    renderer.id = messageId;
+    const author = document.createElement('span');
+    author.id = 'author-name';
+    author.textContent = 'Fixture author';
+    const message = document.createElement('span');
+    message.id = 'message';
+    message.textContent = `Current bootstrap document ${messageId} delivered through DOM fallback`;
+    renderer.append(author, message);
+    items.append(renderer);
+  }, id);
+  await page.waitForFunction(
+    (messageId) =>
+      document.querySelectorAll(
+        `#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p[data-message-id="${messageId}"]`
+      ).length === 1,
+    id,
+    { timeout: 8_000 }
+  );
+  return sourceState(page);
 }
 
 function workerExpression(token: string, extensionId: string): string {
@@ -270,12 +337,12 @@ export async function runChromiumBootstrapBoundaries({
     '<div id="chat">',
     '<div id="chat" class="ytd-live-chat-frame" style="min-height:1px">'
   );
-  const page = await context.newPage();
   const workerUrl = `chrome-extension://${extensionId}/background.js`;
   const workers = context.serviceWorkers().filter((entry) => entry.url() === workerUrl);
   assert.equal(workers.length, 1, 'Exact installed background worker is unavailable');
   const worker = workers[0];
   assert(worker);
+  const page = await context.newPage();
   const token = randomUUID();
   let wrapperInstalled = false;
   let routeInstalled = false;
@@ -408,8 +475,8 @@ export async function runChromiumBootstrapBoundaries({
     await page
       .locator('#yt-live-chat-overlay canvas')
       .waitFor({ state: 'attached', timeout: 15_000 });
-    const b = await sourceState(page);
-    assertHealthy(b, WATCH_URLS[1]);
+    const b = await deliverSourceControl(page, 'windows-bootstrap-source-b');
+    assertHealthy(b, WATCH_URLS[1], 'windows-bootstrap-source-b');
     const bState = await waitForWorkerState(
       worker,
       token,
@@ -441,7 +508,7 @@ export async function runChromiumBootstrapBoundaries({
     const aAfter = productionRecords(retired, WATCH_URLS[0])[0];
     assert.equal(aAfter?.resultDocumentId, null);
     assert(aAfter?.error, 'Browser did not reject retired A document');
-    assertHealthy(await sourceState(page), WATCH_URLS[1]);
+    assertHealthy(await sourceState(page), WATCH_URLS[1], 'windows-bootstrap-source-b');
 
     phase = 'B-duplicate';
     const duplicate = await sendFromDocument(
@@ -462,7 +529,7 @@ export async function runChromiumBootstrapBoundaries({
       productionRecords(afterDuplicate, WATCH_URLS[1]).map((entry) => entry.outcome),
       ['claimed', 'injected', 'already']
     );
-    assertHealthy(await sourceState(page), WATCH_URLS[1]);
+    assertHealthy(await sourceState(page), WATCH_URLS[1], 'windows-bootstrap-source-b');
 
     phase = 'invalid-senders';
     const workerSender = await worker.evaluate<unknown>(
@@ -492,7 +559,7 @@ export async function runChromiumBootstrapBoundaries({
     assert.equal(childSenders.length, 1);
     assert.deepEqual(childSenders[0]?.result, { ok: false, reason: 'unauthorized-document' });
     assert.notEqual(childSenders[0]?.documentId, bDocumentId);
-    assertHealthy(await sourceState(page), WATCH_URLS[1]);
+    assertHealthy(await sourceState(page), WATCH_URLS[1], 'windows-bootstrap-source-b');
 
     phase = 'C-fault';
     await page.goto(WATCH_URLS[2], { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -518,8 +585,8 @@ export async function runChromiumBootstrapBoundaries({
     await page
       .locator('#yt-live-chat-overlay canvas')
       .waitFor({ state: 'attached', timeout: 15_000 });
-    const d = await sourceState(page);
-    assertHealthy(d, WATCH_URLS[3]);
+    const d = await deliverSourceControl(page, 'windows-bootstrap-source-d');
+    assertHealthy(d, WATCH_URLS[3], 'windows-bootstrap-source-d');
     const finalState = await waitForWorkerState(
       worker,
       token,
@@ -636,6 +703,14 @@ export async function runChromiumBootstrapBoundaries({
       })()`);
     });
   }
+  if (!page.isClosed())
+    await cleanup(() =>
+      page.evaluate(() => {
+        (
+          window as Window & { __ytBootstrapSourceCleanup?: () => void }
+        ).__ytBootstrapSourceCleanup?.();
+      })
+    );
   if (routeInstalled) await cleanup(() => page.unroute('**/*', routeFixture));
   await cleanup(() => page.close());
   if (cleanupErrors.length > 0) {
