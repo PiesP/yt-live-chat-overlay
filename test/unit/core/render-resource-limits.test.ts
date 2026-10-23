@@ -28,6 +28,48 @@ describe('render message resource limits', () => {
     );
   });
 
+  it.each(['author', 'translatedText', 'membershipHeader', 'superChatAmount'] as const)(
+    'bounds the displayed %s field independently',
+    (field) => {
+      const exact = 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
+      const over = `${exact}x`;
+      expect(getRenderMessageResourceViolation({ [field]: exact })).toBeNull();
+      expect(getRenderMessageResourceViolation({ [field]: over })).toEqual({
+        field: field === 'superChatAmount' ? 'amount' : field,
+        reason: 'code-point-length',
+      });
+    }
+  );
+
+  it('bounds the nested paid amount when a direct amount is also present', () => {
+    expect(
+      getRenderMessageResourceViolation({
+        superChatAmount: '$5',
+        superChat: { amount: 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1) },
+      })
+    ).toEqual({ field: 'amount', reason: 'code-point-length' });
+    expect(
+      getRenderMessageResourceViolation({
+        superChat: { amount: 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS) },
+      })
+    ).toBeNull();
+  });
+
+  it('uses UTF-16 units for the fast boundary and code points for BMP and astral text', () => {
+    const exactUtf16 = '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
+    expect(exactUtf16.length).toBe(8192);
+    expect(inspectBoundedRenderText(exactUtf16, 'translatedText')).toEqual({ codePoints: 4096 });
+    expect(inspectBoundedRenderText(`${exactUtf16}a`, 'translatedText')).toEqual({
+      violation: { field: 'translatedText', reason: 'utf16-length' },
+    });
+    expect(inspectBoundedRenderText('a'.repeat(4097), 'translatedText')).toEqual({
+      violation: { field: 'translatedText', reason: 'code-point-length' },
+    });
+    expect(inspectBoundedRenderText(`${'😀'.repeat(4095)}a`, 'translatedText')).toEqual({
+      codePoints: 4096,
+    });
+  });
+
   it('counts rich content instead of double-counting its derived plain text', () => {
     const body = 'a'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
     expect(
@@ -44,6 +86,24 @@ describe('render message resource limits', () => {
         text: 'a'.repeat(3000),
         content: [{ type: 'text', content: 'a'.repeat(3000) }],
         author: 'b'.repeat(1097),
+      })
+    ).toEqual({ field: 'aggregate', reason: 'aggregate-code-points' });
+  });
+
+  it('accepts the combined displayed boundary, then rejects an extra translated code point', () => {
+    const displayed = {
+      text: 'a'.repeat(1000),
+      content: [{ type: 'text', content: 'a'.repeat(1000) }],
+      author: 'b'.repeat(1000),
+      superChatAmount: 'c'.repeat(1000),
+      membershipHeader: 'd'.repeat(1000),
+      translatedText: 'e'.repeat(96),
+    };
+    expect(getRenderMessageResourceViolation(displayed)).toBeNull();
+    expect(
+      getRenderMessageResourceViolation({
+        ...displayed,
+        translatedText: `${displayed.translatedText}e`,
       })
     ).toEqual({ field: 'aggregate', reason: 'aggregate-code-points' });
   });
