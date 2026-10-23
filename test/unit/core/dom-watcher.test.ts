@@ -210,27 +210,31 @@ describe('installDomChatWatcher', () => {
     }
   });
 
-  it('does not publish a renderer removed after its mutation but before rAF', async () => {
-    const container = createChatContainer();
-    const onMessages = vi.fn();
-    const unsubscribe = installDomChatWatcher(onMessages);
+  it.each(['detached', 'moved outside chat'])(
+    'does not publish a renderer %s after its mutation but before rAF',
+    async (retirement) => {
+      const container = createChatContainer();
+      const onMessages = vi.fn();
+      const unsubscribe = installDomChatWatcher(onMessages);
 
-    try {
-      const removed = createTextRenderer('alice', 'removed before frame', 'removed');
-      container.append(removed);
-      await Promise.resolve();
-      removed.remove();
-      await vi.runAllTimersAsync();
-      expect(onMessages).not.toHaveBeenCalled();
+      try {
+        const removed = createTextRenderer('alice', 'removed before frame', 'removed');
+        container.append(removed);
+        await Promise.resolve();
+        if (retirement === 'detached') removed.remove();
+        else document.body.append(removed);
+        await vi.runAllTimersAsync();
+        expect(onMessages).not.toHaveBeenCalled();
 
-      container.append(createTextRenderer('bob', 'healthy after removal', 'fresh'));
-      await vi.runAllTimersAsync();
-      expect(onMessages).toHaveBeenCalledOnce();
-      expect(onMessages.mock.calls[0]?.[0]?.map((message: { id: string }) => message.id)).toEqual([
-        'fresh',
-      ]);
-    } finally {
-      unsubscribe?.();
+        container.append(createTextRenderer('bob', 'healthy after removal', 'fresh'));
+        await vi.runAllTimersAsync();
+        expect(onMessages).toHaveBeenCalledOnce();
+        expect(onMessages.mock.calls[0]?.[0]?.map((message: { id: string }) => message.id)).toEqual(
+          ['fresh']
+        );
+      } finally {
+        unsubscribe?.();
+      }
     }
-  });
+  );
 });
