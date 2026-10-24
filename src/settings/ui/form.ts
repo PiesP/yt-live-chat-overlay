@@ -463,6 +463,11 @@ export class SettingsUiForm {
     button.setAttribute('aria-pressed', String(this.userPauseState === true));
     button.disabled =
       this.userPauseState === null || !this.onToggleUserPause || !this.getSettings().enabled;
+    const badge = this.modal?.querySelector<HTMLElement>('.yt-chat-overlay-settings-pause-badge');
+    if (badge) {
+      badge.textContent = t('Paused');
+      badge.hidden = this.userPauseState !== true || button.disabled;
+    }
   }
 
   private translationStatusText(settings: Readonly<OverlaySettings>): {
@@ -821,6 +826,11 @@ export class SettingsUiForm {
             pause.className = 'yt-chat-overlay-settings-pause-button';
             pause.addEventListener('click', () => this.onToggleUserPause?.());
             container.appendChild(pause);
+            const badge = document.createElement('span');
+            badge.className = 'yt-chat-overlay-settings-pause-badge';
+            badge.setAttribute('aria-hidden', 'true');
+            badge.hidden = true;
+            container.appendChild(badge);
             const hint = document.createElement('p');
             hint.className = 'yt-chat-overlay-settings-pause-hint';
             hint.textContent = t('app.pauseShortcutHint');

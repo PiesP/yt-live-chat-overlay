@@ -600,6 +600,17 @@ export const SETTINGS_UI_STYLES = `
         opacity: 0.55;
         cursor: not-allowed;
       }
+      .yt-chat-overlay-settings-pause-badge:not([hidden]) {
+        display: inline-block;
+        margin: ${spacing.xs}px ${spacing.md}px 0;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border: 1px solid ${uiColors.accent};
+        border-radius: ${borderRadius.pill};
+        background: ${uiColorsAlpha.accentBgLight};
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        font-weight: ${typography.fontWeight.semibold};
+      }
       .yt-chat-overlay-settings-pause-hint {
         margin: ${spacing.xs}px ${spacing.md}px ${spacing.sm}px;
         color: ${uiColors.text};

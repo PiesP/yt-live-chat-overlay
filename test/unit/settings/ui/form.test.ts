@@ -293,41 +293,76 @@ describe('SettingsUiForm', () => {
 
   it('keeps the session pause action outside persisted settings and the enabled label', () => {
     const onTogglePause = vi.fn();
-    const form = new SettingsUiForm(getSettings, onPreview, onTogglePause);
+    let settings = getSettings();
+    const form = new SettingsUiForm(() => settings, onPreview, onTogglePause);
     const modal = document.createElement('dialog');
     modal.append(...form.createModalContent());
     document.body.appendChild(modal);
     form.setModal(modal);
-    form.populateForm(getSettings());
+    form.populateForm(settings);
 
     const enabled = modal.querySelector<HTMLInputElement>('#pane-comments input[name="enabled"]');
     const hint = modal.querySelector<HTMLElement>(
       '#pane-comments .yt-chat-overlay-settings-pause-hint'
     );
     const pause = modal.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+    const badge = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-pause-badge');
     expect(enabled?.checked).toBe(true);
     expect(hint?.textContent).toContain('Ctrl+Space');
     expect(hint?.closest('label')).toBeNull();
     expect(pause?.closest('label')).toBeNull();
     expect(pause?.disabled).toBe(true);
+    expect(badge?.hidden).toBe(true);
+    expect(badge?.getAttribute('aria-hidden')).toBe('true');
     form.setUserPauseState(false);
     expect(pause?.disabled).toBe(false);
     expect(pause?.textContent).toBe('Pause comments');
     expect(pause?.getAttribute('aria-pressed')).toBe('false');
+    expect(badge?.hidden).toBe(true);
     pause?.click();
     expect(onTogglePause).toHaveBeenCalledOnce();
     form.setUserPauseState(true);
     expect(pause?.textContent).toBe('Pause comments');
     expect(pause?.getAttribute('aria-pressed')).toBe('true');
+    expect(badge?.textContent).toBe(t('Paused'));
+    expect(badge?.hidden).toBe(false);
     expect(form.collectSettings().enabled).toBe(true);
     expect(onPreview).not.toHaveBeenCalled();
+    settings = makeDefaults({ enabled: false });
+    form.populateForm(settings);
+    expect(pause?.disabled).toBe(true);
+    expect(badge?.hidden).toBe(true);
+    settings = makeDefaults();
+    form.populateForm(settings);
+    expect(badge?.hidden).toBe(false);
     form.setUserPauseState(null);
     expect(pause?.disabled).toBe(true);
+    expect(badge?.hidden).toBe(true);
     hint?.click();
     expect(enabled?.checked).toBe(true);
 
-    form.destroy();
+    form.setUserPauseState(true);
+    form.setModal(null);
     modal.remove();
+    const rebuiltModal = document.createElement('dialog');
+    rebuiltModal.append(...form.createModalContent());
+    document.body.appendChild(rebuiltModal);
+    form.setModal(rebuiltModal);
+    form.populateForm(settings);
+    const rebuiltPause = rebuiltModal.querySelector<HTMLButtonElement>(
+      '#yt-chat-overlay-pause-button'
+    );
+    const rebuiltBadge = rebuiltModal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-pause-badge'
+    );
+    expect(rebuiltPause?.getAttribute('aria-pressed')).toBe('true');
+    expect(rebuiltBadge?.hidden).toBe(false);
+    form.setUserPauseState(false);
+    expect(rebuiltPause?.getAttribute('aria-pressed')).toBe('false');
+    expect(rebuiltBadge?.hidden).toBe(true);
+
+    form.destroy();
+    rebuiltModal.remove();
   });
 
   it('previews accepted opacity, outline, safe-zone, and font values without raw invalid input', () => {
