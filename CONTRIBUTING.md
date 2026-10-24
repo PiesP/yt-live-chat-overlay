@@ -119,6 +119,18 @@ Failed, non-cancelled E2E jobs upload `test-results/` and `playwright-report/`
 through the existing diagnostics artifact with seven-day retention. Open the
 failed attempt's trace from that report; a retry is separate evidence.
 
+The native Firefox fixture uses the public `puppeteer-core` 25.16.0 API with a
+version-pinned pnpm patch. The patch defers loading the unused BiDi-over-CDP
+mapper; its scoped dependency override removes `chromium-bidi` and the vulnerable
+Zod 3 dependency (GHSA-mrhx-c7xc-m3w5). Native Firefox supplies its own BiDi
+endpoint, while Chromium fixtures use Playwright. This package shape supports
+that Firefox path only: Puppeteer's CDP mapper and internal type imports are not
+supported. The patch does not change the fixture's protocol or cleanup logic,
+and installation still enforces release age, provenance and build-script policy.
+On a Puppeteer update, review the patch and dependency closure, then run the
+Firefox projects, public API type check and full OSV scan. Remove the patch and
+override together when an admitted upstream release has a safe mapper closure.
+
 ### External Windows bundle and retained languages
 
 `validation/windows/profile.json` lists artifact-only assets, the installation entry, every transitive helper, and the `pnpm` build commands. The external controller supplies portable Windows Node from the exact `volta.node` pin, `playwright-core`, a headed stable browser, and calls `run({ browser, root, output })`. It admits `.mjs` and erasable `.ts` entries, copies declared source bytes without compiling them, verifies source and bundle hashes, and imports the entry with Node's native TypeScript stripping. Use explicit relative `.ts` imports for converted helpers, include each runtime helper in the profile assets, and type-check the Windows source through `tsconfig.windows.json`. The Node boundary suite runs `node --check` over both module formats; existing Windows helper unit tests cover behavior. These local checks do not prove desktop or live-site behavior; the prepared-VM campaign remains the runtime gate.

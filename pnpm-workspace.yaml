@@ -31,5 +31,9 @@ catalog:
   vite-plus: 1.4.0
   "@vitest/coverage-v8": 5.0.5
 overrides:
+  # Only native Firefox BiDi is used; the patched barrel defers the unused CDP mapper.
+  "puppeteer-core@25.16.0>chromium-bidi": "-"
   vite@*: "catalog:"
   vitest@*: "catalog:"
+patchedDependencies:
+  puppeteer-core@25.16.0: patches/puppeteer-core@25.16.0.patch

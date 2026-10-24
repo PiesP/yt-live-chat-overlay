@@ -1,0 +1,16 @@
+diff --git a/lib/puppeteer/bidi/bidi.js b/lib/puppeteer/bidi/bidi.js
+index ff4ae9fc9296ad755a169267319c445cafd79335..8dab9dd14b7025b71f00a81ae2da7d044f53d7c1 100644
+--- a/lib/puppeteer/bidi/bidi.js
++++ b/lib/puppeteer/bidi/bidi.js
+@@ -3,7 +3,10 @@
+  * Copyright 2022 Google Inc.
+  * SPDX-License-Identifier: Apache-2.0
+  */
+-export * from './BidiOverCdp.js';
++export async function connectBidiOverCdp(...args) {
++    const module = await import('./BidiOverCdp.js');
++    return module.connectBidiOverCdp(...args);
++}
+ export * from './Browser.js';
+ export * from './BrowserContext.js';
+ export * from './Connection.js';
