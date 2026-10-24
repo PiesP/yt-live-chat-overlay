@@ -18,6 +18,12 @@ export const JA: Record<string, string> = {
   'status.unstable': '接続が不安定です',
   'status.disconnected': '切断されました — クリックして再読み込み',
   'status.waiting': 'ライブストリームを待機中…',
+  'settings.saved': '設定を保存しました。',
+  'settings.unsaved': '設定はこのセッションに適用されましたが、保存されていません。',
+  'settings.retry': '保存を再試行',
+  'settings.keepMine': '自分の設定を保存',
+  'settings.conflict':
+    '別のタブで設定が変更されました。現在の値は保持されています。別のタブの設定を上書きするには「自分の設定を保存」を選んでください。',
 
   // ── Section titles ──
   Cards: 'カード',
@@ -298,12 +304,12 @@ export const JA: Record<string, string> = {
   Import: 'インポート',
   Close: '閉じる',
   Done: '完了',
-  'app.autoSave': '変更はすぐに反映され、設定を閉じると保存されます',
+  'app.autoSave': '変更はすぐに反映され、設定を閉じると保存を開始します',
   'reset.confirm': 'すべての設定を初期値にリセットしますか？',
   Cancel: 'キャンセル',
   'import.invalidFormat': 'インポート失敗: 設定形式が無効です',
   'import.fileTooLarge': 'インポート失敗: 設定ファイルが大きすぎます',
-  'import.success': '設定を正常にインポートしました',
+  'import.success': 'このセッションに設定を読み込みました',
   'actions.export': 'エクスポート',
   'actions.import': 'インポート',
   'actions.reset': 'リセット',

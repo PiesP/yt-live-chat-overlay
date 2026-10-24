@@ -169,11 +169,12 @@ export function getStorageAdapter(): StorageAdapter {
         }
       },
       async setItem(key: string, value: string): Promise<void> {
-        if (typeof GM_setValue === 'undefined') return;
+        if (typeof GM_setValue === 'undefined') throw new Error('GM storage is unavailable');
         try {
-          GM_setValue(key, value);
+          await GM_setValue(key, value);
         } catch (error: unknown) {
           log.warn('platform.storage.set-failed', { error: String(error) });
+          throw error;
         }
       },
     };
@@ -205,6 +206,7 @@ export function getStorageAdapter(): StorageAdapter {
                 'Consider reducing settings data or clearing unused entries.'
             );
           }
+          throw error;
         }
       },
     };
@@ -230,6 +232,7 @@ export function getStorageAdapter(): StorageAdapter {
               'Consider reducing settings data or clearing unused entries.'
           );
         }
+        throw error;
       }
     },
   };

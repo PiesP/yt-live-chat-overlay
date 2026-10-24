@@ -50,11 +50,17 @@ class App {
     () => this.settings.get(),
     (partial) => this.previewSettings(partial),
     () => this.resetSettings(),
-    (partial) => this.applySettings(partial),
-    () => this.restartRuntime()
+    (partial) => this.persistSettings(partial),
+    () => this.restartRuntime(),
+    {
+      state: () => this.settings.persistenceState(),
+      retry: () => this.settings.retrySave(),
+      resolveConflict: () => this.settings.chooseLocalAndPersist(),
+    }
   );
   /** Unsubscribe from cross-tab settings sync. */
   private unsubscribeCrossTab: (() => void) | null = null;
+  private unsubscribePersistence: (() => void) | null = null;
 
   private readonly handlePageWatcherChange = (): void => {
     if (this.pageWatcher.isValidPage()) {
@@ -97,6 +103,9 @@ class App {
       this.settingsUi.syncLanguage();
       this.runtimeManager.requestReconcile('settings-change');
     });
+    this.unsubscribePersistence = this.settings.subscribePersistence((state) => {
+      this.settingsUi.showPersistenceState(state);
+    });
 
     if (this.pageWatcher.isValidPage()) {
       await this.ensureSettingsUi();
@@ -116,6 +125,7 @@ class App {
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
     this.unsubscribeCrossTab?.();
+    this.unsubscribePersistence?.();
     await this.settings.destroy();
     log.debug('app.stopped');
   }
@@ -138,6 +148,11 @@ class App {
       resolveActiveLanguage(this.settings.get().language);
     }
     this.applySettingsSideEffects(partial);
+  }
+
+  private persistSettings(partial: Partial<OverlaySettings>) {
+    this.applySettings(partial);
+    return this.settings.persistNow();
   }
 
   /**

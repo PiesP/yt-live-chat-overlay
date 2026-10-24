@@ -16,118 +16,195 @@ import { createLogger } from '@util/logging';
 
 const log = createLogger('Settings');
 
+export type PersistenceState = 'saved' | 'pending' | 'unsaved' | 'conflict';
+
+type UnsavedSnapshot = { revision: number; settings: OverlaySettings };
+type Handoff = {
+  owner: symbol;
+  revision: number;
+  settings: OverlaySettings;
+  baselineRaw: string | null;
+  conflicted: boolean;
+};
+
+// A replacement App can start before its predecessor's async write finishes.
+// The queue keeps writes ordered across Settings owners in the same document;
+// the handoff retains an unsaved choice across an in-document restart only.
+let activeOwner: symbol | null = null;
+let writeTail: Promise<void> = Promise.resolve();
+let pendingHandoff: Handoff | null = null;
+
+function serialized(settings: OverlaySettings): string {
+  return JSON.stringify({ ...settings, _version: SETTINGS_VERSION });
+}
+
 export class Settings {
-  private settings: OverlaySettings;
-  /** Callbacks notified when settings change from another tab. */
+  private readonly owner = Symbol('settings-owner');
+  private settings = cloneSettings(DEFAULT_SETTINGS);
   private readonly onChangeCallbacks = new Set<() => void>();
-  /** Guard: true during a save() call so cross-tab listeners can skip self-triggered events. */
+  private readonly onPersistenceCallbacks = new Set<(state: PersistenceState) => void>();
   private saving = false;
-  /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
+  /** Scheduling is distinct from whether the latest intended value was saved. */
   private savePending = false;
-  /** Monotonic local revision used to reject stale async cross-tab reloads. */
   private localRevision = 0;
-  /** requestIdleCallback handle — stored so we can cancel on flush/destroy. */
+  private previewDirty = false;
+  private unsaved: UnsavedSnapshot | null = null;
+  private writeFailed = false;
+  private remoteConflict = false;
+  private conflictEpoch = 0;
+  private lastStoredRaw: string | null = null;
+  private inFlightRaw: string | null = null;
+  private retired = false;
   private saveIdleHandle = 0;
-  /** setTimeout handle — used when requestIdleCallback is unavailable. */
   private saveTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  /** Save currently awaiting an async storage adapter write. */
-  private savePromise: Promise<void> | null = null;
-  /** Cross-tab sync adapter for the current environment. */
+  private savePromise: Promise<PersistenceState> | null = null;
   private crossTabSyncAdapter = getCrossTabSyncAdapter(STORAGE_KEY);
-  /** Bound callback reference for cross-tab sync adapter removeListener. */
-  private readonly onCrossTabChange = (_key: string): void => {
-    // A remote event must never replace a local edit that is waiting for its
-    // debounced save. The event may be delivered before our write completes.
-    if (this.saving || this.savePending || this.savePromise) return;
+  private readonly onCrossTabChange = (_key: string, newValue: unknown): void => {
+    if (this.retired || activeOwner !== this.owner) return;
+    const changedRaw =
+      typeof newValue === 'string' ? newValue : newValue == null ? null : JSON.stringify(newValue);
+    if (
+      (this.inFlightRaw !== null && changedRaw === this.inFlightRaw) ||
+      (changedRaw === this.lastStoredRaw && !this.saving)
+    )
+      return;
+    if (this.unsaved || this.previewDirty || this.saving || this.savePromise) {
+      // A remote decision cannot silently replace this local edit, and an
+      // automatic retry cannot silently replace the remote decision.
+      if (!this.unsaved) {
+        this.localRevision++;
+        this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
+        pendingHandoff = {
+          owner: this.owner,
+          revision: this.localRevision,
+          settings: cloneSettings(this.settings),
+          baselineRaw: this.lastStoredRaw,
+          conflicted: true,
+        };
+      }
+      this.remoteConflict = true;
+      this.conflictEpoch++;
+      if (pendingHandoff?.owner === this.owner) pendingHandoff.conflicted = true;
+      this.notifyPersistence();
+      return;
+    }
     log.debug('settings.store.cross-tab-change');
     void this.reloadFromStorage();
   };
 
   constructor() {
-    this.settings = cloneSettings(DEFAULT_SETTINGS);
+    activeOwner = this.owner;
   }
 
   async initialize(): Promise<void> {
+    // A previous owner may already have started a write. Observe its final
+    // storage state before applying the in-document handoff.
+    await writeTail;
+    if (this.retired || activeOwner !== this.owner) return;
     try {
-      const adapter = getStorageAdapter();
-      const raw = await adapter.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed: unknown = JSON.parse(raw);
-        // Guard: JSON.parse("null") → null, "42" → 42, "true" → true — none
-        // are records. Only proceed if parsed is a non-null object.
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-          this.settings = normalizeStoredSettings(parsed as Record<string, unknown>);
+      const raw = await getStorageAdapter().getItem(STORAGE_KEY);
+      if (this.retired || activeOwner !== this.owner) return;
+      const handoff = pendingHandoff;
+      if (handoff) {
+        this.settings = cloneSettings(handoff.settings);
+        if (raw === serialized(handoff.settings) && !handoff.conflicted) {
+          pendingHandoff = null;
+          this.lastStoredRaw = raw;
+        } else {
+          this.localRevision++;
+          this.unsaved = {
+            revision: this.localRevision,
+            settings: cloneSettings(handoff.settings),
+          };
+          this.lastStoredRaw = handoff.baselineRaw;
+          this.remoteConflict = handoff.conflicted || raw !== handoff.baselineRaw;
+          this.writeFailed = !this.remoteConflict;
+          pendingHandoff = { ...handoff, owner: this.owner, revision: this.localRevision };
+        }
+      } else {
+        this.lastStoredRaw = raw;
+        if (raw) {
+          const parsed: unknown = JSON.parse(raw);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            this.settings = normalizeStoredSettings(parsed as Record<string, unknown>);
+          }
         }
       }
     } catch (error: unknown) {
       log.warn('settings.store.load-failed', { error: String(error) });
+      if (pendingHandoff) {
+        this.settings = cloneSettings(pendingHandoff.settings);
+        this.localRevision++;
+        this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
+        this.writeFailed = true;
+        pendingHandoff = { ...pendingHandoff, owner: this.owner, revision: this.localRevision };
+      }
     }
-
-    this.startCrossTabSync();
+    if (this.retired || activeOwner !== this.owner) return;
+    this.crossTabSyncAdapter.addListener(this.onCrossTabChange);
+    this.notifyPersistence();
   }
 
-  /** Subscribe to cross-tab settings changes. Returns an unsubscribe function. */
   subscribe(callback: () => void): () => void {
     this.onChangeCallbacks.add(callback);
-    return () => {
-      this.onChangeCallbacks.delete(callback);
-    };
+    return () => this.onChangeCallbacks.delete(callback);
+  }
+
+  subscribePersistence(callback: (state: PersistenceState) => void): () => void {
+    this.onPersistenceCallbacks.add(callback);
+    callback(this.persistenceState());
+    return () => this.onPersistenceCallbacks.delete(callback);
+  }
+
+  persistenceState(): PersistenceState {
+    if (this.remoteConflict) return 'conflict';
+    if (this.saving || this.savePromise) return 'pending';
+    return this.settledState();
+  }
+
+  private settledState(): PersistenceState {
+    if (this.remoteConflict) return 'conflict';
+    if (this.writeFailed) return 'unsaved';
+    return this.unsaved ? 'pending' : 'saved';
+  }
+
+  private notifyPersistence(): void {
+    const state = this.persistenceState();
+    for (const callback of this.onPersistenceCallbacks) callback(state);
   }
 
   async destroy(): Promise<void> {
-    // Remove cross-tab sync listener synchronously BEFORE awaiting the async
-    // flushSave.  The adapter is a cached singleton shared by all Settings
-    // instances — if a new instance calls startCrossTabSync() during the
-    // await gap, this stale removeListener() would null out its callback.
-    this.stopCrossTabSync();
+    // The adapter is shared. A retired owner must not remove a replacement's
+    // listener after that replacement has registered it.
+    if (activeOwner === this.owner) this.crossTabSyncAdapter.removeListener();
     this.onChangeCallbacks.clear();
-
-    // Cancel any idle callback / timeout to avoid a race where flushSave() fires after destroy().
-    if (this.saveIdleHandle !== 0) {
-      cancelIdleCallback(this.saveIdleHandle);
-      this.saveIdleHandle = 0;
+    this.onPersistenceCallbacks.clear();
+    this.cancelScheduledSave();
+    if (this.savePending && !this.remoteConflict && activeOwner === this.owner) {
+      await this.flushSave();
     }
-    if (this.saveTimeoutHandle !== null) {
-      clearTimeout(this.saveTimeoutHandle);
-      this.saveTimeoutHandle = null;
-    }
-    await this.flushSave();
-    // flushSave() is a no-op when the write already started and cleared the
-    // pending flag. Wait for that in-flight write before another Settings
-    // instance can read or overwrite the same storage key.
     if (this.savePromise) await this.savePromise;
+    this.retired = true;
+    if (activeOwner === this.owner) activeOwner = null;
   }
 
-  private startCrossTabSync(): void {
-    this.crossTabSyncAdapter.addListener(this.onCrossTabChange);
-  }
-
-  private stopCrossTabSync(): void {
-    this.crossTabSyncAdapter.removeListener();
-  }
-
-  /** Reload settings from storage and notify subscribers. */
   private async reloadFromStorage(): Promise<void> {
     const revisionAtStart = this.localRevision;
     try {
-      const adapter = getStorageAdapter();
-      const raw = await adapter.getItem(STORAGE_KEY);
-      if (!raw) return;
-      // A local set/preview/reset may have happened while storage I/O was in
-      // flight. Preserve that newer in-memory state instead of applying a
-      // stale remote snapshot after the await.
+      const raw = await getStorageAdapter().getItem(STORAGE_KEY);
+      if (!raw || this.retired || activeOwner !== this.owner) return;
       if (
         revisionAtStart !== this.localRevision ||
-        this.savePending ||
+        this.unsaved ||
+        this.previewDirty ||
         this.saving ||
         this.savePromise
-      ) {
+      )
         return;
-      }
       const parsed: unknown = JSON.parse(raw);
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        const loaded = normalizeStoredSettings(parsed as Record<string, unknown>);
-        this.settings = loaded;
+        this.settings = normalizeStoredSettings(parsed as Record<string, unknown>);
+        this.lastStoredRaw = raw;
         for (const cb of this.onChangeCallbacks) cb();
       }
     } catch (error: unknown) {
@@ -135,38 +212,55 @@ export class Settings {
     }
   }
 
-  private async save(): Promise<void> {
+  private async writeUnsaved(): Promise<PersistenceState> {
+    const previous = writeTail;
+    let release: () => void = () => {};
+    writeTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
     try {
+      if (this.retired || activeOwner !== this.owner || this.remoteConflict || !this.unsaved) {
+        return this.persistenceState();
+      }
+      const snapshot = this.unsaved;
+      const raw = serialized(snapshot.settings);
+      const startedConflictEpoch = this.conflictEpoch;
       this.saving = true;
-      const data = { ...this.settings, _version: SETTINGS_VERSION };
-      await getStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (error: unknown) {
-      log.warn('settings.store.save-failed', { error: String(error) });
+      this.inFlightRaw = raw;
+      try {
+        await getStorageAdapter().setItem(STORAGE_KEY, raw);
+        this.lastStoredRaw = raw;
+        if (
+          !this.remoteConflict &&
+          this.conflictEpoch === startedConflictEpoch &&
+          this.unsaved?.revision === snapshot.revision
+        ) {
+          this.unsaved = null;
+          this.writeFailed = false;
+          if (
+            pendingHandoff?.owner === this.owner &&
+            pendingHandoff.revision === snapshot.revision
+          ) {
+            pendingHandoff = null;
+          }
+        } else if (pendingHandoff?.owner === this.owner) {
+          pendingHandoff.baselineRaw = raw;
+        }
+      } catch (error: unknown) {
+        this.writeFailed = true;
+        log.warn('settings.store.save-failed', { error: String(error) });
+      } finally {
+        this.saving = false;
+        this.inFlightRaw = null;
+      }
+      return this.settledState();
     } finally {
-      this.saving = false;
+      release();
     }
   }
 
-  /**
-   * Schedule a debounced save via requestIdleCallback.
-   * Multiple calls within the same frame are coalesced into a single write.
-   */
-  private scheduleSave(): void {
-    if (this.savePending) return;
-    this.savePending = true;
-    if (typeof requestIdleCallback !== 'undefined') {
-      this.saveIdleHandle = requestIdleCallback(() => void this.flushSave(), { timeout: 2000 });
-    } else {
-      // No requestIdleCallback support — defer save to next task to avoid
-      // racing with subsequent set() calls that update in-memory state first.
-      this.saveTimeoutHandle = setTimeout(() => void this.flushSave(), 0);
-    }
-  }
-
-  /** Flush any pending debounced save immediately. */
-  private async flushSave(): Promise<void> {
-    if (!this.savePending) return;
-    this.savePending = false;
+  private cancelScheduledSave(): void {
     if (this.saveIdleHandle !== 0) {
       cancelIdleCallback(this.saveIdleHandle);
       this.saveIdleHandle = 0;
@@ -175,49 +269,102 @@ export class Settings {
       clearTimeout(this.saveTimeoutHandle);
       this.saveTimeoutHandle = null;
     }
-    // A new save may be scheduled while an async adapter write is still in
-    // flight. Chain it behind the previous write so an older snapshot can
-    // never complete after the newer one and overwrite it.
-    const previousSave = this.savePromise;
-    const savePromise = previousSave ? previousSave.then(() => this.save()) : this.save();
-    this.savePromise = savePromise;
-    try {
-      await savePromise;
-    } finally {
-      if (this.savePromise === savePromise) this.savePromise = null;
+  }
+
+  private scheduleSave(): void {
+    if (this.retired || activeOwner !== this.owner || this.savePending) return;
+    this.savePending = true;
+    if (typeof requestIdleCallback !== 'undefined') {
+      this.saveIdleHandle = requestIdleCallback(() => void this.flushSave(), { timeout: 2000 });
+    } else {
+      this.saveTimeoutHandle = setTimeout(() => void this.flushSave(), 0);
     }
   }
 
-  /**
-   * Returns a deep clone of the current settings object.
-   * Mutations to the returned object do not affect the stored settings.
-   * Use set() or updateSettings() for persistent changes.
-   */
+  private async flushSave(force = false, newChoice = false): Promise<PersistenceState> {
+    if (force && !newChoice && !this.savePending && this.savePromise) return this.savePromise;
+    if ((!this.savePending && !force) || this.remoteConflict || !this.unsaved) {
+      return this.savePromise ?? this.persistenceState();
+    }
+    this.savePending = false;
+    this.cancelScheduledSave();
+    const previousSave = this.savePromise;
+    const savePromise = previousSave
+      ? previousSave.then(() => this.writeUnsaved())
+      : this.writeUnsaved();
+    this.savePromise = savePromise;
+    try {
+      return await savePromise;
+    } finally {
+      if (this.savePromise === savePromise) this.savePromise = null;
+      this.notifyPersistence();
+    }
+  }
+
+  /** Complete a user-initiated save without holding the dialog open. */
+  persistNow(): Promise<PersistenceState> {
+    return this.flushSave(true);
+  }
+
+  /** Exactly one manual attempt; a denial never starts a retry timer. */
+  retrySave(): Promise<PersistenceState> {
+    return this.flushSave(true);
+  }
+
   get(): Readonly<OverlaySettings> {
     return cloneSettings(this.settings);
   }
 
-  /** Apply settings and persist to storage. */
   set(partial: Partial<OverlaySettings>): void {
+    if (this.retired || activeOwner !== this.owner) return;
     this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
-    this.scheduleSave();
+    this.previewDirty = false;
+    this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
+    pendingHandoff = {
+      owner: this.owner,
+      revision: this.localRevision,
+      settings: cloneSettings(this.settings),
+      baselineRaw: this.lastStoredRaw,
+      conflicted: this.remoteConflict,
+    };
+    if (!this.remoteConflict) this.scheduleSave();
+    this.notifyPersistence();
   }
 
-  /** Apply settings to memory only (no storage write). Used for live preview. */
   preview(partial: Partial<OverlaySettings>): void {
+    if (this.retired || activeOwner !== this.owner) return;
     this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
+    this.previewDirty = true;
   }
 
-  /** Reset settings to factory defaults and persist. */
   reset(): void {
+    if (this.retired || activeOwner !== this.owner) return;
     this.localRevision++;
     this.settings = cloneSettings(DEFAULT_SETTINGS);
-    this.scheduleSave();
-    // Notify local subscribers (e.g., live UI) of the reset.
-    // Without this, local listeners won't update until the next storage
-    // write propagates through the cross-tab sync adapter.
+    this.previewDirty = false;
+    this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
+    pendingHandoff = {
+      owner: this.owner,
+      revision: this.localRevision,
+      settings: cloneSettings(this.settings),
+      baselineRaw: this.lastStoredRaw,
+      conflicted: this.remoteConflict,
+    };
+    if (!this.remoteConflict) this.scheduleSave();
+    this.notifyPersistence();
     for (const cb of this.onChangeCallbacks) cb();
+  }
+
+  /** Only a direct user choice may replace a known remote decision. */
+  chooseLocalAndPersist(): Promise<PersistenceState> {
+    if (!this.unsaved || this.retired || activeOwner !== this.owner) {
+      return Promise.resolve(this.persistenceState());
+    }
+    this.remoteConflict = false;
+    if (pendingHandoff?.owner === this.owner) pendingHandoff.conflicted = false;
+    this.notifyPersistence();
+    return this.flushSave(true, true);
   }
 }

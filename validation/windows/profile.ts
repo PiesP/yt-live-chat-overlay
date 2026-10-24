@@ -15,6 +15,8 @@ import type {
   Request,
 } from '@playwright/test';
 
+import { runSettingsPersistenceFixture } from './settings-persistence.ts';
+
 type ChatRenderer = { id: string; [key: string]: unknown };
 type ChatAction = {
   addChatItemAction: {
@@ -763,7 +765,7 @@ async function verifyFontGroupsAndPreferences(
   assert.equal(await motionOverride.isChecked(), previousOverride);
   assert(
     (await modal.locator('.yt-chat-overlay-settings-autosave-hint').textContent())?.includes(
-      'saved when you close settings'
+      'saving starts when you close settings'
     )
   );
   await modal.locator('#tab-comments').click();
@@ -1496,6 +1498,25 @@ export async function run({
     readFile(join(root, GM_MOCKS_PATH), 'utf8'),
   ]);
   assert.match(userscript, /==UserScript==/u, 'Production userscript metadata is missing');
+  let selectedScenario: unknown = null;
+  try {
+    selectedScenario = JSON.parse(
+      await readFile(join(root, 'validation/windows/inputs/settings-persistence.json'), 'utf8')
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (selectedScenario !== null) {
+    assert.deepEqual(selectedScenario, { scenario: 'settings-persistence' });
+    assert(!installedContext, 'The focused settings fixture uses the production userscript');
+    await mkdir(output, { recursive: true });
+    return runSettingsPersistenceFixture({
+      browser,
+      output,
+      userscript,
+      watchHtml: createMockWatchHtml(previewHtml),
+    });
+  }
   const installedEmoji = installedContext
     ? await readFile(join(root, 'dist-extension/icons/icon48.png'))
     : null;

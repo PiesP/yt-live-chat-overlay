@@ -18,6 +18,12 @@ export const ES: Record<string, string> = {
   'status.unstable': 'Conexión inestable',
   'status.disconnected': 'Desconectado — Haz clic para recargar',
   'status.waiting': 'Esperando transmisión en vivo…',
+  'settings.saved': 'Configuración guardada.',
+  'settings.unsaved': 'La configuración se aplica en esta sesión, pero no se guardó.',
+  'settings.retry': 'Reintentar guardado',
+  'settings.keepMine': 'Guardar mis valores',
+  'settings.conflict':
+    'Otra pestaña cambió la configuración. Tus valores siguen aquí. Elige Guardar mis valores para reemplazar los de la otra pestaña.',
 
   // ── Section titles ──
   Cards: 'Tarjetas',
@@ -320,12 +326,12 @@ export const ES: Record<string, string> = {
   Import: 'Importar',
   Close: 'Cerrar',
   Done: 'Listo',
-  'app.autoSave': 'Los cambios se aplican al editar y se guardan al cerrar los ajustes',
+  'app.autoSave': 'Los cambios se aplican al editar y se empieza a guardar al cerrar los ajustes',
   'reset.confirm': '¿Restablecer todas las opciones a los valores predeterminados?',
   Cancel: 'Cancelar',
   'import.invalidFormat': 'Error de importación: formato no válido',
   'import.fileTooLarge': 'Error de importación: el archivo de configuración es demasiado grande',
-  'import.success': 'Configuración importada correctamente',
+  'import.success': 'Configuración importada para esta sesión',
   'actions.export': 'Exportar',
   'actions.import': 'Importar',
   'actions.reset': 'Restablecer',

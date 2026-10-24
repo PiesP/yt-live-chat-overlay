@@ -59,6 +59,16 @@ same PiesP custodian route and retention policy above for both addenda.
 
 ## Artifact-only smoke
 
+For a focused settings-persistence run, create the ignored
+`validation/windows/inputs/settings-persistence.json` with exactly
+`{"scenario":"settings-persistence"}` before bundling the clean committed source.
+The declared `inputs` asset includes and hashes this local selector in the bundle.
+The profile then runs only the built userscript fixture in the prepared browser:
+preview a font edit, deny one settings write, observe the session-only notice,
+restore storage, retry, and reload the saved value. This is a controlled
+localStorage boundary, not an installed extension or live YouTube result. Remove
+only this task-owned selector after the run; a normal profile has no selector.
+
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
 or Edge Stable instance, injects the production userscript, exercises the real settings dialog,

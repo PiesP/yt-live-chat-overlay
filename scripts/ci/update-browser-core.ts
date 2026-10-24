@@ -106,6 +106,7 @@ function prepare(): void {
   run('git', ['switch', '-C', branch, 'origin/master']);
   run('git', ['config', 'user.name', 'github-actions[bot]']);
   run('git', ['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com']);
+  const consumerBaseSha = sha(run('git', ['rev-parse', 'origin/master']), 'consumer base');
   const currentCoreSha = sha(
     run('git', ['rev-parse', 'origin/master:packages/core']),
     'current gitlink'
@@ -118,6 +119,10 @@ function prepare(): void {
     'packages/core',
   ]);
   run('git', ['-C', 'packages/core', 'fetch', '--no-tags', 'origin', 'master']);
+  const coreMasterSha = sha(
+    run('git', ['-C', 'packages/core', 'rev-parse', 'origin/master']),
+    'browser-core master'
+  );
   if (!succeeds('git', ['-C', 'packages/core', 'cat-file', '-e', `${coreSha}^{commit}`]))
     throw new Error(`browser-core commit does not exist: ${coreSha}`);
   if (
@@ -149,26 +154,81 @@ function prepare(): void {
   output(
     'GITHUB_ENV',
     `${[
+      `CONSUMER_BASE_SHA=${consumerBaseSha}`,
       `CORE_SHA=${coreSha}`,
       `CURRENT_CORE_SHA=${currentCoreSha}`,
+      `CORE_MASTER_SHA=${coreMasterSha}`,
       `SHORT_SHA=${coreSha.slice(0, 12)}`,
       `BRANCH=${branch}`,
       `REMOTE_BRANCH_SHA=${remoteBranchSha}`,
       `OPEN_PR=${openPr}`,
     ].join('\n')}\n`
   );
-  output('GITHUB_OUTPUT', `ready=true\nbase=${currentCoreSha}\nhead=${coreSha}\n`);
+  const noUpdate = currentCoreSha === coreSha && !openPr;
+  output(
+    'GITHUB_OUTPUT',
+    `ready=${!noUpdate}\nbase=${currentCoreSha}\nconsumer_base=${consumerBaseSha}\nhead=${coreSha}\ncore_master=${coreMasterSha}\nopen_pr=${!!openPr}\npr_number=${openPr}\nremote_branch=${remoteBranchSha}\n`
+  );
+  if (noUpdate) {
+    output(
+      'GITHUB_STEP_SUMMARY',
+      `browser-core is already at ${coreSha}; no PR requires reconciliation.\n`
+    );
+  }
 }
 
-function closeStale(pr: string, dryRun: boolean, comment: string): void {
+function closeStale(
+  pr: string,
+  repository: string,
+  expectedBranchSha: string,
+  dryRun: boolean,
+  comment: string
+): void {
   if (!pr) return;
   if (dryRun) console.log(`Dry run: would close stale browser-core update PR #${pr}.`);
-  else run('gh', ['pr', 'close', pr, '--comment', comment]);
+  else {
+    if (!expectedBranchSha)
+      throw new Error('Cannot close a PR without a verified automation branch');
+    const remoteBranchSha = run('git', ['ls-remote', '--heads', 'origin', branch]).split(/\s+/)[0];
+    if (remoteBranchSha !== expectedBranchSha)
+      throw new Error('Automation branch changed before stale PR close');
+    const prState = JSON.parse(run('gh', ['api', `repos/${repository}/pulls/${pr}`])) as {
+      state?: unknown;
+      head?: { sha?: unknown; repo?: { full_name?: unknown } };
+      base?: { ref?: unknown };
+    };
+    if (
+      prState.state !== 'open' ||
+      prState.head?.sha !== expectedBranchSha ||
+      prState.head.repo?.full_name !== repository ||
+      prState.base?.ref !== 'master'
+    )
+      throw new Error('Automation PR changed before stale close');
+    run('gh', ['pr', 'close', pr, '--repo', repository, '--comment', comment]);
+  }
 }
 
 function publish(): void {
   const coreSha = sha(required('CORE_SHA'), 'target core');
   const currentCoreSha = sha(required('CURRENT_CORE_SHA'), 'current gitlink');
+  const consumerBaseSha = sha(required('CONSUMER_BASE_SHA'), 'consumer base');
+  const dryRun = process.env.DRY_RUN === 'true';
+  const coreMasterSha = sha(required('CORE_MASTER_SHA'), 'browser-core master');
+  if (!dryRun) {
+    if (
+      sha(required('CLASSIFIED_BASE_SHA'), 'classified gitlink') !== currentCoreSha ||
+      sha(required('CLASSIFIED_CONSUMER_BASE_SHA'), 'classified consumer base') !==
+        consumerBaseSha ||
+      sha(required('CLASSIFIED_CORE_SHA'), 'classified target') !== coreSha ||
+      sha(required('CLASSIFIED_CORE_MASTER_SHA'), 'classified browser-core master') !==
+        coreMasterSha ||
+      (process.env.CLASSIFIED_REMOTE_BRANCH_SHA ?? '') !== (process.env.REMOTE_BRANCH_SHA ?? '') ||
+      (process.env.CLASSIFIED_PR_NUMBER ?? '') !== (process.env.OPEN_PR ?? '')
+    )
+      throw new Error(
+        'browser-core, consumer, or automation state changed after read-only classification'
+      );
+  }
   const shortSha = coreSha.slice(0, 12);
   const remoteBranchSha = process.env.REMOTE_BRANCH_SHA ?? '';
   if (remoteBranchSha) sha(remoteBranchSha, 'automation branch');
@@ -176,7 +236,6 @@ function publish(): void {
   if (openPr && !/^[1-9][0-9]*$/.test(openPr)) throw new Error('Invalid open pull request number');
   const repository = required('GITHUB_REPOSITORY');
   const impact = process.env.CONSUMER_IMPACT;
-  const dryRun = process.env.DRY_RUN === 'true';
   output(
     'GITHUB_STEP_SUMMARY',
     `${[
@@ -184,6 +243,8 @@ function publish(): void {
       `Consumer impact: ${impact ?? ''}`,
       '',
       `Current gitlink: ${currentCoreSha}`,
+      '',
+      `Consumer base: ${consumerBaseSha}`,
       '',
       `Target core: ${coreSha}`,
       '',
@@ -196,9 +257,29 @@ function publish(): void {
   );
   if (impact !== 'true' && impact !== 'false')
     throw new Error(`Invalid consumer impact result: ${impact}`);
+  if (!dryRun) {
+    const liveConsumerBaseSha = sha(
+      run('git', ['ls-remote', 'origin', 'refs/heads/master']).split(/\s+/)[0] ?? '',
+      'live consumer base'
+    );
+    if (liveConsumerBaseSha !== consumerBaseSha)
+      throw new Error('Consumer base changed before publication');
+    const liveCoreMasterSha = sha(
+      run('git', [
+        'ls-remote',
+        `https://github.com/${required('CORE_REPOSITORY')}.git`,
+        'refs/heads/master',
+      ]).split(/\s+/)[0] ?? '',
+      'live browser-core master'
+    );
+    if (liveCoreMasterSha !== coreMasterSha)
+      throw new Error('browser-core master changed before publication');
+  }
   if (impact === 'false') {
     closeStale(
       openPr,
+      repository,
+      remoteBranchSha,
       dryRun,
       `Closing this stale update PR because browser-core ${shortSha} has no consumer-facing changes.`
     );
@@ -214,6 +295,8 @@ function publish(): void {
         : `Closed stale update PR #${openPr}.`;
     closeStale(
       openPr,
+      repository,
+      remoteBranchSha,
       dryRun,
       `Closing this stale update PR because master already contains browser-core ${shortSha}.`
     );
@@ -236,7 +319,12 @@ function publish(): void {
     .filter(Boolean);
   if (changed.length !== 1 || changed[0] !== 'packages/core')
     throw new Error(`Refusing to publish non-gitlink changes: ${changed.join(', ')}`);
+  // Checkout retains no credentials; only this push receives GitHub CLI credentials.
   run('git', [
+    '-c',
+    'credential.helper=',
+    '-c',
+    'credential.https://github.com.helper=!gh auth git-credential',
     'push',
     '--set-upstream',
     'origin',

@@ -171,6 +171,37 @@ export const SETTINGS_UI_STYLES = `
         pointer-events: none;
         transition: ${animDuration.transitions.button};
       }
+      .yt-chat-overlay-settings-persistence-notice {
+        position: absolute;
+        top: calc(${spacing.sm}px + ${uiSizing.buttonSize} + ${spacing.xs}px);
+        inset-inline-start: ${spacing.sm}px;
+        max-width: min(340px, 85%);
+        z-index: ${zIndex.settingsButton};
+        display: flex;
+        align-items: center;
+        gap: ${spacing.sm}px;
+        padding: ${spacing.sm}px;
+        border: 1px solid ${uiColors.warning};
+        border-radius: ${borderRadius.sm};
+        background: ${uiColors.background};
+        color: ${uiColors.text};
+        font: ${typography.fontSize.sm}px ${typography.fontFamily};
+        pointer-events: auto;
+      }
+      .yt-chat-overlay-settings-persistence-notice button {
+        flex-shrink: 0;
+        min-height: ${uiSizing.targetMinimum};
+        padding: 0 ${spacing.sm}px;
+        border: 1px solid ${uiColors.accent};
+        border-radius: ${borderRadius.sm};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.text};
+        cursor: pointer;
+      }
+      .yt-chat-overlay-settings-persistence-notice button:focus-visible {
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
+      }
       .yt-chat-overlay-settings-button:hover,
       .yt-chat-overlay-settings-button:focus-visible {
         background: rgba(0, 0, 0, ${uiSizing.hoverScrimAlpha});

@@ -10,6 +10,7 @@ const profile = JSON.parse(
   readFileSync(join(process.cwd(), 'validation/windows/profile.json'), 'utf8')
 ) as {
   entry?: string;
+  assets?: string[];
   installation?: { entry?: string; assets?: string[] };
 };
 
@@ -53,6 +54,11 @@ it('selects both native TypeScript entrypoints and their installation helper gra
     expect(profile.installation?.assets).toContain(helper);
   }
   assert(profile.entry && profile.installation?.entry && profile.installation.assets);
-  expectBundledImportClosure(profile.entry, []);
-  expectBundledImportClosure(profile.installation.entry, profile.installation.assets);
+  assert(profile.assets);
+  expectBundledImportClosure(profile.entry, profile.assets);
+  // The packager includes base-profile assets in installation bundles too.
+  expectBundledImportClosure(profile.installation.entry, [
+    ...profile.assets,
+    ...profile.installation.assets,
+  ]);
 });

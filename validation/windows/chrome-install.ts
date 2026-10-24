@@ -2386,6 +2386,10 @@ export async function runChromeInstallation({
       installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main',
     });
+    assert(
+      !('builtUserscriptFixture' in result.fixture.checks),
+      'The focused settings fixture cannot run in an installation profile'
+    );
     if (result.userscriptUpgrade) {
       assert(upgradeInputs && 'candidateUnsafeWindowGrant' in result.userscriptUpgrade);
       assert.equal(result.fixture.checks.installedApplicationDelivery, true);

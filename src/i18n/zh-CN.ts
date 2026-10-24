@@ -18,6 +18,12 @@ export const ZH_CN: Record<string, string> = {
   'status.unstable': '连接不稳定',
   'status.disconnected': '已断开 — 点击重新加载',
   'status.waiting': '等待直播…',
+  'settings.saved': '设置已保存。',
+  'settings.unsaved': '设置已应用于当前会话，但尚未保存。',
+  'settings.retry': '重试保存',
+  'settings.keepMine': '保存我的设置',
+  'settings.conflict':
+    '其他标签页更改了设置。当前值仍保留在此。选择“保存我的设置”以覆盖其他标签页的设置。',
 
   // ── Section titles ──
   Cards: '卡片',
@@ -284,12 +290,12 @@ export const ZH_CN: Record<string, string> = {
   Import: '导入',
   Close: '关闭',
   Done: '完成',
-  'app.autoSave': '更改会立即生效，关闭设置时保存',
+  'app.autoSave': '更改会立即生效，关闭设置时开始保存',
   'reset.confirm': '将所有设置重置为默认值？',
   Cancel: '取消',
   'import.invalidFormat': '导入失败：设置格式无效',
   'import.fileTooLarge': '导入失败：设置文件过大',
-  'import.success': '设置导入成功',
+  'import.success': '设置已导入当前会话',
   'actions.export': '导出',
   'actions.import': '导入',
   'actions.reset': '重置',

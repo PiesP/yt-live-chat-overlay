@@ -18,6 +18,12 @@ export const KO: Record<string, string> = {
   'status.unstable': '연결 불안정',
   'status.disconnected': '연결 끊김 — 클릭하여 새로고침',
   'status.waiting': '라이브 스트림 대기 중…',
+  'settings.saved': '설정을 저장했습니다.',
+  'settings.unsaved': '설정이 현재 세션에 적용되었지만 저장되지 않았습니다.',
+  'settings.retry': '저장 다시 시도',
+  'settings.keepMine': '내 설정 저장',
+  'settings.conflict':
+    '다른 탭에서 설정이 변경되었습니다. 현재 값은 유지됩니다. 다른 탭의 설정을 덮어쓰려면 내 설정 저장을 선택하세요.',
 
   // ── Section titles ──
   Cards: '카드',
@@ -292,12 +298,12 @@ export const KO: Record<string, string> = {
   Import: '가져오기',
   Close: '닫기',
   Done: '완료',
-  'app.autoSave': '변경 사항은 바로 적용되며 설정을 닫을 때 저장됩니다',
+  'app.autoSave': '변경 사항은 바로 적용되며 설정을 닫으면 저장을 시작합니다',
   'reset.confirm': '모든 설정을 기본값으로 초기화할까요?',
   Cancel: '취소',
   'import.invalidFormat': '가져오기 실패: 잘못된 설정 형식',
   'import.fileTooLarge': '가져오기 실패: 설정 파일이 너무 큽니다',
-  'import.success': '설정을 성공적으로 가져왔습니다',
+  'import.success': '현재 세션에 설정을 가져왔습니다',
   'actions.export': '내보내기',
   'actions.import': '가져오기',
   'actions.reset': '초기화',

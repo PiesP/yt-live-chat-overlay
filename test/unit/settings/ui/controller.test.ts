@@ -3,6 +3,7 @@
 
 import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage } from '@i18n/index';
+import { DEFAULT_SETTINGS } from '@settings/defaults';
 import { MAX_SETTINGS_IMPORT_BYTES, SettingsUi } from '@settings/ui/controller';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
@@ -271,6 +272,101 @@ describe('SettingsUi', () => {
     expect(reloadBtn).not.toBeNull();
 
     c.destroy();
+  });
+
+  it('keeps denied-save feedback outside the closed dialog and allows one manual retry', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let state: 'unsaved' | 'saved' = 'unsaved';
+    const retry = vi.fn(async () => {
+      state = 'saved' as const;
+      return state;
+    });
+    const controller = new SettingsUi(
+      () => makeDefaults(),
+      vi.fn(),
+      vi.fn(),
+      undefined,
+      undefined,
+      { state: () => state, retry, resolveConflict: vi.fn(async () => state) }
+    );
+    await controller.attach();
+    const notice = player.querySelector('.yt-chat-overlay-settings-persistence-notice');
+    expect(notice?.textContent).toContain('were not saved');
+    const button = notice?.querySelector('button');
+    expect(button?.textContent).toBe('Retry save');
+    button?.click();
+    controller.showPersistenceState('pending');
+    await vi.waitFor(() => expect(player.textContent).toContain('Settings saved.'));
+    expect(retry).toHaveBeenCalledTimes(1);
+    controller.destroy();
+    expect(player.querySelector('.yt-chat-overlay-settings-persistence-notice')).toBeNull();
+  });
+
+  it('persists once when the native close event arrives after a programmatic close', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const onPersist = vi.fn(async () => 'saved' as const);
+    const controller = new SettingsUi(() => makeDefaults(), vi.fn(), vi.fn(), onPersist);
+    await controller.attach();
+    const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+    expect(modal).not.toBeNull();
+    modal!.close = vi.fn(() => {
+      modal!.open = false;
+      queueMicrotask(() => modal!.dispatchEvent(new Event('close')));
+    });
+    modal!.open = true;
+    controller.close();
+    await vi.waitFor(() => expect(modal!.close).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(onPersist).toHaveBeenCalledTimes(1);
+
+    // A later native backdrop dismissal still persists its own form once.
+    modal!.open = true;
+    modal!.open = false;
+    modal!.dispatchEvent(new Event('close'));
+    expect(onPersist).toHaveBeenCalledTimes(2);
+    controller.destroy();
+  });
+
+  it('keeps a remote conflict after ordinary dialog close until Save my values is chosen', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let state: 'conflict' | 'saved' = 'conflict';
+    const onPersist = vi.fn(async () => state);
+    const resolveConflict = vi.fn(async () => {
+      state = 'saved' as const;
+      return state;
+    });
+    const controller = new SettingsUi(
+      () => DEFAULT_SETTINGS,
+      vi.fn(),
+      vi.fn(),
+      onPersist,
+      undefined,
+      { state: () => state, retry: vi.fn(async () => state), resolveConflict }
+    );
+    await controller.attach();
+    document.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+    const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+    if (modal) modal.open = true;
+    controller.close();
+    await vi.waitFor(() => expect(onPersist).toHaveBeenCalledTimes(1));
+    expect(resolveConflict).not.toHaveBeenCalled();
+    const notice = player.querySelector('.yt-chat-overlay-settings-persistence-notice');
+    expect(notice?.textContent).toContain('Another tab changed settings');
+    const button = notice?.querySelector('button');
+    expect(button?.textContent).toBe('Save my values');
+    button?.click();
+    await vi.waitFor(() => expect(resolveConflict).toHaveBeenCalledTimes(1));
+    if (modal) modal.open = false;
+    controller.destroy();
   });
 
   it('reload button not created when onReload is not provided', async () => {
