@@ -23,7 +23,19 @@ const MEDIA = {
 } as const;
 type Scene = keyof typeof MEDIA;
 type Case = { id: string; observations: unknown[]; screenshots: string[]; error?: string };
-type RouteState = { disconnected: boolean; servedIds: string[]; mediaRanges: string[] };
+type RouteState = {
+  disconnected: boolean;
+  servedIds: string[];
+  mediaRanges: string[];
+  replayBatch?: string;
+  replayRequests?: Array<{
+    method: string;
+    contentType: string | null;
+    continuation: string | null;
+    offsetMs: number | null;
+    actions: number;
+  }>;
+};
 
 declare global {
   interface Window {
@@ -75,7 +87,7 @@ function chatItem(id: string, kind: 'text' | 'paid', text: string): unknown {
   };
 }
 
-function messages(batch: string, count: number, replay: boolean): unknown[] {
+function messages(batch: string, count: number, replay: boolean, offsetMs = 0): unknown[] {
   const texts = [
     'Short',
     'A long English comment about keeping the subtitle and player controls readable while comments move across the detailed footage.',
@@ -86,7 +98,9 @@ function messages(batch: string, count: number, replay: boolean): unknown[] {
   return Array.from({ length: count }, (_, index) => {
     const id = `viewing-${batch}-${index}`;
     const item = chatItem(id, index % 5 === 3 ? 'paid' : 'text', texts[index % texts.length] ?? '');
-    return replay ? { replayChatItemAction: { videoOffsetTimeMsec: 0, actions: [item] } } : item;
+    return replay
+      ? { replayChatItemAction: { videoOffsetTimeMsec: offsetMs, actions: [item] } }
+      : item;
   });
 }
 
@@ -121,13 +135,46 @@ async function installFixture(
         await route.fulfill({ status: 503, body: 'Controlled disconnection' });
         return;
       }
-      const batch = url.searchParams.get('fixture-batch');
-      const count = Math.min(15, Math.max(0, Number(url.searchParams.get('fixture-count') ?? 0)));
       const replay = url.pathname.endsWith('get_live_chat_replay');
-      const actions = batch ? messages(batch, count, replay) : [];
+      let batch = url.searchParams.get('fixture-batch');
+      let count = Math.min(15, Math.max(0, Number(url.searchParams.get('fixture-count') ?? 0)));
+      let offsetMs = 0;
+      if (replay && state.replayBatch) {
+        const body: unknown =
+          route.request().method() === 'POST' ? route.request().postDataJSON() : null;
+        const requestBody =
+          body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+        const playerState = requestBody.currentPlayerState;
+        const rawOffset =
+          playerState && typeof playerState === 'object'
+            ? (playerState as Record<string, unknown>).playerOffsetMs
+            : null;
+        const parsedOffset = typeof rawOffset === 'string' ? Number(rawOffset) : null;
+        const validOffset =
+          parsedOffset !== null && Number.isFinite(parsedOffset) && parsedOffset >= 0;
+        if (validOffset && parsedOffset < 5_000) {
+          batch = state.replayBatch;
+          count = 2;
+          offsetMs = parsedOffset;
+        }
+        state.replayRequests ??= [];
+        if (state.replayRequests.length < 30) {
+          state.replayRequests.push({
+            method: route.request().method(),
+            contentType: route.request().headers()['content-type'] ?? null,
+            continuation:
+              typeof requestBody.continuation === 'string' ? requestBody.continuation : null,
+            offsetMs: validOffset ? parsedOffset : null,
+            actions: batch ? count : 0,
+          });
+        }
+      }
+      const actions = batch ? messages(batch, count, replay, offsetMs) : [];
       if (batch) {
-        for (let index = 0; index < count; index++)
-          state.servedIds.push(`viewing-${batch}-${index}`);
+        for (let index = 0; index < count; index++) {
+          const id = `viewing-${batch}-${index}`;
+          if (!state.servedIds.includes(id)) state.servedIds.push(id);
+        }
       }
       await route.fulfill({
         status: 200,
@@ -288,7 +335,7 @@ async function openSettings(page: Page, tab = 'comments'): Promise<void> {
 }
 
 async function closeSettings(page: Page): Promise<void> {
-  await page.locator(`${MODAL} button[data-action="close"]`).click();
+  await page.locator(`${MODAL} button.yt-chat-overlay-settings-close`).click();
   await page.locator(MODAL).waitFor({ state: 'hidden' });
 }
 
@@ -752,7 +799,13 @@ export async function runViewingExperienceFixture({
   } finally {
     await viewingContext.close();
   }
-  const replayState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
+  const replayState: RouteState = {
+    disconnected: false,
+    servedIds: [],
+    mediaRanges: [],
+    replayBatch: 'replay',
+    replayRequests: [],
+  };
   const replayContext = await browser.newContext({
     locale: 'en-US',
     viewport: { width: 1280, height: 720 },
@@ -760,15 +813,43 @@ export async function runViewingExperienceFixture({
   try {
     await installFixture(replayContext, userscript, html, media, replayState);
     const replayPage = await openPage(replayContext, true);
+    const replayConsole: string[] = [];
     replayPage.on('pageerror', (error) => pageErrors.push(error.message));
+    replayPage.on('console', (message) => {
+      if (['warning', 'error'].includes(message.type()) && replayConsole.length < 20) {
+        replayConsole.push(`${message.type()}: ${message.text().slice(0, 500)}`);
+      }
+    });
     cases.push(
       await runCase('Y04-replay-controls', async (result) => {
-        const ids = await feed(replayPage, 'replay', 2, true);
-        await waitForAnyRow(replayPage, ids);
+        const ids = ['viewing-replay-0', 'viewing-replay-1'];
+        try {
+          await waitForAnyRow(replayPage, ids);
+        } catch (error) {
+          result.observations.push({
+            stage: 'replay-admission-timeout',
+            route: {
+              servedIds: [...replayState.servedIds],
+              replayRequests: [...(replayState.replayRequests ?? [])],
+              mediaRanges: [...replayState.mediaRanges],
+            },
+            state: await snapshot(replayPage),
+            bootstrap: await replayPage.evaluate(() =>
+              JSON.stringify(window.ytInitialData).slice(0, 1_200)
+            ),
+            pageErrors: [...pageErrors],
+            console: [...replayConsole],
+          });
+          result.screenshots.push(
+            await screenshot(replayPage, output, 'viewing-y04-replay-admission-error')
+          );
+          throw error;
+        }
         result.observations.push({
           stage: 'fresh-replay',
           ids,
           state: await snapshot(replayPage),
+          route: { replayRequests: [...(replayState.replayRequests ?? [])] },
           firstTimeHumanObserved: false,
         });
         await replayPage.keyboard.press('Control+Space');
@@ -1069,9 +1150,10 @@ export async function runViewingExperienceFixture({
       }
       result.observations.push({ cleanup: { zoomRestored, contextClosed, profileRemoved } });
       if (primaryError || cleanupErrors.length > 0) {
+        const failures = [...(primaryError ? [primaryError] : []), ...cleanupErrors];
         throw new AggregateError(
-          [...(primaryError ? [primaryError] : []), ...cleanupErrors],
-          'Owned Chrome zoom case or cleanup failed'
+          failures,
+          `Owned Chrome zoom case or cleanup failed: ${failures.map(String).join(' | ')}`
         );
       }
     })
