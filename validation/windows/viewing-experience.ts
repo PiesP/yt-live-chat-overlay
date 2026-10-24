@@ -85,6 +85,7 @@ type NativeImeSequence =
   | 'JapaneseCurrent'
   | 'JapaneseHiragana'
   | 'JapaneseDirect'
+  | 'JapaneseToggleProbe'
   | 'JapaneseDuringComposition'
   | 'NativeSpace';
 type NativeImeStage =
@@ -95,7 +96,11 @@ type NativeImeStage =
   | 'compose-restoration'
   | 'japanese-initial'
   | 'japanese-textarea'
+  | 'japanese-toggle-textarea'
+  | 'japanese-toggle-confirm-textarea'
   | 'japanese-editable'
+  | 'japanese-toggle-editable'
+  | 'japanese-toggle-confirm-editable'
   | 'japanese-direct'
   | 'japanese-direct-editable'
   | 'japanese-composing-shortcut'
@@ -537,6 +542,18 @@ export function japaneseWordBehavior(
   return 'unknown';
 }
 
+/** One IME on/off diagnostic is permitted only after direct text was observed. */
+export function assertJapaneseToggleProbeAllowed(
+  state: ImeCheckpoint,
+  target: 'textarea' | 'editable'
+): void {
+  assert.equal(
+    japaneseWordBehavior(state, target),
+    'direct-latin',
+    'Alt+Backquote requires observed direct Latin input in this target'
+  );
+}
+
 /** A mode request alone cannot prove restoration; require a later unforced native word. */
 export function japaneseModeRestored(
   initial: ReturnType<typeof japaneseWordBehavior>,
@@ -565,7 +582,8 @@ export function japaneseCapsLockComparison(
         )
         .map((event) => event.capsLock as boolean)
     );
-    return values.size === 1 ? [...values][0]! : null;
+    const sole = values.values().next().value;
+    return values.size === 1 && typeof sole === 'boolean' ? sole : null;
   };
   const before = observed(initial);
   const after = observed(final);
@@ -604,6 +622,10 @@ function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeIm
     assert(!labels.includes('japanese-conversion-candidate'));
   }
   if (sequence === 'JapaneseHiragana') assert.equal(labels[0], 'Japanese-Ctrl-CapsLock-Hiragana');
+  if (sequence === 'JapaneseToggleProbe') {
+    assert.equal(labels[0], 'Japanese-Alt-Backquote-IME-toggle');
+    assert.equal(labels.filter((label) => label === 'Japanese-Alt-Backquote-IME-toggle').length, 1);
+  }
   if (sequence === 'JapaneseDuringComposition') {
     const pending = labels.indexOf('japanese-pending-vk-4E');
     const shortcut = labels.indexOf('Japanese-Ctrl-Space-during-composition');
@@ -1123,6 +1145,22 @@ async function assertVideoAdvances(page: Page): Promise<void> {
   );
 }
 
+/** Compare settings values while treating only valid hex color letter case as equivalent. */
+export function canonicalSettingsForPauseComparison(serialized: string): unknown {
+  const settings: unknown = JSON.parse(serialized);
+  assert(settings && typeof settings === 'object' && !Array.isArray(settings));
+  for (const groupName of ['colors', 'backgroundColors']) {
+    const group: unknown = (settings as Record<string, unknown>)[groupName];
+    if (!group || typeof group !== 'object' || Array.isArray(group)) continue;
+    for (const [key, value] of Object.entries(group)) {
+      if (typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6,8})$/iu.test(value)) {
+        (group as Record<string, unknown>)[key] = value.toLowerCase();
+      }
+    }
+  }
+  return settings;
+}
+
 async function exercisePauseButton(
   page: Page,
   result: Case,
@@ -1197,9 +1235,11 @@ async function exercisePauseButton(
         return button?.disabled === false;
       });
       assert.equal(await button.getAttribute('aria-pressed'), 'false');
-      assert.equal(
-        await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.())),
-        settingsBefore,
+      assert.deepEqual(
+        canonicalSettingsForPauseComparison(
+          await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.()))
+        ),
+        canonicalSettingsForPauseComparison(settingsBefore),
         'Disable and re-enable changed another setting'
       );
       await button.focus();
@@ -1889,6 +1929,40 @@ async function exerciseJapaneseIme(
     }
     return { action, state };
   };
+  const convertedWord = async (
+    focus: 'textarea' | 'editable',
+    stages: {
+      selection: NativeImeStage;
+      toggle: NativeImeStage;
+      confirmation: NativeImeStage;
+    }
+  ) => {
+    await resetViewingImeTrace(page, true);
+    let attempt = await act('JapaneseHiragana', stages.selection, focus, true);
+    let behavior = japaneseWordBehavior(attempt.state, focus);
+    if (behavior === 'direct-latin') {
+      assertJapaneseToggleProbeAllowed(attempt.state, focus);
+      await resetViewingImeTrace(page, true);
+      const toggled = await act('JapaneseToggleProbe', stages.toggle, focus, true);
+      const toggledBehavior = japaneseWordBehavior(toggled.state, focus);
+      result.observations.push({
+        stage: 'japanese-ime-on-diagnostic',
+        focus,
+        before: behavior,
+        afterOneToggle: toggledBehavior,
+      });
+      assert.equal(
+        toggledBehavior,
+        'converted-japanese',
+        'One Alt+Backquote diagnostic did not start Japanese composition'
+      );
+      await resetViewingImeTrace(page, true);
+      attempt = await act('JapaneseCurrent', stages.confirmation, focus, true);
+      behavior = japaneseWordBehavior(attempt.state, focus);
+    }
+    assert.equal(behavior, 'converted-japanese', 'Japanese conversion was not observed');
+    return attempt;
+  };
 
   try {
     try {
@@ -1901,15 +1975,19 @@ async function exerciseJapaneseIme(
         observedBehavior: initialBehavior,
       });
 
-      await resetViewingImeTrace(page, true);
-      const textarea = await act('JapaneseHiragana', 'japanese-textarea', 'textarea', true);
-      assert.equal(japaneseWordBehavior(textarea.state, 'textarea'), 'converted-japanese');
+      const textarea = await convertedWord('textarea', {
+        selection: 'japanese-textarea',
+        toggle: 'japanese-toggle-textarea',
+        confirmation: 'japanese-toggle-confirm-textarea',
+      });
       assert.equal(textarea.state.overlayPaused, false);
       assert.equal(textarea.state.videoPaused, false);
 
-      await resetViewingImeTrace(page, true);
-      const editable = await act('JapaneseHiragana', 'japanese-editable', 'editable', true);
-      assert.equal(japaneseWordBehavior(editable.state, 'editable'), 'converted-japanese');
+      const editable = await convertedWord('editable', {
+        selection: 'japanese-editable',
+        toggle: 'japanese-toggle-editable',
+        confirmation: 'japanese-toggle-confirm-editable',
+      });
       assert.equal(editable.state.overlayPaused, false);
       assert.equal(editable.state.videoPaused, false);
 

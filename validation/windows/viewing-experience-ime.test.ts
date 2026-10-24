@@ -10,6 +10,8 @@ import {
   assertNativePlayerCtrlSpace,
   imeWordBehavior,
   japaneseWordBehavior,
+  assertJapaneseToggleProbeAllowed,
+  canonicalSettingsForPauseComparison,
   japaneseModeRestored,
   japaneseCapsLockComparison,
   japaneseIncompleteVerdicts,
@@ -121,7 +123,46 @@ test('Japanese evidence requires committed converted text and trusted compositio
     events: [{ type: 'input', target: 'yt-viewing-ime-input', trusted: true }],
   });
   assert.equal(japaneseWordBehavior(direct, 'textarea'), 'direct-latin');
+  assert.doesNotThrow(() => assertJapaneseToggleProbeAllowed(direct, 'textarea'));
+  assert.throws(() => assertJapaneseToggleProbeAllowed(converted, 'editable'), /observed direct/u);
+  assert.throws(
+    () => assertJapaneseToggleProbeAllowed({ ...direct, events: [] }, 'textarea'),
+    /observed direct/u
+  );
   assert.equal(japaneseWordBehavior({ ...direct, events: [] }, 'textarea'), 'unknown');
+});
+
+test('pause settings comparison only ignores valid hex color letter case', () => {
+  const before = JSON.stringify({
+    enabled: true,
+    language: 'en',
+    colors: { normal: '#FFFFFF', member: '#0F9D58' },
+    backgroundColors: { member: '#1B3A6F59' },
+  });
+  const sameColors = JSON.stringify({
+    enabled: true,
+    language: 'en',
+    colors: { normal: '#ffffff', member: '#0f9d58' },
+    backgroundColors: { member: '#1b3a6f59' },
+  });
+  assert.deepEqual(
+    canonicalSettingsForPauseComparison(before),
+    canonicalSettingsForPauseComparison(sameColors)
+  );
+  const changedValue = sameColors.replace('#ffffff', '#fffffe');
+  assert.notDeepEqual(
+    canonicalSettingsForPauseComparison(before),
+    canonicalSettingsForPauseComparison(changedValue)
+  );
+  const changedSetting = sameColors.replace('"language":"en"', '"language":"ja"');
+  assert.notDeepEqual(
+    canonicalSettingsForPauseComparison(before),
+    canonicalSettingsForPauseComparison(changedSetting)
+  );
+  assert.notDeepEqual(
+    canonicalSettingsForPauseComparison('{"colors":{"normal":"NotHex"}}'),
+    canonicalSettingsForPauseComparison('{"colors":{"normal":"nothex"}}')
+  );
 });
 
 test('Japanese native shortcut validates focus, preserved text, and player progress', () => {

@@ -162,7 +162,11 @@ This path uses a fresh owned browser profile and the existing PID, foreground,
 profile, and HKL guards. It sends ordinary native virtual keys to a textarea,
 contenteditable checkpoint, and player focus. The selected 101-key Microsoft IME
 controls request Hiragana with Ctrl+CapsLock and alphanumeric input with
-Shift+CapsLock. Native Space opens a conversion candidate and Enter commits;
+Shift+CapsLock. If the owned target still produces direct Latin input, one
+[Microsoft documented Alt+Backquote toggle](https://support.microsoft.com/en-us/windows/hardware/input-devices/microsoft-japanese-ime)
+is attempted while Japanese HKL is selected, followed by a normal word and a
+separate unforced word to observe whether conversion persists. No second toggle
+is inferred from a key count. Native Space opens a conversion candidate and Enter commits;
 the report checks committed text, trusted composition/input events and unchanged
 text after blur/refocus. A direct-input word is observed in both editables.
 The composing Ctrl+Space waits for an observed open trusted composition at the

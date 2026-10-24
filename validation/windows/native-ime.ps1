@@ -9,7 +9,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseDuringComposition', 'NativeSpace')]
+    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseToggleProbe', 'JapaneseDuringComposition', 'NativeSpace')]
     [string]$Sequence,
 
     [Parameter(Mandatory = $true)]
@@ -472,6 +472,12 @@ try {
             Invoke-Combo 0x10 0x14 'Japanese-Shift-CapsLock-Alphanumeric'
             Start-Sleep -Milliseconds 100
             Invoke-JapaneseWord $false
+        }
+        'JapaneseToggleProbe' {
+            # Only the caller's observed direct-latin result may authorize this one toggle.
+            Invoke-Combo 0x12 0xC0 'Japanese-Alt-Backquote-IME-toggle'
+            Start-Sleep -Milliseconds 100
+            Invoke-JapaneseWord $true
         }
         'JapaneseDuringComposition' {
             Invoke-Combo 0x11 0x14 'Japanese-Ctrl-CapsLock-Hiragana'
