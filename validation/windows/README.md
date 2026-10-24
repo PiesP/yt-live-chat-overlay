@@ -406,11 +406,18 @@ For the separate #332 installed viewing task, create the ignored
 `{"scenario":"installed-viewing-tasks"}` before bundling. Use one headed Chrome
 extension run with `--live-url https://www.youtube.com/watch?v=4xDzrJKXOOY`.
 The normal installed fixture and public content/live-page qualification run first.
-Only a qualified source starts the additional 150-second task. Its A timeline
-checks real video, chat, renderer/bridge, settings, independent Pause, the overlay
-Reload control, one page reload, status ownership and persistent settings. Its B
-timeline reads real Translator availability and drives the normal Translation
-settings; absence, preparation, readiness and effective messages remain distinct.
+Only a qualified source starts the additional 180-second task. Its A timeline
+checks real video, chat, renderer/bridge, actual Canvas ink/motion before Pause,
+stable ink during Pause and motion after resume, native normal/theater layout,
+settings, the overlay Reload control, one page reload, status ownership and
+persistent settings. Canvas sampling reads an image into a separate scratch
+canvas; an unavailable read or insufficient chat activity remains blocked.
+Its B timeline reads real Translator availability and drives the normal
+Translation settings; absence, preparation, readiness and effective messages
+remain distinct. When real creation reaches active, bounded original-message
+IDs/text from the native chat frame or accessible mirror are paired by time with
+three actual Canvas captures for separate manual review. Active status or a
+capture alone does not pass effective translation.
 The real page has no substituted chat, service or network response. Screenshots
 are captured into the private output directory; public chat text is not copied
 into JSON. C is explicitly blocked while no consenting first-time viewer is

@@ -13,7 +13,7 @@ import { readPublicPageBrowserState } from './live-rendering.ts';
 
 export const VIEWING_TASK_URL = 'https://www.youtube.com/watch?v=4xDzrJKXOOY';
 const SELECTOR = 'validation/windows/inputs/installed-viewing-tasks.json';
-const TASK_DEADLINE_MS = 150_000;
+const TASK_DEADLINE_MS = 180_000;
 const CASE_LIMIT_MS = 60_000;
 const CHAT = '.yt-live-chat-overlay-live-region > p';
 const MODAL = '#yt-chat-overlay-settings-backdrop';
@@ -22,6 +22,105 @@ type Verdict = 'passed' | 'blocked' | 'failed' | 'not-run';
 type RecordEntry = { stage: string; elapsedMs: number; observation: unknown };
 type Case = { status: Verdict; reason: string; timeline: RecordEntry[]; screenshots: string[] };
 type SavedSettings = ReturnType<NonNullable<Window['__ytChatOverlay']>['getSettings']>;
+export type CanvasSample =
+  | {
+      status: 'sampled';
+      alphaPixels: number;
+      activeCount: number | null;
+      fingerprint: number;
+      width: number;
+      height: number;
+    }
+  | { status: 'unavailable'; reason: string };
+
+export function assessCanvasMotion(
+  before: readonly CanvasSample[],
+  paused: readonly CanvasSample[],
+  resumed: readonly CanvasSample[]
+): { status: 'passed' | 'blocked' | 'failed'; reason: string } {
+  const all = [...before, ...paused, ...resumed];
+  if (
+    before.length < 3 ||
+    paused.length < 3 ||
+    resumed.length < 3 ||
+    all.some((sample) => sample.status !== 'sampled')
+  ) {
+    return { status: 'blocked', reason: 'canvas-pixel-read-unavailable' };
+  }
+  const visible = (samples: readonly CanvasSample[]) =>
+    samples.filter(
+      (sample) =>
+        sample.status === 'sampled' &&
+        sample.alphaPixels >= 8 &&
+        sample.activeCount !== null &&
+        sample.activeCount > 0
+    );
+  if (visible(before).length < 2 || visible(paused).length < 2 || visible(resumed).length < 2)
+    return { status: 'blocked', reason: 'visible-chat-ink-insufficient' };
+  const changed = (samples: readonly CanvasSample[]) =>
+    new Set(samples.map((sample) => (sample.status === 'sampled' ? sample.fingerprint : null)))
+      .size > 1;
+  if (!changed(before)) return { status: 'blocked', reason: 'pre-pause-chat-motion-unobserved' };
+  if (changed(paused)) return { status: 'failed', reason: 'paused-canvas-not-stable' };
+  if (!changed(resumed)) return { status: 'blocked', reason: 'resumed-chat-motion-unobserved' };
+  return { status: 'passed', reason: 'real-canvas-ink-motion-freeze-resume-observed' };
+}
+
+async function captureCanvasSample(page: Page): Promise<CanvasSample> {
+  try {
+    return await page.evaluate(async () => {
+      const canvas = document.querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas');
+      if (!canvas || canvas.width < 1 || canvas.height < 1)
+        return { status: 'unavailable' as const, reason: 'product-canvas-unavailable' };
+      const bitmap = await createImageBitmap(canvas);
+      try {
+        // Read an image of the actual presented Canvas. The product Canvas is
+        // neither given a context nor modified, including on the Worker route.
+        const scratch = new OffscreenCanvas(256, 144);
+        const context = scratch.getContext('2d', { willReadFrequently: true });
+        if (!context)
+          return { status: 'unavailable' as const, reason: 'scratch-context-unavailable' };
+        context.clearRect(0, 0, 256, 144);
+        context.drawImage(bitmap, 0, 0, 256, 144);
+        const pixels = context.getImageData(0, 0, 256, 144).data;
+        let alphaPixels = 0;
+        let fingerprint = 2166136261;
+        const activeText = [...document.querySelectorAll('#yt-chat-overlay-debug > div')]
+          .map((line) => /^Active:\s*(\d+)\b/u.exec(line.textContent ?? '')?.[1])
+          .find((value) => value !== undefined);
+        const activeCount = activeText === undefined ? null : Number(activeText);
+        for (let index = 0; index < pixels.length; index += 4) {
+          if ((pixels[index + 3] ?? 0) > 8) alphaPixels++;
+          for (let channel = 0; channel < 4; channel++) {
+            fingerprint ^= pixels[index + channel] ?? 0;
+            fingerprint = Math.imul(fingerprint, 16777619);
+          }
+        }
+        return {
+          status: 'sampled' as const,
+          alphaPixels,
+          activeCount,
+          fingerprint: fingerprint >>> 0,
+          width: canvas.width,
+          height: canvas.height,
+        };
+      } finally {
+        bitmap.close();
+      }
+    });
+  } catch (error) {
+    return { status: 'unavailable', reason: errorReason(error) };
+  }
+}
+
+async function sampleCanvasSeries(page: Page, count: number): Promise<CanvasSample[]> {
+  const samples: CanvasSample[] = [];
+  for (let index = 0; index < count; index++) {
+    samples.push(await captureCanvasSample(page));
+    if (index < count - 1) await page.waitForTimeout(250);
+  }
+  return samples;
+}
 
 export type InstalledViewingTasks = {
   source: 'installed-extension-authentic-youtube';
@@ -34,6 +133,15 @@ export type InstalledViewingTasks = {
     pair: { source: 'en'; target: string } | null;
     creation: string;
     effectiveMessage: string;
+    reviewEvidence: {
+      candidates: Array<{
+        messageId: string;
+        original: string;
+        layer: 'native-chat-frame' | 'product-accessible-mirror';
+        elapsedMs: number;
+      }>;
+      captures: Array<{ screenshot: string; elapsedMs: number; messageIds: string[] }>;
+    } | null;
   };
   c: { status: 'blocked'; reason: 'participant-unavailable'; evidenceLayer: 'human-observation' };
   cleanup: { settingsRestored: boolean; pageClosed: boolean; error: string | null };
@@ -53,12 +161,32 @@ export async function readInstalledViewingTaskSelector(root: string): Promise<bo
 
 export function requireInstalledViewingTaskSuccess(result: InstalledViewingTasks): void {
   assert.equal(result.a.status, 'passed', `Installed viewing task A: ${result.a.reason}`);
+  const motion = result.a.timeline.find(
+    (entry) => entry.stage === 'real-canvas-motion'
+  )?.observation;
+  assert(
+    motion &&
+      typeof motion === 'object' &&
+      'assessment' in motion &&
+      (motion.assessment as { status?: unknown }).status === 'passed',
+    'Real Canvas ink and pause/resume motion were not proven'
+  );
+  assert(
+    result.a.timeline.some((entry) => entry.stage === 'native-layout-restored'),
+    'Native theater layout was not observed and restored'
+  );
   assert.equal(result.b.status, 'passed', `Real Translator task B: ${result.b.reason}`);
   assert.equal(result.b.creation, 'ready', 'Real Translator creation was not observed');
   assert.equal(
     result.b.effectiveMessage,
     'observed',
     'Effective translated message was not observed'
+  );
+  assert(
+    result.b.reviewEvidence &&
+      result.b.reviewEvidence.candidates.length > 0 &&
+      result.b.reviewEvidence.captures.length > 0,
+    'Actual translated-message review evidence is missing'
   );
   assert.equal(result.cleanup.settingsRestored, true, 'Task settings were not restored');
   assert.equal(result.cleanup.pageClosed, true, 'Task page was not closed');
@@ -201,6 +329,100 @@ async function videoAdvances(page: Page): Promise<boolean> {
   return second - first >= 0.15;
 }
 
+async function readWatchLayout(page: Page) {
+  return page.evaluate(() => {
+    const watch = document.querySelector('ytd-watch-flexy');
+    const player = document.querySelector('#movie_player');
+    const canvas = document.querySelector('#yt-live-chat-overlay canvas');
+    const bounds = (element: Element | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    };
+    return {
+      theater: watch?.hasAttribute('theater') ?? null,
+      player: bounds(player),
+      canvas: bounds(canvas),
+      canvasCount: document.querySelectorAll('#yt-live-chat-overlay canvas').length,
+    };
+  });
+}
+
+async function observeNativeTheater(page: Page, start: number, output: string, result: Case) {
+  const button = page.locator('#movie_player .ytp-size-button');
+  if ((await button.count()) !== 1)
+    return { status: 'blocked' as const, reason: 'native-theater-control-unavailable' };
+  const normal = await readWatchLayout(page);
+  if (normal.theater === null)
+    return { status: 'blocked' as const, reason: 'native-watch-mode-unavailable' };
+  try {
+    await page.locator('#movie_player').hover();
+    await button.click();
+    await page.waitForFunction(
+      (before) => document.querySelector('ytd-watch-flexy')?.hasAttribute('theater') !== before,
+      normal.theater,
+      { timeout: 8_000 }
+    );
+    const alternate = await readWatchLayout(page);
+    result.timeline.push({
+      stage: 'native-normal-theater-layout',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: { normal, alternate },
+    });
+    if (
+      !normal.player ||
+      !normal.canvas ||
+      !alternate.player ||
+      !alternate.canvas ||
+      normal.theater === null ||
+      alternate.theater === null ||
+      normal.theater === alternate.theater ||
+      normal.canvasCount !== 1 ||
+      alternate.canvasCount !== 1 ||
+      normal.canvas.width <= 0 ||
+      alternate.canvas.width <= 0 ||
+      Math.abs(normal.player.width - alternate.player.width) < 20
+    ) {
+      return { status: 'blocked' as const, reason: 'native-theater-geometry-unverified' };
+    }
+    const theaterInk = await captureCanvasSample(page);
+    result.timeline.push({
+      stage: 'native-theater-canvas-ink',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: theaterInk,
+    });
+    if (
+      theaterInk.status !== 'sampled' ||
+      theaterInk.alphaPixels < 8 ||
+      theaterInk.activeCount === null ||
+      theaterInk.activeCount < 1
+    )
+      return { status: 'blocked' as const, reason: 'native-theater-visible-chat-unverified' };
+    const screenshot = 'installed-viewing-a-theater-canvas.png';
+    await page
+      .locator('#yt-live-chat-overlay canvas')
+      .screenshot({ path: join(output, screenshot) });
+    result.screenshots.push(screenshot);
+    return { status: 'passed' as const, reason: 'normal-and-native-theater-observed' };
+  } finally {
+    const current = await readWatchLayout(page);
+    if (current.theater !== normal.theater) {
+      await page.locator('#movie_player').hover();
+      await button.click();
+      await page.waitForFunction(
+        (before) => document.querySelector('ytd-watch-flexy')?.hasAttribute('theater') === before,
+        normal.theater,
+        { timeout: 8_000 }
+      );
+    }
+    result.timeline.push({
+      stage: 'native-layout-restored',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: await readWatchLayout(page),
+    });
+  }
+}
+
 async function runA(page: Page, start: number, output: string, result: Case): Promise<void> {
   const nativePlay = page.locator('#movie_player .ytp-play-button');
   await page.locator('#movie_player').hover();
@@ -262,10 +484,14 @@ async function runA(page: Page, start: number, output: string, result: Case): Pr
   });
   await record(page, start, result.timeline, 'size-opacity-saved');
 
+  const beforeMotion = await sampleCanvasSeries(page, 4);
+
   modal = await openSettings(page);
   const pause = modal.locator(PAUSE);
   await pause.click();
   assert.equal(await pause.getAttribute('aria-pressed'), 'true');
+  await page.waitForTimeout(350);
+  const pausedMotion = await sampleCanvasSeries(page, 3);
   assert(await videoAdvances(page), 'Pausing comments stopped native playback');
   const paused = await record(page, start, result.timeline, 'pointer-pause');
   assert.equal(paused.overlayPaused, true);
@@ -273,8 +499,22 @@ async function runA(page: Page, start: number, output: string, result: Case): Pr
   await pause.focus();
   await page.keyboard.press('Enter');
   assert.equal(await pause.getAttribute('aria-pressed'), 'false');
+  await page.waitForTimeout(350);
+  const resumedMotion = await sampleCanvasSeries(page, 4);
   const keyboardResume = await record(page, start, result.timeline, 'keyboard-resume');
   assert.equal(keyboardResume.focusWithinModal, true);
+  const motion = assessCanvasMotion(beforeMotion, pausedMotion, resumedMotion);
+  result.timeline.push({
+    stage: 'real-canvas-motion',
+    elapsedMs: Math.round(performance.now() - start),
+    observation: {
+      renderer: keyboardResume.renderer,
+      before: beforeMotion,
+      paused: pausedMotion,
+      resumed: resumedMotion,
+      assessment: motion,
+    },
+  });
 
   await modal.locator('input[name="enabled"]').uncheck();
   assert.equal(await pause.isDisabled(), true);
@@ -284,6 +524,8 @@ async function runA(page: Page, start: number, output: string, result: Case): Pr
   assert.equal(await pause.isEnabled(), true);
   await closeSettings(page, modal);
   await record(page, start, result.timeline, 'comments-restored');
+
+  const theater = await observeNativeTheater(page, start, output, result);
 
   const ordinaryReload = page.locator('#yt-chat-overlay-reload-button');
   await page.locator('#yt-live-chat-overlay canvas').evaluate((node) => {
@@ -351,8 +593,13 @@ async function runA(page: Page, start: number, output: string, result: Case): Pr
   modal = await openSettings(page);
   assert.equal(await modal.locator(PAUSE).getAttribute('aria-pressed'), 'false');
   await closeSettings(page, modal);
-  result.status = 'passed';
-  result.reason = 'installed-viewing-task-observed';
+  result.status =
+    motion.status === 'failed'
+      ? 'failed'
+      : motion.status === 'passed' && theater.status === 'passed'
+        ? 'passed'
+        : 'blocked';
+  result.reason = motion.status !== 'passed' ? motion.reason : theater.reason;
 }
 
 async function readTranslationUi(modal: Locator) {
@@ -363,6 +610,54 @@ async function readTranslationUi(modal: Locator) {
     phase: await runtime.getAttribute('data-phase'),
     text: (await runtime.innerText()).slice(0, 180),
   };
+}
+
+async function readPermittedOriginals(page: Page, elapsedMs: number) {
+  const mirror = await page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLParagraphElement>(
+        '.yt-live-chat-overlay-live-region > p[data-message-id]'
+      ),
+    ]
+      .slice(-8)
+      .map((node) => ({
+        messageId: (node.dataset.messageId ?? '').slice(0, 96),
+        original: (node.textContent ?? '').trim().slice(0, 120),
+      }))
+      .filter((item) => item.messageId && item.original)
+  );
+  const native = new Map<string, string>();
+  for (const frame of page
+    .frames()
+    .filter((item) => {
+      try {
+        return new URL(item.url()).pathname.includes('/live_chat');
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, 2)) {
+    const entries = await frame
+      .evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('yt-live-chat-text-message-renderer[id]')]
+          .slice(-40)
+          .map((item) => ({
+            messageId: item.id.slice(0, 96),
+            original: (item.querySelector('#message')?.textContent ?? '').trim().slice(0, 120),
+          }))
+          .filter((item) => item.messageId && item.original)
+      )
+      .catch(() => []);
+    for (const item of entries) native.set(item.messageId, item.original);
+  }
+  return mirror.map((item) => ({
+    messageId: item.messageId,
+    original: native.get(item.messageId) ?? item.original,
+    layer: native.has(item.messageId)
+      ? ('native-chat-frame' as const)
+      : ('product-accessible-mirror' as const),
+    elapsedMs,
+  }));
 }
 
 async function runB(
@@ -519,10 +814,31 @@ async function runB(
     }
     assert(await videoAdvances(page), 'Native video did not advance during translation');
     await closeSettings(page, modal);
-    await page
-      .locator('#yt-live-chat-overlay canvas')
-      .screenshot({ path: join(output, 'installed-viewing-b-active-canvas.png') });
-    result.screenshots.push('installed-viewing-b-active-canvas.png');
+    const candidates = new Map<
+      string,
+      Awaited<ReturnType<typeof readPermittedOriginals>>[number]
+    >();
+    const captures: NonNullable<InstalledViewingTasks['b']['reviewEvidence']>['captures'] = [];
+    for (let index = 0; index < 3; index++) {
+      const elapsedMs = Math.round(performance.now() - start);
+      const observed = await readPermittedOriginals(page, elapsedMs);
+      for (const item of observed) candidates.set(item.messageId, item);
+      const screenshot = `installed-viewing-b-active-canvas-${index}.png`;
+      await page
+        .locator('#yt-live-chat-overlay canvas')
+        .screenshot({ path: join(output, screenshot) });
+      result.screenshots.push(screenshot);
+      captures.push({ screenshot, elapsedMs, messageIds: observed.map((item) => item.messageId) });
+      if (index < 2) await page.waitForTimeout(400);
+    }
+    result.reviewEvidence = { candidates: [...candidates.values()].slice(-8), captures };
+    result.timeline.push({
+      stage: 'actual-message-manual-review-pending',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: result.reviewEvidence,
+    });
+    result.effectiveMessage =
+      result.reviewEvidence.candidates.length > 0 ? 'manual-review-pending' : 'unobserved';
     modal = await openSettings(page);
     await modal.locator('#tab-translation').click();
   }
@@ -537,7 +853,10 @@ async function runB(
     });
     // The accessible mirror carries original text. Do not claim Canvas translation
     // solely from API readiness or an unchanged accessible-chat count.
-    result.reason = 'effective-translated-message-unverified';
+    result.reason =
+      result.effectiveMessage === 'manual-review-pending'
+        ? 'actual-translated-message-manual-review-pending'
+        : 'real-message-identity-unavailable';
   } else if (result.creation !== 'preparation-retired') {
     result.reason = `model-not-ready:${phase ?? 'unobserved'}`;
   }
@@ -573,6 +892,7 @@ export async function runInstalledViewingTasks({
       pair: null,
       creation: 'not-run',
       effectiveMessage: 'not-run',
+      reviewEvidence: null,
     },
     c: { status: 'blocked', reason: 'participant-unavailable', evidenceLayer: 'human-observation' },
     cleanup: { settingsRestored: false, pageClosed: false, error: null },

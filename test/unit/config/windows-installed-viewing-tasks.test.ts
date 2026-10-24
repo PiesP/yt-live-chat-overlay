@@ -10,8 +10,10 @@ import { afterEach, expect, it } from 'vite-plus/test';
 
 import { runChromeInstallation } from '../../../validation/windows/chrome-install.ts';
 import {
+  assessCanvasMotion,
   readInstalledViewingTaskSelector,
   requireInstalledViewingTaskSuccess,
+  type CanvasSample,
   type InstalledViewingTasks,
   VIEWING_TASK_URL,
 } from '../../../validation/windows/installed-viewing-tasks.ts';
@@ -58,11 +60,45 @@ it('rejects a duration observation before launching a browser when the short tas
   ).rejects.toThrow(/cannot use the duration profile/u);
 });
 
+it('requires actual nonempty Canvas motion, a stable pause and resumed motion', () => {
+  const sample = (fingerprint: number, alphaPixels = 32): CanvasSample => ({
+    status: 'sampled',
+    fingerprint,
+    alphaPixels,
+    activeCount: 1,
+    width: 1280,
+    height: 720,
+  });
+  const before = [sample(1), sample(2), sample(3)];
+  const paused = [sample(4), sample(4), sample(4)];
+  const resumed = [sample(5), sample(6), sample(7)];
+  expect(assessCanvasMotion(before, paused, resumed).status).toBe('passed');
+  expect(assessCanvasMotion(before, [sample(4), sample(5), sample(4)], resumed).status).toBe(
+    'failed'
+  );
+  expect(assessCanvasMotion(before, paused, [sample(5), sample(5), sample(5)]).status).toBe(
+    'blocked'
+  );
+  expect(
+    assessCanvasMotion(before, paused, [sample(5, 0), sample(6, 0), sample(7, 0)]).status
+  ).toBe('blocked');
+  expect(
+    assessCanvasMotion(
+      before.map((item) => ({ ...item, activeCount: 0 })),
+      paused,
+      resumed
+    ).status
+  ).toBe('blocked');
+  expect(
+    assessCanvasMotion(before, paused, [{ status: 'unavailable', reason: 'read-failed' }]).status
+  ).toBe('blocked');
+});
+
 it('keeps API availability and service readiness separate from an effective message', () => {
   const result: InstalledViewingTasks = {
     source: 'installed-extension-authentic-youtube',
     url: VIEWING_TASK_URL,
-    limits: { totalMs: 150_000, caseMs: 60_000 },
+    limits: { totalMs: 180_000, caseMs: 60_000 },
     a: { status: 'passed', reason: 'observed', timeline: [], screenshots: [] },
     b: {
       status: 'blocked',
@@ -74,14 +110,33 @@ it('keeps API availability and service readiness separate from an effective mess
       pair: { source: 'en', target: 'ko' },
       creation: 'ready',
       effectiveMessage: 'unobserved',
+      reviewEvidence: null,
     },
     c: { status: 'blocked', reason: 'participant-unavailable', evidenceLayer: 'human-observation' },
     cleanup: { settingsRestored: true, pageClosed: true, error: null },
   };
+  expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/Real Canvas ink/u);
+  result.a.timeline.push(
+    {
+      stage: 'real-canvas-motion',
+      elapsedMs: 1000,
+      observation: { assessment: { status: 'passed' } },
+    },
+    { stage: 'native-layout-restored', elapsedMs: 2000, observation: {} }
+  );
   expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/Real Translator task B/u);
   result.b.status = 'passed';
   expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/Effective translated message/u);
   result.b.effectiveMessage = 'observed';
+  expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/review evidence is missing/u);
+  result.b.reviewEvidence = { candidates: [], captures: [] };
+  expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/review evidence is missing/u);
+  result.b.reviewEvidence = {
+    candidates: [
+      { messageId: 'public-id', original: 'Hello', layer: 'native-chat-frame', elapsedMs: 3000 },
+    ],
+    captures: [{ screenshot: 'canvas.png', elapsedMs: 3000, messageIds: ['public-id'] }],
+  };
   expect(() => requireInstalledViewingTaskSuccess(result)).not.toThrow();
   result.cleanup.settingsRestored = false;
   expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/settings were not restored/u);
