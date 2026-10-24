@@ -1331,6 +1331,30 @@ async function exercisePauseButton(
       assert(await button.evaluate((node) => document.activeElement === node));
       result.observations.push({ stage: 'pause-comments-reenabled', state: await snapshot(page) });
       await assertVideoAdvances(page);
+      await page.keyboard.press('Enter');
+      await page
+        .locator('#yt-live-chat-overlay')
+        .getByText('Paused', { exact: true })
+        .waitFor({ state: 'visible' });
+      assert.equal(await button.getAttribute('aria-pressed'), 'true');
+      result.observations.push({ stage: 'reenabled-pause-keyboard', state: await snapshot(page) });
+      await assertVideoAdvances(page);
+      await button.click();
+      await page
+        .locator('#yt-live-chat-overlay')
+        .getByText('Paused', { exact: true })
+        .waitFor({ state: 'hidden' });
+      assert.equal(await button.getAttribute('aria-pressed'), 'false');
+      result.observations.push({ stage: 'reenabled-resume-pointer', state: await snapshot(page) });
+      await assertVideoAdvances(page);
+      await assertStoredEnabled(true);
+      assert.deepEqual(
+        canonicalSettingsForPauseComparison(
+          await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.()))
+        ),
+        canonicalSettingsForPauseComparison(settingsBefore),
+        'Pause after re-enabling comments changed another setting'
+      );
     }
   } finally {
     if (verifyDisableEnable) {
