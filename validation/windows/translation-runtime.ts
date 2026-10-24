@@ -74,7 +74,9 @@ async function makeContext(
                         item: {
                           liveChatTextMessageRenderer: {
                             id: fixtureMessage,
-                            authorName: { simpleText: 'Fixture Viewer' },
+                            // Keep each state probe independent of the product's
+                            // per-author chat rate limit (five messages per 5s).
+                            authorName: { simpleText: `Fixture Viewer ${fixtureMessage}` },
                             message: { runs: [{ text: `Original chat ${fixtureMessage}` }] },
                           },
                         },
