@@ -944,6 +944,8 @@ async function exerciseConnectionFault({
   stage: string;
   capture: () => Promise<string>;
 }): Promise<void> {
+  const settingsButton = page.locator('#yt-chat-overlay-settings-button');
+  await settingsButton.focus();
   routeState.faultStatus = 403;
   routeState.disconnected = true;
   const statusAction = page.locator('#yt-chat-overlay-status-action');
@@ -953,6 +955,26 @@ async function exerciseConnectionFault({
     )
     .waitFor({ state: 'visible', timeout: 30_000 });
   const feedback = page.locator('.yt-chat-overlay-reload-feedback');
+  const tooltipState = await page.evaluate(() => {
+    const settings = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+    const reload = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    return {
+      settingsFocused: document.activeElement === settings,
+      settingsInterest: settings?.hasAttribute('interestfor') ?? false,
+      settingsTitle: settings?.hasAttribute('title') ?? false,
+      reloadInterest: reload?.hasAttribute('interestfor') ?? false,
+      reloadTitle: reload?.hasAttribute('title') ?? false,
+      openTooltips: document.querySelectorAll(
+        '#yt-chat-overlay-settings-tooltip:popover-open, #yt-chat-overlay-reload-tooltip:popover-open'
+      ).length,
+    };
+  });
+  assert.equal(tooltipState.settingsFocused, true, 'Settings focus was lost during recovery');
+  assert.equal(tooltipState.settingsInterest, false, 'Settings tooltip remained enabled');
+  assert.equal(tooltipState.settingsTitle, false, 'Settings title tooltip remained enabled');
+  assert.equal(tooltipState.reloadInterest, false, 'Reload tooltip remained enabled');
+  assert.equal(tooltipState.reloadTitle, false, 'Reload title tooltip remained enabled');
+  assert.equal(tooltipState.openTooltips, 0, 'A tooltip obscured recovery feedback');
   const actionVisible = await statusAction.isVisible();
   const status = await page.evaluate(() => {
     const action = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
@@ -972,6 +994,7 @@ async function exerciseConnectionFault({
     legacyStatusAction: 'not-applicable-under-managed-restart',
     automaticRecoveryPhase: await feedback.getAttribute('data-phase'),
     automaticRecoveryText: await feedback.textContent(),
+    tooltipState,
     status,
     state: await snapshot(page),
   });

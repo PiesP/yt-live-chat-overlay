@@ -438,17 +438,27 @@ export class SettingsUi {
     if (this.reloadPending) button.setAttribute('aria-busy', 'true');
     else button.removeAttribute('aria-busy');
     if (SettingsUi.supportsHints) {
+      const settingsTooltip = document.getElementById(SettingsUi.SETTINGS_TOOLTIP_ID);
+      if (settingsTooltip) settingsTooltip.textContent = t('app.settings');
       const tooltip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
       if (tooltip) tooltip.textContent = t('app.reload');
       if (state === 'idle') {
+        this.button?.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
         button.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
       } else {
+        this.button?.removeAttribute('interestfor');
         button.removeAttribute('interestfor');
+        if (settingsTooltip?.matches(':popover-open')) settingsTooltip.hidePopover();
         if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
       }
     } else {
-      if (state === 'idle') button.title = t('app.reload');
-      else button.removeAttribute('title');
+      if (state === 'idle') {
+        if (this.button) this.button.title = t('app.settings');
+        button.title = t('app.reload');
+      } else {
+        this.button?.removeAttribute('title');
+        button.removeAttribute('title');
+      }
     }
     if (this.reloadFeedback) {
       this.reloadFeedback.dataset.phase = state;
