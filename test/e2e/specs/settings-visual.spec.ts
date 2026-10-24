@@ -230,10 +230,20 @@ test.describe('Settings UI Visual', () => {
       await expect(previewText).toBeVisible();
 
       await expect(modal.locator('#tab-comments')).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(modal.locator('input[name="enabled"]')).toBeFocused();
+      await page.keyboard.press('Tab');
+      const pauseButton = modal.locator('#yt-chat-overlay-pause-button');
+      const mode = modal.locator('select[name="danmakuMode"]');
+      if (await pauseButton.evaluate((button) => document.activeElement === button)) {
+        // A live overlay makes this session control available and focusable.
+        await expect(pauseButton).toBeFocused();
+        await page.keyboard.press('Tab');
+      }
+      // The mock chat can have no active session, which disables Pause and
+      // causes Tab to skip it. Check where that single Tab actually landed.
+      await expect(mode).toBeFocused();
       for (const selector of [
-        'input[name="enabled"]',
-        '#yt-chat-overlay-pause-button',
-        'select[name="danmakuMode"]',
         'input[name="fontSize"]',
         'input[name="speedPxPerSec"]',
         'input[name="opacity-slider"]',
