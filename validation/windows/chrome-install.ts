@@ -25,6 +25,13 @@ import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
+import {
+  readInstalledViewingTaskSelector,
+  requireInstalledViewingTaskSuccess,
+  runInstalledViewingTasks,
+  type InstalledViewingTasks,
+  VIEWING_TASK_URL,
+} from './installed-viewing-tasks.ts';
 import { runLiveContentPrerequisite } from './live-content-prerequisite.ts';
 import {
   assessPublicImage,
@@ -204,6 +211,7 @@ type ChromeResult<Live = LiveObservation> = {
     status: string;
   } | null;
   liveObservation?: { mode: 'duration'; duration_seconds: 1200 } | null;
+  installedViewingTasks?: InstalledViewingTasks | null;
   cleanup: Record<string, unknown>;
   browserVersion?: string;
   installationMethod?: string;
@@ -2232,6 +2240,18 @@ export async function runChromeInstallation({
     Array.isArray(liveUrls) && liveUrls.length <= 3,
     'At most three live URLs can run within the guest deadline'
   );
+  const installedViewingSelected = await readInstalledViewingTaskSelector(root);
+  if (installedViewingSelected) {
+    assert.equal(liveObservation, null, 'Installed viewing tasks cannot use the duration profile');
+    assert.equal(browserName, 'chrome', 'Installed viewing tasks require Chrome');
+    assert.equal(headless, false, 'Installed viewing tasks require headed Chrome');
+    assert.equal(installation, 'extension', 'Installed viewing tasks require the extension');
+    assert.deepEqual(
+      liveUrls,
+      [VIEWING_TASK_URL],
+      'Installed viewing tasks require one exact public URL'
+    );
+  }
   if (liveObservation !== null) {
     assert.deepEqual(liveObservation, { mode: 'duration', duration_seconds: 1200 });
     assert.equal(browserName, 'chrome', 'Duration observation requires installed Chrome');
@@ -2544,7 +2564,34 @@ export async function runChromeInstallation({
         );
       }
     }
-    requireLiveSuccess(result.live);
+    try {
+      requireLiveSuccess(result.live);
+    } catch (error) {
+      if (installedViewingSelected) {
+        assert(extensionId, 'Installed viewing tasks require an installed extension ID');
+        result.installedViewingTasks = await runInstalledViewingTasks({
+          context,
+          extensionId,
+          output,
+          url: liveUrls[0] ?? '',
+          liveQualified: false,
+        });
+      }
+      throw error;
+    }
+    if (installedViewingSelected) {
+      assert(extensionId, 'Installed viewing tasks require an installed extension ID');
+      result.installedViewingTasks = await runInstalledViewingTasks({
+        context,
+        extensionId,
+        output,
+        url: liveUrls[0] ?? '',
+        liveQualified:
+          result.live[0]?.status === 'passed' &&
+          result.liveContentPrerequisites?.[0]?.status === 'passed',
+      });
+      requireInstalledViewingTaskSuccess(result.installedViewingTasks);
+    }
     return result;
   } catch (error) {
     primaryError = error;

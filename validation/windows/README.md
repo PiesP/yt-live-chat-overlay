@@ -436,6 +436,45 @@ URLs in an Edge extension run must cover both live and replay plus cross-watch
 navigation; blocked chat, login/consent, unavailable playback, missing seek
 range, and unknown chat mode remain `unverified` rather than a pass. Without
 public URLs, this real-site tier is untested even if the synthetic fixture passes.
+
+For the separate #332 installed viewing task, create the ignored
+`validation/windows/inputs/installed-viewing-tasks.json` containing exactly
+`{"scenario":"installed-viewing-tasks"}` before bundling. Use one headed Chrome
+extension run with `--live-url https://www.youtube.com/watch?v=4xDzrJKXOOY`.
+The normal installed fixture and public content/live-page qualification run first.
+Only a qualified source starts the additional 180-second task. Its A timeline
+checks real video, chat, renderer/bridge, actual Canvas ink/motion before Pause,
+stable ink during Pause and motion after resume, native normal/theater layout,
+settings, the overlay Reload control, one page reload, status ownership and
+persistent settings. Canvas sampling reads an image into a separate scratch
+canvas; an unavailable read or insufficient chat ink and motion remains blocked.
+The debug HUD active count is retained as a diagnostic because the main renderer
+can draw newly activated messages before that counter is updated. The settings
+enable/disable checks wait for the debounced preview and control state, and A
+restores an open settings transaction after failure.
+Its B timeline reads real Translator availability and drives the normal
+Translation settings; absence, preparation, readiness and effective messages
+remain distinct. B first verifies that the overlay is enabled, its Canvas and
+chat are available, and native playback advances; it repairs a disabled A
+setting through the normal UI before evaluating Translator readiness. Service
+activation uses trusted keyboard input on the normal
+settings control, with selected values and browser activation state recorded.
+A `needs-action` state gets one normal settings off/on keyboard retry.
+When real creation reaches active, the task waits up to 20 seconds for a new
+chat message. Up to three actual Canvas captures are paired by time with private
+visual captures of the matching native chat row or a bounded rendering of the
+product's accessible mirror. No new message remains blocked. Active status or a
+capture alone does not pass effective translation.
+The real page has no substituted chat, service or network response. Screenshots
+are captured into the private output directory; JSON retains only message ID
+and original text SHA-256 digests, codepoint length, evidence layer, and timing.
+Original public chat text stays only in private images and short-lived memory;
+raw message IDs stay in memory for matching and are hashed before capture.
+C is explicitly blocked while no consenting first-time viewer is
+available. The profile fails closed when a required technical case is incomplete,
+while retaining the separate fixture and A/B/C receipts and owned-profile cleanup.
+Remove only this task-owned selector after collection.
+
 The native Firefox extension run also requires live and replay pages plus a
 cross-watch transition. It changes a font-size setting through the public
 overlay UI, reloads to check persistence, and records pause, resume, seek,
