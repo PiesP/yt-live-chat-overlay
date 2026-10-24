@@ -29,7 +29,10 @@ export const MAX_SETTINGS_IMPORT_BYTES = 256 * 1024;
 const log = createLogger('SettingsUi');
 
 const TOAST_DURATION_MS = 2500;
-const RELOAD_FEEDBACK_DURATION_MS = 1500;
+const RELOAD_WAITING_DURATION_MS = 5000;
+const RELOAD_FEEDBACK_DURATION_MS = 2500;
+
+type ReloadFeedbackState = 'idle' | 'pending' | 'waiting' | 'requested' | 'failed';
 
 export class SettingsUi {
   /** Popover API feature detection — checked once at construction. */
@@ -42,12 +45,15 @@ export class SettingsUi {
   private playerElement: HTMLElement | null = null;
   private button: HTMLButtonElement | null = null;
   private reloadButton: HTMLButtonElement | null = null;
+  private reloadFeedback: HTMLDivElement | null = null;
+  private reloadFeedbackState: ReloadFeedbackState = 'idle';
+  private reloadPending = false;
   private persistenceNotice: HTMLDivElement | null = null;
   private persistenceNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   private recoveryFeedbackPending = false;
   /** dialog.close() queues a native close event after our closing guard resets. */
   private suppressNextNativeClose = false;
-  /** Timer for reload-complete checkmark → icon restoration. */
+  /** Timer for the still-waiting message or neutral acknowledgement dismissal. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private modal: HTMLDialogElement | null = null;
   private previousFocus: HTMLElement | null = null;
@@ -332,6 +338,11 @@ export class SettingsUi {
       this.reloadButton.addEventListener('click', () => {
         this.handleReloadClick();
       });
+      this.reloadFeedback = document.createElement('div');
+      this.reloadFeedback.className = 'yt-chat-overlay-reload-feedback';
+      this.reloadFeedback.setAttribute('role', 'status');
+      this.reloadFeedback.setAttribute('aria-atomic', 'true');
+      this.reloadFeedback.hidden = true;
     } else if (this.reloadButton?.parentElement) {
       this.reloadButton.remove();
     }
@@ -346,6 +357,8 @@ export class SettingsUi {
     player.appendChild(this.button);
     if (this.reloadButton) {
       player.appendChild(this.reloadButton);
+      if (this.reloadFeedback) player.appendChild(this.reloadFeedback);
+      this.renderReloadFeedback();
     }
   }
 
@@ -376,32 +389,86 @@ export class SettingsUi {
     this.reloadFeedbackTimer = clearSafeTimeout(this.reloadFeedbackTimer);
   }
 
+  private renderReloadFeedback(): void {
+    const button = this.reloadButton;
+    if (!button) return;
+    const state = this.reloadFeedbackState;
+    const messageKey = {
+      idle: 'app.reload',
+      pending: 'app.reloadPending',
+      waiting: 'app.reloadWaiting',
+      requested: 'app.reloadRequested',
+      failed: 'app.reloadFailed',
+    }[state];
+    const message = t(messageKey);
+    button.textContent =
+      state === 'pending' || state === 'waiting' ? '…' : state === 'failed' ? '!' : '↻';
+    button.classList.toggle('yt-chat-overlay-reload-button--pending', this.reloadPending);
+    button.classList.toggle('yt-chat-overlay-reload-button--failed', state === 'failed');
+    button.setAttribute('aria-label', state === 'failed' ? t('app.reloadRetry') : message);
+    if (this.reloadPending) button.setAttribute('aria-busy', 'true');
+    else button.removeAttribute('aria-busy');
+    if (SettingsUi.supportsHints) {
+      const tooltip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
+      if (tooltip) tooltip.textContent = message;
+    } else {
+      button.title = message;
+    }
+    if (this.reloadFeedback) {
+      this.reloadFeedback.textContent = state === 'idle' ? '' : message;
+      this.reloadFeedback.hidden = state === 'idle';
+      this.reloadFeedback.lang = getActiveLanguage();
+      this.reloadFeedback.dir = getActiveLanguage() === 'ar' ? 'rtl' : 'ltr';
+    }
+  }
+
   private handleReloadClick(): void {
-    if (!this.reloadButton) return;
-
-    // Show immediate feedback — briefly switch to a checkmark so the user
-    // knows the reload was triggered.  The runtime restart is async and
-    // happens in the background; the checkmark confirms the action started.
-    // Capture the original icon as a constant so rapid double-clicks don't
-    // capture the checkmark itself and get stuck on ✓ permanently.
-    this.reloadButton.textContent = '\u2713';
-    this.reloadButton.classList.add('yt-chat-overlay-reload-button--done');
-
+    const button = this.reloadButton;
+    if (!button || this.reloadPending) return;
+    this.reloadPending = true;
+    this.reloadFeedbackState = 'pending';
+    this.renderReloadFeedback();
     this.clearReloadFeedbackTimer();
     this.reloadFeedbackTimer = setTimeout(() => {
       this.reloadFeedbackTimer = null;
-      if (this.reloadButton) {
-        this.reloadButton.textContent = '\u21BB';
-        this.reloadButton.classList.remove('yt-chat-overlay-reload-button--done');
-      }
-    }, RELOAD_FEEDBACK_DURATION_MS);
+      if (!this.reloadPending || this.reloadButton !== button) return;
+      this.reloadFeedbackState = 'waiting';
+      this.renderReloadFeedback();
+    }, RELOAD_WAITING_DURATION_MS);
 
-    const reloadPromise = this.onReload?.();
-    if (reloadPromise) {
-      void reloadPromise.catch((error: unknown) => {
-        log.warn('settings.reload-failed', { error: String(error) });
-      });
+    const generation = this.lifecycleGeneration;
+    let reloadPromise: Promise<void>;
+    try {
+      reloadPromise = this.onReload?.() ?? Promise.resolve();
+    } catch (error: unknown) {
+      this.finishReloadFailure(error, generation, button);
+      return;
     }
+    void reloadPromise.then(
+      () => {
+        if (generation !== this.lifecycleGeneration || this.reloadButton !== button) return;
+        this.reloadPending = false;
+        this.clearReloadFeedbackTimer();
+        this.reloadFeedbackState = 'requested';
+        this.renderReloadFeedback();
+        this.reloadFeedbackTimer = setTimeout(() => {
+          this.reloadFeedbackTimer = null;
+          if (generation !== this.lifecycleGeneration || this.reloadButton !== button) return;
+          this.reloadFeedbackState = 'idle';
+          this.renderReloadFeedback();
+        }, RELOAD_FEEDBACK_DURATION_MS);
+      },
+      (error: unknown) => this.finishReloadFailure(error, generation, button)
+    );
+  }
+
+  private finishReloadFailure(error: unknown, generation: number, button: HTMLButtonElement): void {
+    log.warn('settings.reload-failed', { error: String(error) });
+    if (generation !== this.lifecycleGeneration || this.reloadButton !== button) return;
+    this.reloadPending = false;
+    this.clearReloadFeedbackTimer();
+    this.reloadFeedbackState = 'failed';
+    this.renderReloadFeedback();
   }
 
   private ensureStyles(): void {
@@ -594,6 +661,7 @@ export class SettingsUi {
    * No storage write — only the in-memory DOM is updated.
    */
   syncLanguage(): void {
+    this.renderReloadFeedback();
     if (!this.isDialogOpen() || !this.modal) return;
     if (this.modalLanguage === getActiveLanguage()) return;
 
@@ -865,10 +933,13 @@ export class SettingsUi {
     }
     this.button?.remove();
     this.reloadButton?.remove();
+    this.reloadFeedback?.remove();
     this.persistenceNoticeTimer = clearSafeTimeout(this.persistenceNoticeTimer);
     this.persistenceNotice?.remove();
     this.persistenceNotice = null;
     this.clearReloadFeedbackTimer();
+    this.reloadPending = false;
+    this.reloadFeedbackState = 'idle';
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.form.destroy();
     this.modal?.close();
@@ -880,6 +951,7 @@ export class SettingsUi {
 
     this.button = null;
     this.reloadButton = null;
+    this.reloadFeedback = null;
     this.modal = null;
     this.playerElement = null;
     this.lifecycleGeneration++;

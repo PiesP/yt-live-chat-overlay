@@ -97,6 +97,9 @@ async function snapshot(page: Page) {
       buttonClass: button?.className ?? null,
       buttonLabel: button?.getAttribute('aria-label') ?? null,
       buttonDisabled: button?.disabled ?? null,
+      buttonBusy: button?.getAttribute('aria-busy') ?? null,
+      reloadFeedbackText:
+        document.querySelector('.yt-chat-overlay-reload-feedback')?.textContent ?? null,
       statusText: status?.textContent ?? null,
       canvasPresent: Boolean(canvas),
       videoPresent: Boolean(video),
@@ -161,7 +164,9 @@ export async function runReloadFeedbackFixture({
   });
   const record = async (nextPhase: string, currentPage: Page) => {
     phase = nextPhase;
-    timeline.push({ phase, state: await snapshot(currentPage) });
+    const state = await snapshot(currentPage);
+    timeline.push({ phase, state });
+    return state;
   };
 
   try {
@@ -301,12 +306,24 @@ export async function runReloadFeedbackFixture({
     holdChatRequests = true;
     await page.locator(RELOAD_BUTTON).click();
     await waitForHostState(() => heldChatRequest, 'held reload request', 10_000);
-    await record('pointer-held', page);
+    const held = await record('pointer-held', page);
+    assert.equal(held.buttonText, '…');
+    assert.equal(held.buttonBusy, 'true');
+    assert.equal(held.reloadFeedbackText, 'Restarting overlay…');
+    assert(!held.buttonClass?.includes('--done'), 'Pending reload used success styling');
+    const requestsAtHold = chatRequests;
     await page.locator(RELOAD_BUTTON).focus();
     await page.keyboard.press('Enter');
     await record('keyboard-repeat', page);
+    assert.equal(chatRequests, requestsAtHold, 'Repeated activation started another chat request');
     await page.waitForTimeout(1_700);
-    await record('still-waiting-after-old-feedback-timer', page);
+    const stillWaiting = await record('still-waiting-after-old-feedback-timer', page);
+    assert.equal(stillWaiting.buttonText, '…');
+    assert.equal(stillWaiting.buttonBusy, 'true');
+    await page.waitForTimeout(3_700);
+    const waitingMessage = await record('still-waiting-after-five-seconds', page);
+    assert.equal(waitingMessage.buttonBusy, 'true');
+    assert(waitingMessage.reloadFeedbackText?.startsWith('Still restarting'));
     holdChatRequests = false;
     releaseHeldChatRequest();
     await waitForHostState(
@@ -315,6 +332,23 @@ export async function runReloadFeedbackFixture({
       10_000
     );
     await record('quiet-after-release', page);
+    await page.waitForFunction(() => {
+      const button = document.querySelector('#yt-chat-overlay-reload-button');
+      return Boolean(button && button.getAttribute('aria-busy') !== 'true');
+    });
+    const requestsBeforeKeyboard = chatRequests;
+    await page.locator(RELOAD_BUTTON).focus();
+    await page.keyboard.press('Enter');
+    await waitForHostState(
+      () => chatRequests > requestsBeforeKeyboard,
+      'keyboard reload request',
+      10_000
+    );
+    await record('keyboard-fresh-request', page);
+    await page.waitForFunction(() => {
+      const button = document.querySelector('#yt-chat-overlay-reload-button');
+      return Boolean(button && button.getAttribute('aria-busy') !== 'true');
+    });
 
     await page.evaluate(() => {
       window.ytInitialData = {
@@ -323,10 +357,17 @@ export async function runReloadFeedbackFixture({
       };
     });
     await page.locator(RELOAD_BUTTON).click();
-    await page.waitForFunction(() =>
-      Boolean(document.querySelector('#yt-live-chat-overlay [role="status"]')?.textContent)
+    await page.waitForFunction(
+      () =>
+        document.querySelector('#yt-live-chat-overlay [role="status"]')?.textContent ===
+        'Waiting for live stream…'
     );
-    await record('legitimate-standby', page);
+    await page.waitForFunction(() => {
+      const button = document.querySelector('#yt-chat-overlay-reload-button');
+      return Boolean(button && button.getAttribute('aria-busy') !== 'true');
+    });
+    const standby = await record('legitimate-standby', page);
+    assert(!standby.buttonClass?.includes('--done'), 'Standby reload used success styling');
     const playerIdentity = await page.evaluate(() => {
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
       return {

@@ -274,6 +274,77 @@ describe('SettingsUi', () => {
     c.destroy();
   });
 
+  it('keeps reload feedback neutral while pending and bounds repeated activation', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let resolveReload: () => void = () => {};
+    const onReload = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveReload = resolve;
+        })
+    );
+    const controller = makeController({ onReload });
+    await controller.attach();
+    const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    const feedback = player.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
+    expect(button).not.toBeNull();
+    button?.click();
+    button?.click();
+    expect(onReload).toHaveBeenCalledTimes(1);
+    expect(button?.textContent).toBe('…');
+    expect(button?.getAttribute('aria-busy')).toBe('true');
+    expect(feedback?.textContent).toBe('Restarting overlay…');
+    expect(button?.classList.contains('yt-chat-overlay-reload-button--done')).toBe(false);
+
+    vi.advanceTimersByTime(5000);
+    expect(feedback?.textContent).toContain('Still restarting');
+    resolveReload();
+    await Promise.resolve();
+    expect(button?.textContent).toBe('↻');
+    expect(button?.hasAttribute('aria-busy')).toBe(false);
+    expect(feedback?.textContent).toContain('attempt ended');
+    vi.advanceTimersByTime(2500);
+    expect(feedback?.hidden).toBe(true);
+    controller.destroy();
+  });
+
+  it('shows a retryable reload failure and ignores completion after destroy', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let resolveReload: () => void = () => {};
+    const onReload = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('controlled failure'))
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveReload = resolve;
+          })
+      );
+    const controller = makeController({ onReload });
+    await controller.attach();
+    const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    const feedback = player.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
+    button?.click();
+    await Promise.resolve();
+    expect(button?.textContent).toBe('!');
+    expect(feedback?.textContent).toContain('Could not restart');
+    expect(button?.getAttribute('aria-label')).toContain('Try reloading');
+    button?.click();
+    expect(onReload).toHaveBeenCalledTimes(2);
+    expect(button?.textContent).toBe('…');
+    controller.destroy();
+    resolveReload();
+    await Promise.resolve();
+    expect(player.querySelector('.yt-chat-overlay-reload-feedback')).toBeNull();
+  });
+
   it('keeps denied-save feedback outside the closed dialog and allows one manual retry', async () => {
     const player = document.createElement('div');
     player.id = 'movie_player';
