@@ -14,6 +14,65 @@ const VIDEO_SHA256 = '38d4e4e22c8aa3712a75c92bc70d461e3d6d0568fb75a146dfec2b91bd
 const RELOAD_BUTTON = '#yt-chat-overlay-reload-button';
 const CANVAS = '#yt-live-chat-overlay canvas';
 
+/** Serve the owned media fixture with the byte-range contract native video seeking uses. */
+export function mediaResponse(
+  bytes: Buffer,
+  rangeHeader: string | null
+): {
+  status: number;
+  headers: Record<string, string>;
+  body: Buffer;
+} {
+  const headers = { 'accept-ranges': 'bytes', 'content-length': String(bytes.length) };
+  if (rangeHeader === null) return { status: 200, headers, body: bytes };
+
+  const match = /^bytes=(\d*)-(\d*)$/u.exec(rangeHeader);
+  const startText = match?.[1];
+  const endText = match?.[2];
+  let start: number;
+  let end: number;
+  if (startText === undefined || endText === undefined || (startText === '' && endText === '')) {
+    return {
+      status: 416,
+      headers: { ...headers, 'content-range': `bytes */${bytes.length}`, 'content-length': '0' },
+      body: Buffer.alloc(0),
+    };
+  }
+  if (startText === '') {
+    const suffixLength = Number(endText);
+    start = bytes.length - suffixLength;
+    end = bytes.length - 1;
+    if (start < 0) start = 0;
+    if (suffixLength === 0) start = bytes.length;
+  } else {
+    start = Number(startText);
+    end = endText === '' ? bytes.length - 1 : Math.min(Number(endText), bytes.length - 1);
+  }
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    start >= bytes.length ||
+    end < start
+  ) {
+    return {
+      status: 416,
+      headers: { ...headers, 'content-range': `bytes */${bytes.length}`, 'content-length': '0' },
+      body: Buffer.alloc(0),
+    };
+  }
+  const body = bytes.subarray(start, end + 1);
+  return {
+    status: 206,
+    headers: {
+      ...headers,
+      'content-range': `bytes ${start}-${end}/${bytes.length}`,
+      'content-length': String(body.length),
+    },
+    body,
+  };
+}
+
 async function waitForHostState(
   condition: () => boolean,
   label: string,
@@ -88,7 +147,12 @@ export async function runReloadFeedbackFixture({
   const timeline: { phase: string; state: Awaited<ReturnType<typeof snapshot>> }[] = [];
   let chatRequests = 0;
   let chatResponses = 0;
-  const mediaRequests: { method: string; range: string | null; resourceType: string }[] = [];
+  const mediaRequests: {
+    method: string;
+    range: string | null;
+    resourceType: string;
+    responseStatus: number;
+  }[] = [];
   let heldChatRequest = false;
   let holdChatRequests = false;
   let releaseHeldChatRequest: () => void = () => {};
@@ -107,14 +171,17 @@ export async function runReloadFeedbackFixture({
       if (url.hostname === 'www.youtube.com' && request.resourceType() === 'document') {
         await route.fulfill({ status: 200, contentType: 'text/html', body: watchHtml });
       } else if (url.hostname === 'www.youtube.com' && url.pathname === '/reload-fixture.webm') {
+        const range = request.headers()['range'] ?? null;
+        const response = mediaResponse(video, range);
         if (mediaRequests.length < 8) {
           mediaRequests.push({
             method: request.method(),
-            range: request.headers()['range'] ?? null,
+            range,
             resourceType: request.resourceType(),
+            responseStatus: response.status,
           });
         }
-        await route.fulfill({ status: 200, contentType: 'video/webm', body: video });
+        await route.fulfill({ ...response, contentType: 'video/webm' });
       } else if (
         url.hostname === 'www.youtube.com' &&
         url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')
