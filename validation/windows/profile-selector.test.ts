@@ -65,10 +65,14 @@ test('native viewing IME requires an exact opt-in selector', async () => {
   const selector = join(inputs, 'viewing-experience-ime.json');
   try {
     await mkdir(inputs, { recursive: true });
-    assert.equal(await readViewingImeSelection(root), false);
+    assert.equal(await readViewingImeSelection(root), 'not-run');
     await writeFile(selector, '{"enabled":true}');
-    assert.equal(await readViewingImeSelection(root), true);
+    assert.equal(await readViewingImeSelection(root), 'full');
+    await writeFile(selector, '{"enabled":true,"only":true}');
+    assert.equal(await readViewingImeSelection(root), 'only');
     await writeFile(selector, '{"enabled":false}');
+    await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
+    await writeFile(selector, '{"enabled":true,"only":false}');
     await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
     await writeFile(selector, '{"enabled":true,"script":"other.ps1"}');
     await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);

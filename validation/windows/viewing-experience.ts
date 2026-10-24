@@ -69,8 +69,10 @@ type NativeImeStage =
   | 'compose-restoration';
 type NativeImeAction = { receiptFile: string; receipt: unknown; error: string | null };
 
+type ViewingImeSelection = 'not-run' | 'full' | 'only';
+
 /** An opt-in selector keeps ordinary baseline runs free of native input. */
-export async function readViewingImeSelection(root: string): Promise<boolean> {
+export async function readViewingImeSelection(root: string): Promise<ViewingImeSelection> {
   let contents: string;
   try {
     contents = await readFile(
@@ -78,11 +80,16 @@ export async function readViewingImeSelection(root: string): Promise<boolean> {
       'utf8'
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'not-run';
     throw error;
   }
-  assert.deepEqual(JSON.parse(contents), { enabled: true }, 'Invalid viewing IME selector');
-  return true;
+  const selection: unknown = JSON.parse(contents);
+  if (selection && typeof selection === 'object' && 'only' in selection) {
+    assert.deepEqual(selection, { enabled: true, only: true }, 'Invalid viewing IME selector');
+    return 'only';
+  }
+  assert.deepEqual(selection, { enabled: true }, 'Invalid viewing IME selector');
+  return 'full';
 }
 
 async function ownedBrowserIdentity(
@@ -1008,189 +1015,199 @@ export async function runViewingExperienceFixture({
     assert.equal(sha256(bytes), MEDIA[scene], `${scene} owned media changed`);
     media[scene] = bytes;
   }
-  const imeRequested = await readViewingImeSelection(root);
+  const imeSelection = await readViewingImeSelection(root);
+  const imeRequested = imeSelection !== 'not-run';
+  const nativeOnly = imeSelection === 'only';
   let nativeImeInput: 'not-run' | 'failed' | 'verified' = imeRequested ? 'failed' : 'not-run';
   const cases: Case[] = [];
   const pageErrors: string[] = [];
   const state: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
   const html = watchPage(watchHtml);
-  const context = await browser.newContext({
-    locale: 'en-US',
-    viewport: { width: 1280, height: 720 },
-  });
-  try {
-    await installFixture(context, userscript, html, media, state);
-    const page = await openPage(context);
-    page.on('pageerror', (error) => pageErrors.push(error.message));
-    cases.push(
-      await runCase('Y04-live-controls', async (result) => {
-        result.observations.push({
-          stage: 'fresh',
-          state: await snapshot(page),
-          firstTimeHumanObserved: false,
-        });
-        await openSettings(page);
-        await setNumber(page, 'fontSize', '26');
-        await setNumber(page, 'opacity', '70', 0.7);
-        result.observations.push({
-          stage: 'size-opacity',
-          state: await snapshot(page),
-          actionPath: 'gear > Comments > Size / Text opacity',
-          visibleShortcutHint: await page
-            .locator(MODAL)
-            .evaluate((node) => (node.textContent ?? '').includes('Ctrl+Space')),
-        });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y04-comments-controls'));
-        await closeSettings(page);
-        const beforePause = await snapshot(page);
-        await page.keyboard.press('Control+Space');
-        await page
-          .locator('#yt-live-chat-overlay')
-          .getByText('Paused', { exact: true })
-          .waitFor({ state: 'visible' });
-        await assertVideoAdvances(page);
-        result.observations.push({
-          stage: 'overlay-paused',
-          beforePause,
-          state: await snapshot(page),
-          actionPath: 'Ctrl+Space',
-        });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y04-paused'));
-        await page.keyboard.press('Control+Space');
-        await page
-          .locator('#yt-live-chat-overlay')
-          .getByText('Paused', { exact: true })
-          .waitFor({ state: 'hidden' });
-        result.observations.push({ stage: 'overlay-resumed', state: await snapshot(page) });
-        await openSettings(page);
-        await page.locator(`${MODAL} input[name="enabled"]`).uncheck();
-        await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().enabled === false);
-        result.observations.push({ stage: 'disabled', state: await snapshot(page) });
-        await page.locator(`${MODAL} input[name="enabled"]`).check();
-        await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().enabled === true);
-        await page.locator(`${MODAL} #tab-advanced`).click();
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        result.observations.push({
-          stage: 'reduced-motion-control',
-          label: await page
-            .locator(`${MODAL} input[name="ignoreReducedMotion"]`)
-            .evaluate((node) => node.closest('label')?.textContent ?? ''),
-          state: await snapshot(page),
-        });
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
-        await closeSettings(page);
-      })
-    );
-  } finally {
-    await context.close();
+  if (!nativeOnly) {
+    const context = await browser.newContext({
+      locale: 'en-US',
+      viewport: { width: 1280, height: 720 },
+    });
+    try {
+      await installFixture(context, userscript, html, media, state);
+      const page = await openPage(context);
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      cases.push(
+        await runCase('Y04-live-controls', async (result) => {
+          result.observations.push({
+            stage: 'fresh',
+            state: await snapshot(page),
+            firstTimeHumanObserved: false,
+          });
+          await openSettings(page);
+          await setNumber(page, 'fontSize', '26');
+          await setNumber(page, 'opacity', '70', 0.7);
+          result.observations.push({
+            stage: 'size-opacity',
+            state: await snapshot(page),
+            actionPath: 'gear > Comments > Size / Text opacity',
+            visibleShortcutHint: await page
+              .locator(MODAL)
+              .evaluate((node) => (node.textContent ?? '').includes('Ctrl+Space')),
+          });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y04-comments-controls'));
+          await closeSettings(page);
+          const beforePause = await snapshot(page);
+          await page.keyboard.press('Control+Space');
+          await page
+            .locator('#yt-live-chat-overlay')
+            .getByText('Paused', { exact: true })
+            .waitFor({ state: 'visible' });
+          await assertVideoAdvances(page);
+          result.observations.push({
+            stage: 'overlay-paused',
+            beforePause,
+            state: await snapshot(page),
+            actionPath: 'Ctrl+Space',
+          });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y04-paused'));
+          await page.keyboard.press('Control+Space');
+          await page
+            .locator('#yt-live-chat-overlay')
+            .getByText('Paused', { exact: true })
+            .waitFor({ state: 'hidden' });
+          result.observations.push({ stage: 'overlay-resumed', state: await snapshot(page) });
+          await openSettings(page);
+          await page.locator(`${MODAL} input[name="enabled"]`).uncheck();
+          await page.waitForFunction(
+            () => window.__ytChatOverlay?.getSettings?.().enabled === false
+          );
+          result.observations.push({ stage: 'disabled', state: await snapshot(page) });
+          await page.locator(`${MODAL} input[name="enabled"]`).check();
+          await page.waitForFunction(
+            () => window.__ytChatOverlay?.getSettings?.().enabled === true
+          );
+          await page.locator(`${MODAL} #tab-advanced`).click();
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+          result.observations.push({
+            stage: 'reduced-motion-control',
+            label: await page
+              .locator(`${MODAL} input[name="ignoreReducedMotion"]`)
+              .evaluate((node) => node.closest('label')?.textContent ?? ''),
+            state: await snapshot(page),
+          });
+          await page.emulateMedia({ reducedMotion: 'no-preference' });
+          await closeSettings(page);
+        })
+      );
+    } finally {
+      await context.close();
+    }
   }
   const viewingState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
-  const viewingContext = await browser.newContext({
-    locale: 'en-US',
-    viewport: { width: 1280, height: 720 },
-  });
-  try {
-    await installFixture(viewingContext, userscript, html, media, viewingState);
-    let page = await openPage(viewingContext);
-    page.on('pageerror', (error) => pageErrors.push(error.message));
-    cases.push(
-      await runCase('Y05-moving-video', async (result) => {
-        for (const scene of Object.keys(MEDIA) as Scene[]) {
-          const baselinePage = await openPage(viewingContext);
-          try {
-            await setScene(baselinePage, scene);
-            const ids = await feed(baselinePage, `low-${scene}`, 2);
-            await waitForAnyRow(baselinePage, ids);
-            await waitForMovingChatFrame(baselinePage);
-            result.observations.push({
-              stage: `${scene}-normal-default-mid`,
-              ids,
-              state: await snapshot(baselinePage),
-            });
-            result.screenshots.push(
-              await screenshot(baselinePage, output, `viewing-y05-${scene}-normal`)
-            );
-          } finally {
-            await baselinePage.close();
+  if (!nativeOnly) {
+    const viewingContext = await browser.newContext({
+      locale: 'en-US',
+      viewport: { width: 1280, height: 720 },
+    });
+    try {
+      await installFixture(viewingContext, userscript, html, media, viewingState);
+      let page = await openPage(viewingContext);
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      cases.push(
+        await runCase('Y05-moving-video', async (result) => {
+          for (const scene of Object.keys(MEDIA) as Scene[]) {
+            const baselinePage = await openPage(viewingContext);
+            try {
+              await setScene(baselinePage, scene);
+              const ids = await feed(baselinePage, `low-${scene}`, 2);
+              await waitForAnyRow(baselinePage, ids);
+              await waitForMovingChatFrame(baselinePage);
+              result.observations.push({
+                stage: `${scene}-normal-default-mid`,
+                ids,
+                state: await snapshot(baselinePage),
+              });
+              result.screenshots.push(
+                await screenshot(baselinePage, output, `viewing-y05-${scene}-normal`)
+              );
+            } finally {
+              await baselinePage.close();
+            }
           }
-        }
-        await setScene(page, 'detailed');
-        await page.locator('#yt-viewing-theater').click();
-        const highIds = await feed(page, 'high-theater', 12);
-        await waitForAnyRow(page, highIds);
-        await waitForMovingChatFrame(page);
-        result.observations.push({
-          stage: 'detailed-theater-high',
-          state: await snapshot(page),
-          inputCount: 12,
-        });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y05-theater-high'));
-        await page.locator('#yt-viewing-fullscreen').click();
-        await page.waitForFunction(() => Boolean(document.fullscreenElement));
-        result.observations.push({ stage: 'detailed-fullscreen', state: await snapshot(page) });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y05-fullscreen'));
-        await page.keyboard.press('Escape');
-        await page.close();
-        page = await openPage(viewingContext);
-        await setScene(page, 'detailed');
-        await openSettings(page);
-        await page
-          .locator(`${MODAL} details`)
-          .first()
-          .evaluate((element) => {
-            (element as HTMLDetailsElement).open = true;
+          await setScene(page, 'detailed');
+          await page.locator('#yt-viewing-theater').click();
+          const highIds = await feed(page, 'high-theater', 12);
+          await waitForAnyRow(page, highIds);
+          await waitForMovingChatFrame(page);
+          result.observations.push({
+            stage: 'detailed-theater-high',
+            state: await snapshot(page),
+            inputCount: 12,
           });
-        await setNumber(page, 'safeBottom', '25', 0.25);
-        await page.locator(`${MODAL} #tab-colors`).click();
-        await setNumber(page, 'outline-widthPx', '3');
-        result.observations.push({ stage: 'adjusted-preview', state: await snapshot(page) });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y05-preview-adjusted'));
-        await closeSettings(page);
-        const adjustedIds = await feed(page, 'adjusted', 2);
-        await waitForAnyRow(page, adjustedIds);
-        await waitForMovingChatFrame(page);
-        result.observations.push({
-          stage: 'adjusted-video',
-          adjustedIds,
-          state: await snapshot(page),
-          pairedWith: 'detailed-normal-default-mid',
-        });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y05-video-adjusted'));
+          result.screenshots.push(await screenshot(page, output, 'viewing-y05-theater-high'));
+          await page.locator('#yt-viewing-fullscreen').click();
+          await page.waitForFunction(() => Boolean(document.fullscreenElement));
+          result.observations.push({ stage: 'detailed-fullscreen', state: await snapshot(page) });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y05-fullscreen'));
+          await page.keyboard.press('Escape');
+          await page.close();
+          page = await openPage(viewingContext);
+          await setScene(page, 'detailed');
+          await openSettings(page);
+          await page
+            .locator(`${MODAL} details`)
+            .first()
+            .evaluate((element) => {
+              (element as HTMLDetailsElement).open = true;
+            });
+          await setNumber(page, 'safeBottom', '25', 0.25);
+          await page.locator(`${MODAL} #tab-colors`).click();
+          await setNumber(page, 'outline-widthPx', '3');
+          result.observations.push({ stage: 'adjusted-preview', state: await snapshot(page) });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y05-preview-adjusted'));
+          await closeSettings(page);
+          const adjustedIds = await feed(page, 'adjusted', 2);
+          await waitForAnyRow(page, adjustedIds);
+          await waitForMovingChatFrame(page);
+          result.observations.push({
+            stage: 'adjusted-video',
+            adjustedIds,
+            state: await snapshot(page),
+            pairedWith: 'detailed-normal-default-mid',
+          });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y05-video-adjusted'));
 
-        await openSettings(page, 'translation');
-        await page.locator(`${MODAL} select[name="translationSource"]`).selectOption('en');
-        await page.locator(`${MODAL} select[name="translationTarget"]`).selectOption('ko');
-        await page.locator(`${MODAL} input[name="translationEnabled"]`).check();
-        await page.waitForFunction(
-          () =>
-            document.querySelector<HTMLElement>('.yt-chat-overlay-settings-runtime-status')?.dataset
-              .phase === 'active',
-          null,
-          { timeout: 10_000 }
-        );
-        result.observations.push({
-          stage: 'controlled-translation-active',
-          state: await snapshot(page),
-        });
-        await closeSettings(page);
-        const translatedIds = await feed(page, 'translated', 5);
-        await waitForAnyRow(page, translatedIds);
-        await waitForMovingChatFrame(page);
-        result.observations.push({
-          stage: 'translated-chat-over-video',
-          translatedIds,
-          state: await snapshot(page),
-        });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y05-translated'));
+          await openSettings(page, 'translation');
+          await page.locator(`${MODAL} select[name="translationSource"]`).selectOption('en');
+          await page.locator(`${MODAL} select[name="translationTarget"]`).selectOption('ko');
+          await page.locator(`${MODAL} input[name="translationEnabled"]`).check();
+          await page.waitForFunction(
+            () =>
+              document.querySelector<HTMLElement>('.yt-chat-overlay-settings-runtime-status')
+                ?.dataset.phase === 'active',
+            null,
+            { timeout: 10_000 }
+          );
+          result.observations.push({
+            stage: 'controlled-translation-active',
+            state: await snapshot(page),
+          });
+          await closeSettings(page);
+          const translatedIds = await feed(page, 'translated', 5);
+          await waitForAnyRow(page, translatedIds);
+          await waitForMovingChatFrame(page);
+          result.observations.push({
+            stage: 'translated-chat-over-video',
+            translatedIds,
+            state: await snapshot(page),
+          });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y05-translated'));
 
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        result.observations.push({ stage: 'reduced-motion', state: await snapshot(page) });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y05-reduced-motion'));
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
-      })
-    );
-  } finally {
-    await viewingContext.close();
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+          result.observations.push({ stage: 'reduced-motion', state: await snapshot(page) });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y05-reduced-motion'));
+          await page.emulateMedia({ reducedMotion: 'no-preference' });
+        })
+      );
+    } finally {
+      await viewingContext.close();
+    }
   }
   const replayState: RouteState = {
     disconnected: false,
@@ -1455,287 +1472,323 @@ export async function runViewingExperienceFixture({
       if (nativeReplayProfile) await rm(nativeReplayProfile, { recursive: true, force: true });
     }
   }
-  for (const language of [
-    { id: 'en', locale: 'en-US' },
-    { id: 'ko', locale: 'ko-KR' },
-    { id: 'ja', locale: 'ja-JP' },
-    { id: 'ar', locale: 'ar-SA' },
-  ]) {
-    const localState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
-    const localContext = await browser.newContext({
-      locale: language.locale,
-      viewport: { width: 390, height: 720 },
-    });
-    try {
-      await installFixture(localContext, userscript, html, media, localState, language.id);
-      const localPage = await openPage(localContext);
-      localPage.on('pageerror', (error) => pageErrors.push(error.message));
-      cases.push(
-        await runCase(`Y06-${language.id}-narrow`, async (result) => {
-          if (language.id === 'ar') await localPage.emulateMedia({ forcedColors: 'active' });
-          if (language.id === 'ja') await localPage.emulateMedia({ reducedMotion: 'reduce' });
-          await openSettings(localPage);
-          for (const tab of ['comments', 'colors', 'advanced', 'translation']) {
-            await localPage.locator(`${MODAL} #tab-${tab}`).click();
-            result.observations.push({ stage: tab, state: await snapshot(localPage) });
-            if (language.id === 'en') {
-              result.screenshots.push(await screenshot(localPage, output, `viewing-y06-en-${tab}`));
-            }
-          }
-          if (language.id !== 'en') {
-            result.screenshots.push(
-              await screenshot(localPage, output, `viewing-y06-${language.id}-translation`)
-            );
-          }
-          if (language.id === 'en') {
-            const [chooser] = await Promise.all([
-              localPage.waitForEvent('filechooser'),
-              localPage.locator(`${MODAL} button[data-action="import"]`).click(),
-            ]);
-            await chooser.setFiles({
-              name: 'invalid.json',
-              mimeType: 'application/json',
-              buffer: Buffer.from('{'),
-            });
-            await localPage
-              .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
-              .waitFor({ state: 'visible' });
-            result.observations.push({
-              stage: 'import-failure',
-              toast: await localPage
-                .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
-                .textContent(),
-              state: await snapshot(localPage),
-            });
-            result.screenshots.push(
-              await screenshot(localPage, output, 'viewing-y06-import-failure')
-            );
-            await localPage.locator(`${MODAL} button[data-action="reset"]`).click();
-            const confirm = localPage.locator('dialog.yt-chat-overlay-settings-confirm');
-            await confirm.waitFor({ state: 'visible' });
-            result.observations.push({
-              stage: 'reset-confirm',
-              text: await confirm.textContent(),
-              focus: await confirm.evaluate(() => document.activeElement?.className ?? null),
-              state: await snapshot(localPage),
-            });
-            result.screenshots.push(
-              await screenshot(localPage, output, 'viewing-y06-reset-confirm')
-            );
-            await confirm.locator('button.yt-chat-overlay-settings-confirm-cancel').click();
-          }
-          await localPage.locator(`${MODAL} select[name="translationService"]`).selectOption('off');
-          await localPage.locator(`${MODAL} input[name="translationEnabled"]`).check();
-          result.observations.push({
-            stage: 'translation-inactive',
-            state: await snapshot(localPage),
-          });
-          await closeSettings(localPage);
-          const ids = await feed(localPage, `localized-${language.id}`, 5);
-          await waitForAnyRow(localPage, ids);
-          await exerciseConnectionFault({
-            page: localPage,
-            routeState: localState,
-            result,
-            stage: `${language.id}-narrow`,
-            capture: () => screenshot(localPage, output, `viewing-y06-${language.id}-fault`),
-          });
-        })
-      );
-    } finally {
-      await localContext.close();
-    }
-  }
-  cases.push(
-    await runCase('Y06-unsaved-conflict-narrow', async (result) => {
-      const recoveryState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
-      const recoveryContext = await browser.newContext({
-        locale: 'en-US',
+  if (!nativeOnly) {
+    for (const language of [
+      { id: 'en', locale: 'en-US' },
+      { id: 'ko', locale: 'ko-KR' },
+      { id: 'ja', locale: 'ja-JP' },
+      { id: 'ar', locale: 'ar-SA' },
+    ]) {
+      const localState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
+      const localContext = await browser.newContext({
+        locale: language.locale,
         viewport: { width: 390, height: 720 },
       });
       try {
-        await installFixture(recoveryContext, userscript, html, media, recoveryState);
-        const page = await openPage(recoveryContext);
-        page.on('pageerror', (error) => pageErrors.push(error.message));
-        await openSettings(page);
-        await setNumber(page, 'fontSize', '44');
-        await page.evaluate(() => {
-          window.__ytViewingDenyWrites = true;
-        });
-        await closeSettings(page);
-        const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
-        await notice.locator('button').waitFor({ state: 'visible' });
-        result.observations.push({ stage: 'unsaved', state: await snapshot(page) });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y06-unsaved-narrow'));
-        const remote = await recoveryContext.newPage();
-        await remote.goto(WATCH_URL, { waitUntil: 'domcontentloaded' });
-        await remote.evaluate((key) => {
-          const previous = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
-          localStorage.setItem(key, JSON.stringify({ ...previous, fontSize: 52 }));
-        }, SETTINGS_KEY);
-        await notice.locator('button').getByText('Save my values').waitFor({ state: 'visible' });
-        result.observations.push({ stage: 'conflict', state: await snapshot(page) });
-        result.screenshots.push(await screenshot(page, output, 'viewing-y06-conflict-narrow'));
+        await installFixture(localContext, userscript, html, media, localState, language.id);
+        const localPage = await openPage(localContext);
+        localPage.on('pageerror', (error) => pageErrors.push(error.message));
+        cases.push(
+          await runCase(`Y06-${language.id}-narrow`, async (result) => {
+            if (language.id === 'ar') await localPage.emulateMedia({ forcedColors: 'active' });
+            if (language.id === 'ja') await localPage.emulateMedia({ reducedMotion: 'reduce' });
+            await openSettings(localPage);
+            for (const tab of ['comments', 'colors', 'advanced', 'translation']) {
+              await localPage.locator(`${MODAL} #tab-${tab}`).click();
+              result.observations.push({ stage: tab, state: await snapshot(localPage) });
+              if (language.id === 'en') {
+                result.screenshots.push(
+                  await screenshot(localPage, output, `viewing-y06-en-${tab}`)
+                );
+              }
+            }
+            if (language.id !== 'en') {
+              result.screenshots.push(
+                await screenshot(localPage, output, `viewing-y06-${language.id}-translation`)
+              );
+            }
+            if (language.id === 'en') {
+              const [chooser] = await Promise.all([
+                localPage.waitForEvent('filechooser'),
+                localPage.locator(`${MODAL} button[data-action="import"]`).click(),
+              ]);
+              await chooser.setFiles({
+                name: 'invalid.json',
+                mimeType: 'application/json',
+                buffer: Buffer.from('{'),
+              });
+              await localPage
+                .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
+                .waitFor({ state: 'visible' });
+              result.observations.push({
+                stage: 'import-failure',
+                toast: await localPage
+                  .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
+                  .textContent(),
+                state: await snapshot(localPage),
+              });
+              result.screenshots.push(
+                await screenshot(localPage, output, 'viewing-y06-import-failure')
+              );
+              await localPage.locator(`${MODAL} button[data-action="reset"]`).click();
+              const confirm = localPage.locator('dialog.yt-chat-overlay-settings-confirm');
+              await confirm.waitFor({ state: 'visible' });
+              result.observations.push({
+                stage: 'reset-confirm',
+                text: await confirm.textContent(),
+                focus: await confirm.evaluate(() => document.activeElement?.className ?? null),
+                state: await snapshot(localPage),
+              });
+              result.screenshots.push(
+                await screenshot(localPage, output, 'viewing-y06-reset-confirm')
+              );
+              await confirm.locator('button.yt-chat-overlay-settings-confirm-cancel').click();
+            }
+            await localPage
+              .locator(`${MODAL} select[name="translationService"]`)
+              .selectOption('off');
+            await localPage.locator(`${MODAL} input[name="translationEnabled"]`).check();
+            result.observations.push({
+              stage: 'translation-inactive',
+              state: await snapshot(localPage),
+            });
+            await closeSettings(localPage);
+            const ids = await feed(localPage, `localized-${language.id}`, 5);
+            await waitForAnyRow(localPage, ids);
+            await exerciseConnectionFault({
+              page: localPage,
+              routeState: localState,
+              result,
+              stage: `${language.id}-narrow`,
+              capture: () => screenshot(localPage, output, `viewing-y06-${language.id}-fault`),
+            });
+          })
+        );
       } finally {
-        await recoveryContext.close();
+        await localContext.close();
       }
-    })
-  );
-  cases.push(
-    await runCase('Y06-real-200-percent-chrome', async (result) => {
-      const bundle: unknown = JSON.parse(await readFile(join(root, 'bundle.json'), 'utf8'));
-      assert(bundle && typeof bundle === 'object' && 'mode' in bundle && bundle.mode === 'desktop');
-      const profilePath = await mkdtemp(join(root, 'yt-viewing-zoom-chrome-'));
-      let zoomContext: BrowserContext | undefined;
-      let settingsPage: Page | undefined;
-      let previousZoom: string | undefined;
-      let primaryError: unknown;
-      const cleanupErrors: unknown[] = [];
-      let zoomRestored = false;
-      let contextClosed = false;
-      let profileRemoved = false;
-      try {
-        zoomContext = await browser.browserType().launchPersistentContext(profilePath, {
-          channel: 'chrome',
-          headless: false,
-          args: ['--mute-audio'],
-          locale: 'ko-KR',
-          viewport: { width: 780, height: 720 },
+    }
+    cases.push(
+      await runCase('Y06-unsaved-conflict-narrow', async (result) => {
+        const recoveryState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
+        const recoveryContext = await browser.newContext({
+          locale: 'en-US',
+          viewport: { width: 390, height: 720 },
         });
-        const zoomState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
-        await installFixture(zoomContext, userscript, html, media, zoomState, 'ko');
-        const page = await openPage(zoomContext);
-        page.on('pageerror', (error) => pageErrors.push(error.message));
-        const baseline = await page.evaluate(() => ({ dpr: devicePixelRatio, width: innerWidth }));
-        settingsPage = await zoomContext.newPage();
-        await settingsPage.goto('chrome://settings/appearance');
-        const zoom = settingsPage.locator('select#zoomLevel');
-        previousZoom = await zoom.inputValue();
-        assert.equal(Number(previousZoom), 1, 'Owned Chrome profile did not start at 100% zoom');
-        await zoom.selectOption('2');
-        await page.bringToFront();
-        await page.waitForFunction(
-          (before) =>
-            Math.abs(devicePixelRatio / before.dpr - 2) < 0.02 &&
-            Math.abs(innerWidth / before.width - 0.5) < 0.02,
-          baseline,
-          { timeout: 10_000 }
-        );
-        await openSettings(page);
-        for (const tab of ['comments', 'colors', 'advanced', 'translation']) {
-          await page.locator(`${MODAL} #tab-${tab}`).click();
-          result.observations.push({ stage: `ko-200-${tab}`, state: await snapshot(page) });
-        }
-        const capture = await nativeZoomScreenshot(page, output, 'viewing-y06-ko-200-translation');
-        result.screenshots.push(capture.file);
-        result.observations.push({ screenshot: capture });
-        const [chooser] = await Promise.all([
-          page.waitForEvent('filechooser'),
-          page.locator(`${MODAL} button[data-action="import"]`).click(),
-        ]);
-        await chooser.setFiles({
-          name: 'invalid.json',
-          mimeType: 'application/json',
-          buffer: Buffer.from('{'),
-        });
-        await page
-          .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
-          .waitFor({ state: 'visible' });
-        result.observations.push({ stage: 'ko-200-import-failure', state: await snapshot(page) });
-        const importCapture = await nativeZoomScreenshot(page, output, 'viewing-y06-ko-200-import');
-        result.screenshots.push(importCapture.file);
-        result.observations.push({ screenshot: importCapture });
-        await page.locator(`${MODAL} button[data-action="reset"]`).click();
-        const reset = page.locator('dialog.yt-chat-overlay-settings-confirm');
-        await reset.waitFor({ state: 'visible' });
-        result.observations.push({
-          stage: 'ko-200-reset-confirm',
-          text: await reset.textContent(),
-          state: await snapshot(page),
-        });
-        await reset.locator('button.yt-chat-overlay-settings-confirm-cancel').click();
-        await page.locator(`${MODAL} select[name="translationService"]`).selectOption('off');
-        await page.locator(`${MODAL} input[name="translationEnabled"]`).check();
-        result.observations.push({
-          stage: 'ko-200-translation-inactive',
-          state: await snapshot(page),
-        });
-        await page.locator(`${MODAL} select[name="language"]`).selectOption('ja');
-        result.observations.push({ stage: 'ja-200-translation', state: await snapshot(page) });
-        const japaneseCapture = await nativeZoomScreenshot(
-          page,
-          output,
-          'viewing-y06-ja-200-translation'
-        );
-        result.screenshots.push(japaneseCapture.file);
-        result.observations.push({ screenshot: japaneseCapture });
-        await closeSettings(page);
-        const ids = await feed(page, 'zoom-ja-long', 5);
-        await waitForAnyRow(page, ids);
-        await exerciseConnectionFault({
-          page,
-          routeState: zoomState,
-          result,
-          stage: 'ja-200',
-          capture: async () => {
-            const capture = await nativeZoomScreenshot(page, output, 'viewing-y06-ja-200-fault');
-            result.observations.push({ screenshot: capture });
-            return capture.file;
-          },
-        });
-      } catch (error) {
-        primaryError = error;
-      } finally {
-        if (settingsPage && previousZoom) {
-          try {
-            await settingsPage.locator('select#zoomLevel').selectOption(previousZoom);
-            zoomRestored = true;
-          } catch (error) {
-            cleanupErrors.push(error);
-          }
-        }
         try {
-          await zoomContext?.close();
-          contextClosed = true;
-        } catch (error) {
-          cleanupErrors.push(error);
+          await installFixture(recoveryContext, userscript, html, media, recoveryState);
+          const page = await openPage(recoveryContext);
+          page.on('pageerror', (error) => pageErrors.push(error.message));
+          await openSettings(page);
+          await setNumber(page, 'fontSize', '44');
+          await page.evaluate(() => {
+            window.__ytViewingDenyWrites = true;
+          });
+          await closeSettings(page);
+          const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
+          await notice.locator('button').waitFor({ state: 'visible' });
+          result.observations.push({ stage: 'unsaved', state: await snapshot(page) });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y06-unsaved-narrow'));
+          const remote = await recoveryContext.newPage();
+          await remote.goto(WATCH_URL, { waitUntil: 'domcontentloaded' });
+          await remote.evaluate((key) => {
+            const previous = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<
+              string,
+              unknown
+            >;
+            localStorage.setItem(key, JSON.stringify({ ...previous, fontSize: 52 }));
+          }, SETTINGS_KEY);
+          await notice.locator('button').getByText('Save my values').waitFor({ state: 'visible' });
+          result.observations.push({ stage: 'conflict', state: await snapshot(page) });
+          result.screenshots.push(await screenshot(page, output, 'viewing-y06-conflict-narrow'));
+        } finally {
+          await recoveryContext.close();
         }
-        if (contextClosed) {
+      })
+    );
+    cases.push(
+      await runCase('Y06-real-200-percent-chrome', async (result) => {
+        const bundle: unknown = JSON.parse(await readFile(join(root, 'bundle.json'), 'utf8'));
+        assert(
+          bundle && typeof bundle === 'object' && 'mode' in bundle && bundle.mode === 'desktop'
+        );
+        const profilePath = await mkdtemp(join(root, 'yt-viewing-zoom-chrome-'));
+        let zoomContext: BrowserContext | undefined;
+        let settingsPage: Page | undefined;
+        let previousZoom: string | undefined;
+        let primaryError: unknown;
+        const cleanupErrors: unknown[] = [];
+        let zoomRestored = false;
+        let contextClosed = false;
+        let profileRemoved = false;
+        try {
+          zoomContext = await browser.browserType().launchPersistentContext(profilePath, {
+            channel: 'chrome',
+            headless: false,
+            args: ['--mute-audio'],
+            locale: 'ko-KR',
+            viewport: { width: 780, height: 720 },
+          });
+          const zoomState: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
+          await installFixture(zoomContext, userscript, html, media, zoomState, 'ko');
+          const page = await openPage(zoomContext);
+          page.on('pageerror', (error) => pageErrors.push(error.message));
+          const baseline = await page.evaluate(() => ({
+            dpr: devicePixelRatio,
+            width: innerWidth,
+          }));
+          settingsPage = await zoomContext.newPage();
+          await settingsPage.goto('chrome://settings/appearance');
+          const zoom = settingsPage.locator('select#zoomLevel');
+          previousZoom = await zoom.inputValue();
+          assert.equal(Number(previousZoom), 1, 'Owned Chrome profile did not start at 100% zoom');
+          await zoom.selectOption('2');
+          await page.bringToFront();
+          await page.waitForFunction(
+            (before) =>
+              Math.abs(devicePixelRatio / before.dpr - 2) < 0.02 &&
+              Math.abs(innerWidth / before.width - 0.5) < 0.02,
+            baseline,
+            { timeout: 10_000 }
+          );
+          await openSettings(page);
+          for (const tab of ['comments', 'colors', 'advanced', 'translation']) {
+            await page.locator(`${MODAL} #tab-${tab}`).click();
+            result.observations.push({ stage: `ko-200-${tab}`, state: await snapshot(page) });
+          }
+          const capture = await nativeZoomScreenshot(
+            page,
+            output,
+            'viewing-y06-ko-200-translation'
+          );
+          result.screenshots.push(capture.file);
+          result.observations.push({ screenshot: capture });
+          const [chooser] = await Promise.all([
+            page.waitForEvent('filechooser'),
+            page.locator(`${MODAL} button[data-action="import"]`).click(),
+          ]);
+          await chooser.setFiles({
+            name: 'invalid.json',
+            mimeType: 'application/json',
+            buffer: Buffer.from('{'),
+          });
+          await page
+            .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
+            .waitFor({ state: 'visible' });
+          result.observations.push({ stage: 'ko-200-import-failure', state: await snapshot(page) });
+          const importCapture = await nativeZoomScreenshot(
+            page,
+            output,
+            'viewing-y06-ko-200-import'
+          );
+          result.screenshots.push(importCapture.file);
+          result.observations.push({ screenshot: importCapture });
+          await page.locator(`${MODAL} button[data-action="reset"]`).click();
+          const reset = page.locator('dialog.yt-chat-overlay-settings-confirm');
+          await reset.waitFor({ state: 'visible' });
+          result.observations.push({
+            stage: 'ko-200-reset-confirm',
+            text: await reset.textContent(),
+            state: await snapshot(page),
+          });
+          await reset.locator('button.yt-chat-overlay-settings-confirm-cancel').click();
+          await page.locator(`${MODAL} select[name="translationService"]`).selectOption('off');
+          await page.locator(`${MODAL} input[name="translationEnabled"]`).check();
+          result.observations.push({
+            stage: 'ko-200-translation-inactive',
+            state: await snapshot(page),
+          });
+          await page.locator(`${MODAL} select[name="language"]`).selectOption('ja');
+          result.observations.push({ stage: 'ja-200-translation', state: await snapshot(page) });
+          const japaneseCapture = await nativeZoomScreenshot(
+            page,
+            output,
+            'viewing-y06-ja-200-translation'
+          );
+          result.screenshots.push(japaneseCapture.file);
+          result.observations.push({ screenshot: japaneseCapture });
+          await closeSettings(page);
+          const ids = await feed(page, 'zoom-ja-long', 5);
+          await waitForAnyRow(page, ids);
+          await exerciseConnectionFault({
+            page,
+            routeState: zoomState,
+            result,
+            stage: 'ja-200',
+            capture: async () => {
+              const capture = await nativeZoomScreenshot(page, output, 'viewing-y06-ja-200-fault');
+              result.observations.push({ screenshot: capture });
+              return capture.file;
+            },
+          });
+        } catch (error) {
+          primaryError = error;
+        } finally {
+          if (settingsPage && previousZoom) {
+            try {
+              await settingsPage.locator('select#zoomLevel').selectOption(previousZoom);
+              zoomRestored = true;
+            } catch (error) {
+              cleanupErrors.push(error);
+            }
+          }
           try {
-            assert(basename(profilePath).startsWith('yt-viewing-zoom-chrome-'));
-            await rm(profilePath, { recursive: true });
-            profileRemoved = true;
+            await zoomContext?.close();
+            contextClosed = true;
           } catch (error) {
             cleanupErrors.push(error);
           }
+          if (contextClosed) {
+            try {
+              assert(basename(profilePath).startsWith('yt-viewing-zoom-chrome-'));
+              await rm(profilePath, { recursive: true });
+              profileRemoved = true;
+            } catch (error) {
+              cleanupErrors.push(error);
+            }
+          }
         }
-      }
-      result.observations.push({ cleanup: { zoomRestored, contextClosed, profileRemoved } });
-      if (primaryError || cleanupErrors.length > 0) {
-        const failures = [...(primaryError ? [primaryError] : []), ...cleanupErrors];
-        throw new AggregateError(
-          failures,
-          `Owned Chrome zoom case or cleanup failed: ${failures.map(String).join(' | ')}`
-        );
-      }
-    })
-  );
+        result.observations.push({ cleanup: { zoomRestored, contextClosed, profileRemoved } });
+        if (primaryError || cleanupErrors.length > 0) {
+          const failures = [...(primaryError ? [primaryError] : []), ...cleanupErrors];
+          throw new AggregateError(
+            failures,
+            `Owned Chrome zoom case or cleanup failed: ${failures.map(String).join(' | ')}`
+          );
+        }
+      })
+    );
+  }
+  const notRun = nativeOnly
+    ? [
+        'Y04-live-controls',
+        'Y05-moving-video',
+        'Y06-en-narrow',
+        'Y06-ko-narrow',
+        'Y06-ja-narrow',
+        'Y06-ar-narrow',
+        'Y06-unsaved-conflict-narrow',
+        'Y06-real-200-percent-chrome',
+      ]
+    : [];
   const result = {
     checks: {
       sourceBoundMovingMedia: true,
       builtUserscriptFixture: true,
       sustainedViewingLifecycle: false,
       firstTimeHumanObservation: false,
-      humanReadabilityJudgment: 'pending-review',
+      humanReadabilityJudgment: nativeOnly ? 'not-run' : 'pending-review',
       nativeImeInput,
       spokenScreenReaderCheck: 'not-run',
       nativeYouTubeControls: 'not-run',
       installedApplication: false,
       liveYouTube: false,
       failedCases: cases.filter((entry) => entry.error).map((entry) => entry.id),
+      notRun,
       pageErrors,
     },
     observations: {
+      profileMode: nativeOnly ? 'native-ime-only' : 'full',
       mediaSha256: MEDIA,
       browserVersion: browser.version(),
       cases,
@@ -1762,6 +1815,13 @@ export async function runViewingExperienceFixture({
     },
   };
   await writeFile(join(output, 'viewing-experience.json'), JSON.stringify(result, null, 2));
+  if (nativeOnly) {
+    assert.equal(
+      nativeImeInput,
+      'verified',
+      'Native-only diagnostic did not verify native IME input'
+    );
+  }
   assert.equal(
     cases.filter((entry) => entry.error).length,
     0,

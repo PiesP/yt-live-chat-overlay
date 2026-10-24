@@ -118,7 +118,12 @@ paired readability observations before drawing Y-04/Y-05 usability conclusions.
 Installed-extension behavior, live YouTube, spoken screen-reader operation, and
 Japanese IME composition are separate evidence. Native Korean IME input is
 optional: add the ignored `validation/windows/inputs/viewing-experience-ime.json`
-with exactly `{"enabled":true}` beside the #327 selector. The native check opens
+with exactly `{"enabled":true}` beside the #327 selector. Setting exactly
+`{"enabled":true,"only":true}` runs a focused diagnostic with
+only the Y04 replay and native IME case. The report marks Y04 live, Y05, and
+all Y06 cases `not-run` and requires verified native input for success. Restore
+the full selector after this diagnostic when collecting the complete baseline.
+The native check opens
 its own temporary headed Chrome profile and reads that browser's PID through
 CDP. The bundled `native-ime.ps1` independently checks the process command line
 against the caller-owned profile path in the same interactive desktop session.
