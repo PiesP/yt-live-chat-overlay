@@ -6,13 +6,25 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { expect, type Browser, type Page } from '@playwright/test';
+import type { Browser, Page } from '@playwright/test';
 
 const WATCH_URL = 'https://www.youtube.com/watch?v=windowsAcceptance';
 const VIDEO_PATH = 'validation/windows/fixtures/autoplay-av.webm';
 const VIDEO_SHA256 = '38d4e4e22c8aa3712a75c92bc70d461e3d6d0568fb75a146dfec2b91bd1b9cfe';
 const RELOAD_BUTTON = '#yt-chat-overlay-reload-button';
 const CANVAS = '#yt-live-chat-overlay canvas';
+
+async function waitForHostState(
+  condition: () => boolean,
+  label: string,
+  timeoutMs: number
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`${label}: timed out after ${timeoutMs} ms`);
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+}
 
 async function snapshot(page: Page) {
   return page.evaluate(() => {
@@ -160,7 +172,7 @@ export async function runReloadFeedbackFixture({
     await page.locator(CANVAS).waitFor({ state: 'attached', timeout: 15_000 });
     await page.locator(RELOAD_BUTTON).waitFor({ state: 'attached' });
     await page.waitForFunction(() => Boolean(window.__ytChatOverlay));
-    await expect.poll(() => chatResponses, { timeout: 15_000 }).toBeGreaterThan(0);
+    await waitForHostState(() => chatResponses > 0, 'quiet chat response', 15_000);
 
     // Decode real media. A paused, seeked element lets the fixture check that
     // reload and standby preserve the native player rather than a mocked clock.
@@ -192,7 +204,7 @@ export async function runReloadFeedbackFixture({
     const responsesBeforeReload = chatResponses;
     holdChatRequests = true;
     await page.locator(RELOAD_BUTTON).click();
-    await expect.poll(() => heldChatRequest, { timeout: 10_000 }).toBe(true);
+    await waitForHostState(() => heldChatRequest, 'held reload request', 10_000);
     await record('pointer-held', page);
     await page.locator(RELOAD_BUTTON).focus();
     await page.keyboard.press('Enter');
@@ -201,9 +213,11 @@ export async function runReloadFeedbackFixture({
     await record('still-waiting-after-old-feedback-timer', page);
     holdChatRequests = false;
     releaseHeldChatRequest();
-    await expect
-      .poll(() => chatResponses, { timeout: 10_000 })
-      .toBeGreaterThan(responsesBeforeReload);
+    await waitForHostState(
+      () => chatResponses > responsesBeforeReload,
+      'released reload response',
+      10_000
+    );
     await record('quiet-after-release', page);
 
     await page.evaluate(() => {
