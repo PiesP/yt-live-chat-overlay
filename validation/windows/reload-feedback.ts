@@ -92,26 +92,31 @@ export async function runReloadFeedbackFixture({
           heldChatRequest = true;
           await heldChatGate;
         }
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          json: {
-            continuationContents: {
-              liveChatContinuation: {
-                actions: [],
-                continuations: [
-                  {
-                    timedContinuationData: {
-                      continuation: 'reload-fixture-next',
-                      timeoutMs: 30_000,
+        if (request.failure()) return;
+        try {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            json: {
+              continuationContents: {
+                liveChatContinuation: {
+                  actions: [],
+                  continuations: [
+                    {
+                      timedContinuationData: {
+                        continuation: 'reload-fixture-next',
+                        timeoutMs: 30_000,
+                      },
                     },
-                  },
-                ],
+                  ],
+                },
               },
             },
-          },
-        });
-        chatResponses++;
+          });
+          chatResponses++;
+        } catch (error) {
+          if (!request.failure()) throw error;
+        }
       } else {
         await route.fulfill({ status: 204 });
       }
