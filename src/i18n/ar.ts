@@ -52,6 +52,18 @@ export const AR: Record<string, string> = {
     'يوفر هذا المتصفح واجهة Translator API المضمنة. سيتم التحقق من توفر زوج اللغات والنموذج عند بدء الترجمة.',
   'translation.capabilityUnavailable':
     'لا يوفر هذا المتصفح واجهة Translator API المضمنة. سيتم الاحتفاظ بتفضيلك، لكن الترجمة ستظل غير نشطة هنا.',
+  'translation.stateOff': 'الترجمة متوقفة.',
+  'translation.stateServiceOff': 'الترجمة غير نشطة لأن الخدمة متوقفة.',
+  'translation.stateApiUnavailable':
+    'الترجمة غير نشطة: لا تتوفر واجهة Translator API في هذا المتصفح.',
+  'translation.stateWaitingSession': 'بانتظار بدء جلسة التراكب للتحقق من حالة الترجمة.',
+  'translation.statePreparing': 'جارٍ فحص الترجمة أو تجهيزها لزوج اللغات المحدد…',
+  'translation.stateDownloading': 'جارٍ تجهيز نموذج الترجمة (التنزيل {percent}٪)…',
+  'translation.stateActive': 'الترجمة نشطة للزوج {source} ← {target}.',
+  'translation.statePairUnavailable': 'الترجمة غير متاحة لزوج اللغات المحدد.',
+  'translation.stateNeedsAction':
+    'حظر المتصفح تجهيز الترجمة. حاول مجددًا من الإعدادات أو تحقق من أذونات المتصفح.',
+  'translation.stateFailed': 'فشل تجهيز الترجمة. غيّر أحد إعدادات الترجمة للمحاولة مجددًا.',
   'translation.serviceDesc': 'خدمة الترجمة الخلفية لمعالجة الرسائل',
 
   // ── Field labels ──

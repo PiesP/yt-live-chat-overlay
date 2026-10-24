@@ -29,6 +29,7 @@ import { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import type { ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@settings/schema';
+import type { TranslationRuntimeStatus } from '@translation/service';
 import { BacklogInjectionController } from '@util/backlog-controller';
 import { findElementMatch, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';
@@ -114,6 +115,7 @@ interface RuntimeManagerOptions {
   getCurrentUrl: () => string;
   getSettings: () => Readonly<OverlaySettings>;
   isValidPage: () => boolean;
+  onTranslationStatus?: (status: TranslationRuntimeStatus | null) => void;
 }
 
 interface DesiredRuntimeState {
@@ -139,6 +141,7 @@ export class RuntimeManager {
   private readonly getCurrentUrl: RuntimeManagerOptions['getCurrentUrl'];
   private readonly getSettings: RuntimeManagerOptions['getSettings'];
   private readonly isValidPage: RuntimeManagerOptions['isValidPage'];
+  private readonly onTranslationStatus: RuntimeManagerOptions['onTranslationStatus'];
   private reconcileRequested = false;
   /** When true, the next reconcile will always dispose the active session,
    *  even if the URL matches. Set by page-watcher on yt-navigate-finish
@@ -250,6 +253,7 @@ export class RuntimeManager {
     this.getCurrentUrl = options.getCurrentUrl;
     this.getSettings = options.getSettings;
     this.isValidPage = options.isValidPage;
+    this.onTranslationStatus = options.onTranslationStatus;
     this.standbyController = new StandbyController(
       () => this.abortController.signal,
       () => this.isDisposedState,
@@ -921,6 +925,7 @@ export class RuntimeManager {
 
     this.renderer?.destroy();
     this.renderer = null;
+    this.onTranslationStatus?.(null);
     this.standbyController.setRenderer(null);
 
     this.overlay?.destroy();
@@ -2029,6 +2034,11 @@ export class RuntimeManager {
    */
   private createRenderer(overlay: Overlay, settings: OverlaySettings): RendererBase {
     log.info('runtime.renderer.selected', { mode: 'canvas2d' });
-    return new CanvasRenderer(overlay, settings);
+    const generation = this.sessionGeneration;
+    return new CanvasRenderer(overlay, settings, (status) => {
+      if (generation === this.sessionGeneration && this.state !== 'destroyed') {
+        this.onTranslationStatus?.(status);
+      }
+    });
   }
 }

@@ -113,7 +113,7 @@ import {
 import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
-import { TranslationService } from '@translation/service';
+import { TranslationService, type TranslationRuntimeStatus } from '@translation/service';
 import { DensityIndicator } from '@util/density-indicator';
 import { statusBarLayout } from '@util/design-tokens';
 import { forEachSlot, SCREEN_READER_CSS } from '@util/dom';
@@ -206,6 +206,7 @@ export class CanvasRenderer extends RendererBase {
   /** Visually-hidden live region for connection status announcements. */
   private statusRegion: HTMLDivElement | null = null;
   private translationService: TranslationService;
+  private translationStatusUnsubscribe: (() => void) | null = null;
   private messageActivator: MessageActivator;
   private languageDetector: LanguageDetectorService | null = null;
   private channelMemory: ChannelLanguageMemory | null = null;
@@ -341,11 +342,19 @@ export class CanvasRenderer extends RendererBase {
   /** Last timestamp when updateLiveRegion was called, for throttling. */
   private lastLiveRegionUpdateRef = { value: 0 };
 
-  constructor(overlay: Overlay, settings: OverlaySettings) {
+  constructor(
+    overlay: Overlay,
+    settings: OverlaySettings,
+    onTranslationStatus?: (status: TranslationRuntimeStatus) => void
+  ) {
     super(overlay, settings);
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
+    if (onTranslationStatus) {
+      this.translationStatusUnsubscribe =
+        this.translationService.subscribeStatus(onTranslationStatus);
+    }
     if (settings.translationEnabled) {
       this.initializeSourceDetectionPipeline();
     }
@@ -2460,6 +2469,8 @@ export class CanvasRenderer extends RendererBase {
     this.pendingTranslations.length = 0;
     this.onBacklogPauseChange = null;
     this.onStatusBarClick = null;
+    this.translationStatusUnsubscribe?.();
+    this.translationStatusUnsubscribe = null;
     this.translationService.destroy();
     this.resetSourceDetection();
     this.languageDetector?.destroy();

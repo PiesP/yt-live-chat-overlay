@@ -16,6 +16,7 @@ import {
 } from '@settings/ui/form';
 import { PANES } from '@settings/ui/panes';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
+import type { TranslationRuntimeStatus } from '@translation/service';
 import {
   ensurePlayerPositioning,
   findPlayerContainerElement,
@@ -96,6 +97,10 @@ export class SettingsUi {
   syncForm(): void {
     if (!this.isDialogOpen()) return;
     this.form.populateForm(this.getSettings());
+  }
+
+  showTranslationStatus(status: TranslationRuntimeStatus | null): void {
+    this.form.setTranslationStatus(status);
   }
 
   constructor(
@@ -942,6 +947,7 @@ export class SettingsUi {
     this.reloadFeedbackState = 'idle';
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.form.destroy();
+    this.form.setTranslationStatus(null);
     this.modal?.close();
     this.modal?.remove();
     this.restoreDocumentLangDir();

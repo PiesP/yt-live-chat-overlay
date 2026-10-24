@@ -284,6 +284,17 @@ export const EN: Record<string, string> = {
     'This browser exposes the built-in Translator API. Language-pair and model availability will be checked when translation starts.',
   'translation.capabilityUnavailable':
     'This browser does not expose the built-in Translator API. Your preference is kept, but translation will stay inactive here.',
+  'translation.stateOff': 'Translation is off.',
+  'translation.stateServiceOff': 'Translation is inactive because Service is Off.',
+  'translation.stateApiUnavailable': 'Translation is inactive: this browser has no Translator API.',
+  'translation.stateWaitingSession': 'Waiting for an overlay session to check translation.',
+  'translation.statePreparing': 'Checking or preparing translation for the selected language pair…',
+  'translation.stateDownloading': 'Preparing translation model (download {percent}%)…',
+  'translation.stateActive': 'Translation active for {source} → {target}.',
+  'translation.statePairUnavailable': 'Translation unavailable for the selected language pair.',
+  'translation.stateNeedsAction':
+    'Browser blocked translation setup. Try again from settings or check browser permissions.',
+  'translation.stateFailed': 'Translation setup failed. Change a translation setting to retry.',
   'translation.displayMode': 'Display Mode',
   'translation.displayModeDesc':
     'Dual shows original above translation, Replace shows translation only',

@@ -17,6 +17,7 @@ import type {
 
 import { runReloadFeedbackFixture } from './reload-feedback.ts';
 import { runSettingsPersistenceFixture } from './settings-persistence.ts';
+import { runTranslationRuntimeFixture } from './translation-runtime.ts';
 
 type ChatRenderer = { id: string; [key: string]: unknown };
 type ChatAction = {
@@ -1471,7 +1472,7 @@ async function verifySustainedViewingLifecycle(
   };
 }
 
-type FocusedScenario = 'settings-persistence' | 'reload-feedback';
+type FocusedScenario = 'settings-persistence' | 'reload-feedback' | 'translation-runtime';
 
 async function hasScenarioSelector(root: string, scenario: FocusedScenario): Promise<boolean> {
   const path = join(root, 'validation/windows/inputs', `${scenario}.json`);
@@ -1493,9 +1494,14 @@ async function hasScenarioSelector(root: string, scenario: FocusedScenario): Pro
 export async function readFocusedScenario(root: string): Promise<FocusedScenario | null> {
   const settings = await hasScenarioSelector(root, 'settings-persistence');
   const reload = await hasScenarioSelector(root, 'reload-feedback');
-  assert(!(settings && reload), 'Focused Windows scenario selectors are mutually exclusive');
+  const translation = await hasScenarioSelector(root, 'translation-runtime');
+  assert(
+    Number(settings) + Number(reload) + Number(translation) <= 1,
+    'Focused Windows scenario selectors are mutually exclusive'
+  );
   if (settings) return 'settings-persistence';
   if (reload) return 'reload-feedback';
+  if (translation) return 'translation-runtime';
   return null;
 }
 
@@ -1538,6 +1544,14 @@ export async function run({
         output,
         userscript,
         gmMocks,
+        watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
+    if (selectedScenario === 'translation-runtime') {
+      return runTranslationRuntimeFixture({
+        browser,
+        output,
+        userscript,
         watchHtml: createMockWatchHtml(previewHtml),
       });
     }

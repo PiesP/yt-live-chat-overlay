@@ -52,6 +52,22 @@ export const ES: Record<string, string> = {
     'Este navegador ofrece la API Translator integrada. La disponibilidad del par de idiomas y del modelo se comprobará al iniciar la traducción.',
   'translation.capabilityUnavailable':
     'Este navegador no ofrece la API Translator integrada. Se conservará tu preferencia, pero la traducción permanecerá inactiva aquí.',
+  'translation.stateOff': 'La traducción está desactivada.',
+  'translation.stateServiceOff': 'La traducción está inactiva porque el servicio está desactivado.',
+  'translation.stateApiUnavailable':
+    'La traducción está inactiva: este navegador no tiene la API Translator.',
+  'translation.stateWaitingSession':
+    'Esperando una sesión de la superposición para comprobar la traducción.',
+  'translation.statePreparing':
+    'Comprobando o preparando la traducción para el par de idiomas elegido…',
+  'translation.stateDownloading': 'Preparando el modelo de traducción (descarga: {percent} %)…',
+  'translation.stateActive': 'Traducción activa para {source} → {target}.',
+  'translation.statePairUnavailable':
+    'La traducción no está disponible para el par de idiomas elegido.',
+  'translation.stateNeedsAction':
+    'El navegador bloqueó la preparación de la traducción. Reinténtalo desde la configuración o revisa los permisos.',
+  'translation.stateFailed':
+    'Falló la preparación de la traducción. Cambia un ajuste de traducción para reintentar.',
   'translation.serviceDesc': 'Servicio de traducción para procesar mensajes',
 
   // ── Field labels ──

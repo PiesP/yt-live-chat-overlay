@@ -50,6 +50,106 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('TranslationService runtime status', () => {
+  it('distinguishes preferences, missing API, unsupported pairs, and blocked setup', async () => {
+    const service = new TranslationService();
+    const seen: string[] = [];
+    const unsubscribe = service.subscribeStatus((status) => seen.push(status.phase));
+    await service.configure({ enabled: false, service: 'auto', source: 'en', target: 'ja' });
+    expect(service.getStatus()).toMatchObject({ phase: 'off', reason: 'disabled' });
+    await service.configure({ enabled: true, service: 'off', source: 'en', target: 'ja' });
+    expect(service.getStatus()).toMatchObject({ phase: 'off', reason: 'service-off' });
+    vi.stubGlobal('Translator', undefined);
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    expect(service.getStatus()).toMatchObject({ phase: 'unavailable', reason: 'api-unavailable' });
+
+    const availability = vi
+      .fn()
+      .mockResolvedValueOnce('unavailable')
+      .mockResolvedValue('available');
+    const blocked = Object.assign(new Error('blocked'), { name: 'NotAllowedError' });
+    const create = vi.fn().mockRejectedValue(blocked);
+    stubTranslator(create, availability);
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    expect(service.getStatus()).toMatchObject({ phase: 'unavailable', reason: 'pair-unavailable' });
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ko' });
+    expect(service.getStatus()).toMatchObject({ phase: 'needs-action', reason: 'blocked' });
+    expect(seen).toContain('preparing');
+    unsubscribe();
+    service.destroy();
+  });
+
+  it('reports actual model progress and only marks ready after create resolves', async () => {
+    const creation = deferred<TranslatorInstance>();
+    const monitor = new EventTarget();
+    const create = vi.fn((options: { monitor?: (target: EventTarget) => void }) => {
+      options.monitor?.(monitor);
+      return creation.promise;
+    });
+    stubTranslator(create, vi.fn().mockResolvedValue('downloadable'));
+    const service = new TranslationService();
+    const configuring = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ja',
+    });
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(service.getStatus()).toMatchObject({ phase: 'preparing', progressPercent: null });
+    monitor.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded: 0.4, total: 1 }));
+    expect(service.getStatus()).toMatchObject({ phase: 'downloading', progressPercent: 40 });
+    monitor.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded: 1, total: 1 }));
+    expect(service.getStatus()).toMatchObject({ phase: 'downloading', progressPercent: 100 });
+    creation.resolve(makeTranslator('ready'));
+    await configuring;
+    expect(service.getStatus()).toMatchObject({ phase: 'active', source: 'en', target: 'ja' });
+    expect(service.isActive).toBe(true);
+    service.destroy();
+  });
+
+  it('discards old-pair progress and readiness after reconfiguration or disable', async () => {
+    const oldCreation = deferred<TranslatorInstance>();
+    const oldMonitor = new EventTarget();
+    const oldTranslator = makeTranslator('old');
+    const newTranslator = makeTranslator('new');
+    const create = vi
+      .fn()
+      .mockImplementationOnce((options: { monitor?: (target: EventTarget) => void }) => {
+        options.monitor?.(oldMonitor);
+        return oldCreation.promise;
+      })
+      .mockResolvedValueOnce(newTranslator);
+    stubTranslator(create, vi.fn().mockResolvedValue('downloadable'));
+    const service = new TranslationService();
+    const old = service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const latest = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    oldMonitor.dispatchEvent(
+      Object.assign(new Event('downloadprogress'), { loaded: 0.8, total: 1 })
+    );
+    expect(service.getStatus()).toMatchObject({ phase: 'preparing', target: 'ko' });
+    await latest;
+    await old;
+    expect(service.getStatus()).toMatchObject({ phase: 'active', target: 'ko' });
+    oldMonitor.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded: 1, total: 1 }));
+    expect(service.getStatus()).toMatchObject({ phase: 'active', target: 'ko' });
+    oldCreation.resolve(oldTranslator);
+    await vi.waitFor(() => expect(oldTranslator.destroy).toHaveBeenCalledOnce());
+    await service.configure({ enabled: false, service: 'auto', source: 'en', target: 'ko' });
+    expect(service.getStatus()).toMatchObject({ phase: 'off', reason: 'disabled' });
+    oldMonitor.dispatchEvent(
+      Object.assign(new Event('downloadprogress'), { loaded: 0.5, total: 1 })
+    );
+    expect(service.getStatus()).toMatchObject({ phase: 'off', reason: 'disabled' });
+    service.destroy();
+  });
+});
+
 describe('TranslationService translator lifecycle', () => {
   it('reuses cached translations within a language pair and disposes the replaced translator', async () => {
     const oldTranslator = makeTranslator('old');

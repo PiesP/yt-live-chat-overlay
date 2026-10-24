@@ -790,6 +790,17 @@ export const SETTINGS_UI_STYLES = `
         border-inline-start-color: ${uiColors.warning};
         background: color-mix(in srgb, ${uiColors.warning} 10%, ${uiColors.background});
       }
+      .yt-chat-overlay-settings-runtime-status {
+        margin-block: ${spacing.sm}px;
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        line-height: 1.5;
+      }
+      .yt-chat-overlay-settings-runtime-status[data-phase="unavailable"],
+      .yt-chat-overlay-settings-runtime-status[data-phase="needs-action"],
+      .yt-chat-overlay-settings-runtime-status[data-phase="failed"] {
+        color: ${uiColors.warning};
+      }
       /* Range slider (dual: slider + number) */
       .yt-chat-overlay-settings-range {
         display: flex;

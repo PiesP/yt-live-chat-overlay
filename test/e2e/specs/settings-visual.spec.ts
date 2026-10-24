@@ -444,6 +444,10 @@ test.describe('Settings UI Visual', () => {
       await expect(capability).toContainText('preference is kept');
     }
     await expect(capability).not.toContainText(/ready/i);
+    const runtime = modal.locator('.yt-chat-overlay-settings-runtime-status');
+    await expect(runtime).toHaveAttribute('role', 'status');
+    await expect(runtime).toHaveAttribute('data-phase', 'off');
+    await expect(runtime).toContainText('Translation is off');
     await expect(modal.locator('input[name="translationEnabled"]')).toBeVisible();
     await expect(modal.locator('select[name="translationSource"]')).toBeVisible();
     await expect(modal.locator('select[name="translationTarget"]')).toBeVisible();
@@ -456,6 +460,7 @@ test.describe('Settings UI Visual', () => {
     await page.locator(`#${BUTTON_ID}`).click({ force: true });
     await modal.locator('#tab-translation').click();
     await expect(service).toHaveValue('off');
+    await expect(runtime).toHaveAttribute('data-phase', 'off');
   });
 
   test('author background controls expose defaults and persist a selected color', async ({
