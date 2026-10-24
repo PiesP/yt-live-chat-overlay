@@ -440,7 +440,8 @@ export class SettingsUi {
       this.reloadFeedbackState !== 'idle'
         ? this.reloadFeedbackState
         : (this.automaticRecoveryStatus ?? 'idle');
-    this.renderSettingsTooltip(state !== 'idle' || this.persistenceNotice !== null);
+    const suppressTooltips = state !== 'idle' || this.persistenceNotice !== null;
+    this.renderSettingsTooltip(suppressTooltips);
     const button = this.reloadButton;
     if (!button) return;
     const messageKey = {
@@ -465,14 +466,14 @@ export class SettingsUi {
     if (SettingsUi.supportsHints) {
       const tooltip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
       if (tooltip) tooltip.textContent = t('app.reload');
-      if (state === 'idle') {
+      if (!suppressTooltips) {
         button.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
       } else {
         button.removeAttribute('interestfor');
         if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
       }
     } else {
-      if (state === 'idle') {
+      if (!suppressTooltips) {
         button.title = t('app.reload');
       } else {
         button.removeAttribute('title');

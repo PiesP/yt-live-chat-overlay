@@ -1610,6 +1610,7 @@ export async function run({
         output,
         userscript,
         watchHtml: createMockWatchHtml(previewHtml),
+        readPrimaryGeometry: readPrimarySettingsGeometry,
       });
     }
     return runSettingsPersistenceFixture({

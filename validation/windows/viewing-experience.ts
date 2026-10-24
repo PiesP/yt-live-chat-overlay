@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, win32 } from 'node:path';
 import { promisify } from 'node:util';
 
-import type { Browser, BrowserContext, Page } from '@playwright/test';
+import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 
 import { mediaResponse } from './reload-feedback.ts';
 
@@ -27,6 +27,16 @@ const MEDIA = {
 } as const;
 type Scene = keyof typeof MEDIA;
 type Case = { id: string; observations: unknown[]; screenshots: string[]; error?: string };
+type PrimarySettingsGeometry = {
+  controlsVisible: boolean;
+  horizontalOverflow: boolean;
+  paneScrollTop: number;
+  pauseBesideEnabled: boolean;
+  pauseTarget: boolean;
+  pauseVisible: boolean;
+  sampleInsidePane: boolean;
+  sampleInsideStage: boolean;
+};
 type RouteState = {
   disconnected: boolean;
   faultStatus?: 403 | 503;
@@ -932,28 +942,49 @@ async function waitForAnyRow(page: Page, ids: string[]): Promise<void> {
 }
 
 async function assertNoticeTooltipClear(page: Page): Promise<unknown> {
+  const states = [];
+  for (const target of ['settings', 'reload'] as const) {
+    await page.locator(`#yt-chat-overlay-${target}-button`).focus();
+    const state = await page.evaluate(() => {
+      const settings = document.querySelector<HTMLButtonElement>(
+        '#yt-chat-overlay-settings-button'
+      );
+      const reload = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+      const notice = document.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-persistence-notice'
+      );
+      return {
+        focused: document.activeElement?.id ?? null,
+        settingsInterest: settings?.hasAttribute('interestfor') ?? false,
+        settingsTitle: settings?.hasAttribute('title') ?? false,
+        reloadInterest: reload?.hasAttribute('interestfor') ?? false,
+        reloadTitle: reload?.hasAttribute('title') ?? false,
+        noticeVisible: Boolean(notice && getComputedStyle(notice).display !== 'none'),
+        openTooltips: document.querySelectorAll(
+          '#yt-chat-overlay-settings-tooltip:popover-open, #yt-chat-overlay-reload-tooltip:popover-open'
+        ).length,
+      };
+    });
+    assert.equal(state.focused, `yt-chat-overlay-${target}-button`);
+    assert.equal(state.noticeVisible, true, 'Persistence notice was not visible');
+    assert.equal(state.settingsInterest, false, 'Settings tooltip remained enabled by notice');
+    assert.equal(state.settingsTitle, false, 'Settings title remained enabled by notice');
+    assert.equal(state.reloadInterest, false, 'Reload tooltip remained enabled by notice');
+    assert.equal(state.reloadTitle, false, 'Reload title remained enabled by notice');
+    assert.equal(state.openTooltips, 0, 'A tooltip obscured persistence notice');
+    states.push({ target, ...state });
+  }
   await page.locator('#yt-chat-overlay-settings-button').focus();
-  const state = await page.evaluate(() => {
-    const settings = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
-    const notice = document.querySelector<HTMLElement>(
-      '.yt-chat-overlay-settings-persistence-notice'
-    );
-    return {
-      settingsFocused: document.activeElement === settings,
-      settingsInterest: settings?.hasAttribute('interestfor') ?? false,
-      settingsTitle: settings?.hasAttribute('title') ?? false,
-      noticeVisible: Boolean(notice && getComputedStyle(notice).display !== 'none'),
-      openTooltips: document.querySelectorAll(
+  assert.equal(
+    await page
+      .locator(
         '#yt-chat-overlay-settings-tooltip:popover-open, #yt-chat-overlay-reload-tooltip:popover-open'
-      ).length,
-    };
-  });
-  assert.equal(state.settingsFocused, true, 'Settings focus was lost beside persistence notice');
-  assert.equal(state.noticeVisible, true, 'Persistence notice was not visible');
-  assert.equal(state.settingsInterest, false, 'Settings tooltip remained enabled by notice');
-  assert.equal(state.settingsTitle, false, 'Settings title remained enabled by notice');
-  assert.equal(state.openTooltips, 0, 'A tooltip obscured persistence notice');
-  return state;
+      )
+      .count(),
+    0,
+    'A tooltip reopened when Settings focus returned'
+  );
+  return states;
 }
 
 async function assertToastClearOfActions(page: Page, required: boolean): Promise<unknown> {
@@ -1388,12 +1419,14 @@ export async function runViewingExperienceFixture({
   output,
   userscript,
   watchHtml,
+  readPrimaryGeometry,
 }: {
   browser: Browser;
   root: string;
   output: string;
   userscript: string;
   watchHtml: string;
+  readPrimaryGeometry: (modal: Locator) => Promise<PrimarySettingsGeometry>;
 }) {
   const media = {} as Record<Scene, Buffer>;
   for (const scene of Object.keys(MEDIA) as Scene[]) {
@@ -1427,6 +1460,33 @@ export async function runViewingExperienceFixture({
             firstTimeHumanObserved: false,
           });
           await openSettings(page);
+          const modal = page.locator(MODAL);
+          await modal.evaluate(async (element) => {
+            await Promise.allSettled(
+              element.getAnimations().map((animation) => animation.finished)
+            );
+          });
+          for (const viewport of [
+            { width: 1280, height: 720 },
+            { width: 401, height: 592 },
+          ]) {
+            await page.setViewportSize(viewport);
+            const geometry = await readPrimaryGeometry(modal);
+            assert.equal(geometry.paneScrollTop, 0, 'Primary settings scrolled before editing');
+            assert.equal(
+              geometry.horizontalOverflow,
+              false,
+              'Primary settings overflow horizontally'
+            );
+            assert(geometry.controlsVisible, 'A primary settings control starts clipped');
+            assert(geometry.pauseVisible, 'Session pause starts clipped');
+            assert(geometry.pauseTarget, 'Session pause target is below 44 px');
+            assert(geometry.pauseBesideEnabled, 'Session pause is not beside Enabled');
+            assert(geometry.sampleInsidePane, 'The default opacity sample starts clipped');
+            assert(geometry.sampleInsideStage, 'The default sample overflows its preview stage');
+            result.observations.push({ stage: 'default-primary-geometry', viewport, geometry });
+          }
+          await page.setViewportSize({ width: 1280, height: 720 });
           await setNumber(page, 'fontSize', '26');
           await setNumber(page, 'opacity', '70', 0.7);
           result.observations.push({
@@ -1550,7 +1610,9 @@ export async function runViewingExperienceFixture({
           const preview = page.locator(
             `${MODAL} #pane-comments .yt-chat-overlay-settings-font-preview`
           );
-          await preview.scrollIntoViewIfNeeded();
+          await preview
+            .locator('.yt-chat-overlay-settings-font-preview-text')
+            .scrollIntoViewIfNeeded();
           const previewGeometry = await preview.evaluate((element) => {
             const pane = element.closest<HTMLElement>('#pane-comments');
             const stage = element.querySelector<HTMLElement>(
@@ -1559,28 +1621,59 @@ export async function runViewingExperienceFixture({
             const text = element.querySelector<HTMLElement>(
               '.yt-chat-overlay-settings-font-preview-text'
             );
-            if (!pane || !stage || !text) throw new Error('Adjusted preview DOM is incomplete');
+            const topZone = element.querySelector<HTMLElement>(
+              '.yt-chat-overlay-settings-font-preview-zone[data-preview-zone="top"]'
+            );
+            const bottomZone = element.querySelector<HTMLElement>(
+              '.yt-chat-overlay-settings-font-preview-zone[data-preview-zone="bottom"]'
+            );
+            if (!pane || !stage || !text || !topZone || !bottomZone)
+              throw new Error('Adjusted preview DOM is incomplete');
             const paneBounds = pane.getBoundingClientRect();
             const previewBounds = element.getBoundingClientRect();
+            const stageBounds = stage.getBoundingClientRect();
             const textBounds = text.getBoundingClientRect();
+            const topBounds = topZone.getBoundingClientRect();
+            const bottomBounds = bottomZone.getBoundingClientRect();
             return {
               paneScrollTop: pane.scrollTop,
-              previewVisible:
-                previewBounds.top >= paneBounds.top - 1 &&
-                previewBounds.bottom <= paneBounds.bottom + 1,
+              paneBounds: { top: paneBounds.top, bottom: paneBounds.bottom },
               previewBounds: { top: previewBounds.top, bottom: previewBounds.bottom },
+              stageBounds: { top: stageBounds.top, bottom: stageBounds.bottom },
               textBounds: { top: textBounds.top, bottom: textBounds.bottom },
+              topZoneBottom: topBounds.bottom,
+              bottomZoneTop: bottomBounds.top,
+              bottomFraction: bottomBounds.height / stageBounds.height,
               previewText: text.textContent,
               metrics: element.querySelector('[data-preview-metrics]')?.textContent ?? null,
             };
           });
-          assert(previewGeometry.previewVisible, 'Adjusted preview is outside the Comments pane');
           result.observations.push({
             stage: 'adjusted-preview',
             previewGeometry,
             state: await snapshot(page),
           });
           result.screenshots.push(await screenshot(page, output, 'viewing-y05-preview-adjusted'));
+          assert(previewGeometry.previewText, 'Adjusted preview text is missing');
+          assert(
+            previewGeometry.textBounds.top >= previewGeometry.paneBounds.top - 1 &&
+              previewGeometry.textBounds.bottom <= previewGeometry.paneBounds.bottom + 1,
+            'Adjusted preview text is outside the Comments pane'
+          );
+          assert(
+            previewGeometry.textBounds.top >= previewGeometry.stageBounds.top - 1 &&
+              previewGeometry.textBounds.bottom <= previewGeometry.stageBounds.bottom + 1,
+            'Adjusted preview text is outside its stage'
+          );
+          assert(
+            previewGeometry.textBounds.top >= previewGeometry.topZoneBottom - 1 &&
+              previewGeometry.textBounds.bottom <= previewGeometry.bottomZoneTop + 1,
+            'Adjusted preview text overlaps a safe zone'
+          );
+          assert(
+            Math.abs(previewGeometry.bottomFraction - 0.25) < 0.02,
+            'Adjusted bottom safe zone does not match the chosen 25%'
+          );
           await closeSettings(page);
           const adjustedIds = await feed(page, 'adjusted', 2);
           await waitForAnyRow(page, adjustedIds);

@@ -414,9 +414,12 @@ describe('SettingsUi', () => {
       expect(reloadButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-reload-tooltip');
       controller.showPersistenceState('unsaved');
       expect(settingsButton?.getAttribute('interestfor')).toBeNull();
+      expect(reloadButton?.getAttribute('interestfor')).toBeNull();
       expect(hideSettings).toHaveBeenCalledTimes(2);
+      expect(hideReload).toHaveBeenCalledTimes(2);
       controller.showPersistenceState('pending');
       expect(settingsButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-settings-tooltip');
+      expect(reloadButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-reload-tooltip');
     } finally {
       controller.destroy();
       hints.supportsHints = original;
@@ -519,13 +522,18 @@ describe('SettingsUi', () => {
     const controller = makeController({ onReload: vi.fn().mockResolvedValue(undefined) });
     await controller.attach();
     const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+    const reload = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
     controller.showPersistenceState('unsaved');
+    expect(button?.getAttribute('title')).toBeNull();
+    expect(reload?.getAttribute('title')).toBeNull();
     controller.showRuntimeRecoveryStatus('recovering');
     controller.showPersistenceState('saved');
     vi.advanceTimersByTime(2500);
     expect(button?.getAttribute('title')).toBeNull();
+    expect(reload?.getAttribute('title')).toBeNull();
     controller.showRuntimeRecoveryStatus(null);
     expect(button?.title).toBe('Chat overlay settings');
+    expect(reload?.title).toBe('Reload overlay');
     controller.destroy();
   });
 
