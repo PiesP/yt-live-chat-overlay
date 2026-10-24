@@ -11,6 +11,7 @@ import { parseGate } from './dependabot-apply.ts';
 const dir = fileURLToPath(new URL('.', import.meta.url));
 const head = 'a'.repeat(40);
 const other = 'b'.repeat(40);
+const consumerBase = 'c'.repeat(40);
 const repository = 'PiesP/yt-live-chat-overlay';
 const temporaryFixtures: string[] = [];
 after(() => {
@@ -33,7 +34,22 @@ function fixture(rules: Rule[]) {
   const output = join(root, 'output');
   const summary = join(root, 'summary');
   const envFile = join(root, 'env');
-  writeFileSync(plan, JSON.stringify(rules));
+  writeFileSync(
+    plan,
+    JSON.stringify([
+      ...rules,
+      {
+        match: 'git ls-remote origin refs/heads/master',
+        result: `${consumerBase}\trefs/heads/master`,
+      },
+      {
+        match: 'git ls-remote https://github.com/PiesP/browser-core.git refs/heads/master',
+        result: `${head}\trefs/heads/master`,
+      },
+      { match: 'git rev-parse origin/master', result: consumerBase },
+      { match: 'git -C packages/core rev-parse origin/master', result: head },
+    ])
+  );
   for (const path of [log, output, summary, envFile]) writeFileSync(path, '');
   const fake = `#!${process.execPath}
 const fs = require('node:fs');
@@ -83,6 +99,21 @@ function cli(file: string, mode: string, env: NodeJS.ProcessEnv) {
     env,
     encoding: 'utf8',
   });
+}
+
+function publicationEnv(f: ReturnType<typeof fixture>): NodeJS.ProcessEnv {
+  return {
+    ...f.env,
+    CORE_REPOSITORY: 'PiesP/browser-core',
+    CONSUMER_BASE_SHA: consumerBase,
+    CORE_MASTER_SHA: head,
+    CLASSIFIED_BASE_SHA: other,
+    CLASSIFIED_CONSUMER_BASE_SHA: consumerBase,
+    CLASSIFIED_CORE_SHA: head,
+    CLASSIFIED_CORE_MASTER_SHA: head,
+    CLASSIFIED_REMOTE_BRANCH_SHA: '',
+    CLASSIFIED_PR_NUMBER: '',
+  };
 }
 
 test('CLIs preserve child failures and stay inert on unrelated missing argv paths', () => {
@@ -250,10 +281,54 @@ test('prepare skips classification on a master push without a same-repository PR
   );
 });
 
+test('prepare skips a pure no-op but keeps an open PR eligible for reconciliation', () => {
+  for (const pr of ['', '12']) {
+    const f = fixture([
+      {
+        match: 'git ls-remote --heads origin automation/update-browser-core',
+        result: pr ? `${other}\trefs/heads/automation/update-browser-core` : '',
+      },
+      {
+        match: 'gh pr list',
+        result: pr
+          ? JSON.stringify([
+              {
+                number: 12,
+                headRepository: { nameWithOwner: repository },
+                isCrossRepository: false,
+              },
+            ])
+          : '[]',
+      },
+      { match: 'git fetch origin master', result: '' },
+      { match: 'git switch -C', result: '' },
+      { match: 'git config', result: '' },
+      { match: 'git rev-parse origin/master:packages/core', result: head },
+      { match: 'git clone', result: '' },
+      { match: 'git -C packages/core fetch', result: '' },
+      { match: `git -C packages/core cat-file -e ${head}^{commit}`, result: '' },
+      { match: `git -C packages/core merge-base --is-ancestor ${head} origin/master`, result: '' },
+      { match: `git -C packages/core merge-base --is-ancestor ${head} ${head}`, result: '' },
+    ]);
+    const result = cli('update-browser-core.ts', 'prepare', {
+      ...f.env,
+      CORE_REPOSITORY: 'PiesP/browser-core',
+      INPUT_CORE_SHA: head,
+      GITHUB_EVENT_NAME: 'workflow_dispatch',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const output = readFileSync(f.output, 'utf8');
+    assert.match(output, new RegExp(`ready=${Boolean(pr)}`));
+    assert.match(output, new RegExp(`consumer_base=${consumerBase}`));
+    assert.match(output, new RegExp(`open_pr=${Boolean(pr)}`));
+    assert.match(output, new RegExp(`pr_number=${pr}\\n`));
+  }
+});
+
 test('publish rejects invalid impact before any remote write', () => {
   const f = fixture([]);
   const result = cli('update-browser-core.ts', 'publish', {
-    ...f.env,
+    ...publicationEnv(f),
     CORE_SHA: head,
     CURRENT_CORE_SHA: other,
     CONSUMER_IMPACT: 'unknown',
@@ -263,6 +338,100 @@ test('publish rejects invalid impact before any remote write', () => {
   assert.deepEqual(f.calls(), []);
 });
 
+test('publication rejects changed or malformed classified identities before executing commands', () => {
+  const mismatches = [
+    { CLASSIFIED_BASE_SHA: head },
+    { CLASSIFIED_CONSUMER_BASE_SHA: other },
+    { CLASSIFIED_CORE_SHA: other },
+    { CLASSIFIED_CORE_MASTER_SHA: other },
+    { CLASSIFIED_REMOTE_BRANCH_SHA: other },
+    { CLASSIFIED_PR_NUMBER: '12' },
+    { CLASSIFIED_CORE_SHA: 'malformed' },
+  ];
+  for (const mismatch of mismatches) {
+    const f = fixture([]);
+    const result = cli('update-browser-core.ts', 'publish', {
+      ...publicationEnv(f),
+      CORE_SHA: head,
+      CURRENT_CORE_SHA: other,
+      CONSUMER_IMPACT: 'true',
+      ...mismatch,
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /changed after read-only classification|Invalid classified/);
+    assert.deepEqual(f.calls(), []);
+  }
+});
+
+test('publication rechecks live consumer and core masters before remote mutation', () => {
+  for (const changed of ['consumer', 'core']) {
+    const f = fixture([
+      {
+        match: 'git ls-remote origin refs/heads/master',
+        result: `${changed === 'consumer' ? other : consumerBase}\trefs/heads/master`,
+      },
+      {
+        match: 'git ls-remote https://github.com/PiesP/browser-core.git refs/heads/master',
+        result: `${changed === 'core' ? other : head}\trefs/heads/master`,
+      },
+    ]);
+    const result = cli('update-browser-core.ts', 'publish', {
+      ...publicationEnv(f),
+      CORE_SHA: head,
+      CURRENT_CORE_SHA: other,
+      CONSUMER_IMPACT: 'true',
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /changed before publication/);
+    assert.equal(
+      f.calls().some((call) => call.includes('git add') || call.includes('gh pr close')),
+      false
+    );
+  }
+});
+
+test('stale PR close requires the observed branch and PR head to remain unchanged', () => {
+  const prState = (prHead: string) =>
+    JSON.stringify({
+      state: 'open',
+      head: { sha: prHead, repo: { full_name: repository } },
+      base: { ref: 'master' },
+    });
+  for (const changed of ['none', 'branch', 'pr']) {
+    const f = fixture([
+      {
+        match: 'git ls-remote --heads origin automation/update-browser-core',
+        result: `${changed === 'branch' ? head : other}\trefs/heads/automation/update-browser-core`,
+      },
+      {
+        match: `gh api repos/${repository}/pulls/12`,
+        result: prState(changed === 'pr' ? head : other),
+      },
+      { match: 'gh pr close 12', result: '' },
+    ]);
+    const result = cli('update-browser-core.ts', 'publish', {
+      ...publicationEnv(f),
+      CORE_SHA: head,
+      CURRENT_CORE_SHA: other,
+      REMOTE_BRANCH_SHA: other,
+      CLASSIFIED_REMOTE_BRANCH_SHA: other,
+      OPEN_PR: '12',
+      CLASSIFIED_PR_NUMBER: '12',
+      CONSUMER_IMPACT: 'false',
+    });
+    if (changed === 'none') {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(f.calls().filter((call) => call.includes('gh pr close')).length, 1);
+    } else {
+      assert.notEqual(result.status, 0);
+      assert.equal(
+        f.calls().some((call) => call.includes('gh pr close')),
+        false
+      );
+    }
+  }
+});
+
 test('dry-run never closes a stale PR or publishes a changed gitlink', () => {
   for (const impact of ['false', 'true']) {
     const f = fixture([
@@ -270,7 +439,7 @@ test('dry-run never closes a stale PR or publishes a changed gitlink', () => {
       { match: 'git diff --quiet -- packages/core', code: 1 },
     ]);
     const result = cli('update-browser-core.ts', 'publish', {
-      ...f.env,
+      ...publicationEnv(f),
       CORE_SHA: head,
       CURRENT_CORE_SHA: other,
       OPEN_PR: '12',
@@ -297,9 +466,10 @@ test('publish summarizes an existing gitlink without remote mutation', () => {
     { match: 'git diff --quiet -- packages/core', result: '' },
   ]);
   const result = cli('update-browser-core.ts', 'publish', {
-    ...f.env,
+    ...publicationEnv(f),
     CORE_SHA: head,
     CURRENT_CORE_SHA: head,
+    CLASSIFIED_BASE_SHA: head,
     CONSUMER_IMPACT: 'true',
   });
   assert.equal(result.status, 0, result.stderr);
@@ -321,7 +491,7 @@ test('publish stops before push when the generated commit changes another file',
     { match: 'git diff --name-only origin/master...HEAD', result: 'packages/core\nREADME.md' },
   ]);
   const result = cli('update-browser-core.ts', 'publish', {
-    ...f.env,
+    ...publicationEnv(f),
     CORE_SHA: head,
     CURRENT_CORE_SHA: other,
     CONSUMER_IMPACT: 'true',
@@ -400,7 +570,7 @@ test('publish leases the branch and verifies the generated PR head before diagno
     { match: 'git rev-parse HEAD', result: other },
     { match: 'git diff --name-only origin/master...HEAD', result: 'packages/core' },
     {
-      match: `git push --set-upstream origin automation/update-browser-core --force-with-lease=refs/heads/automation/update-browser-core:${other}`,
+      match: `git -c credential.helper= -c credential.https://github.com.helper=!gh auth git-credential push --set-upstream origin automation/update-browser-core --force-with-lease=refs/heads/automation/update-browser-core:${other}`,
       result: '',
     },
     { match: 'gh pr edit 12', result: '' },
@@ -408,17 +578,19 @@ test('publish leases the branch and verifies the generated PR head before diagno
     { match: 'gh workflow run', result: '' },
   ]);
   const result = cli('update-browser-core.ts', 'publish', {
-    ...f.env,
+    ...publicationEnv(f),
     CORE_SHA: head,
     CURRENT_CORE_SHA: other,
     REMOTE_BRANCH_SHA: other,
     OPEN_PR: '12',
+    CLASSIFIED_REMOTE_BRANCH_SHA: other,
+    CLASSIFIED_PR_NUMBER: '12',
     CONSUMER_IMPACT: 'true',
     PREFLIGHT: 'true',
   });
   assert.equal(result.status, 0, result.stderr);
   const calls = f.calls();
-  const pushIndex = calls.findIndex((call) => call.includes('git push'));
+  const pushIndex = calls.findIndex((call) => call.includes('auth git-credential push'));
   const editIndex = calls.findIndex((call) => call.includes('gh pr edit'));
   const viewIndex = calls.findIndex((call) => call.includes('gh pr view'));
   const diagnosticIndex = calls.findIndex((call) => call.includes('gh workflow run'));
@@ -431,6 +603,37 @@ test('publish leases the branch and verifies the generated PR head before diagno
   assert.match(readFileSync(f.summary, 'utf8'), /- Auto-merge: not queued/);
 });
 
+test('a moved automation branch fails the push lease before PR edit', () => {
+  const f = fixture([
+    { match: `git -C packages/core checkout --detach ${head}`, result: '' },
+    { match: 'git diff --quiet -- packages/core', code: 1 },
+    { match: 'git add packages/core', result: '' },
+    { match: 'git commit -m', result: '' },
+    { match: 'git rev-parse HEAD', result: other },
+    { match: 'git diff --name-only origin/master...HEAD', result: 'packages/core' },
+    { match: 'auth git-credential push', code: 1 },
+  ]);
+  const result = cli('update-browser-core.ts', 'publish', {
+    ...publicationEnv(f),
+    CORE_SHA: head,
+    CURRENT_CORE_SHA: other,
+    REMOTE_BRANCH_SHA: other,
+    CLASSIFIED_REMOTE_BRANCH_SHA: other,
+    OPEN_PR: '12',
+    CLASSIFIED_PR_NUMBER: '12',
+    CONSUMER_IMPACT: 'true',
+  });
+  assert.notEqual(result.status, 0);
+  assert.equal(
+    f.calls().some((call) => call.includes('gh pr edit')),
+    false
+  );
+  assert.equal(
+    f.calls().some((call) => call.includes('gh pr create')),
+    false
+  );
+});
+
 test('publish fails closed when a PR head changes after the push', () => {
   const f = fixture([
     { match: `git -C packages/core checkout --detach ${head}`, result: '' },
@@ -439,15 +642,16 @@ test('publish fails closed when a PR head changes after the push', () => {
     { match: 'git commit -m', result: '' },
     { match: 'git rev-parse HEAD', result: other },
     { match: 'git diff --name-only origin/master...HEAD', result: 'packages/core' },
-    { match: 'git push', result: '' },
+    { match: 'auth git-credential push', result: '' },
     { match: 'gh pr edit 12', result: '' },
     { match: 'gh pr view 12', result: JSON.stringify({ headRefOid: head }) },
   ]);
   const result = cli('update-browser-core.ts', 'publish', {
-    ...f.env,
+    ...publicationEnv(f),
     CORE_SHA: head,
     CURRENT_CORE_SHA: other,
     OPEN_PR: '12',
+    CLASSIFIED_PR_NUMBER: '12',
     CONSUMER_IMPACT: 'true',
     PREFLIGHT: 'true',
   });
