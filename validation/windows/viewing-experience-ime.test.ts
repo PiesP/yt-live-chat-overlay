@@ -12,6 +12,7 @@ import {
   japaneseWordBehavior,
   japaneseModeRestored,
   japaneseCapsLockComparison,
+  japaneseIncompleteVerdicts,
   japaneseCompositionOpen,
   assertJapanesePlayerSpace,
   assertJapaneseShortcut,
@@ -240,6 +241,28 @@ test('Caps Lock restoration compares trusted browser key state and keeps gaps un
     ),
     'unverified'
   );
+});
+
+test('Japanese native verification requires every selected case to pass', () => {
+  const passed = Object.fromEntries(
+    ['JI-01', 'JI-02', 'JI-03', 'JI-04'].map((id) => [id, { status: 'Pass' as const }])
+  );
+  assert.deepEqual(japaneseIncompleteVerdicts(passed), []);
+  assert.deepEqual(
+    japaneseIncompleteVerdicts({
+      ...passed,
+      'JI-04': { status: 'Not run', reason: 'Caps Lock state unverified' },
+    }),
+    ['JI-04: Not run (Caps Lock state unverified)']
+  );
+  assert.deepEqual(japaneseIncompleteVerdicts({ ...passed, 'JI-02': { status: 'Fail' } }), [
+    'JI-02: Fail',
+  ]);
+  assert.deepEqual(japaneseIncompleteVerdicts({ 'JI-01': { status: 'Pass' } }), [
+    'JI-02: missing',
+    'JI-03: missing',
+    'JI-04: missing',
+  ]);
 });
 
 test('Japanese composing shortcut gate requires an open trusted composition', () => {

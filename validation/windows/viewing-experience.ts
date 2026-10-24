@@ -573,6 +573,18 @@ export function japaneseCapsLockComparison(
   return before === after ? 'same' : 'changed';
 }
 
+/** Every selected Japanese case must pass before the native run can claim verification. */
+export function japaneseIncompleteVerdicts(
+  verdicts: Record<string, { status: 'Pass' | 'Fail' | 'Not run'; reason?: string }>
+): string[] {
+  return (['JI-01', 'JI-02', 'JI-03', 'JI-04'] as const).flatMap((id) => {
+    const verdict = verdicts[id];
+    return verdict?.status === 'Pass'
+      ? []
+      : [`${id}: ${verdict?.status ?? 'missing'}${verdict?.reason ? ` (${verdict.reason})` : ''}`];
+  });
+}
+
 function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeImeSequence): void {
   assertNativeImeAction(action, sequence, false, true);
   const receipt = action.receipt as {
@@ -2073,6 +2085,10 @@ async function exerciseJapaneseIme(
     }
   } finally {
     result.observations.push({ stage: 'japanese-case-verdicts', verdicts });
+  }
+  const incomplete = japaneseIncompleteVerdicts(verdicts);
+  if (incomplete.length) {
+    errors.push(new Error(`Required Japanese evidence incomplete: ${incomplete.join('; ')}`));
   }
   if (errors.length) throw new AggregateError(errors, 'Japanese native IME cases failed');
 }
