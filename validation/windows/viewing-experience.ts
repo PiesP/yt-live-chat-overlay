@@ -931,6 +931,72 @@ async function waitForAnyRow(page: Page, ids: string[]): Promise<void> {
   );
 }
 
+async function assertNoticeTooltipClear(page: Page): Promise<unknown> {
+  await page.locator('#yt-chat-overlay-settings-button').focus();
+  const state = await page.evaluate(() => {
+    const settings = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+    const notice = document.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-persistence-notice'
+    );
+    return {
+      settingsFocused: document.activeElement === settings,
+      settingsInterest: settings?.hasAttribute('interestfor') ?? false,
+      settingsTitle: settings?.hasAttribute('title') ?? false,
+      noticeVisible: Boolean(notice && getComputedStyle(notice).display !== 'none'),
+      openTooltips: document.querySelectorAll(
+        '#yt-chat-overlay-settings-tooltip:popover-open, #yt-chat-overlay-reload-tooltip:popover-open'
+      ).length,
+    };
+  });
+  assert.equal(state.settingsFocused, true, 'Settings focus was lost beside persistence notice');
+  assert.equal(state.noticeVisible, true, 'Persistence notice was not visible');
+  assert.equal(state.settingsInterest, false, 'Settings tooltip remained enabled by notice');
+  assert.equal(state.settingsTitle, false, 'Settings title remained enabled by notice');
+  assert.equal(state.openTooltips, 0, 'A tooltip obscured persistence notice');
+  return state;
+}
+
+async function assertToastClearOfActions(page: Page, required: boolean): Promise<unknown> {
+  const state = await page.evaluate(() => {
+    const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+    const toast = modal?.querySelector<HTMLElement>('.yt-chat-overlay-settings-toast');
+    const importButton = modal?.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-actions button[data-action="import"]'
+    );
+    if (!modal || !toast || !importButton) return null;
+    const toastBounds = toast.getBoundingClientRect();
+    const modalBounds = modal.getBoundingClientRect();
+    const buttons = Array.from(
+      modal.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-actions button')
+    );
+    const buttonBounds = buttons.map((button) => button.getBoundingClientRect());
+    return {
+      importFocused: document.activeElement === importButton,
+      toastBounds: { top: toastBounds.top, bottom: toastBounds.bottom },
+      buttonsVisible: buttonBounds.every(
+        (bounds) =>
+          bounds.top >= modalBounds.top - 1 &&
+          bounds.bottom <= modalBounds.bottom + 1 &&
+          bounds.bottom <= innerHeight + 1
+      ),
+      overlapsButtons: buttonBounds.some(
+        (bounds) =>
+          toastBounds.left < bounds.right &&
+          toastBounds.right > bounds.left &&
+          toastBounds.top < bounds.bottom &&
+          toastBounds.bottom > bounds.top
+      ),
+    };
+  });
+  if (required) assert(state, 'Import toast disappeared before layout capture');
+  if (state) {
+    assert.equal(state.importFocused, true, 'Import focus was lost with toast visible');
+    assert.equal(state.buttonsVisible, true, 'Footer actions moved outside the visible modal');
+    assert.equal(state.overlapsButtons, false, 'Import toast obscured a footer action');
+  }
+  return state;
+}
+
 async function exerciseConnectionFault({
   page,
   routeState,
@@ -1891,11 +1957,13 @@ export async function runViewingExperienceFixture({
               await localPage
                 .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
                 .waitFor({ state: 'visible' });
+              await localPage.locator(`${MODAL} button[data-action="import"]`).focus();
               result.observations.push({
                 stage: 'import-failure',
                 toast: await localPage
                   .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
                   .textContent(),
+                toastLayout: await assertToastClearOfActions(localPage, true),
                 state: await snapshot(localPage),
               });
               result.screenshots.push(
@@ -1958,7 +2026,11 @@ export async function runViewingExperienceFixture({
           await closeSettings(page);
           const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
           await notice.locator('button').waitFor({ state: 'visible' });
-          result.observations.push({ stage: 'unsaved', state: await snapshot(page) });
+          result.observations.push({
+            stage: 'unsaved',
+            tooltipState: await assertNoticeTooltipClear(page),
+            state: await snapshot(page),
+          });
           result.screenshots.push(await screenshot(page, output, 'viewing-y06-unsaved-narrow'));
           const remote = await recoveryContext.newPage();
           await remote.goto(WATCH_URL, { waitUntil: 'domcontentloaded' });
@@ -1970,7 +2042,11 @@ export async function runViewingExperienceFixture({
             localStorage.setItem(key, JSON.stringify({ ...previous, fontSize: 52 }));
           }, SETTINGS_KEY);
           await notice.locator('button').getByText('Save my values').waitFor({ state: 'visible' });
-          result.observations.push({ stage: 'conflict', state: await snapshot(page) });
+          result.observations.push({
+            stage: 'conflict',
+            tooltipState: await assertNoticeTooltipClear(page),
+            state: await snapshot(page),
+          });
           result.screenshots.push(await screenshot(page, output, 'viewing-y06-conflict-narrow'));
         } finally {
           await recoveryContext.close();
@@ -2046,7 +2122,12 @@ export async function runViewingExperienceFixture({
           await page
             .locator(`${MODAL} .yt-chat-overlay-settings-toast`)
             .waitFor({ state: 'visible' });
-          result.observations.push({ stage: 'ko-200-import-failure', state: await snapshot(page) });
+          await page.locator(`${MODAL} button[data-action="import"]`).focus();
+          result.observations.push({
+            stage: 'ko-200-import-failure',
+            toastLayout: await assertToastClearOfActions(page, true),
+            state: await snapshot(page),
+          });
           const importCapture = await nativeZoomScreenshot(
             page,
             output,
@@ -2070,7 +2151,12 @@ export async function runViewingExperienceFixture({
             state: await snapshot(page),
           });
           await page.locator(`${MODAL} select[name="language"]`).selectOption('ja');
-          result.observations.push({ stage: 'ja-200-translation', state: await snapshot(page) });
+          await page.locator(`${MODAL} button[data-action="import"]`).focus();
+          result.observations.push({
+            stage: 'ja-200-translation',
+            toastLayout: await assertToastClearOfActions(page, false),
+            state: await snapshot(page),
+          });
           const japaneseCapture = await nativeZoomScreenshot(
             page,
             output,

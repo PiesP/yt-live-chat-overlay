@@ -257,7 +257,10 @@ export class SettingsUi {
     this.persistenceNoticeTimer = clearSafeTimeout(this.persistenceNoticeTimer);
     this.persistenceNotice?.remove();
     this.persistenceNotice = null;
-    if (state === 'pending' || !this.playerElement || (state === 'saved' && !hadNotice)) return;
+    if (state === 'pending' || !this.playerElement || (state === 'saved' && !hadNotice)) {
+      this.renderReloadFeedback();
+      return;
+    }
     this.recoveryFeedbackPending = false;
 
     const notice = document.createElement('div');
@@ -298,11 +301,13 @@ export class SettingsUi {
     }
     this.playerElement.appendChild(notice);
     this.persistenceNotice = notice;
+    this.renderReloadFeedback();
     if (state === 'saved') {
       this.persistenceNoticeTimer = setTimeout(() => {
         notice.remove();
         if (this.persistenceNotice === notice) this.persistenceNotice = null;
         this.persistenceNoticeTimer = null;
+        this.renderReloadFeedback();
       }, TOAST_DURATION_MS);
     }
   }
@@ -411,13 +416,33 @@ export class SettingsUi {
     this.reloadFeedbackTimer = clearSafeTimeout(this.reloadFeedbackTimer);
   }
 
-  private renderReloadFeedback(): void {
-    const button = this.reloadButton;
+  private renderSettingsTooltip(suppress: boolean): void {
+    const button = this.button;
     if (!button) return;
+    if (SettingsUi.supportsHints) {
+      const tooltip = document.getElementById(SettingsUi.SETTINGS_TOOLTIP_ID);
+      if (tooltip) tooltip.textContent = t('app.settings');
+      if (suppress) {
+        button.removeAttribute('interestfor');
+        if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
+      } else {
+        button.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
+      }
+    } else if (suppress) {
+      button.removeAttribute('title');
+    } else {
+      button.title = t('app.settings');
+    }
+  }
+
+  private renderReloadFeedback(): void {
     const state =
       this.reloadFeedbackState !== 'idle'
         ? this.reloadFeedbackState
         : (this.automaticRecoveryStatus ?? 'idle');
+    this.renderSettingsTooltip(state !== 'idle' || this.persistenceNotice !== null);
+    const button = this.reloadButton;
+    if (!button) return;
     const messageKey = {
       idle: 'app.reload',
       pending: 'app.reloadPending',
@@ -438,25 +463,18 @@ export class SettingsUi {
     if (this.reloadPending) button.setAttribute('aria-busy', 'true');
     else button.removeAttribute('aria-busy');
     if (SettingsUi.supportsHints) {
-      const settingsTooltip = document.getElementById(SettingsUi.SETTINGS_TOOLTIP_ID);
-      if (settingsTooltip) settingsTooltip.textContent = t('app.settings');
       const tooltip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
       if (tooltip) tooltip.textContent = t('app.reload');
       if (state === 'idle') {
-        this.button?.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
         button.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
       } else {
-        this.button?.removeAttribute('interestfor');
         button.removeAttribute('interestfor');
-        if (settingsTooltip?.matches(':popover-open')) settingsTooltip.hidePopover();
         if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
       }
     } else {
       if (state === 'idle') {
-        if (this.button) this.button.title = t('app.settings');
         button.title = t('app.reload');
       } else {
-        this.button?.removeAttribute('title');
         button.removeAttribute('title');
       }
     }
@@ -944,7 +962,9 @@ export class SettingsUi {
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
     toast.textContent = message;
-    this.modal.appendChild(toast);
+    const footer = this.modal.querySelector('.yt-chat-overlay-settings-actions-wrapper');
+    if (footer) footer.prepend(toast);
+    else this.modal.appendChild(toast);
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       toast.remove();

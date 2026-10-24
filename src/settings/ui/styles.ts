@@ -808,17 +808,17 @@ export const SETTINGS_UI_STYLES = `
       }
       /* Toast notification */
       .yt-chat-overlay-settings-toast {
-        position: absolute;
-        bottom: 60px;
-        left: 50%;
-        transform: translateX(-50%);
+        box-sizing: border-box;
+        max-height: min(96px, 20dvh);
+        margin-bottom: ${spacing.xs}px;
+        overflow-y: auto;
+        overflow-wrap: anywhere;
         background: ${TOAST_BG};
         color: ${uiColors.text};
         font: ${TOAST_FONT};
         padding: ${TOAST_PADDING};
         border-radius: ${borderRadius.sm};
-        z-index: 2;
-        pointer-events: none;
+        pointer-events: auto;
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
       }
       .yt-chat-overlay-settings-capability {
