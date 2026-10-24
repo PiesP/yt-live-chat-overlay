@@ -98,11 +98,17 @@ Create the ignored `validation/windows/inputs/viewing-experience.json` with exac
 The common `yt-visual` profile then uses fresh controlled userscript pages for
 Y-04 live and replay controls, Y-05 matched chat on moving media in normal,
 theater, and fullscreen fixture modes, and Y-06 narrow localized recovery
-states. A separate owned Chrome profile sets the real page zoom to 200% through
-Chrome Settings, captures the resulting viewport with CDP `Page.captureScreenshot`
-without a Playwright clip, restores zoom, closes Chrome, and removes that owned
-profile. The output is one `viewing-experience.json` with bounded case records
-and at most 32 decisive PNGs. Failure cases remain recorded in the JSON.
+states. Readability frames wait for decoded video to advance after matched chat
+is admitted, so moving text reaches the picture rather than only its edge. The
+controlled Y-06 fault uses a nonretryable HTTP 403 after healthy chat, records
+fault requests and the actual connection UI, then exercises a product recovery
+control after restoring the route. If the disconnected action never appears,
+the case fails with its observed status preserved. A separate owned Chrome
+profile sets the real page zoom to 200% through Chrome Settings, captures the
+resulting viewport with CDP `Page.captureScreenshot` without a Playwright clip,
+restores zoom, closes Chrome, and removes that owned profile. The output is one
+`viewing-experience.json` with bounded case records and at most 32 decisive PNGs.
+Failure cases remain recorded in the JSON.
 
 The runner follows scripted control paths and records geometry, media state,
 accessible chat IDs, focus, labels, and screenshots. It does not measure how a
@@ -112,12 +118,14 @@ paired readability observations before drawing Y-04/Y-05 usability conclusions.
 Installed-extension behavior, live YouTube, spoken screen-reader operation, and
 Japanese IME composition are separate evidence. Native Korean IME input is
 optional: add the ignored `validation/windows/inputs/viewing-experience-ime.json`
-with exactly `{"enabled":true}` beside the #327 selector. The Windows runner binds
-the headed browser PID and exact `--user-data-dir` through CDP, then calls the
-bundled `native-ime.ps1` in the same interactive desktop session. It records
-native action receipts, trusted composition start/update/end events and actual
-`한글` text. Ctrl+Space is tried first in the focused textarea, where the overlay
-must stay active, and then on the focused player, where it must pause and resume.
+with exactly `{"enabled":true}` beside the #327 selector. The native check opens
+its own temporary headed Chrome profile and reads that browser's PID through
+CDP. The bundled `native-ime.ps1` independently checks the process command line
+against the caller-owned profile path in the same interactive desktop session.
+It records native action receipts, trusted composition start/update/end events,
+and actual `한글` text. Ctrl+Space is tried first in the focused textarea, where
+the overlay must stay active, and then on the focused player, where it must
+pause and resume.
 Both shortcuts must leave video playing at each observed step. A final native
 word probe compares observed input behavior with the initial Korean-layout
 probe; receipts verify HKL restoration and balanced toggle actions, but do not

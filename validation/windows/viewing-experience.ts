@@ -29,6 +29,9 @@ type Scene = keyof typeof MEDIA;
 type Case = { id: string; observations: unknown[]; screenshots: string[]; error?: string };
 type RouteState = {
   disconnected: boolean;
+  faultStatus?: 403 | 503;
+  faultRequests?: number;
+  healthyPollRequests?: number;
   servedIds: string[];
   mediaRanges: string[];
   replayBatch?: string;
@@ -82,7 +85,14 @@ export async function readViewingImeSelection(root: string): Promise<boolean> {
   return true;
 }
 
-async function ownedBrowserIdentity(browser: Browser): Promise<{ pid: number; profile: string }> {
+async function ownedBrowserIdentity(
+  browser: Browser,
+  profile: string
+): Promise<{ pid: number; profile: string }> {
+  assert(
+    win32.isAbsolute(profile) && win32.basename(profile).startsWith('yt-viewing-ime-chrome-'),
+    'Native IME requires the dedicated owned Chrome profile'
+  );
   const session = await browser.newBrowserCDPSession();
   try {
     const processInfo = await session.send('SystemInfo.getProcessInfo');
@@ -92,21 +102,6 @@ async function ownedBrowserIdentity(browser: Browser): Promise<{ pid: number; pr
     assert(
       typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 && pid <= 0xffffffff,
       'Invalid browser PID'
-    );
-    const commandLine = await session.send('Browser.getBrowserCommandLine');
-    const profiles: string[] = [];
-    for (const [index, arg] of commandLine.arguments.entries()) {
-      if (arg.toLowerCase().startsWith('--user-data-dir=')) {
-        profiles.push(arg.slice('--user-data-dir='.length));
-      } else if (arg.toLowerCase() === '--user-data-dir') {
-        profiles.push(commandLine.arguments[index + 1] ?? '');
-      }
-    }
-    assert.equal(profiles.length, 1, 'Browser must expose one user-data-dir');
-    const profile = profiles[0];
-    assert(
-      profile && win32.isAbsolute(profile),
-      'Browser profile must be an absolute Windows path'
     );
     return { pid, profile };
   } finally {
@@ -384,8 +379,12 @@ async function installFixture(
     }
     if (url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')) {
       if (state.disconnected) {
-        await route.fulfill({ status: 503, body: 'Controlled disconnection' });
+        state.faultRequests = (state.faultRequests ?? 0) + 1;
+        await route.fulfill({ status: state.faultStatus ?? 503, body: 'Controlled disconnection' });
         return;
+      }
+      if (!url.searchParams.has('fixture-batch')) {
+        state.healthyPollRequests = (state.healthyPollRequests ?? 0) + 1;
       }
       const replay = url.pathname.endsWith('get_live_chat_replay');
       let batch = url.searchParams.get('fixture-batch');
@@ -580,6 +579,29 @@ async function assertVideoAdvances(page: Page): Promise<void> {
   );
 }
 
+async function waitForMovingChatFrame(page: Page): Promise<void> {
+  const start = await page.evaluate(() => {
+    const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+    return video?.currentTime ?? -1;
+  });
+  assert(start >= 0, 'Owned moving video is unavailable');
+  await page.waitForFunction(
+    (before) => {
+      const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+      if (!video || video.paused || video.readyState < 2 || !Number.isFinite(video.duration)) {
+        return false;
+      }
+      const advanced =
+        video.currentTime >= before
+          ? video.currentTime - before
+          : video.currentTime + video.duration - before;
+      return advanced >= 2.2;
+    },
+    start,
+    { timeout: 8_000 }
+  );
+}
+
 async function openSettings(page: Page, tab = 'comments'): Promise<void> {
   await page.locator('#movie_player').hover();
   await page.locator('#yt-chat-overlay-settings-button').click();
@@ -639,6 +661,80 @@ async function waitForAnyRow(page: Page, ids: string[]): Promise<void> {
     ids,
     { timeout: 10_000 }
   );
+}
+
+async function exerciseConnectionFault({
+  page,
+  routeState,
+  result,
+  stage,
+  capture,
+}: {
+  page: Page;
+  routeState: RouteState;
+  result: Case;
+  stage: string;
+  capture: () => Promise<string>;
+}): Promise<void> {
+  routeState.faultStatus = 403;
+  routeState.disconnected = true;
+  const statusAction = page.locator('#yt-chat-overlay-status-action');
+  try {
+    await statusAction.waitFor({ state: 'visible', timeout: 18_000 });
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+  }
+  const actionVisible = await statusAction.isVisible();
+  const status = await page.evaluate(() => {
+    const action = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+    const region = document.querySelector<HTMLElement>('#yt-live-chat-overlay [role="status"]');
+    return {
+      actionText: action?.textContent ?? null,
+      actionLabel: action?.getAttribute('aria-label') ?? null,
+      actionDisplay: action ? getComputedStyle(action).display : null,
+      liveRegion: region?.textContent ?? null,
+    };
+  });
+  result.observations.push({
+    stage: `${stage}-fault`,
+    requestedHttpStatus: 403,
+    faultRequests: routeState.faultRequests ?? 0,
+    actionVisible,
+    status,
+    state: await snapshot(page),
+  });
+  result.screenshots.push(await capture());
+  assert((routeState.faultRequests ?? 0) > 0, 'Controlled chat fault was never requested');
+
+  const recoveryAction = actionVisible ? 'status-action' : 'reload-button';
+  if (!actionVisible) await page.locator('#movie_player').hover();
+  const recovery = page.locator(
+    actionVisible ? '#yt-chat-overlay-status-action' : '#yt-chat-overlay-reload-button'
+  );
+  const healthyResponse = page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat') &&
+        !url.searchParams.has('fixture-batch') &&
+        response.status() === 200
+      );
+    },
+    { timeout: 12_000 }
+  );
+  routeState.disconnected = false;
+  await Promise.all([healthyResponse, recovery.click({ timeout: 12_000 })]);
+  const recoveredIds = await feed(page, `${stage}-recovered`, 1);
+  await waitForAnyRow(page, recoveredIds);
+  result.observations.push({
+    stage: `${stage}-recovery`,
+    action: recoveryAction,
+    faultRequests: routeState.faultRequests ?? 0,
+    healthyPollRequests: routeState.healthyPollRequests ?? 0,
+    recoveredIds,
+    state: await snapshot(page),
+  });
+  assert(actionVisible, 'The real disconnected status action did not become visible');
 }
 
 async function snapshot(page: Page): Promise<unknown> {
@@ -1005,8 +1101,9 @@ export async function runViewingExperienceFixture({
             await setScene(baselinePage, scene);
             const ids = await feed(baselinePage, `low-${scene}`, 2);
             await waitForAnyRow(baselinePage, ids);
+            await waitForMovingChatFrame(baselinePage);
             result.observations.push({
-              stage: `${scene}-normal-default`,
+              stage: `${scene}-normal-default-mid`,
               ids,
               state: await snapshot(baselinePage),
             });
@@ -1021,6 +1118,7 @@ export async function runViewingExperienceFixture({
         await page.locator('#yt-viewing-theater').click();
         const highIds = await feed(page, 'high-theater', 12);
         await waitForAnyRow(page, highIds);
+        await waitForMovingChatFrame(page);
         result.observations.push({
           stage: 'detailed-theater-high',
           state: await snapshot(page),
@@ -1050,11 +1148,12 @@ export async function runViewingExperienceFixture({
         await closeSettings(page);
         const adjustedIds = await feed(page, 'adjusted', 2);
         await waitForAnyRow(page, adjustedIds);
+        await waitForMovingChatFrame(page);
         result.observations.push({
           stage: 'adjusted-video',
           adjustedIds,
           state: await snapshot(page),
-          pairedWith: 'detailed-normal-default',
+          pairedWith: 'detailed-normal-default-mid',
         });
         result.screenshots.push(await screenshot(page, output, 'viewing-y05-video-adjusted'));
 
@@ -1076,6 +1175,7 @@ export async function runViewingExperienceFixture({
         await closeSettings(page);
         const translatedIds = await feed(page, 'translated', 5);
         await waitForAnyRow(page, translatedIds);
+        await waitForMovingChatFrame(page);
         result.observations.push({
           stage: 'translated-chat-over-video',
           translatedIds,
@@ -1099,13 +1199,27 @@ export async function runViewingExperienceFixture({
     replayBatch: 'replay',
     replayRequests: [],
   };
-  const replayContext = await browser.newContext({
-    locale: 'en-US',
-    viewport: { width: 1280, height: 720 },
-  });
+  const nativeReplayProfile =
+    imeRequested && process.platform === 'win32'
+      ? await mkdtemp(join(root, 'yt-viewing-ime-chrome-'))
+      : null;
+  let replayContext: BrowserContext | undefined;
   try {
-    await installFixture(replayContext, userscript, html, media, replayState);
-    const replayPage = await openPage(replayContext, true);
+    replayContext = nativeReplayProfile
+      ? await browser.browserType().launchPersistentContext(nativeReplayProfile, {
+          channel: 'chrome',
+          headless: false,
+          args: ['--mute-audio'],
+          locale: 'en-US',
+          viewport: { width: 1280, height: 720 },
+        })
+      : await browser.newContext({
+          locale: 'en-US',
+          viewport: { width: 1280, height: 720 },
+        });
+    const activeReplayContext = replayContext;
+    await installFixture(activeReplayContext, userscript, html, media, replayState);
+    const replayPage = await openPage(activeReplayContext, true);
     const replayConsole: string[] = [];
     replayPage.on('pageerror', (error) => pageErrors.push(error.message));
     replayPage.on('console', (message) => {
@@ -1181,7 +1295,10 @@ export async function runViewingExperienceFixture({
             .getAttribute('tabindex');
           try {
             await prepareViewingImeCheckpoint(replayPage);
-            const identity = await ownedBrowserIdentity(browser);
+            assert(nativeReplayProfile, 'Native IME profile was not created');
+            const replayBrowser = activeReplayContext.browser();
+            assert(replayBrowser, 'Native IME browser is unavailable');
+            const identity = await ownedBrowserIdentity(replayBrowser, nativeReplayProfile);
             const current = await runNativeImeAction({
               page: replayPage,
               root,
@@ -1333,7 +1450,10 @@ export async function runViewingExperienceFixture({
       })
     );
   } finally {
-    await replayContext.close();
+    if (replayContext) {
+      await replayContext.close();
+      if (nativeReplayProfile) await rm(nativeReplayProfile, { recursive: true, force: true });
+    }
   }
   for (const language of [
     { id: 'en', locale: 'en-US' },
@@ -1413,19 +1533,13 @@ export async function runViewingExperienceFixture({
           await closeSettings(localPage);
           const ids = await feed(localPage, `localized-${language.id}`, 5);
           await waitForAnyRow(localPage, ids);
-          localState.disconnected = true;
-          await localPage
-            .locator('#yt-chat-overlay-status-action')
-            .waitFor({ state: 'visible', timeout: 30_000 });
-          result.observations.push({
-            stage: 'disconnected-long-localized',
-            state: await snapshot(localPage),
-            served: localState.servedIds,
-            statusAction: await localPage.locator('#yt-chat-overlay-status-action').textContent(),
+          await exerciseConnectionFault({
+            page: localPage,
+            routeState: localState,
+            result,
+            stage: `${language.id}-narrow`,
+            capture: () => screenshot(localPage, output, `viewing-y06-${language.id}-fault`),
           });
-          result.screenshots.push(
-            await screenshot(localPage, output, `viewing-y06-${language.id}-disconnected`)
-          );
         })
       );
     } finally {
@@ -1558,21 +1672,17 @@ export async function runViewingExperienceFixture({
         await closeSettings(page);
         const ids = await feed(page, 'zoom-ja-long', 5);
         await waitForAnyRow(page, ids);
-        zoomState.disconnected = true;
-        await page
-          .locator('#yt-chat-overlay-status-action')
-          .waitFor({ state: 'visible', timeout: 30_000 });
-        result.observations.push({
-          stage: 'ja-200-disconnected-long',
-          state: await snapshot(page),
-        });
-        const disconnectedCapture = await nativeZoomScreenshot(
+        await exerciseConnectionFault({
           page,
-          output,
-          'viewing-y06-ja-200-disconnected'
-        );
-        result.screenshots.push(disconnectedCapture.file);
-        result.observations.push({ screenshot: disconnectedCapture });
+          routeState: zoomState,
+          result,
+          stage: 'ja-200',
+          capture: async () => {
+            const capture = await nativeZoomScreenshot(page, output, 'viewing-y06-ja-200-fault');
+            result.observations.push({ screenshot: capture });
+            return capture.file;
+          },
+        });
       } catch (error) {
         primaryError = error;
       } finally {
