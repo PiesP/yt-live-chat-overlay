@@ -1517,7 +1517,8 @@ type FocusedScenario =
   | 'settings-persistence'
   | 'reload-feedback'
   | 'translation-runtime'
-  | 'viewing-experience';
+  | 'viewing-experience'
+  | 'japanese-ime';
 
 async function hasScenarioSelector(root: string, scenario: FocusedScenario): Promise<boolean> {
   const path = join(root, 'validation/windows/inputs', `${scenario}.json`);
@@ -1541,14 +1542,21 @@ export async function readFocusedScenario(root: string): Promise<FocusedScenario
   const reload = await hasScenarioSelector(root, 'reload-feedback');
   const translation = await hasScenarioSelector(root, 'translation-runtime');
   const viewing = await hasScenarioSelector(root, 'viewing-experience');
+  const japaneseIme = await hasScenarioSelector(root, 'japanese-ime');
   assert(
-    Number(settings) + Number(reload) + Number(translation) + Number(viewing) <= 1,
+    Number(settings) +
+      Number(reload) +
+      Number(translation) +
+      Number(viewing) +
+      Number(japaneseIme) <=
+      1,
     'Focused Windows scenario selectors are mutually exclusive'
   );
   if (settings) return 'settings-persistence';
   if (reload) return 'reload-feedback';
   if (translation) return 'translation-runtime';
   if (viewing) return 'viewing-experience';
+  if (japaneseIme) return 'japanese-ime';
   return null;
 }
 
@@ -1603,7 +1611,7 @@ export async function run({
         watchHtml: createMockWatchHtml(previewHtml),
       });
     }
-    if (selectedScenario === 'viewing-experience') {
+    if (selectedScenario === 'viewing-experience' || selectedScenario === 'japanese-ime') {
       return runViewingExperienceFixture({
         browser,
         root,
@@ -1611,6 +1619,7 @@ export async function run({
         userscript,
         watchHtml: createMockWatchHtml(previewHtml),
         readPrimaryGeometry: readPrimarySettingsGeometry,
+        japaneseIme: selectedScenario === 'japanese-ime',
       });
     }
     return runSettingsPersistenceFixture({
