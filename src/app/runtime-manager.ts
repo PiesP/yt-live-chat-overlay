@@ -2064,7 +2064,7 @@ export class RuntimeManager {
   }
 
   private clearRecoveryWhenHealthy(): void {
-    if (this.recoveryStatus?.phase !== 'recovering') return;
+    if (this.recoveryStatus === null) return;
     if (this.recoveryStatus.url !== this.getCurrentUrl()) return;
     if (this.standbyController.isStandby() || this.computeConnectionStatus() === 'connected') {
       this.clearRecoveryStatus();

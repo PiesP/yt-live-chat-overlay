@@ -19,7 +19,7 @@ export const KO: Record<string, string> = {
   'status.disconnected': '연결 끊김 — 클릭하여 새로고침',
   'status.waiting': '라이브 스트림 대기 중…',
   'app.reloadPending': '오버레이를 다시 시작하는 중…',
-  'app.recoveryInProgress': '오버레이를 복구하는 중… 동영상은 계속 재생됩니다.',
+  'app.recoveryInProgress': '오버레이를 복구하는 중… 동영상 재생 상태는 바뀌지 않습니다.',
   'app.reloadWaiting': '계속 다시 시작하는 중입니다. 완료되지 않으면 페이지를 새로고침하세요.',
   'app.reloadRequested': '다시 시작 시도가 끝났습니다. 오버레이 상태를 확인하세요.',
   'app.reloadFailed': '오버레이를 다시 시작하지 못했습니다. 버튼을 눌러 다시 시도하세요.',

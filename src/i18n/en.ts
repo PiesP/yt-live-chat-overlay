@@ -271,7 +271,7 @@ export const EN: Record<string, string> = {
   'status.unstable': 'Connection unstable',
   'status.waiting': 'Waiting for live stream…',
   'app.reloadPending': 'Restarting overlay…',
-  'app.recoveryInProgress': 'Recovering overlay… Video keeps playing.',
+  'app.recoveryInProgress': 'Recovering overlay… Video playback is unchanged.',
   'app.reloadWaiting': 'Still restarting. If this does not finish, refresh the page.',
   'app.reloadRequested': 'Restart attempt ended. Check overlay status.',
   'app.reloadFailed': 'Could not restart overlay. Select reload to try again.',
