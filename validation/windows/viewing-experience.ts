@@ -1241,9 +1241,9 @@ async function exercisePauseButton(
     );
     if (verifyDisableEnable) {
       assert(storedBefore, 'Original persisted settings are unavailable');
-      const storedSettings: unknown = JSON.parse(storedBefore);
+      const originalSettings: unknown = JSON.parse(settingsBefore);
       assert(
-        storedSettings && typeof storedSettings === 'object' && !Array.isArray(storedSettings)
+        originalSettings && typeof originalSettings === 'object' && !Array.isArray(originalSettings)
       );
       const assertStoredEnabled = async (expectedEnabled: boolean): Promise<void> => {
         await page.waitForFunction(
@@ -1263,10 +1263,19 @@ async function exercisePauseButton(
         );
         const stored = await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY);
         assert(stored, 'Persisted settings disappeared after changing comment availability');
+        const storedSettings: unknown = JSON.parse(stored);
+        assert(
+          storedSettings && typeof storedSettings === 'object' && '_version' in storedSettings
+        );
+        const { _version: version, ...storedValues } = storedSettings;
+        assert(
+          typeof version === 'number' && Number.isInteger(version) && version > 0,
+          'Committed settings have no schema version'
+        );
         assert.deepEqual(
-          canonicalSettingsForPauseComparison(stored),
+          canonicalSettingsForPauseComparison(JSON.stringify(storedValues)),
           canonicalSettingsForPauseComparison(
-            JSON.stringify({ ...storedSettings, enabled: expectedEnabled })
+            JSON.stringify({ ...originalSettings, enabled: expectedEnabled })
           ),
           'Changing comment availability persisted another setting'
         );
@@ -1279,7 +1288,11 @@ async function exercisePauseButton(
         return button?.disabled === true;
       });
       assert.equal(await button.getAttribute('aria-pressed'), 'false');
-      await assertStoredEnabled(false);
+      assert.equal(
+        await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY),
+        storedBefore,
+        'Disabling comments wrote storage before the settings dialog closed'
+      );
       assert.notEqual(
         await button.evaluate((node) => document.activeElement === node),
         true,
@@ -1287,13 +1300,22 @@ async function exercisePauseButton(
       );
       result.observations.push({ stage: 'pause-comments-disabled', state: await snapshot(page) });
       await assertVideoAdvances(page);
+      await closeSettings(page);
+      await assertStoredEnabled(false);
+      await openSettings(page);
+      assert.equal(await button.isEnabled(), false);
+      const storedDisabled = await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY);
       await enabled.click();
       await page.waitForFunction(() => {
         const button = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
         return button?.disabled === false;
       });
       assert.equal(await button.getAttribute('aria-pressed'), 'false');
-      await assertStoredEnabled(true);
+      assert.equal(
+        await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY),
+        storedDisabled,
+        'Re-enabling comments wrote storage before the settings dialog closed'
+      );
       assert.deepEqual(
         canonicalSettingsForPauseComparison(
           await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.()))
@@ -1301,6 +1323,10 @@ async function exercisePauseButton(
         canonicalSettingsForPauseComparison(settingsBefore),
         'Disable and re-enable changed another setting'
       );
+      await closeSettings(page);
+      await assertStoredEnabled(true);
+      await openSettings(page);
+      assert.equal(await button.isEnabled(), true);
       await button.focus();
       assert(await button.evaluate((node) => document.activeElement === node));
       result.observations.push({ stage: 'pause-comments-reenabled', state: await snapshot(page) });
@@ -1308,10 +1334,11 @@ async function exercisePauseButton(
     }
   } finally {
     if (verifyDisableEnable) {
+      if (!(await page.locator(MODAL).isVisible())) await openSettings(page);
       const enabled = page.locator(`${MODAL} input[name="enabled"]`);
       if ((await enabled.count()) && !(await enabled.isChecked())) await enabled.click();
     }
-    await closeSettings(page);
+    if (await page.locator(MODAL).isVisible()) await closeSettings(page);
   }
 }
 
