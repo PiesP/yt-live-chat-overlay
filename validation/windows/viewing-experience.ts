@@ -108,6 +108,9 @@ type NativeImeStage =
   | 'japanese-player-shortcut'
   | 'japanese-player-space'
   | 'japanese-player-space-resume'
+  | 'japanese-after-pause'
+  | 'japanese-toggle-after-pause'
+  | 'japanese-toggle-confirm-after-pause'
   | 'japanese-mode-probe'
   | 'japanese-mode-restore'
   | 'japanese-restored-probe';
@@ -562,6 +565,29 @@ export function japaneseModeRestored(
   return (
     initial !== 'unknown' && probe.sequence === 'JapaneseCurrent' && probe.behavior === initial
   );
+}
+
+/** Restoration alone does not prove that Japanese conversion survived the Pause actions. */
+export function japaneseNativeBehaviorVerdict(
+  postPauseBehavior: ReturnType<typeof japaneseWordBehavior>,
+  modeRestored: boolean,
+  capsLockComparison: 'same' | 'changed' | 'unverified'
+): { status: 'Pass' | 'Fail' | 'Not run'; reason?: string } {
+  if (postPauseBehavior !== 'converted-japanese') {
+    return { status: 'Fail', reason: 'A committed Japanese word after Pause was not observed.' };
+  }
+  if (!modeRestored) {
+    return { status: 'Fail', reason: 'The original observed input mode was not restored.' };
+  }
+  if (capsLockComparison === 'changed') {
+    return { status: 'Fail', reason: 'Browser-observed Caps Lock state changed.' };
+  }
+  return capsLockComparison === 'same'
+    ? { status: 'Pass' }
+    : {
+        status: 'Not run',
+        reason: 'Caps Lock preservation was not observable in native key events.',
+      };
 }
 
 /** Compare browser-observed Caps Lock state on native word keys, never helper-thread state. */
@@ -1214,6 +1240,37 @@ async function exercisePauseButton(
       'Session pause wrote settings storage'
     );
     if (verifyDisableEnable) {
+      assert(storedBefore, 'Original persisted settings are unavailable');
+      const storedSettings: unknown = JSON.parse(storedBefore);
+      assert(
+        storedSettings && typeof storedSettings === 'object' && !Array.isArray(storedSettings)
+      );
+      const assertStoredEnabled = async (expectedEnabled: boolean): Promise<void> => {
+        await page.waitForFunction(
+          ({ key, enabled }) => {
+            const serialized = localStorage.getItem(key);
+            if (!serialized) return false;
+            const settings: unknown = JSON.parse(serialized);
+            return (
+              settings !== null &&
+              typeof settings === 'object' &&
+              'enabled' in settings &&
+              settings.enabled === enabled
+            );
+          },
+          { key: SETTINGS_KEY, enabled: expectedEnabled },
+          { timeout: 5_000 }
+        );
+        const stored = await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY);
+        assert(stored, 'Persisted settings disappeared after changing comment availability');
+        assert.deepEqual(
+          canonicalSettingsForPauseComparison(stored),
+          canonicalSettingsForPauseComparison(
+            JSON.stringify({ ...storedSettings, enabled: expectedEnabled })
+          ),
+          'Changing comment availability persisted another setting'
+        );
+      };
       const enabled = page.locator(`${MODAL} input[name="enabled"]`);
       assert(await enabled.isChecked(), 'Comments unexpectedly start disabled');
       await enabled.click();
@@ -1222,6 +1279,7 @@ async function exercisePauseButton(
         return button?.disabled === true;
       });
       assert.equal(await button.getAttribute('aria-pressed'), 'false');
+      await assertStoredEnabled(false);
       assert.notEqual(
         await button.evaluate((node) => document.activeElement === node),
         true,
@@ -1235,6 +1293,7 @@ async function exercisePauseButton(
         return button?.disabled === false;
       });
       assert.equal(await button.getAttribute('aria-pressed'), 'false');
+      await assertStoredEnabled(true);
       assert.deepEqual(
         canonicalSettingsForPauseComparison(
           await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.()))
@@ -2096,6 +2155,25 @@ async function exerciseJapaneseIme(
         await page.locator('#yt-viewing-ime-input').evaluate((node) => {
           (node as HTMLTextAreaElement).hidden = false;
         });
+        let postPauseBehavior: ReturnType<typeof japaneseWordBehavior> = 'unknown';
+        try {
+          const postPause = await convertedWord('textarea', {
+            selection: 'japanese-after-pause',
+            toggle: 'japanese-toggle-after-pause',
+            confirmation: 'japanese-toggle-confirm-after-pause',
+          });
+          assert.equal(postPause.state.overlayPaused, false);
+          assert.equal(postPause.state.videoPaused, false);
+          await assertVideoAdvances(page);
+          postPauseBehavior = japaneseWordBehavior(postPause.state, 'textarea');
+        } catch (error) {
+          errors.push(error);
+          result.observations.push({
+            stage: 'japanese-after-pause-incomplete',
+            reason: String(error),
+          });
+        }
+        // Attempt the original observed mode even when the post-Pause composition failed.
         await resetViewingImeTrace(page, true);
         const unforced = await act('JapaneseCurrent', 'japanese-mode-probe', 'textarea', true);
         let finalCapsState = unforced.state;
@@ -2141,16 +2219,18 @@ async function exerciseJapaneseIme(
           restorationRequested,
           finalUnforcedBehavior: finalBehavior,
           capsLockComparison,
+          postPauseBehavior,
           tsfFlagsObserved: false,
         });
         assert.notEqual(capsLockComparison, 'changed', 'Browser-observed Caps Lock state changed');
-        verdicts['JI-04'] =
-          capsLockComparison === 'same'
-            ? { status: 'Pass' }
-            : {
-                status: 'Not run',
-                reason: 'Caps Lock preservation was not observable in native key events.',
-              };
+        verdicts['JI-04'] = japaneseNativeBehaviorVerdict(
+          postPauseBehavior,
+          japaneseModeRestored(initialBehavior, {
+            sequence: 'JapaneseCurrent',
+            behavior: finalBehavior,
+          }),
+          capsLockComparison
+        );
       } catch (error) {
         verdicts['JI-04'] = { status: 'Fail', reason: String(error) };
         errors.push(error);

@@ -13,6 +13,7 @@ import {
   assertJapaneseToggleProbeAllowed,
   canonicalSettingsForPauseComparison,
   japaneseModeRestored,
+  japaneseNativeBehaviorVerdict,
   japaneseCapsLockComparison,
   japaneseIncompleteVerdicts,
   japaneseCompositionOpen,
@@ -162,6 +163,28 @@ test('pause settings comparison only ignores valid hex color letter case', () =>
   assert.notDeepEqual(
     canonicalSettingsForPauseComparison('{"colors":{"normal":"NotHex"}}'),
     canonicalSettingsForPauseComparison('{"colors":{"normal":"nothex"}}')
+  );
+});
+
+test('Japanese native behavior needs a converted word after Pause independently of mode restoration', () => {
+  const restoredDirectMode = japaneseModeRestored('direct-latin', {
+    sequence: 'JapaneseCurrent',
+    behavior: 'direct-latin',
+  });
+  assert.equal(
+    japaneseNativeBehaviorVerdict('direct-latin', restoredDirectMode, 'same').status,
+    'Fail'
+  );
+  assert.equal(japaneseNativeBehaviorVerdict('unknown', restoredDirectMode, 'same').status, 'Fail');
+  assert.equal(
+    japaneseNativeBehaviorVerdict('converted-japanese', restoredDirectMode, 'same').status,
+    'Pass'
+  );
+  assert.equal(japaneseNativeBehaviorVerdict('converted-japanese', false, 'same').status, 'Fail');
+  assert.equal(japaneseNativeBehaviorVerdict('converted-japanese', true, 'changed').status, 'Fail');
+  assert.equal(
+    japaneseNativeBehaviorVerdict('converted-japanese', true, 'unverified').status,
+    'Not run'
   );
 });
 
