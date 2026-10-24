@@ -44,6 +44,18 @@ async function snapshot(page: Page) {
       videoPaused: video?.paused ?? null,
       videoTime: video ? Math.round(video.currentTime * 1000) / 1000 : null,
       videoReadyState: video?.readyState ?? null,
+      videoDuration: video?.duration ?? null,
+      videoSeeking: video?.seeking ?? null,
+      videoEnded: video?.ended ?? null,
+      videoNetworkState: video?.networkState ?? null,
+      videoErrorCode: video?.error?.code ?? null,
+      videoCurrentSrc: video?.currentSrc ?? null,
+      videoSeekable: video
+        ? Array.from({ length: video.seekable.length }, (_, index) => ({
+            start: video.seekable.start(index),
+            end: video.seekable.end(index),
+          }))
+        : null,
     };
   });
 }
@@ -76,6 +88,7 @@ export async function runReloadFeedbackFixture({
   const timeline: { phase: string; state: Awaited<ReturnType<typeof snapshot>> }[] = [];
   let chatRequests = 0;
   let chatResponses = 0;
+  const mediaRequests: { method: string; range: string | null; resourceType: string }[] = [];
   let heldChatRequest = false;
   let holdChatRequests = false;
   let releaseHeldChatRequest: () => void = () => {};
@@ -94,6 +107,13 @@ export async function runReloadFeedbackFixture({
       if (url.hostname === 'www.youtube.com' && request.resourceType() === 'document') {
         await route.fulfill({ status: 200, contentType: 'text/html', body: watchHtml });
       } else if (url.hostname === 'www.youtube.com' && url.pathname === '/reload-fixture.webm') {
+        if (mediaRequests.length < 8) {
+          mediaRequests.push({
+            method: request.method(),
+            range: request.headers()['range'] ?? null,
+            resourceType: request.resourceType(),
+          });
+        }
         await route.fulfill({ status: 200, contentType: 'video/webm', body: video });
       } else if (
         url.hostname === 'www.youtube.com' &&
@@ -176,6 +196,7 @@ export async function runReloadFeedbackFixture({
 
     // Decode real media. A paused, seeked element lets the fixture check that
     // reload and standby preserve the native player rather than a mocked clock.
+    phase = 'media-play-requested';
     await page.evaluate(async () => {
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
       if (!video) throw new Error('Fixture video is missing');
@@ -188,6 +209,8 @@ export async function runReloadFeedbackFixture({
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
       return Boolean(video && video.readyState >= 2 && video.currentTime > 0.05);
     });
+    await record('media-positive-progress', page);
+    phase = 'media-seek-requested';
     await page.evaluate(() => {
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
       if (!video) throw new Error('Fixture video is missing');
@@ -195,10 +218,16 @@ export async function runReloadFeedbackFixture({
       video.currentTime = 0.8;
       video.dataset.reloadFixtureIdentity = 'original';
     });
-    await page.waitForFunction(() => {
-      const video = document.querySelector<HTMLVideoElement>('#movie_player video');
-      return Boolean(video && video.paused && Math.abs(video.currentTime - 0.8) < 0.15);
-    });
+    await record('media-seek-immediate', page);
+    phase = 'media-seek-wait';
+    await page.waitForFunction(
+      () => {
+        const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+        return Boolean(video && video.paused && Math.abs(video.currentTime - 0.8) < 0.15);
+      },
+      undefined,
+      { timeout: 10_000 }
+    );
     await page.locator('#movie_player').hover();
     await record('quiet-before', page);
     const responsesBeforeReload = chatResponses;
@@ -278,7 +307,16 @@ export async function runReloadFeedbackFixture({
     await writeFile(
       join(output, 'reload-feedback-error.json'),
       JSON.stringify(
-        { phase, error: String(error), chatRequests, chatResponses, pageErrors, timeline },
+        {
+          phase,
+          error: String(error),
+          chatRequests,
+          chatResponses,
+          mediaRequests,
+          nativeVideo: page ? await snapshot(page).catch(() => null) : null,
+          pageErrors,
+          timeline,
+        },
         null,
         2
       )
