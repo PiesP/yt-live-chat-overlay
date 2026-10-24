@@ -1550,6 +1550,7 @@ export async function run({
     if (selectedScenario === 'translation-runtime') {
       return runTranslationRuntimeFixture({
         browser,
+        root,
         output,
         userscript,
         watchHtml: createMockWatchHtml(previewHtml),
