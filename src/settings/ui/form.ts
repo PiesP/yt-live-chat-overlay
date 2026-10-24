@@ -791,6 +791,12 @@ export class SettingsUiForm {
     }
 
     this.appendSections(pane, def.sections);
+    if (def.id === 'comments') {
+      const hint = document.createElement('p');
+      hint.className = 'yt-chat-overlay-settings-pause-hint';
+      hint.textContent = t('app.pauseShortcutHint');
+      pane.appendChild(hint);
+    }
     for (const disclosure of def.disclosures ?? []) {
       pane.appendChild(this.buildDisclosure(disclosure));
     }
@@ -817,24 +823,23 @@ export class SettingsUiForm {
       } else {
         for (const field of section.fields) {
           const el = this.buildField(field);
-          if (field.type === 'enabled') el.classList.add('yt-chat-overlay-settings-enabled');
-          container.appendChild(el);
           if (field.type === 'enabled') {
+            const row = domDiv('yt-chat-overlay-settings-pause-row');
+            row.appendChild(el);
             const pause = document.createElement('button');
             pause.id = PAUSE_BUTTON_ID;
             pause.type = 'button';
             pause.className = 'yt-chat-overlay-settings-pause-button';
             pause.addEventListener('click', () => this.onToggleUserPause?.());
-            container.appendChild(pause);
+            row.appendChild(pause);
             const badge = document.createElement('span');
             badge.className = 'yt-chat-overlay-settings-pause-badge';
             badge.setAttribute('aria-hidden', 'true');
             badge.hidden = true;
-            container.appendChild(badge);
-            const hint = document.createElement('p');
-            hint.className = 'yt-chat-overlay-settings-pause-hint';
-            hint.textContent = t('app.pauseShortcutHint');
-            container.appendChild(hint);
+            row.appendChild(badge);
+            container.appendChild(row);
+          } else {
+            container.appendChild(el);
           }
         }
       }

@@ -232,6 +232,7 @@ test.describe('Settings UI Visual', () => {
       await expect(modal.locator('#tab-comments')).toBeFocused();
       for (const selector of [
         'input[name="enabled"]',
+        '#yt-chat-overlay-pause-button',
         'select[name="danmakuMode"]',
         'input[name="fontSize"]',
         'input[name="speedPxPerSec"]',

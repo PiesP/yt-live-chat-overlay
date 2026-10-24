@@ -1433,7 +1433,7 @@ export async function runViewingExperienceFixture({
             stage: 'size-opacity',
             state: await snapshot(page),
             actionPath: 'gear > Comments > Size / Text opacity',
-            visibleShortcutHint: await page
+            shortcutHintPresent: await page
               .locator(MODAL)
               .evaluate((node) => (node.textContent ?? '').includes('Ctrl+Space')),
           });
@@ -1546,7 +1546,40 @@ export async function runViewingExperienceFixture({
           await setNumber(page, 'safeBottom', '25', 0.25);
           await page.locator(`${MODAL} #tab-colors`).click();
           await setNumber(page, 'outline-widthPx', '3');
-          result.observations.push({ stage: 'adjusted-preview', state: await snapshot(page) });
+          await page.locator(`${MODAL} #tab-comments`).click();
+          const preview = page.locator(
+            `${MODAL} #pane-comments .yt-chat-overlay-settings-font-preview`
+          );
+          await preview.scrollIntoViewIfNeeded();
+          const previewGeometry = await preview.evaluate((element) => {
+            const pane = element.closest<HTMLElement>('#pane-comments');
+            const stage = element.querySelector<HTMLElement>(
+              '.yt-chat-overlay-settings-font-preview-stage'
+            );
+            const text = element.querySelector<HTMLElement>(
+              '.yt-chat-overlay-settings-font-preview-text'
+            );
+            if (!pane || !stage || !text) throw new Error('Adjusted preview DOM is incomplete');
+            const paneBounds = pane.getBoundingClientRect();
+            const previewBounds = element.getBoundingClientRect();
+            const textBounds = text.getBoundingClientRect();
+            return {
+              paneScrollTop: pane.scrollTop,
+              previewVisible:
+                previewBounds.top >= paneBounds.top - 1 &&
+                previewBounds.bottom <= paneBounds.bottom + 1,
+              previewBounds: { top: previewBounds.top, bottom: previewBounds.bottom },
+              textBounds: { top: textBounds.top, bottom: textBounds.bottom },
+              previewText: text.textContent,
+              metrics: element.querySelector('[data-preview-metrics]')?.textContent ?? null,
+            };
+          });
+          assert(previewGeometry.previewVisible, 'Adjusted preview is outside the Comments pane');
+          result.observations.push({
+            stage: 'adjusted-preview',
+            previewGeometry,
+            state: await snapshot(page),
+          });
           result.screenshots.push(await screenshot(page, output, 'viewing-y05-preview-adjusted'));
           await closeSettings(page);
           const adjustedIds = await feed(page, 'adjusted', 2);

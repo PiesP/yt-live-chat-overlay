@@ -307,10 +307,23 @@ describe('SettingsUiForm', () => {
     );
     const pause = modal.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
     const badge = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-pause-badge');
+    const row = modal.querySelector<HTMLElement>(
+      '#pane-comments .yt-chat-overlay-settings-pause-row'
+    );
+    const preview = modal.querySelector<HTMLElement>(
+      '#pane-comments .yt-chat-overlay-settings-font-preview'
+    );
     expect(enabled?.checked).toBe(true);
     expect(hint?.textContent).toContain('Ctrl+Space');
     expect(hint?.closest('label')).toBeNull();
     expect(pause?.closest('label')).toBeNull();
+    expect(row?.contains(enabled)).toBe(true);
+    expect(row?.contains(pause)).toBe(true);
+    expect(row?.contains(badge)).toBe(true);
+    expect(row?.contains(hint)).toBe(false);
+    expect(preview && hint ? preview.compareDocumentPosition(hint) : null).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
     expect(pause?.disabled).toBe(true);
     expect(badge?.hidden).toBe(true);
     expect(badge?.getAttribute('aria-hidden')).toBe('true');

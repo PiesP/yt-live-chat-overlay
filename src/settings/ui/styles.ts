@@ -556,10 +556,21 @@ export const SETTINGS_UI_STYLES = `
         cursor: not-allowed;
       }
       /* Enabled toggle */
-      .yt-chat-overlay-settings-enabled {
+      .yt-chat-overlay-settings-pause-row {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
+        gap: ${spacing.xs}px;
+        min-width: 0;
+      }
+      .yt-chat-overlay-settings-enabled {
+        display: flex;
+        flex: 1 1 150px;
+        align-items: center;
         justify-content: space-between;
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 44px;
         padding: ${spacing.sm}px ${spacing.md}px;
         background: ${uiColors.backgroundLight};
         border-radius: ${borderRadius.sm};
@@ -579,10 +590,11 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-pause-button {
         display: block;
+        flex: 0 1 auto;
         box-sizing: border-box;
         min-width: 44px;
         min-height: 44px;
-        margin: ${spacing.sm}px ${spacing.md}px 0;
+        max-width: 100%;
         padding: ${spacing.sm}px ${spacing.md}px;
         border: 1px solid ${uiColors.border};
         border-radius: ${borderRadius.sm};
@@ -590,6 +602,7 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font: inherit;
         font-size: ${typography.fontSize.sm};
+        overflow-wrap: anywhere;
         cursor: pointer;
       }
       .yt-chat-overlay-settings-pause-button:focus-visible {
@@ -602,7 +615,6 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-pause-badge:not([hidden]) {
         display: inline-block;
-        margin: ${spacing.xs}px ${spacing.md}px 0;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border: 1px solid ${uiColors.accent};
         border-radius: ${borderRadius.pill};
@@ -612,7 +624,7 @@ export const SETTINGS_UI_STYLES = `
         font-weight: ${typography.fontWeight.semibold};
       }
       .yt-chat-overlay-settings-pause-hint {
-        margin: ${spacing.xs}px ${spacing.md}px ${spacing.sm}px;
+        margin: 0 ${spacing.md}px;
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
         line-height: 1.4;
@@ -1133,7 +1145,7 @@ export const SETTINGS_UI_STYLES = `
         dialog.yt-chat-overlay-settings-modal[open] {
           max-height: calc(100dvh - 16px);
           padding: ${spacing.md}px;
-          gap: ${spacing.sm}px;
+          gap: ${spacing.xs}px;
         }
         .yt-chat-overlay-settings-pane {
           padding-bottom: ${spacing.lg}px;
