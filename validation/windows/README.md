@@ -176,7 +176,9 @@ fixture's plain-Space player handler models the expected YouTube action; it is
 not installed-extension or live YouTube evidence. The result's JI-01 to JI-04
 statuses, native receipts, and cleanup must be reviewed together. An HKL
 acknowledgement does not establish TSF conversion mode, so actual text/events
-are decisive. Preserve failed receipts and remove only the task-owned selector
+are decisive. Trusted word keydowns also compare browser-observed Caps Lock
+modifier state before and after; missing or conflicting observations leave
+JI-04 unverified, and a changed state fails it. Preserve failed receipts and remove only the task-owned selector
 and profile after collection.
 
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It

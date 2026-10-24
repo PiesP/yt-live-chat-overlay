@@ -547,6 +547,32 @@ export function japaneseModeRestored(
   );
 }
 
+/** Compare browser-observed Caps Lock state on native word keys, never helper-thread state. */
+export function japaneseCapsLockComparison(
+  initial: ImeCheckpoint,
+  final: ImeCheckpoint
+): 'same' | 'changed' | 'unverified' {
+  const observed = (state: ImeCheckpoint): boolean | null => {
+    if (state.traceOverflow) return null;
+    const values = new Set(
+      state.events
+        .filter(
+          (event) =>
+            event.type === 'keydown' &&
+            event.target === 'yt-viewing-ime-input' &&
+            event.trusted === true &&
+            typeof event.capsLock === 'boolean'
+        )
+        .map((event) => event.capsLock as boolean)
+    );
+    return values.size === 1 ? [...values][0]! : null;
+  };
+  const before = observed(initial);
+  const after = observed(final);
+  if (before === null || after === null) return 'unverified';
+  return before === after ? 'same' : 'changed';
+}
+
 function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeImeSequence): void {
   assertNativeImeAction(action, sequence, false, true);
   const receipt = action.receipt as {
@@ -1684,6 +1710,7 @@ async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promis
             trusted: event.isTrusted,
             isComposing: keyboard?.isComposing ?? null,
             key: keyboard?.key ?? null,
+            capsLock: keyboard?.getModifierState('CapsLock') ?? null,
             data: composition?.data ?? inputEvent?.data ?? null,
             inputType: inputEvent?.inputType ?? null,
             atMs: performance.now(),
@@ -1819,6 +1846,7 @@ async function exerciseJapaneseIme(
   };
   const errors: unknown[] = [];
   let initialBehavior: ReturnType<typeof japaneseWordBehavior> = 'unknown';
+  let initialCapsState: ImeCheckpoint | null = null;
   const act = async (
     sequence: NativeImeSequence,
     stage: NativeImeStage,
@@ -1853,6 +1881,7 @@ async function exerciseJapaneseIme(
   try {
     try {
       const initial = await act('JapaneseCurrent', 'japanese-initial', 'textarea', true);
+      initialCapsState = initial.state;
       initialBehavior = japaneseWordBehavior(initial.state, 'textarea');
       assert.notEqual(initialBehavior, 'unknown', 'Original Japanese input mode was not observed');
       result.observations.push({
@@ -1979,6 +2008,7 @@ async function exerciseJapaneseIme(
         });
         await resetViewingImeTrace(page, true);
         const unforced = await act('JapaneseCurrent', 'japanese-mode-probe', 'textarea', true);
+        let finalCapsState = unforced.state;
         let finalBehavior = japaneseWordBehavior(unforced.state, 'textarea');
         const beforeRepair = finalBehavior;
         let restorationRequested = false;
@@ -2001,6 +2031,7 @@ async function exerciseJapaneseIme(
             'textarea',
             true
           );
+          finalCapsState = followup.state;
           finalBehavior = japaneseWordBehavior(followup.state, 'textarea');
         }
         assert(
@@ -2010,15 +2041,26 @@ async function exerciseJapaneseIme(
           }),
           'Unforced Japanese input did not match the original observed mode'
         );
+        const capsLockComparison = initialCapsState
+          ? japaneseCapsLockComparison(initialCapsState, finalCapsState)
+          : 'unverified';
         result.observations.push({
           stage: 'japanese-observed-mode-restored',
           initialBehavior,
           beforeRepair,
           restorationRequested,
           finalUnforcedBehavior: finalBehavior,
+          capsLockComparison,
           tsfFlagsObserved: false,
         });
-        verdicts['JI-04'] = { status: 'Pass' };
+        assert.notEqual(capsLockComparison, 'changed', 'Browser-observed Caps Lock state changed');
+        verdicts['JI-04'] =
+          capsLockComparison === 'same'
+            ? { status: 'Pass' }
+            : {
+                status: 'Not run',
+                reason: 'Caps Lock preservation was not observable in native key events.',
+              };
       } catch (error) {
         verdicts['JI-04'] = { status: 'Fail', reason: String(error) };
         errors.push(error);

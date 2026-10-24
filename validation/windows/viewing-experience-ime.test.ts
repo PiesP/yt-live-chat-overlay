@@ -11,6 +11,7 @@ import {
   imeWordBehavior,
   japaneseWordBehavior,
   japaneseModeRestored,
+  japaneseCapsLockComparison,
   japaneseCompositionOpen,
   assertJapanesePlayerSpace,
   assertJapaneseShortcut,
@@ -210,6 +211,34 @@ test('Japanese mode restoration requires a separate unforced input observation',
       behavior: 'converted-japanese',
     }),
     true
+  );
+});
+
+test('Caps Lock restoration compares trusted browser key state and keeps gaps unverified', () => {
+  const key = (capsLock: boolean) => ({
+    type: 'keydown',
+    target: 'yt-viewing-ime-input',
+    trusted: true,
+    capsLock,
+  });
+  const initial = checkpoint({ events: [key(false), key(false)] });
+  assert.equal(japaneseCapsLockComparison(initial, checkpoint({ events: [key(false)] })), 'same');
+  assert.equal(japaneseCapsLockComparison(initial, checkpoint({ events: [key(true)] })), 'changed');
+  assert.equal(japaneseCapsLockComparison(initial, checkpoint({ events: [] })), 'unverified');
+  assert.equal(
+    japaneseCapsLockComparison(initial, checkpoint({ events: [key(false), key(true)] })),
+    'unverified'
+  );
+  assert.equal(
+    japaneseCapsLockComparison(initial, checkpoint({ events: [key(false)], traceOverflow: true })),
+    'unverified'
+  );
+  assert.equal(
+    japaneseCapsLockComparison(
+      checkpoint({ events: [{ ...key(false), trusted: false }] }),
+      checkpoint({ events: [key(false)] })
+    ),
+    'unverified'
   );
 });
 
