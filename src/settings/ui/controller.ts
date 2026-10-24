@@ -5,6 +5,7 @@ import type { OverlaySettings } from '@app-types';
 import { getActiveLanguage, t } from '@i18n/index';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@settings/schema';
+import type { PersistenceState } from '@settings/store';
 import {
   type ActionType,
   BACKDROP_ID,
@@ -41,6 +42,9 @@ export class SettingsUi {
   private playerElement: HTMLElement | null = null;
   private button: HTMLButtonElement | null = null;
   private reloadButton: HTMLButtonElement | null = null;
+  private persistenceNotice: HTMLDivElement | null = null;
+  private persistenceNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  private recoveryFeedbackPending = false;
   /** Timer for reload-complete checkmark → icon restoration. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private modal: HTMLDialogElement | null = null;
@@ -91,9 +95,16 @@ export class SettingsUi {
     private readonly onChange: (partial: Partial<OverlaySettings>) => void,
     private readonly resetSettings: () => void,
     /** Called when settings should be persisted (modal close). Falls back to onChange. */
-    private readonly onPersist?: (partial: Partial<OverlaySettings>) => void,
+    private readonly onPersist?: (
+      partial: Partial<OverlaySettings>
+    ) => Promise<PersistenceState> | void,
     /** Called when the reload button is clicked. */
-    private readonly onReload?: () => Promise<void>
+    private readonly onReload?: () => Promise<void>,
+    private readonly persistence?: {
+      state: () => PersistenceState;
+      retry: () => Promise<PersistenceState>;
+      resolveConflict: () => Promise<PersistenceState>;
+    }
   ) {
     this.activeTab = this.defaultTabId;
     this.form = new SettingsUiForm(getSettings, () => {
@@ -145,6 +156,7 @@ export class SettingsUi {
     this.ensureButton(player);
     this.ensureModal();
     this.close();
+    if (this.persistence) this.showPersistenceState(this.persistence.state());
   }
 
   close(): void {
@@ -171,8 +183,7 @@ export class SettingsUi {
     if (this.previewTimer !== null) {
       this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
-    const persist = this.onPersist ?? this.onChange;
-    persist(this.form.collectSettings());
+    this.persistForm(this.form.collectSettings());
 
     // Close the native dialog (fires 'close' event synchronously, but
     // the closing guard prevents re-entry).
@@ -185,6 +196,84 @@ export class SettingsUi {
     }
     this.previousFocus = null;
     this.closing = false;
+  }
+
+  private persistForm(partial: Partial<OverlaySettings>): void {
+    const generation = this.lifecycleGeneration;
+    const persist = this.onPersist ?? this.onChange;
+    let outcome: Promise<PersistenceState> | void;
+    try {
+      outcome = persist(partial);
+    } catch (error: unknown) {
+      log.warn('settings.persist-failed', { error: String(error) });
+      this.showPersistenceState('unsaved');
+      return;
+    }
+    void Promise.resolve(outcome)
+      .then((state) => {
+        if (generation === this.lifecycleGeneration && state)
+          this.showPersistenceState(this.persistence?.state() ?? state);
+      })
+      .catch((error: unknown) => {
+        log.warn('settings.persist-failed', { error: String(error) });
+        if (generation === this.lifecycleGeneration) this.showPersistenceState('unsaved');
+      });
+  }
+
+  /** Keep failure feedback and its single manual retry available after close. */
+  showPersistenceState(state: PersistenceState): void {
+    const hadNotice = this.persistenceNotice !== null || this.recoveryFeedbackPending;
+    this.persistenceNoticeTimer = clearSafeTimeout(this.persistenceNoticeTimer);
+    this.persistenceNotice?.remove();
+    this.persistenceNotice = null;
+    if (state === 'pending' || !this.playerElement || (state === 'saved' && !hadNotice)) return;
+    this.recoveryFeedbackPending = false;
+
+    const notice = document.createElement('div');
+    notice.className = 'yt-chat-overlay-settings-persistence-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', state === 'saved' ? 'polite' : 'assertive');
+    const message = document.createElement('span');
+    message.textContent = t(
+      state === 'saved'
+        ? 'settings.saved'
+        : state === 'conflict'
+          ? 'settings.conflict'
+          : 'settings.unsaved'
+    );
+    notice.appendChild(message);
+    if ((state === 'unsaved' || state === 'conflict') && this.persistence) {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.textContent = t(state === 'conflict' ? 'settings.keepMine' : 'settings.retry');
+      action.addEventListener('click', () => {
+        action.disabled = true;
+        this.recoveryFeedbackPending = true;
+        const generation = this.lifecycleGeneration;
+        const save =
+          state === 'conflict' ? this.persistence?.resolveConflict : this.persistence?.retry;
+        if (!save) return;
+        void save()
+          .then((result) => {
+            if (generation === this.lifecycleGeneration)
+              this.showPersistenceState(this.persistence?.state() ?? result);
+          })
+          .catch((error: unknown) => {
+            log.warn('settings.retry-failed', { error: String(error) });
+            if (generation === this.lifecycleGeneration) this.showPersistenceState(state);
+          });
+      });
+      notice.appendChild(action);
+    }
+    this.playerElement.appendChild(notice);
+    this.persistenceNotice = notice;
+    if (state === 'saved') {
+      this.persistenceNoticeTimer = setTimeout(() => {
+        notice.remove();
+        if (this.persistenceNotice === notice) this.persistenceNotice = null;
+        this.persistenceNoticeTimer = null;
+      }, TOAST_DURATION_MS);
+    }
   }
 
   private findPlayerContainer(signal?: AbortSignal): Promise<HTMLElement | null> {
@@ -444,8 +533,7 @@ export class SettingsUi {
       if (this.previewTimer !== null) {
         this.previewTimer = clearSafeTimeout(this.previewTimer);
       }
-      const persist = this.onPersist ?? this.onChange;
-      persist(this.form.collectSettings());
+      this.persistForm(this.form.collectSettings());
       this.restoreDocumentLangDir();
       if (this.previousFocus?.isConnected) {
         this.previousFocus.focus();
@@ -675,8 +763,7 @@ export class SettingsUi {
           const settings = normalizeStoredSettings(sanitized);
           this.onChange(settings);
           this.form.populateForm(this.getSettings());
-          const persist = this.onPersist ?? this.onChange;
-          persist(settings);
+          this.persistForm(settings);
           this.showToast(t('import.success'));
         } catch (error: unknown) {
           this.showToast(t('import.invalidJson'));
@@ -771,6 +858,9 @@ export class SettingsUi {
     }
     this.button?.remove();
     this.reloadButton?.remove();
+    this.persistenceNoticeTimer = clearSafeTimeout(this.persistenceNoticeTimer);
+    this.persistenceNotice?.remove();
+    this.persistenceNotice = null;
     this.clearReloadFeedbackTimer();
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.form.destroy();
@@ -785,6 +875,7 @@ export class SettingsUi {
     this.reloadButton = null;
     this.modal = null;
     this.playerElement = null;
+    this.lifecycleGeneration++;
 
     log.info('settings.controller.destroyed');
   }

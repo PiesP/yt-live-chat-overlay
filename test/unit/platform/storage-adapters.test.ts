@@ -123,6 +123,54 @@ describe('platform storage adapters', () => {
     expect(localStorage.getItem('new')).toBe('value');
   });
 
+  it('reports denied writes from GM, direct Chrome, and localStorage without switching stores', async () => {
+    const denied = new Error('write denied');
+    globals.GM_getValue = vi.fn(() => null);
+    globals.GM_setValue = vi.fn(() => {
+      throw denied;
+    });
+    const gm = await loadAdapter();
+    await expect(gm.setItem('key', 'new')).rejects.toBe(denied);
+
+    vi.resetModules();
+    globals.GM_setValue = vi.fn(async () => {
+      throw denied;
+    });
+    const asyncGm = await loadAdapter();
+    await expect(asyncGm.setItem('key', 'new')).rejects.toBe(denied);
+
+    vi.resetModules();
+    delete globals.GM_getValue;
+    delete globals.GM_setValue;
+    globals.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => {
+            throw denied;
+          }),
+        },
+      },
+    };
+    const direct = await loadAdapter();
+    await expect(direct.setItem('key', 'new')).rejects.toBe(denied);
+
+    vi.resetModules();
+    delete globals.chrome;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        ...memoryStorage,
+        setItem: () => {
+          throw denied;
+        },
+      },
+    });
+    const local = await loadAdapter();
+    await expect(local.setItem('key', 'new')).rejects.toBe(denied);
+    expect(storageValues.has('key')).toBe(false);
+  });
+
   it('uses the authenticated extension relay in the MAIN world', async () => {
     window.__ytExtensionBridge = {
       workerSupported: true,

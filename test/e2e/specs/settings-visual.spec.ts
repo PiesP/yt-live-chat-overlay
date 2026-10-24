@@ -519,7 +519,7 @@ test.describe('Settings UI Visual', () => {
     const toast = page.locator(
       '#yt-chat-overlay-settings-backdrop .yt-chat-overlay-settings-toast[role="status"]'
     );
-    await expect(toast).toContainText(/Settings imported successfully/i);
+    await expect(toast).toContainText(/Settings imported for this session/i);
 
     const settings = await page.evaluate(() => {
       const handle = (

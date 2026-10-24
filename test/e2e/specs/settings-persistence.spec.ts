@@ -94,6 +94,55 @@ test.describe('Settings Persistence', () => {
     }
   });
 
+  test('keeps preview usable after a denied write, then retries and reloads the saved value', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript((key) => {
+      const testWindow = window as Window & { denySettingsWrite?: boolean; deniedWrites?: number };
+      testWindow.denySettingsWrite = false;
+      testWindow.deniedWrites = 0;
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name: string, value: string): void {
+        if (name === key && testWindow.denySettingsWrite) {
+          testWindow.deniedWrites = (testWindow.deniedWrites ?? 0) + 1;
+          throw new DOMException('Controlled settings denial', 'QuotaExceededError');
+        }
+        original.call(this, name, value);
+      };
+    }, SETTINGS_STORAGE_KEY);
+    await setupPersistentSettingsPage(page, { ...DEFAULT_SETTINGS, language: 'en', fontSize: 32 });
+    const before = await readStoredSettings(page);
+    await page.locator('#movie_player').hover();
+    await page.locator(`#${BUTTON_ID}`).click();
+    const dialog = page.locator('#yt-chat-overlay-settings-backdrop');
+    await dialog.locator('input[name="fontSize"]').fill('44');
+    await expect.poll(async () => (await getSettings(page)).fontSize).toBe(44);
+    await page.evaluate(() => {
+      (window as Window & { denySettingsWrite?: boolean }).denySettingsWrite = true;
+    });
+    await page.keyboard.press('Escape');
+    const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
+    await expect(notice).toContainText('were not saved');
+    expect((await getSettings(page)).fontSize).toBe(44);
+    expect(await readStoredSettings(page)).toBe(before);
+    expect(
+      await page.evaluate(() => (window as Window & { deniedWrites?: number }).deniedWrites)
+    ).toBe(1);
+
+    await page.evaluate(() => {
+      (window as Window & { denySettingsWrite?: boolean }).denySettingsWrite = false;
+    });
+    await notice.getByRole('button', { name: 'Retry save' }).click();
+    await expect(notice).toContainText('Settings saved.');
+    await waitForStoredSettings(page, { fontSize: 44 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached' });
+    await expect.poll(async () => (await getSettings(page)).fontSize).toBe(44);
+    expect(errors).toEqual([]);
+  });
+
   test('opacity change is reflected in settings and storage', async ({ page }) => {
     await setupOverlayPage(page);
 
@@ -173,7 +222,7 @@ test.describe('Settings Persistence', () => {
       const checkbox = modal.getByRole('checkbox', { name: 'Always animate scrolling comments' });
       await expect(checkbox).toBeChecked({ checked: persistedOverride });
       await expect(modal.locator('.yt-chat-overlay-settings-autosave-hint')).toContainText(
-        'saved when you close settings'
+        'saving starts when you close settings'
       );
       await page.keyboard.press('Escape');
       await waitForStoredSettings(page, { ignoreReducedMotion: persistedOverride });

@@ -4,7 +4,9 @@
   "assets": [
     "dist/yt-live-chat-overlay.user.js",
     "test/visual/preview.html",
-    "test/visual/gm-mocks.js"
+    "test/visual/gm-mocks.js",
+    "validation/windows/settings-persistence.ts",
+    "validation/windows/inputs"
   ],
   "installation": {
     "entry": "validation/windows/install-profile.ts",

@@ -18,6 +18,12 @@ export const AR: Record<string, string> = {
   'status.unstable': 'الاتصال غير مستقر',
   'status.disconnected': 'تم قطع الاتصال — انقر لإعادة التحميل',
   'status.waiting': 'بانتظار البث المباشر…',
+  'settings.saved': 'تم حفظ الإعدادات.',
+  'settings.unsaved': 'طُبّقت الإعدادات في هذه الجلسة، لكن لم تُحفظ.',
+  'settings.retry': 'إعادة محاولة الحفظ',
+  'settings.keepMine': 'حفظ قيمي',
+  'settings.conflict':
+    'تغيّرت الإعدادات في علامة تبويب أخرى. بقيت قيمك هنا. اختر حفظ قيمي لاستبدال إعدادات علامة التبويب الأخرى.',
 
   // ── Section titles ──
   Cards: 'البطاقات',
@@ -298,12 +304,12 @@ export const AR: Record<string, string> = {
   Import: 'استيراد',
   Close: 'إغلاق',
   Done: 'تم',
-  'app.autoSave': 'تُطبّق التغييرات أثناء التعديل وتُحفظ عند إغلاق الإعدادات',
+  'app.autoSave': 'تُطبّق التغييرات أثناء التعديل ويبدأ حفظها عند إغلاق الإعدادات',
   'reset.confirm': 'إعادة تعيين جميع الإعدادات إلى الافتراضية؟',
   Cancel: 'إلغاء',
   'import.invalidFormat': 'فشل الاستيراد: تنسيق الإعدادات غير صالح',
   'import.fileTooLarge': 'فشل الاستيراد: ملف الإعدادات كبير جدًا',
-  'import.success': 'تم استيراد الإعدادات بنجاح',
+  'import.success': 'تم استيراد الإعدادات لهذه الجلسة',
   'actions.export': 'تصدير',
   'actions.import': 'استيراد',
   'actions.reset': 'إعادة تعيين',
