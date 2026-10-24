@@ -115,12 +115,17 @@ optional: add the ignored `validation/windows/inputs/viewing-experience-ime.json
 with exactly `{"enabled":true}` beside the #327 selector. The Windows runner binds
 the headed browser PID and exact `--user-data-dir` through CDP, then calls the
 bundled `native-ime.ps1` in the same interactive desktop session. It records
-native action receipts, trusted composition events, actual `한글` text, a native
-Ctrl+Space pause/resume round trip outside the input, continuing video playback,
-and restoration evidence. Missing Korean layout, session mismatch, incomplete
-restoration, and absent trusted composition fail the opted-in case with retained
-receipts. With no IME selector the check is `not-run`; Playwright keyboard input
-is never counted as IME evidence. Remove only the #327 selectors after collection.
+native action receipts, trusted composition start/update/end events and actual
+`한글` text. Ctrl+Space is tried first in the focused textarea, where the overlay
+must stay active, and then on the focused player, where it must pause and resume.
+Both shortcuts must leave video playing at each observed step. A final native
+word probe compares observed input behavior with the initial Korean-layout
+probe; receipts verify HKL restoration and balanced toggle actions, but do not
+prove TSF mode state. Missing Korean layout, session mismatch, incomplete
+restoration, absent trusted composition, and an opted-in non-Windows run fail
+the case with retained receipts. With no IME selector the check is `not-run`;
+Playwright keyboard input is never counted as IME evidence. Remove only the
+#327 selectors after collection.
 
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
