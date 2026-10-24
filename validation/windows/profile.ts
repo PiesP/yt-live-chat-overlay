@@ -1471,6 +1471,34 @@ async function verifySustainedViewingLifecycle(
   };
 }
 
+type FocusedScenario = 'settings-persistence' | 'reload-feedback';
+
+async function hasScenarioSelector(root: string, scenario: FocusedScenario): Promise<boolean> {
+  const path = join(root, 'validation/windows/inputs', `${scenario}.json`);
+  let contents: string;
+  try {
+    contents = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(
+    JSON.parse(contents),
+    { scenario },
+    `${scenario} selector does not match its file`
+  );
+  return true;
+}
+
+export async function readFocusedScenario(root: string): Promise<FocusedScenario | null> {
+  const settings = await hasScenarioSelector(root, 'settings-persistence');
+  const reload = await hasScenarioSelector(root, 'reload-feedback');
+  assert(!(settings && reload), 'Focused Windows scenario selectors are mutually exclusive');
+  if (settings) return 'settings-persistence';
+  if (reload) return 'reload-feedback';
+  return null;
+}
+
 export async function run({
   browser,
   root,
@@ -1499,24 +1527,11 @@ export async function run({
     readFile(join(root, GM_MOCKS_PATH), 'utf8'),
   ]);
   assert.match(userscript, /==UserScript==/u, 'Production userscript metadata is missing');
-  let selectedScenario: unknown = null;
-  try {
-    selectedScenario = JSON.parse(
-      await readFile(join(root, 'validation/windows/inputs/settings-persistence.json'), 'utf8')
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  const selectedScenario = await readFocusedScenario(root);
   if (selectedScenario !== null) {
     assert(!installedContext, 'Focused fixtures use the production userscript');
     await mkdir(output, { recursive: true });
-    if (
-      typeof selectedScenario === 'object' &&
-      selectedScenario !== null &&
-      'scenario' in selectedScenario &&
-      selectedScenario.scenario === 'reload-feedback'
-    ) {
-      assert.deepEqual(selectedScenario, { scenario: 'reload-feedback' });
+    if (selectedScenario === 'reload-feedback') {
       return runReloadFeedbackFixture({
         browser,
         root,
@@ -1526,7 +1541,6 @@ export async function run({
         watchHtml: createMockWatchHtml(previewHtml),
       });
     }
-    assert.deepEqual(selectedScenario, { scenario: 'settings-persistence' });
     return runSettingsPersistenceFixture({
       browser,
       root,
