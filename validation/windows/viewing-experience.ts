@@ -3,9 +3,11 @@
 
 /** Bounded #327 baseline: controlled viewing tasks, not a human usability verdict. */
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, win32 } from 'node:path';
+import { promisify } from 'node:util';
 
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 
@@ -16,6 +18,8 @@ const REPLAY_URL = 'https://www.youtube.com/watch?v=windowsAcceptanceReplay';
 const SETTINGS_KEY = 'yt-live-chat-overlay-settings';
 const MODAL = '#yt-chat-overlay-settings-backdrop';
 const VIDEO_PREFIX = '/viewing-';
+const IME_TITLE = 'YT Viewing IME Checkpoint';
+const execFileAsync = promisify(execFile);
 const MEDIA = {
   bright: 'de75569b7fd474c55080d8bc35aeb02b8a629010729de8dbd30dfe925522c14f',
   dark: '5c58845db4a7f37ddd3a15c7bd764e1cb05f28301ffe3d94234c9184f812d89a',
@@ -42,6 +46,128 @@ declare global {
     __ytViewingDenyWrites?: boolean;
     __ytViewingImeEvents?: Array<Record<string, unknown>>;
   }
+}
+
+type ImeCheckpoint = {
+  title: string;
+  focus: string | null;
+  input: string | null;
+  events: Array<Record<string, unknown>>;
+  videoPaused: boolean | null;
+  videoTime: number | null;
+  overlayPaused: boolean;
+};
+
+/** An opt-in selector keeps ordinary baseline runs free of native input. */
+export async function readViewingImeSelection(root: string): Promise<boolean> {
+  let contents: string;
+  try {
+    contents = await readFile(
+      join(root, 'validation/windows/inputs/viewing-experience-ime.json'),
+      'utf8'
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(JSON.parse(contents), { enabled: true }, 'Invalid viewing IME selector');
+  return true;
+}
+
+async function ownedBrowserIdentity(browser: Browser): Promise<{ pid: number; profile: string }> {
+  const session = await browser.newBrowserCDPSession();
+  try {
+    const processInfo = await session.send('SystemInfo.getProcessInfo');
+    const browsers = processInfo.processInfo.filter((entry) => entry.type === 'browser');
+    assert.equal(browsers.length, 1, 'CDP must expose exactly one browser process');
+    const pid = browsers[0]?.id;
+    assert(
+      typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 && pid <= 0xffffffff,
+      'Invalid browser PID'
+    );
+    const commandLine = await session.send('Browser.getBrowserCommandLine');
+    const profiles: string[] = [];
+    for (const [index, arg] of commandLine.arguments.entries()) {
+      if (arg.toLowerCase().startsWith('--user-data-dir=')) {
+        profiles.push(arg.slice('--user-data-dir='.length));
+      } else if (arg.toLowerCase() === '--user-data-dir') {
+        profiles.push(commandLine.arguments[index + 1] ?? '');
+      }
+    }
+    assert.equal(profiles.length, 1, 'Browser must expose one user-data-dir');
+    const profile = profiles[0];
+    assert(
+      profile && win32.isAbsolute(profile),
+      'Browser profile must be an absolute Windows path'
+    );
+    return { pid, profile };
+  } finally {
+    await session.detach();
+  }
+}
+
+async function runNativeImeAction({
+  root,
+  output,
+  identity,
+  sequence,
+  koreanLayout = false,
+}: {
+  root: string;
+  output: string;
+  identity: { pid: number; profile: string };
+  sequence: 'ComposeCurrent' | 'ComposeToggleRoundTrip' | 'CtrlSpaceRoundTrip';
+  koreanLayout?: boolean;
+}): Promise<{ receiptFile: string; receipt: unknown; error: string | null }> {
+  assert.equal(process.platform, 'win32', 'Native IME requires the Windows runner');
+  const receiptFile = `viewing-ime-${sequence.toLowerCase()}.json`;
+  const receiptPath = join(output, receiptFile);
+  const systemRoot = process.env.SystemRoot;
+  assert(systemRoot && win32.isAbsolute(systemRoot), 'Windows SystemRoot is unavailable');
+  const powershell = win32.join(
+    systemRoot,
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe'
+  );
+  const args = [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    join(root, 'validation/windows/native-ime.ps1'),
+    '-Sequence',
+    sequence,
+    '-ExpectedWindowTitle',
+    IME_TITLE,
+    '-ExpectedProfileDirectory',
+    identity.profile,
+    '-OwnedOutputDirectory',
+    output,
+    '-ReceiptPath',
+    receiptPath,
+    '-ExpectedBrowserPID',
+    String(identity.pid),
+  ];
+  if (koreanLayout) args.push('-RequestExistingKoreanLayout');
+  let error: string | null = null;
+  try {
+    await execFileAsync(powershell, args, { timeout: 45_000, maxBuffer: 4_096, windowsHide: true });
+  } catch (cause) {
+    const failure = cause as { code?: string | number; signal?: string; killed?: boolean };
+    error = `Native helper failed (code=${String(failure.code ?? 'unknown')}, signal=${String(failure.signal ?? 'none')}, timedOut=${failure.killed === true})`;
+  }
+  let receipt: unknown = null;
+  try {
+    receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
+  } catch (cause) {
+    const failure = cause as NodeJS.ErrnoException;
+    error ??= `Native helper left no readable receipt (${failure.code ?? 'invalid-json'})`;
+  }
+  return { receiptFile, receipt, error };
 }
 
 function sha256(bytes: Buffer): string {
@@ -583,18 +709,46 @@ async function prepareViewingImeCheckpoint(page: Page): Promise<void> {
         });
       });
     }
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (!event.ctrlKey || event.code !== 'Space') return;
+        const focus = document.activeElement?.id ?? null;
+        window.__ytViewingImeEvents?.push({
+          type: 'document-keydown',
+          trusted: event.isTrusted,
+          isComposing: event.isComposing,
+          focus,
+          atMs: performance.now(),
+        });
+        setTimeout(() => {
+          window.__ytViewingImeEvents?.push({
+            type: 'post-ctrl-space',
+            focus,
+            overlayPaused: Array.from(
+              document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
+            ).some(
+              (node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'
+            ),
+            atMs: performance.now(),
+          });
+        }, 50);
+      },
+      true
+    );
     input.focus();
   });
 }
 
 /** Read evidence after native input; this function never synthesizes a key event. */
-async function readViewingImeCheckpoint(page: Page): Promise<unknown> {
+async function readViewingImeCheckpoint(page: Page): Promise<ImeCheckpoint> {
   return page.evaluate(() => ({
     title: document.title,
     focus: document.activeElement?.id ?? null,
     input: document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input')?.value ?? null,
     events: window.__ytViewingImeEvents ?? [],
     videoPaused: document.querySelector<HTMLVideoElement>('#movie_player video')?.paused ?? null,
+    videoTime: document.querySelector<HTMLVideoElement>('#movie_player video')?.currentTime ?? null,
     overlayPaused: Array.from(
       document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
     ).some((node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'),
@@ -621,6 +775,8 @@ export async function runViewingExperienceFixture({
     assert.equal(sha256(bytes), MEDIA[scene], `${scene} owned media changed`);
     media[scene] = bytes;
   }
+  const imeRequested = await readViewingImeSelection(root);
+  let nativeImeInput: 'not-run' | 'failed' | 'verified' = 'not-run';
   const cases: Case[] = [];
   const pageErrors: string[] = [];
   const state: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
@@ -871,13 +1027,134 @@ export async function runViewingExperienceFixture({
           stage: 'replay-overlay-resumed',
           state: await snapshot(replayPage),
         });
-        // The in-process native Windows helper can run between these calls.
-        await prepareViewingImeCheckpoint(replayPage);
-        result.observations.push({
-          stage: 'ime-checkpoint-unexercised',
-          state: await readViewingImeCheckpoint(replayPage),
-          nativeInput: 'not-run',
-        });
+        if (!imeRequested) {
+          result.observations.push({
+            stage: 'native-ime-not-run',
+            reason: 'Optional viewing-experience-ime.json selector is absent',
+          });
+        } else if (process.platform !== 'win32') {
+          result.observations.push({
+            stage: 'native-ime-not-run',
+            reason: 'Native input requires the prepared Windows runner',
+          });
+        } else {
+          nativeImeInput = 'failed';
+          const originalTitle = await replayPage.title();
+          try {
+            await prepareViewingImeCheckpoint(replayPage);
+            await replayPage.bringToFront();
+            const identity = await ownedBrowserIdentity(browser);
+            const current = await runNativeImeAction({
+              root,
+              output,
+              identity,
+              sequence: 'ComposeCurrent',
+            });
+            const currentState = await readViewingImeCheckpoint(replayPage);
+            result.observations.push({
+              stage: 'native-ime-current-layout',
+              ...current,
+              state: currentState,
+            });
+            assert.equal(current.error, null, 'Native IME current-layout action failed');
+            assert.equal(
+              (current.receipt as { status?: unknown } | null)?.status,
+              'action-dispatched',
+              'Native IME current-layout receipt is incomplete'
+            );
+            const composed = (state: ImeCheckpoint) =>
+              state.input?.includes('한글') &&
+              state.events.some(
+                (event) =>
+                  event.trusted === true &&
+                  (event.type === 'compositionstart' ||
+                    event.type === 'compositionupdate' ||
+                    event.type === 'compositionend')
+              );
+            if (!composed(currentState)) {
+              await replayPage.evaluate(() => {
+                const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
+                if (input) {
+                  input.value = '';
+                  input.focus();
+                }
+                window.__ytViewingImeEvents = [];
+              });
+              await replayPage.bringToFront();
+              const toggled = await runNativeImeAction({
+                root,
+                output,
+                identity,
+                sequence: 'ComposeToggleRoundTrip',
+                koreanLayout: true,
+              });
+              const toggledState = await readViewingImeCheckpoint(replayPage);
+              result.observations.push({
+                stage: 'native-ime-existing-korean-layout',
+                ...toggled,
+                state: toggledState,
+              });
+              assert.equal(toggled.error, null, 'Native IME Korean-layout action failed');
+              assert.equal(
+                (toggled.receipt as { status?: unknown } | null)?.status,
+                'action-dispatched',
+                'Native IME Korean-layout receipt is incomplete'
+              );
+              assert(
+                composed(toggledState),
+                'Trusted Korean IME composition and 한글 text were not observed'
+              );
+            }
+            await replayPage.evaluate(() => {
+              document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input')?.blur();
+              window.__ytViewingImeEvents = [];
+            });
+            await replayPage.bringToFront();
+            const controls = await runNativeImeAction({
+              root,
+              output,
+              identity,
+              sequence: 'CtrlSpaceRoundTrip',
+            });
+            await replayPage.waitForTimeout(100);
+            const controlState = await readViewingImeCheckpoint(replayPage);
+            result.observations.push({
+              stage: 'native-ime-noneditable-control',
+              ...controls,
+              state: controlState,
+            });
+            assert.equal(controls.error, null, 'Native Ctrl+Space round trip failed');
+            assert.equal(
+              (controls.receipt as { status?: unknown } | null)?.status,
+              'action-dispatched',
+              'Native Ctrl+Space receipt is incomplete'
+            );
+            const presses = controlState.events.filter(
+              (event) => event.type === 'document-keydown'
+            );
+            const settled = controlState.events.filter((event) => event.type === 'post-ctrl-space');
+            assert.equal(presses.length, 2, 'Expected two native Ctrl+Space keydown events');
+            assert(
+              presses.every(
+                (event) => event.trusted === true && event.focus !== 'yt-viewing-ime-input'
+              )
+            );
+            assert.deepEqual(
+              settled.map((event) => event.overlayPaused),
+              [true, false],
+              'Native Ctrl+Space did not pause then resume the overlay'
+            );
+            assert.equal(controlState.videoPaused, false, 'Native shortcut paused the video');
+            await assertVideoAdvances(replayPage);
+            nativeImeInput = 'verified';
+          } finally {
+            await replayPage.evaluate((title) => {
+              document.querySelector('#yt-viewing-ime-input')?.remove();
+              delete window.__ytViewingImeEvents;
+              document.title = title;
+            }, originalTitle);
+          }
+        }
       })
     );
   } finally {
@@ -1165,7 +1442,7 @@ export async function runViewingExperienceFixture({
       sustainedViewingLifecycle: false,
       firstTimeHumanObservation: false,
       humanReadabilityJudgment: 'pending-review',
-      nativeImeInput: 'not-run',
+      nativeImeInput,
       spokenScreenReaderCheck: 'not-run',
       nativeYouTubeControls: 'not-run',
       installedApplication: false,

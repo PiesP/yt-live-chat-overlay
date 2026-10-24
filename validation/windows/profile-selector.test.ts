@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { readFocusedScenario } from './profile.ts';
+import { readViewingImeSelection } from './viewing-experience.ts';
 
 test('focused Windows selectors dispatch by their own file and reject ambiguity', async () => {
   const root = await mkdtemp(join(tmpdir(), 'yt-visual-selector-'));
@@ -53,6 +54,24 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
     await rm(translation);
     await writeFile(viewing, '{"scenario":"translation-runtime"}');
     await assert.rejects(readFocusedScenario(root), /does not match its file/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('native viewing IME requires an exact opt-in selector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'yt-viewing-ime-selector-'));
+  const inputs = join(root, 'validation/windows/inputs');
+  const selector = join(inputs, 'viewing-experience-ime.json');
+  try {
+    await mkdir(inputs, { recursive: true });
+    assert.equal(await readViewingImeSelection(root), false);
+    await writeFile(selector, '{"enabled":true}');
+    assert.equal(await readViewingImeSelection(root), true);
+    await writeFile(selector, '{"enabled":false}');
+    await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
+    await writeFile(selector, '{"enabled":true,"script":"other.ps1"}');
+    await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

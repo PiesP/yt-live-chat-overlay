@@ -9,6 +9,7 @@
     "validation/windows/reload-feedback.ts",
     "validation/windows/translation-runtime.ts",
     "validation/windows/viewing-experience.ts",
+    "validation/windows/native-ime.ps1",
     "validation/windows/fixtures/autoplay-av.webm",
     "validation/windows/fixtures/viewing-bright.mp4",
     "validation/windows/fixtures/viewing-dark.mp4",
