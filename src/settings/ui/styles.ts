@@ -185,7 +185,7 @@ export const SETTINGS_UI_STYLES = `
         border-radius: ${borderRadius.sm};
         background: ${uiColors.background};
         color: ${uiColors.text};
-        font: ${typography.fontSize.sm}px ${typography.fontFamily};
+        font: ${typography.fontSize.sm} ${typography.fontFamily};
         pointer-events: auto;
       }
       .yt-chat-overlay-settings-persistence-notice button {

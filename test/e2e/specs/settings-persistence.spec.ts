@@ -125,6 +125,23 @@ test.describe('Settings Persistence', () => {
     await page.keyboard.press('Escape');
     const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
     await expect(notice).toContainText('were not saved');
+    const presentation = await notice.evaluate((element) => {
+      const action = element.querySelector('button');
+      if (!action) throw new Error('Persistence recovery action is missing');
+      const noticeBounds = element.getBoundingClientRect();
+      const actionBounds = action.getBoundingClientRect();
+      return {
+        fontSize: getComputedStyle(element).fontSize,
+        noticeWithinViewport: noticeBounds.left >= 0 && noticeBounds.right <= innerWidth,
+        actionWithinNotice:
+          actionBounds.left >= noticeBounds.left && actionBounds.right <= noticeBounds.right,
+      };
+    });
+    expect(presentation).toEqual({
+      fontSize: '14px',
+      noticeWithinViewport: true,
+      actionWithinNotice: true,
+    });
     expect((await getSettings(page)).fontSize).toBe(44);
     expect(await readStoredSettings(page)).toBe(before);
     expect(
