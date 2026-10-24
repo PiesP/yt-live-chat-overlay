@@ -45,6 +45,7 @@ type BitmapProbeResult = {
   decodeSuccesses?: number;
   decodeFailures?: number;
   failedCached?: boolean;
+  fetchEvents?: Array<{ event: string; at: number; detail?: string }>;
 };
 
 type BitmapWorkerRecord = {
@@ -63,6 +64,14 @@ type ImageRoutePlan =
   | { kind: 'redirect'; location: string };
 
 type ImageRouteRecord = { url: string; kind: ImageRoutePlan['kind']; status: number | null };
+type RouteCompletion = {
+  url: string;
+  kind: ImageRoutePlan['kind'];
+  startedAt: number;
+  settledAt: number | null;
+  outcome: 'fulfilled' | 'rejected' | null;
+  error: string | null;
+};
 
 declare global {
   interface Window {
@@ -133,35 +142,136 @@ function attachWorkerBitmapProbe(renderer: {
         let decodeAttempts = 0;
         let decodeSuccesses = 0;
         let decodeFailures = 0;
+        const fetchEvents: NonNullable<BitmapProbeResult['fetchEvents']> = [];
         if (phase === 'acquire') {
+          const observedStreams = new WeakSet<ReadableStream>();
+          const observedReaders = new WeakSet<ReadableStreamDefaultReader>();
+          const nativeGetReader = ReadableStream.prototype.getReader;
+          const nativeStreamCancel = ReadableStream.prototype.cancel;
+          const nativeRead = ReadableStreamDefaultReader.prototype.read;
+          const nativeReaderCancel = ReadableStreamDefaultReader.prototype.cancel;
+          const signalCleanups: Array<() => void> = [];
+          Object.defineProperty(ReadableStream.prototype, 'getReader', {
+            configurable: true,
+            writable: true,
+            value: function (this: ReadableStream, ...args: unknown[]) {
+              const reader = Reflect.apply(nativeGetReader, this, args);
+              if (observedStreams.has(this)) {
+                observedReaders.add(reader);
+                fetchEvents.push({ event: 'body-reader', at: Date.now() });
+              }
+              return reader;
+            },
+          });
+          ReadableStream.prototype.cancel = function (...args) {
+            const observed = observedStreams.has(this);
+            if (observed) fetchEvents.push({ event: 'body-cancel', at: Date.now() });
+            const operation = Reflect.apply(nativeStreamCancel, this, args);
+            if (observed)
+              void operation.then(
+                () => fetchEvents.push({ event: 'body-cancel-done', at: Date.now() }),
+                (error: unknown) =>
+                  fetchEvents.push({
+                    event: 'body-cancel-error',
+                    at: Date.now(),
+                    detail: error instanceof Error ? error.name : typeof error,
+                  })
+              );
+            return operation;
+          };
+          ReadableStreamDefaultReader.prototype.read = function (...args) {
+            const observed = observedReaders.has(this);
+            const operation = Reflect.apply(nativeRead, this, args);
+            if (observed)
+              void operation.then(
+                (result) => {
+                  if (result.done) fetchEvents.push({ event: 'body-read-done', at: Date.now() });
+                },
+                (error: unknown) => {
+                  fetchEvents.push({
+                    event: 'body-read-error',
+                    at: Date.now(),
+                    detail: error instanceof Error ? error.name : typeof error,
+                  });
+                }
+              );
+            return operation;
+          };
+          ReadableStreamDefaultReader.prototype.cancel = function (...args) {
+            const observed = observedReaders.has(this);
+            if (observed) fetchEvents.push({ event: 'body-reader-cancel', at: Date.now() });
+            const operation = Reflect.apply(nativeReaderCancel, this, args);
+            if (observed)
+              void operation.then(
+                () => fetchEvents.push({ event: 'body-reader-cancel-done', at: Date.now() }),
+                (error: unknown) =>
+                  fetchEvents.push({
+                    event: 'body-reader-cancel-error',
+                    at: Date.now(),
+                    detail: error instanceof Error ? error.name : typeof error,
+                  })
+              );
+            return operation;
+          };
           globals.fetch = async (input, init) => {
             fetchAttempts++;
+            const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+            fetchEvents.push({ event: 'fetch-start', at: Date.now() });
+            if (signal) {
+              const onAbort = () => fetchEvents.push({ event: 'signal-abort', at: Date.now() });
+              fetchEvents.push({
+                event: 'signal-state',
+                at: Date.now(),
+                detail: signal.aborted ? 'aborted' : 'active',
+              });
+              signal.addEventListener('abort', onAbort);
+              signalCleanups.push(() => signal.removeEventListener('abort', onAbort));
+            }
             try {
               const response = await nativeFetch.call(self, input, init);
               responseStatus = response.status;
               finalUrl = response.url;
+              fetchEvents.push({
+                event: 'fetch-response',
+                at: Date.now(),
+                detail: String(response.status),
+              });
+              if (response.body) observedStreams.add(response.body);
               return response;
             } catch (error) {
               fetchErrorType = error instanceof Error ? error.name : typeof error;
+              fetchEvents.push({ event: 'fetch-error', at: Date.now(), detail: fetchErrorType });
               throw error;
             }
           };
           globals.createImageBitmap = async (source) => {
             decodeAttempts++;
+            fetchEvents.push({ event: 'decode-start', at: Date.now() });
             try {
               const bitmap = await nativeCreateImageBitmap.call(self, source);
               decodeSuccesses++;
+              fetchEvents.push({ event: 'decode-success', at: Date.now() });
               return bitmap;
             } catch (error) {
               decodeFailures++;
+              fetchEvents.push({
+                event: 'decode-error',
+                at: Date.now(),
+                detail: error instanceof Error ? error.name : typeof error,
+              });
               throw error;
             }
           };
           try {
             await renderer.prefetchImages([url], cache);
           } finally {
+            for (const cleanup of signalCleanups) cleanup();
             globals.fetch = nativeFetch;
             globals.createImageBitmap = nativeCreateImageBitmap;
+            ReadableStream.prototype.getReader = nativeGetReader;
+            ReadableStream.prototype.cancel = nativeStreamCancel;
+            ReadableStreamDefaultReader.prototype.read = nativeRead;
+            ReadableStreamDefaultReader.prototype.cancel = nativeReaderCancel;
           }
         }
         const bitmap = cache.get(url);
@@ -197,6 +307,7 @@ function attachWorkerBitmapProbe(renderer: {
           decodeSuccesses,
           decodeFailures,
           failedCached: renderer.failedImageFetches.has(url),
+          fetchEvents,
         });
         return;
       }
@@ -356,32 +467,78 @@ export async function runBitmapLifecycleFixture({
   const imageRoutes = new Map<string, ImageRoutePlan>();
   const imageRequests: ImageRouteRecord[] = [];
   let imageRequestOverflow = 0;
+  const routeCompletions: RouteCompletion[] = [];
+  let routeCompletionOverflow = 0;
+  const observeRouteCompletion = (
+    url: string,
+    kind: ImageRoutePlan['kind'],
+    startedAt: number,
+    operation: Promise<void>
+  ) => {
+    if (routeCompletions.length >= 64) {
+      routeCompletionOverflow++;
+      return operation;
+    }
+    const record: RouteCompletion = {
+      url,
+      kind,
+      startedAt,
+      settledAt: null,
+      outcome: null,
+      error: null,
+    };
+    routeCompletions.push(record);
+    void operation.then(
+      () => {
+        record.settledAt = Date.now();
+        record.outcome = 'fulfilled';
+      },
+      (error: unknown) => {
+        record.settledAt = Date.now();
+        record.outcome = 'rejected';
+        record.error = error instanceof Error ? error.name : typeof error;
+      }
+    );
+    return operation;
+  };
   const imageRoute = (route: Route) => {
     const url = route.request().url();
     const plan = imageRoutes.get(url);
     assert(plan, `Unplanned image route: ${url}`);
+    const startedAt = Date.now();
     const status = plan.kind === 'http' ? plan.status : plan.kind === 'redirect' ? 302 : 200;
     if (imageRequests.length < 64)
       imageRequests.push({ url, kind: plan.kind, status: plan.kind === 'abort' ? null : status });
     else imageRequestOverflow++;
-    if (plan.kind === 'abort') return route.abort('failed');
+    if (plan.kind === 'abort')
+      return observeRouteCompletion(url, plan.kind, startedAt, route.abort('failed'));
     if (plan.kind === 'redirect') {
-      return route.fulfill({
-        status,
-        headers: {
-          location: plan.location,
-          'access-control-allow-origin': '*',
-          'cache-control': 'no-store',
-        },
-      });
+      return observeRouteCompletion(
+        url,
+        plan.kind,
+        startedAt,
+        route.fulfill({
+          status,
+          headers: {
+            location: plan.location,
+            'access-control-allow-origin': '*',
+            'cache-control': 'no-store',
+          },
+        })
+      );
     }
     if (plan.kind === 'http') {
-      return route.fulfill({
-        status,
-        contentType: 'text/plain',
-        headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
-        body: 'Image fixture HTTP failure',
-      });
+      return observeRouteCompletion(
+        url,
+        plan.kind,
+        startedAt,
+        route.fulfill({
+          status,
+          contentType: 'text/plain',
+          headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
+          body: 'Image fixture HTTP failure',
+        })
+      );
     }
     const body =
       plan.kind === 'empty'
@@ -393,19 +550,24 @@ export async function runBitmapLifecycleFixture({
             : plan.kind === 'truncated'
               ? RED_PNG.subarray(0, 12)
               : RED_PNG;
-    return route.fulfill({
-      status,
-      contentType: plan.kind === 'html' ? 'text/html' : 'image/png',
-      headers:
-        plan.kind === 'cors'
-          ? {
-              // Playwright fills a missing ACAO header with the request origin.
-              'access-control-allow-origin': 'https://cors-denied.example.test',
-              'cache-control': 'no-store',
-            }
-          : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
-      body,
-    });
+    return observeRouteCompletion(
+      url,
+      plan.kind,
+      startedAt,
+      route.fulfill({
+        status,
+        contentType: plan.kind === 'html' ? 'text/html' : 'image/png',
+        headers:
+          plan.kind === 'cors'
+            ? {
+                // Playwright fills a missing ACAO header with the request origin.
+                'access-control-allow-origin': 'https://cors-denied.example.test',
+                'cache-control': 'no-store',
+              }
+            : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
+        body,
+      })
+    );
   };
   let selfFetchRequests = 0;
   const selfFetchRoute = (route: Route) => {
@@ -1032,6 +1194,8 @@ export async function runBitmapLifecycleFixture({
         cases,
         imageRequests,
         imageRequestOverflow,
+        routeCompletions,
+        routeCompletionOverflow,
         redirectTransport: redirectTransport.binding,
         requestFailures,
         requestFailureOverflow,
@@ -1071,6 +1235,8 @@ export async function runBitmapLifecycleFixture({
             pageScriptProbeProvenance,
             imageRequests,
             imageRequestOverflow,
+            routeCompletions,
+            routeCompletionOverflow,
             workerObservations,
             pageErrors,
             pageErrorOverflow,
