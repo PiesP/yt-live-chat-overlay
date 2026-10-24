@@ -411,10 +411,17 @@ checks real video, chat, renderer/bridge, actual Canvas ink/motion before Pause,
 stable ink during Pause and motion after resume, native normal/theater layout,
 settings, the overlay Reload control, one page reload, status ownership and
 persistent settings. Canvas sampling reads an image into a separate scratch
-canvas; an unavailable read or insufficient chat activity remains blocked.
+canvas; an unavailable read or insufficient chat ink and motion remains blocked.
+The debug HUD active count is retained as a diagnostic because the main renderer
+can draw newly activated messages before that counter is updated. The settings
+enable/disable checks wait for the debounced preview and control state, and A
+restores an open settings transaction after failure.
 Its B timeline reads real Translator availability and drives the normal
 Translation settings; absence, preparation, readiness and effective messages
-remain distinct. Service activation uses trusted keyboard input on the normal
+remain distinct. B first verifies that the overlay is enabled, its Canvas and
+chat are available, and native playback advances; it repairs a disabled A
+setting through the normal UI before evaluating Translator readiness. Service
+activation uses trusted keyboard input on the normal
 settings control, with selected values and browser activation state recorded.
 A `needs-action` state gets one normal settings off/on keyboard retry.
 When real creation reaches active, the task waits up to 20 seconds for a new

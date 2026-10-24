@@ -22,6 +22,13 @@ type Verdict = 'passed' | 'blocked' | 'failed' | 'not-run';
 type RecordEntry = { stage: string; elapsedMs: number; observation: unknown };
 type Case = { status: Verdict; reason: string; timeline: RecordEntry[]; screenshots: string[] };
 type SavedSettings = ReturnType<NonNullable<Window['__ytChatOverlay']>['getSettings']>;
+class ViewingTaskStateError extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.reason = reason;
+  }
+}
 export type CanvasSample =
   | {
       status: 'sampled';
@@ -63,13 +70,7 @@ export function assessCanvasMotion(
     return { status: 'blocked', reason: 'canvas-pixel-read-unavailable' };
   }
   const visible = (samples: readonly CanvasSample[]) =>
-    samples.filter(
-      (sample) =>
-        sample.status === 'sampled' &&
-        sample.alphaPixels >= 8 &&
-        sample.activeCount !== null &&
-        sample.activeCount > 0
-    );
+    samples.filter((sample) => sample.status === 'sampled' && sample.alphaPixels >= 8);
   if (visible(before).length < 2 || visible(paused).length < 2 || visible(resumed).length < 2)
     return { status: 'blocked', reason: 'visible-chat-ink-insufficient' };
   const changed = (samples: readonly CanvasSample[]) =>
@@ -214,6 +215,7 @@ export function requireInstalledViewingTaskSuccess(result: InstalledViewingTasks
 }
 
 function errorReason(error: unknown): string {
+  if (error instanceof ViewingTaskStateError) return error.reason;
   return error instanceof Error ? error.name : typeof error;
 }
 
@@ -299,6 +301,13 @@ async function snapshot(page: Page) {
             ?.contains(document.activeElement) ?? false,
         settingsButtonCount: document.querySelectorAll('#yt-chat-overlay-settings-button').length,
         pauseButtonCount: document.querySelectorAll('#yt-chat-overlay-pause-button').length,
+        pauseDisabled:
+          document.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button')?.disabled ??
+          null,
+        settingsFormEnabled:
+          document.querySelector<HTMLInputElement>(
+            '#yt-chat-overlay-settings-backdrop input[name="enabled"]'
+          )?.checked ?? null,
         reloadFeedback: [
           ...document.querySelectorAll<HTMLElement>('.yt-chat-overlay-reload-feedback'),
         ].map((node) => ({ phase: node.dataset.phase ?? null, hidden: node.hidden })),
@@ -325,13 +334,37 @@ async function record(page: Page, start: number, timeline: RecordEntry[], stage:
 }
 
 async function openSettings(page: Page): Promise<Locator> {
+  const modal = page.locator(MODAL);
+  if (await modal.isVisible()) return modal;
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible' });
   await button.focus();
   await page.keyboard.press('Enter');
-  const modal = page.locator(MODAL);
   await modal.waitFor({ state: 'visible' });
   return modal;
+}
+
+async function waitForCommentsControl(
+  page: Page,
+  start: number,
+  timeline: RecordEntry[],
+  enabled: boolean,
+  stage: string
+): Promise<void> {
+  try {
+    await page.waitForFunction(
+      (expected) =>
+        window.__ytChatOverlay?.getSettings().enabled === expected &&
+        document.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button')?.disabled ===
+          !expected,
+      enabled,
+      { timeout: 5_000 }
+    );
+  } catch {
+    await record(page, start, timeline, `${stage}-unsettled`);
+    throw new ViewingTaskStateError(`${stage}-not-settled`);
+  }
+  await record(page, start, timeline, stage);
 }
 
 async function closeSettings(page: Page, modal: Locator): Promise<void> {
@@ -412,12 +445,7 @@ async function observeNativeTheater(page: Page, start: number, output: string, r
       elapsedMs: Math.round(performance.now() - start),
       observation: theaterInk,
     });
-    if (
-      theaterInk.status !== 'sampled' ||
-      theaterInk.alphaPixels < 8 ||
-      theaterInk.activeCount === null ||
-      theaterInk.activeCount < 1
-    )
+    if (theaterInk.status !== 'sampled' || theaterInk.alphaPixels < 8)
       return { status: 'blocked' as const, reason: 'native-theater-visible-chat-unverified' };
     const screenshot = 'installed-viewing-a-theater-canvas.png';
     await page
@@ -444,7 +472,7 @@ async function observeNativeTheater(page: Page, start: number, output: string, r
   }
 }
 
-async function runA(page: Page, start: number, output: string, result: Case): Promise<void> {
+async function runAStages(page: Page, start: number, output: string, result: Case): Promise<void> {
   const nativePlay = page.locator('#movie_player .ytp-play-button');
   await page.locator('#movie_player').hover();
   const wasPaused = await page
@@ -538,11 +566,9 @@ async function runA(page: Page, start: number, output: string, result: Case): Pr
   });
 
   await modal.locator('input[name="enabled"]').uncheck();
-  assert.equal(await pause.isDisabled(), true);
-  const disabled = await record(page, start, result.timeline, 'comments-disabled');
-  assert.equal(disabled.settings?.enabled, false);
+  await waitForCommentsControl(page, start, result.timeline, false, 'comments-disabled');
   await modal.locator('input[name="enabled"]').check();
-  assert.equal(await pause.isEnabled(), true);
+  await waitForCommentsControl(page, start, result.timeline, true, 'comments-reenabled');
   await closeSettings(page, modal);
   await record(page, start, result.timeline, 'comments-restored');
 
@@ -621,6 +647,34 @@ async function runA(page: Page, start: number, output: string, result: Case): Pr
         ? 'passed'
         : 'blocked';
   result.reason = motion.status !== 'passed' ? motion.reason : theater.reason;
+}
+
+async function runA(page: Page, start: number, output: string, result: Case): Promise<void> {
+  try {
+    await runAStages(page, start, output, result);
+  } finally {
+    if (!page.isClosed()) {
+      const modal = page.locator(MODAL);
+      if (await modal.isVisible().catch(() => false)) {
+        try {
+          const enabled = modal.locator('input[name="enabled"]');
+          if (!(await enabled.isChecked())) await enabled.check();
+          await waitForCommentsControl(page, start, result.timeline, true, 'a-control-restored');
+          await closeSettings(page, modal);
+        } catch (error) {
+          result.timeline.push({
+            stage: 'a-control-restore-failed',
+            elapsedMs: Math.round(performance.now() - start),
+            observation: {
+              reason: errorReason(error),
+              state: await snapshot(page).catch(() => null),
+            },
+          });
+          await page.keyboard.press('Escape').catch(() => {});
+        }
+      }
+    }
+  }
 }
 
 async function readTranslationUi(modal: Locator) {
@@ -806,6 +860,52 @@ async function runB(
   result: InstalledViewingTasks['b']
 ): Promise<void> {
   let modal = await openSettings(page);
+  const enabledControl = modal.locator('input[name="enabled"]');
+  const repairedEnabled = !(await enabledControl.isChecked());
+  if (repairedEnabled) await enabledControl.check();
+  try {
+    await page.waitForFunction(
+      () =>
+        window.__ytChatOverlay?.getSettings().enabled === true &&
+        document.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button')?.disabled ===
+          false &&
+        document.querySelector('#yt-live-chat-overlay canvas') !== null &&
+        document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
+      null,
+      { timeout: 8_000 }
+    );
+  } catch {
+    const state = await record(page, start, result.timeline, 'translation-session-prerequisite');
+    result.timeline.push({
+      stage: 'translation-session-prerequisite-result',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: { repairedEnabled, ready: false, state },
+    });
+    result.reason = 'overlay-session-prerequisite-unavailable';
+    result.creation = 'blocked';
+    result.effectiveMessage = 'not-run';
+    await closeSettings(page, modal);
+    return;
+  }
+  const sessionState = await record(
+    page,
+    start,
+    result.timeline,
+    'translation-session-prerequisite'
+  );
+  const playbackReady = await videoAdvances(page);
+  result.timeline.push({
+    stage: 'translation-session-prerequisite-result',
+    elapsedMs: Math.round(performance.now() - start),
+    observation: { repairedEnabled, ready: playbackReady, state: sessionState },
+  });
+  if (!playbackReady) {
+    result.reason = 'overlay-session-playback-unavailable';
+    result.creation = 'blocked';
+    result.effectiveMessage = 'not-run';
+    await closeSettings(page, modal);
+    return;
+  }
   await modal.locator('#tab-translation').click();
   result.timeline.push({
     stage: 'translation-baseline',

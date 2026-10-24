@@ -86,10 +86,10 @@ it('requires actual nonempty Canvas motion, a stable pause and resumed motion', 
   expect(
     assessCanvasMotion(
       before.map((item) => ({ ...item, activeCount: 0 })),
-      paused,
-      resumed
+      paused.map((item) => ({ ...item, activeCount: 0 })),
+      resumed.map((item) => ({ ...item, activeCount: 0 }))
     ).status
-  ).toBe('blocked');
+  ).toBe('passed');
   expect(
     assessCanvasMotion(before, paused, [{ status: 'unavailable', reason: 'read-failed' }]).status
   ).toBe('blocked');
