@@ -9,6 +9,11 @@ The encoded input is used before any capture stream or Web Audio source is
 created. After an actual autoplay rejection, trusted Play must decode this
 same input and advance its time and frames before the capture-based tests run.
 
+The separate ignored `viewing-*.mp4` clips belong to the #327 viewing baseline.
+Generate them with `generate-viewing-experience.sh`; `viewing-experience.ts` pins
+their hashes, and `profile.json` includes their exact bytes in the Windows bundle.
+Do not substitute this flat teal autoplay input for moving-video readability.
+
 To regenerate the input, review the resulting streams and update the fixture's
 hash; muxer metadata can change the exact bytes:
 

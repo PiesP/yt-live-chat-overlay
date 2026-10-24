@@ -86,6 +86,36 @@ a focused `SettingsUi` unit fixture because the production debug handle is
 frozen. Remove the selector after the run. This fixture does not
 establish installed extension or live-page behavior.
 
+For the #327 viewing-experience baseline, generate the three ignored, owned
+12-second moving-video inputs with
+`validation/windows/fixtures/generate-viewing-experience.sh`. The script requires
+FFmpeg with `libx264` and DejaVu Sans; verify its printed SHA-256 values against
+`viewing-experience.ts` before bundling. The clips are 640 × 360 H.264 MP4,
+each with a burned subtitle area. They provide bright, dark, and noisy detailed
+motion; they are controlled examples, not a sample of public YouTube videos.
+Create the ignored `validation/windows/inputs/viewing-experience.json` with exactly
+`{"scenario":"viewing-experience"}`. No other focused selector may be present.
+The common `yt-visual` profile then uses fresh controlled userscript pages for
+Y-04 live and replay controls, Y-05 matched chat on moving media in normal,
+theater, and fullscreen fixture modes, and Y-06 narrow localized recovery
+states. A separate owned Chrome profile sets the real page zoom to 200% through
+Chrome Settings, captures the resulting viewport with CDP `Page.captureScreenshot`
+without a Playwright clip, restores zoom, closes Chrome, and removes that owned
+profile. The output is one `viewing-experience.json` with bounded case records
+and at most 32 decisive PNGs. Failure cases remain recorded in the JSON.
+
+The runner follows scripted control paths and records geometry, media state,
+accessible chat IDs, focus, labels, and screenshots. It does not measure how a
+first-time person finds a control or how readable a moving comment feels. Add a
+separate dated operator log with task times, wrong actions, help requests, and
+paired readability observations before drawing Y-04/Y-05 usability conclusions.
+Installed-extension behavior, live YouTube, spoken screen-reader operation, and
+native Korean/Japanese IME composition are separate evidence. The local
+`prepareViewingImeCheckpoint(page)` and `readViewingImeCheckpoint(page)` helpers provide
+an exact titled textarea and a trusted-event trace for a later in-process native
+Windows input helper; this baseline never synthesizes IME events or waits for
+external input. Remove only the #327 selector after collection.
+
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
 or Edge Stable instance, injects the production userscript, exercises the real settings dialog,

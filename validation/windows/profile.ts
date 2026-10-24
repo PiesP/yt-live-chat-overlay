@@ -18,6 +18,7 @@ import type {
 import { runReloadFeedbackFixture } from './reload-feedback.ts';
 import { runSettingsPersistenceFixture } from './settings-persistence.ts';
 import { runTranslationRuntimeFixture } from './translation-runtime.ts';
+import { runViewingExperienceFixture } from './viewing-experience.ts';
 
 type ChatRenderer = { id: string; [key: string]: unknown };
 type ChatAction = {
@@ -1472,7 +1473,11 @@ async function verifySustainedViewingLifecycle(
   };
 }
 
-type FocusedScenario = 'settings-persistence' | 'reload-feedback' | 'translation-runtime';
+type FocusedScenario =
+  | 'settings-persistence'
+  | 'reload-feedback'
+  | 'translation-runtime'
+  | 'viewing-experience';
 
 async function hasScenarioSelector(root: string, scenario: FocusedScenario): Promise<boolean> {
   const path = join(root, 'validation/windows/inputs', `${scenario}.json`);
@@ -1495,13 +1500,15 @@ export async function readFocusedScenario(root: string): Promise<FocusedScenario
   const settings = await hasScenarioSelector(root, 'settings-persistence');
   const reload = await hasScenarioSelector(root, 'reload-feedback');
   const translation = await hasScenarioSelector(root, 'translation-runtime');
+  const viewing = await hasScenarioSelector(root, 'viewing-experience');
   assert(
-    Number(settings) + Number(reload) + Number(translation) <= 1,
+    Number(settings) + Number(reload) + Number(translation) + Number(viewing) <= 1,
     'Focused Windows scenario selectors are mutually exclusive'
   );
   if (settings) return 'settings-persistence';
   if (reload) return 'reload-feedback';
   if (translation) return 'translation-runtime';
+  if (viewing) return 'viewing-experience';
   return null;
 }
 
@@ -1549,6 +1556,15 @@ export async function run({
     }
     if (selectedScenario === 'translation-runtime') {
       return runTranslationRuntimeFixture({
+        browser,
+        root,
+        output,
+        userscript,
+        watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
+    if (selectedScenario === 'viewing-experience') {
+      return runViewingExperienceFixture({
         browser,
         root,
         output,
