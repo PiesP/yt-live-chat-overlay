@@ -480,6 +480,22 @@ try {
                 Invoke-KeyPress $key ('japanese-pending-vk-{0:X2}' -f $key)
                 Start-Sleep -Milliseconds 40
             }
+            $pendingMarker = $receiptFile + '.pending'
+            $gateAck = $receiptFile + '.ack'
+            if ([IO.File]::Exists($pendingMarker) -or [IO.File]::Exists($gateAck)) {
+                throw 'Composition gate files already exist.'
+            }
+            [IO.File]::WriteAllText($pendingMarker, 'pending')
+            $receipt.actions += [ordered]@{ kind = 'composition-gate'; label = 'pending-observation-requested'; atMs = $clock.ElapsedMilliseconds }
+            while (-not [IO.File]::Exists($gateAck)) {
+                Assert-OwnedForeground
+                Start-Sleep -Milliseconds 40
+            }
+            $gate = Get-Content -LiteralPath $gateAck -Raw | ConvertFrom-Json
+            if ($gate.allow -cne $true) {
+                throw 'Owned browser did not observe an open Japanese composition before Ctrl+Space.'
+            }
+            $receipt.actions += [ordered]@{ kind = 'composition-gate'; label = 'open-observation-acknowledged'; atMs = $clock.ElapsedMilliseconds }
             Invoke-Combo 0x11 0x20 'Japanese-Ctrl-Space-during-composition'
             Start-Sleep -Milliseconds 100
             foreach ($key in [System.UInt16[]]@(0x47, 0x4F)) {

@@ -164,9 +164,14 @@ contenteditable checkpoint, and player focus. The selected 101-key Microsoft IME
 controls request Hiragana with Ctrl+CapsLock and alphanumeric input with
 Shift+CapsLock. Native Space opens a conversion candidate and Enter commits;
 the report checks committed text, trusted composition/input events and unchanged
-text after blur/refocus. It separately records IME-consumed versus delivered
-Ctrl+Space, the independent Pause button across disable/re-enable, a fixture
-player's Space behavior, and a final word in the original observed mode. The
+text after blur/refocus. A direct-input word is observed in both editables.
+The composing Ctrl+Space waits for an observed open trusted composition at the
+native key boundary. The report records document shortcut delivery or its
+absence without assigning the cause, the independent Pause button across
+disable/re-enable, trusted native Space at the fixture player handler, and an
+unforced final word to check the original observed mode. If that differs, the
+helper requests the original mode and a second, separate unforced word must
+verify the result. The
 fixture's plain-Space player handler models the expected YouTube action; it is
 not installed-extension or live YouTube evidence. The result's JI-01 to JI-04
 statuses, native receipts, and cleanup must be reviewed together. An HKL

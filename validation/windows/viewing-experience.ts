@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join, win32 } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -58,6 +58,8 @@ declare global {
   interface Window {
     __ytViewingDenyWrites?: boolean;
     __ytViewingImeEvents?: Array<Record<string, unknown>>;
+    __ytViewingImeTraceOverflow?: boolean;
+    __ytViewingImeRecord?: (event: Record<string, unknown>) => void;
     __ytViewingPlayerSpaceHandler?: (event: KeyboardEvent) => void;
   }
 }
@@ -71,6 +73,7 @@ export type ImeCheckpoint = {
   settledEditable?: string | null;
   settledFocus?: string | null;
   events: Array<Record<string, unknown>>;
+  traceOverflow?: boolean;
   videoPaused: boolean | null;
   videoTime: number | null;
   overlayPaused: boolean;
@@ -94,12 +97,15 @@ type NativeImeStage =
   | 'japanese-textarea'
   | 'japanese-editable'
   | 'japanese-direct'
+  | 'japanese-direct-editable'
   | 'japanese-composing-shortcut'
   | 'japanese-editable-shortcut'
   | 'japanese-player-shortcut'
   | 'japanese-player-space'
   | 'japanese-player-space-resume'
-  | 'japanese-final';
+  | 'japanese-mode-probe'
+  | 'japanese-mode-restore'
+  | 'japanese-restored-probe';
 export type NativeControlSample = {
   atMs: number;
   focus: string | null;
@@ -109,12 +115,37 @@ export type NativeControlSample = {
   videoPaused: boolean | null;
   videoTime: number | null;
 };
+type CompositionGate = {
+  open: boolean;
+  focus: string | null;
+  eventCount: number;
+  traceOverflow: boolean;
+};
 type NativeImeAction = {
   receiptFile: string;
   receipt: unknown;
   error: string | null;
   samples: NativeControlSample[];
+  compositionGate: CompositionGate | undefined;
 };
+
+/** Require an unclosed trusted composition on the owned textarea at the key boundary. */
+export function japaneseCompositionOpen(
+  state: Pick<ImeCheckpoint, 'focus' | 'events' | 'traceOverflow'>
+): boolean {
+  if (state.focus !== 'yt-viewing-ime-input' || state.traceOverflow) return false;
+  const events = state.events.filter((event) => event.target === 'yt-viewing-ime-input');
+  const start = events.findLastIndex(
+    (event) => event.type === 'compositionstart' && event.trusted === true
+  );
+  if (start < 0) return false;
+  return (
+    events
+      .slice(start + 1)
+      .some((event) => event.type === 'compositionupdate' && event.trusted === true) &&
+    !events.slice(start + 1).some((event) => event.type === 'compositionend')
+  );
+}
 
 async function readNativeControlSample(page: Page): Promise<NativeControlSample> {
   return page.evaluate(() => {
@@ -268,6 +299,8 @@ async function runNativeImeAction({
     sequence === 'CtrlSpaceRoundTrip' || sequence === 'JapaneseDuringComposition';
   let sampling = sampleAction;
   let samplingError: string | null = null;
+  let compositionGate: CompositionGate | undefined;
+  let gateError: string | null = null;
   const sampler = (async () => {
     while (sampling && samples.length < 600) {
       samples.push(await readNativeControlSample(page));
@@ -276,12 +309,56 @@ async function runNativeImeAction({
   })().catch((cause: unknown) => {
     samplingError = String(cause);
   });
+  const gate =
+    sequence === 'JapaneseDuringComposition'
+      ? (async () => {
+          const marker = `${receiptPath}.pending`;
+          const acknowledgement = `${receiptPath}.ack`;
+          const deadline = Date.now() + 30_000;
+          while (Date.now() < deadline) {
+            try {
+              await readFile(marker, 'utf8');
+              const observationDeadline = Math.min(deadline, Date.now() + 1_500);
+              do {
+                const observed = await page.evaluate(() => ({
+                  focus: document.activeElement?.id ?? null,
+                  events: window.__ytViewingImeEvents ?? [],
+                  traceOverflow: window.__ytViewingImeTraceOverflow === true,
+                }));
+                compositionGate = {
+                  open: japaneseCompositionOpen(observed),
+                  focus: observed.focus,
+                  eventCount: observed.events.length,
+                  traceOverflow: observed.traceOverflow,
+                };
+                if (compositionGate.open || compositionGate.traceOverflow) break;
+                await new Promise((resolve) => setTimeout(resolve, 50));
+              } while (Date.now() < observationDeadline);
+              assert(compositionGate);
+              await writeFile(
+                `${acknowledgement}.tmp`,
+                JSON.stringify({ allow: compositionGate.open }),
+                { flag: 'wx' }
+              );
+              await rename(`${acknowledgement}.tmp`, acknowledgement);
+              return;
+            } catch (cause) {
+              if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 40));
+          }
+          throw new Error('Native composition gate marker did not arrive within 30 seconds');
+        })().catch((cause: unknown) => {
+          gateError = String(cause);
+        })
+      : Promise.resolve();
   try {
     await execFileAsync(powershell, args, { timeout: 45_000, maxBuffer: 4_096, windowsHide: true });
   } catch (cause) {
     const failure = cause as { code?: string | number; signal?: string; killed?: boolean };
     error = `Native helper failed (code=${String(failure.code ?? 'unknown')}, signal=${String(failure.signal ?? 'none')}, timedOut=${failure.killed === true})`;
   } finally {
+    await gate;
     sampling = false;
     await sampler;
     if (sampleAction && samplingError === null) {
@@ -292,6 +369,7 @@ async function runNativeImeAction({
       }
     }
     if (samplingError !== null) error ??= `Native control sampler failed (${samplingError})`;
+    if (gateError !== null) error ??= `Native composition gate failed (${gateError})`;
   }
   let receipt: unknown = null;
   try {
@@ -300,7 +378,7 @@ async function runNativeImeAction({
     const failure = cause as NodeJS.ErrnoException;
     error ??= `Native helper left no readable receipt (${failure.code ?? 'invalid-json'})`;
   }
-  return { receiptFile, receipt, error, samples };
+  return { receiptFile, receipt, error, samples, compositionGate };
 }
 
 function assertNativeImeAction(
@@ -424,6 +502,7 @@ export function japaneseWordBehavior(
   state: ImeCheckpoint,
   target: 'textarea' | 'editable'
 ): 'converted-japanese' | 'direct-latin' | 'unknown' {
+  if (state.traceOverflow) return 'unknown';
   const targetId = target === 'textarea' ? 'yt-viewing-ime-input' : 'yt-viewing-ime-editable';
   const text = target === 'textarea' ? state.input : state.editable;
   const settled = target === 'textarea' ? state.settledInput : state.settledEditable;
@@ -446,7 +525,7 @@ export function japaneseWordBehavior(
       event.data.length > 0
   );
   if (
-    /\p{Script=Han}/u.test(text) &&
+    text === '日本語' &&
     compositionStart >= 0 &&
     compositionUpdate > compositionStart &&
     compositionEnd > compositionUpdate
@@ -456,6 +535,16 @@ export function japaneseWordBehavior(
     return 'direct-latin';
   }
   return 'unknown';
+}
+
+/** A mode request alone cannot prove restoration; require a later unforced native word. */
+export function japaneseModeRestored(
+  initial: ReturnType<typeof japaneseWordBehavior>,
+  probe: { sequence: NativeImeSequence; behavior: ReturnType<typeof japaneseWordBehavior> }
+): boolean {
+  return (
+    initial !== 'unknown' && probe.sequence === 'JapaneseCurrent' && probe.behavior === initial
+  );
 }
 
 function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeImeSequence): void {
@@ -482,6 +571,13 @@ function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeIm
     const shortcut = labels.indexOf('Japanese-Ctrl-Space-during-composition');
     const finish = labels.indexOf('japanese-finish-vk-47');
     assert(pending >= 0 && shortcut > pending && finish > shortcut);
+    const gateLabels = receipt.actions
+      ?.filter((entry) => entry.kind === 'composition-gate')
+      .map((entry) => entry.label);
+    assert.deepEqual(gateLabels, [
+      'pending-observation-requested',
+      'open-observation-acknowledged',
+    ]);
   }
   if (sequence !== 'JapaneseDirect' && sequence !== 'CtrlSpaceRoundTrip') {
     assert(labels.includes('japanese-conversion-candidate'));
@@ -494,7 +590,8 @@ export function assertJapaneseShortcut(
   samples: NativeControlSample[],
   focus: 'yt-viewing-ime-input' | 'yt-viewing-ime-editable' | 'movie_player',
   originalText: string | null
-): 'delivered' | 'document-ignored' | 'ime-consumed' {
+): 'delivered' | 'document-ignored' | 'not-delivered-to-document' {
+  assert.equal(state.traceOverflow, false, 'Japanese IME trace overflowed');
   const targetText = focus === 'yt-viewing-ime-editable' ? state.editable : state.input;
   assert.equal(targetText, originalText, 'Japanese shortcut changed committed text');
   const presses = state.events.filter((event) => event.type === 'document-keydown');
@@ -547,7 +644,19 @@ export function assertJapaneseShortcut(
     return focus === 'movie_player' ? 'delivered' : 'document-ignored';
   }
   assert(samples.every((sample) => sample.overlayPaused === false));
-  return 'ime-consumed';
+  return 'not-delivered-to-document';
+}
+
+/** The fixture player model must receive exactly one trusted native Space per action. */
+export function assertJapanesePlayerSpace(state: ImeCheckpoint, expectedPaused: boolean): void {
+  assert.equal(state.traceOverflow, false, 'Japanese IME trace overflowed');
+  const events = state.events.filter((event) => event.type === 'fixture-native-player-space');
+  assert.equal(events.length, 1, 'Fixture player did not receive exactly one native Space');
+  assert.equal(events[0]?.trusted, true);
+  assert.equal(events[0]?.focus, 'movie_player');
+  assert.equal(state.focus, 'movie_player');
+  assert.equal(state.videoPaused, expectedPaused);
+  assert.equal(state.overlayPaused, false);
 }
 
 function observedCompositionEnds(state: ImeCheckpoint): Array<{ data: unknown; trusted: unknown }> {
@@ -1545,6 +1654,16 @@ async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promis
       document.body.appendChild(editable);
     }
     window.__ytViewingImeEvents = [];
+    window.__ytViewingImeTraceOverflow = false;
+    window.__ytViewingImeRecord = (event) => {
+      const events = window.__ytViewingImeEvents;
+      if (!events) return;
+      if (events.length >= 200) {
+        window.__ytViewingImeTraceOverflow = true;
+        return;
+      }
+      events.push(event);
+    };
     const types = [
       'compositionstart',
       'compositionupdate',
@@ -1559,8 +1678,7 @@ async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promis
           const keyboard = event instanceof KeyboardEvent ? event : null;
           const composition = event instanceof CompositionEvent ? event : null;
           const inputEvent = event instanceof InputEvent ? event : null;
-          if ((window.__ytViewingImeEvents?.length ?? 0) >= 200) return;
-          window.__ytViewingImeEvents?.push({
+          window.__ytViewingImeRecord?.({
             type,
             target: target.id,
             trusted: event.isTrusted,
@@ -1577,7 +1695,7 @@ async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promis
       (event) => {
         if (!event.ctrlKey || event.code !== 'Space') return;
         const focus = document.activeElement?.id ?? null;
-        window.__ytViewingImeEvents?.push({
+        window.__ytViewingImeRecord?.({
           type: 'document-keydown',
           trusted: event.isTrusted,
           isComposing: event.isComposing,
@@ -1586,7 +1704,7 @@ async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promis
         });
         setTimeout(() => {
           const video = document.querySelector<HTMLVideoElement>('#movie_player video');
-          window.__ytViewingImeEvents?.push({
+          window.__ytViewingImeRecord?.({
             type: 'post-ctrl-space',
             focus,
             overlayPaused: Array.from(
@@ -1618,7 +1736,7 @@ async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promis
         event.preventDefault();
         if (video.paused) void video.play();
         else video.pause();
-        window.__ytViewingImeEvents?.push({
+        window.__ytViewingImeRecord?.({
           type: 'fixture-native-player-space',
           trusted: event.isTrusted,
           focus: document.activeElement?.id,
@@ -1659,6 +1777,7 @@ async function readViewingImeCheckpoint(
         settledEditable: settleComposition ? (editable?.textContent ?? null) : null,
         settledFocus: settleComposition ? (document.activeElement?.id ?? null) : null,
         events: window.__ytViewingImeEvents ?? [],
+        traceOverflow: window.__ytViewingImeTraceOverflow === true,
         videoPaused:
           document.querySelector<HTMLVideoElement>('#movie_player video')?.paused ?? null,
         videoTime:
@@ -1681,6 +1800,7 @@ async function resetViewingImeTrace(page: Page, clearInput = false): Promise<voi
     const editable = document.querySelector<HTMLElement>('#yt-viewing-ime-editable');
     if (clear && editable) editable.textContent = '';
     window.__ytViewingImeEvents = [];
+    window.__ytViewingImeTraceOverflow = false;
   }, clearInput);
 }
 
@@ -1723,6 +1843,10 @@ async function exerciseJapaneseIme(
     );
     result.observations.push({ stage, native: action, state });
     assertJapaneseNativeReceipt(action, sequence);
+    assert.equal(state.traceOverflow, false, 'Japanese IME trace overflowed');
+    if (sequence === 'JapaneseDuringComposition') {
+      assert.equal(action.compositionGate?.open, true, 'Composition was not open at shortcut gate');
+    }
     return { action, state };
   };
 
@@ -1752,6 +1876,14 @@ async function exerciseJapaneseIme(
       const direct = await act('JapaneseDirect', 'japanese-direct', 'textarea', true);
       assert.equal(japaneseWordBehavior(direct.state, 'textarea'), 'direct-latin');
       assert.equal(direct.state.videoPaused, false);
+      await resetViewingImeTrace(page, true);
+      const editableDirect = await act(
+        'JapaneseDirect',
+        'japanese-direct-editable',
+        'editable',
+        true
+      );
+      assert.equal(japaneseWordBehavior(editableDirect.state, 'editable'), 'direct-latin');
       verdicts['JI-01'] = { status: 'Pass' };
       await assertVideoAdvances(page);
     } catch (error) {
@@ -1797,7 +1929,7 @@ async function exerciseJapaneseIme(
         assert.equal(composing.state.videoPaused, false);
         result.observations.push({
           stage: 'japanese-composing-shortcut-route',
-          route: composingPresses.length ? 'document-ignored' : 'ime-consumed',
+          route: composingPresses.length ? 'document-ignored' : 'not-delivered-to-document',
           trustedDocumentPresses: composingPresses.length,
         });
         await assertVideoAdvances(page);
@@ -1834,29 +1966,57 @@ async function exerciseJapaneseIme(
 
     if (initialBehavior !== 'unknown') {
       try {
+        await resetViewingImeTrace(page);
         const firstSpace = await act('NativeSpace', 'japanese-player-space', 'player');
-        assert.equal(firstSpace.state.videoPaused, true, 'Native player Space did not pause video');
-        assert.equal(firstSpace.state.overlayPaused, false);
+        assertJapanesePlayerSpace(firstSpace.state, true);
+        await resetViewingImeTrace(page);
         const secondSpace = await act('NativeSpace', 'japanese-player-space-resume', 'player');
-        assert.equal(
-          secondSpace.state.videoPaused,
-          false,
-          'Native player Space did not resume video'
-        );
+        assertJapanesePlayerSpace(secondSpace.state, false);
         await assertVideoAdvances(page);
 
         await page.locator('#yt-viewing-ime-input').evaluate((node) => {
           (node as HTMLTextAreaElement).hidden = false;
         });
         await resetViewingImeTrace(page, true);
-        const sequence = initialBehavior === 'direct-latin' ? 'JapaneseDirect' : 'JapaneseHiragana';
-        const final = await act(sequence, 'japanese-final', 'textarea', true);
-        assert.equal(japaneseWordBehavior(final.state, 'textarea'), initialBehavior);
+        const unforced = await act('JapaneseCurrent', 'japanese-mode-probe', 'textarea', true);
+        let finalBehavior = japaneseWordBehavior(unforced.state, 'textarea');
+        const beforeRepair = finalBehavior;
+        let restorationRequested = false;
+        if (
+          !japaneseModeRestored(initialBehavior, {
+            sequence: 'JapaneseCurrent',
+            behavior: finalBehavior,
+          })
+        ) {
+          const restoreSequence =
+            initialBehavior === 'direct-latin' ? 'JapaneseDirect' : 'JapaneseHiragana';
+          await resetViewingImeTrace(page, true);
+          const restoration = await act(restoreSequence, 'japanese-mode-restore', 'textarea', true);
+          restorationRequested = true;
+          assert.equal(japaneseWordBehavior(restoration.state, 'textarea'), initialBehavior);
+          await resetViewingImeTrace(page, true);
+          const followup = await act(
+            'JapaneseCurrent',
+            'japanese-restored-probe',
+            'textarea',
+            true
+          );
+          finalBehavior = japaneseWordBehavior(followup.state, 'textarea');
+        }
+        assert(
+          japaneseModeRestored(initialBehavior, {
+            sequence: 'JapaneseCurrent',
+            behavior: finalBehavior,
+          }),
+          'Unforced Japanese input did not match the original observed mode'
+        );
         result.observations.push({
           stage: 'japanese-observed-mode-restored',
           initialBehavior,
-          finalBehavior: japaneseWordBehavior(final.state, 'textarea'),
-          tsfModeVerified: false,
+          beforeRepair,
+          restorationRequested,
+          finalUnforcedBehavior: finalBehavior,
+          tsfFlagsObserved: false,
         });
         verdicts['JI-04'] = { status: 'Pass' };
       } catch (error) {
@@ -2485,6 +2645,8 @@ export async function runViewingExperienceFixture({
                   delete window.__ytViewingPlayerSpaceHandler;
                 }
                 delete window.__ytViewingImeEvents;
+                delete window.__ytViewingImeTraceOverflow;
+                delete window.__ytViewingImeRecord;
                 const player = document.querySelector<HTMLElement>('#movie_player');
                 if (playerTabindex === null) player?.removeAttribute('tabindex');
                 else player?.setAttribute('tabindex', playerTabindex);

@@ -10,6 +10,9 @@ import {
   assertNativePlayerCtrlSpace,
   imeWordBehavior,
   japaneseWordBehavior,
+  japaneseModeRestored,
+  japaneseCompositionOpen,
+  assertJapanesePlayerSpace,
   assertJapaneseShortcut,
   type ImeCheckpoint,
   type NativeControlSample,
@@ -21,6 +24,7 @@ function checkpoint(overrides: Partial<ImeCheckpoint> = {}): ImeCheckpoint {
     focus: 'yt-viewing-ime-input',
     input: '',
     events: [],
+    traceOverflow: false,
     videoPaused: false,
     videoTime: 2,
     overlayPaused: false,
@@ -83,6 +87,11 @@ test('Japanese evidence requires committed converted text and trusted compositio
   });
   assert.equal(japaneseWordBehavior(converted, 'editable'), 'converted-japanese');
   assert.equal(
+    japaneseWordBehavior({ ...converted, editable: '漢', settledEditable: '漢' }, 'editable'),
+    'unknown'
+  );
+  assert.equal(japaneseWordBehavior({ ...converted, traceOverflow: true }, 'editable'), 'unknown');
+  assert.equal(
     japaneseWordBehavior({ ...converted, events: events.slice(1) }, 'editable'),
     'unknown'
   );
@@ -126,7 +135,7 @@ test('Japanese native shortcut validates focus, preserved text, and player progr
   const state = checkpoint({ focus: 'yt-viewing-ime-editable', editable: '日本語' });
   assert.equal(
     assertJapaneseShortcut(state, samples, 'yt-viewing-ime-editable', '日本語'),
-    'ime-consumed'
+    'not-delivered-to-document'
   );
   assert.throws(
     () =>
@@ -169,6 +178,77 @@ test('Japanese native shortcut validates focus, preserved text, and player progr
         ''
       ),
     /Incomplete/u
+  );
+});
+
+test('Japanese mode restoration requires a separate unforced input observation', () => {
+  assert.equal(
+    japaneseModeRestored('converted-japanese', {
+      sequence: 'JapaneseHiragana',
+      behavior: 'converted-japanese',
+    }),
+    false
+  );
+  assert.equal(
+    japaneseModeRestored('direct-latin', { sequence: 'JapaneseDirect', behavior: 'direct-latin' }),
+    false
+  );
+  assert.equal(
+    japaneseModeRestored('converted-japanese', {
+      sequence: 'JapaneseCurrent',
+      behavior: 'direct-latin',
+    }),
+    false
+  );
+  assert.equal(
+    japaneseModeRestored('unknown', { sequence: 'JapaneseCurrent', behavior: 'unknown' }),
+    false
+  );
+  assert.equal(
+    japaneseModeRestored('converted-japanese', {
+      sequence: 'JapaneseCurrent',
+      behavior: 'converted-japanese',
+    }),
+    true
+  );
+});
+
+test('Japanese composing shortcut gate requires an open trusted composition', () => {
+  const start = { type: 'compositionstart', target: 'yt-viewing-ime-input', trusted: true };
+  const update = { type: 'compositionupdate', target: 'yt-viewing-ime-input', trusted: true };
+  const active = checkpoint({ events: [start, update] });
+  assert.equal(japaneseCompositionOpen(active), true);
+  assert.equal(japaneseCompositionOpen({ ...active, events: [start] }), false);
+  assert.equal(
+    japaneseCompositionOpen({ ...active, events: [{ ...start, trusted: false }, update] }),
+    false
+  );
+  assert.equal(
+    japaneseCompositionOpen({
+      ...active,
+      events: [start, update, { type: 'compositionend', target: 'yt-viewing-ime-input' }],
+    }),
+    false
+  );
+  assert.equal(japaneseCompositionOpen({ ...active, focus: 'movie_player' }), false);
+  assert.equal(japaneseCompositionOpen({ ...active, traceOverflow: true }), false);
+});
+
+test('fixture player Space requires one trusted event in the focused player', () => {
+  const event = { type: 'fixture-native-player-space', trusted: true, focus: 'movie_player' };
+  const paused = checkpoint({ focus: 'movie_player', videoPaused: true, events: [event] });
+  assert.doesNotThrow(() => assertJapanesePlayerSpace(paused, true));
+  assert.throws(() => assertJapanesePlayerSpace({ ...paused, events: [] }, true), /exactly one/u);
+  assert.throws(
+    () => assertJapanesePlayerSpace({ ...paused, events: [event, event] }, true),
+    /exactly one/u
+  );
+  assert.throws(() =>
+    assertJapanesePlayerSpace({ ...paused, events: [{ ...event, trusted: false }] }, true)
+  );
+  assert.throws(
+    () => assertJapanesePlayerSpace({ ...paused, traceOverflow: true }, true),
+    /overflowed/u
   );
 });
 
