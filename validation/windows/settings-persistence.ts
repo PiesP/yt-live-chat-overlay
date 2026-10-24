@@ -220,6 +220,7 @@ async function runLocalizedCase({
     assert.equal(await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().fontSize), 44);
     await focusNoticeAction(page, retry);
     const unsaved = await readNotice(notice);
+    assertNoticePresentation(unsaved, `${language.id} narrow unsaved`);
     const unsavedScreenshot = `settings-${language.id}-narrow-unsaved.png`;
     await page.screenshot({ path: join(output, unsavedScreenshot) });
     await page.evaluate(() => {
@@ -232,6 +233,7 @@ async function runLocalizedCase({
     );
     await notice.getByText(language.saved).waitFor({ state: 'visible' });
     const saved = await readNotice(notice);
+    assert.equal(saved.fontSize, '14px', `${language.id} narrow saved notice font`);
     const savedScreenshot = `settings-${language.id}-narrow-saved.png`;
     await page.screenshot({ path: join(output, savedScreenshot) });
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -303,6 +305,7 @@ async function runConflictCase({
     assert.equal(await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().fontSize), 44);
     await focusNoticeAction(page, keepMine);
     const conflict = await readNotice(notice);
+    assertNoticePresentation(conflict, 'English narrow conflict');
     await page.screenshot({ path: join(output, 'settings-en-narrow-conflict.png') });
     await page.evaluate(() => {
       window.__ytAcceptanceDenySettings = false;
@@ -346,6 +349,29 @@ function noticeAnomalies(observation: NoticeObservation) {
       content.scrollWidth > content.width + 1 || content.scrollHeight > content.height + 1,
     documentHorizontalOverflow: observation.documentScrollWidth > viewport.width + 1,
   };
+}
+
+function assertNoticePresentation(observation: NoticeObservation, scenario: string): void {
+  assert.equal(
+    observation.fontSize,
+    '14px',
+    `${scenario}: notice body font differs from the token`
+  );
+  assert(observation.focusedAction, `${scenario}: recovery action lost keyboard focus`);
+  assert(
+    Number.parseFloat(observation.actionOutlineWidth ?? '0') > 0,
+    `${scenario}: keyboard focus ring is not visible`
+  );
+  assert.deepEqual(
+    noticeAnomalies(observation),
+    {
+      noticeOutsideViewport: false,
+      actionOutsideViewport: false,
+      noticeContentOverflow: false,
+      documentHorizontalOverflow: false,
+    },
+    `${scenario}: notice text or action is clipped`
+  );
 }
 
 async function captureNativeZoomScreenshot(page: Page, output: string, file: string) {
@@ -451,6 +477,7 @@ async function runChromeZoomCase({
     await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
     let notice = await triggerUnsavedNotice(page, korean);
     const ko100 = await readNotice(notice);
+    assertNoticePresentation(ko100, 'Korean 100% zoom');
     const ko100Screenshot = await captureNativeZoomScreenshot(
       page,
       output,
@@ -478,6 +505,7 @@ async function runChromeZoomCase({
     stage = 'observe-korean-at-200';
     await focusNoticeAction(page, notice.getByRole('button', { name: korean.retry }));
     const ko200 = await readNotice(notice);
+    assertNoticePresentation(ko200, 'Korean 200% zoom');
     const ko200Screenshot = await captureNativeZoomScreenshot(
       page,
       output,
@@ -500,6 +528,7 @@ async function runChromeZoomCase({
     await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
     notice = await triggerUnsavedNotice(page, japanese);
     const ja200 = await readNotice(notice);
+    assertNoticePresentation(ja200, 'Japanese 200% zoom');
     const ja200Screenshot = await captureNativeZoomScreenshot(
       page,
       output,
@@ -517,6 +546,7 @@ async function runChromeZoomCase({
     await page.bringToFront();
     await focusNoticeAction(page, keepMine);
     const jaConflict200 = await readNotice(notice);
+    assertNoticePresentation(jaConflict200, 'Japanese conflict at 200% zoom');
     const conflictScreenshot = await captureNativeZoomScreenshot(
       page,
       output,
@@ -705,6 +735,7 @@ export async function runSettingsPersistenceFixture({
     assert.equal(await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().fontSize), 44);
     await focusNoticeAction(page, retry);
     const unsaved = await readNotice(notice);
+    assertNoticePresentation(unsaved, 'English unsaved');
     await page.screenshot({ path: join(output, 'settings-unsaved.png') });
 
     await retry.click();
@@ -716,6 +747,7 @@ export async function runSettingsPersistenceFixture({
     });
     assert.equal(await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY), before);
     const repeatedUnsaved = await readNotice(notice);
+    assert.equal(repeatedUnsaved.fontSize, '14px', 'English repeated failure font');
 
     await page.evaluate(() => {
       window.__ytAcceptanceDenySettings = false;
@@ -727,6 +759,7 @@ export async function runSettingsPersistenceFixture({
     );
     await notice.getByText('Settings saved.').waitFor({ state: 'visible' });
     const saved = await readNotice(notice);
+    assert.equal(saved.fontSize, '14px', 'English saved notice font');
     await page.screenshot({ path: join(output, 'settings-saved.png') });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });

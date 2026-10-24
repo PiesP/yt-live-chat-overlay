@@ -63,11 +63,16 @@ For a focused settings-persistence run, create the ignored
 `validation/windows/inputs/settings-persistence.json` with exactly
 `{"scenario":"settings-persistence"}` before bundling the clean committed source.
 The declared `inputs` asset includes and hashes this local selector in the bundle.
-The profile then runs only the built userscript fixture in the prepared browser:
-preview a font edit, deny one settings write, observe the session-only notice,
-restore storage, retry, and reload the saved value. This is a controlled
-localStorage boundary, not an installed extension or live YouTube result. Remove
-only this task-owned selector after the run; a normal profile has no selector.
+The profile runs the built userscript fixture in the prepared browser: preview a
+font edit, deny and retry settings writes, observe the session-only notice, test
+a real cross-tab storage conflict, and reload the saved value. It records
+computed notice typography, focus, bounds, and screenshots for English and
+narrow Korean/Japanese layouts. A separate owned Chrome profile sets real 200%
+page zoom through Chrome Settings and repeats the affected localized and conflict
+states, then restores zoom and removes that profile after confirmed closure.
+This is a controlled localStorage boundary, not an installed extension or live
+YouTube result. Remove only this task-owned selector after the run; a normal
+profile has no selector.
 
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
