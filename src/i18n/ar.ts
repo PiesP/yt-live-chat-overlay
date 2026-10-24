@@ -19,6 +19,7 @@ export const AR: Record<string, string> = {
   'status.disconnected': 'تم قطع الاتصال — انقر لإعادة التحميل',
   'status.waiting': 'بانتظار البث المباشر…',
   'app.reloadPending': 'جارٍ إعادة تشغيل التراكب…',
+  'app.recoveryInProgress': 'جارٍ استعادة التراكب… يستمر تشغيل الفيديو.',
   'app.reloadWaiting': 'لا تزال إعادة التشغيل جارية. إذا لم تكتمل، فأعد تحميل الصفحة.',
   'app.reloadRequested': 'انتهت محاولة إعادة التشغيل. تحقّق من حالة التراكب.',
   'app.reloadFailed': 'تعذّرت إعادة تشغيل التراكب. اختر الزر للمحاولة مجددًا.',
@@ -232,6 +233,8 @@ export const AR: Record<string, string> = {
 
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': 'تفعيل أو تعطيل تراكب الدردشة على بثوث YouTube المباشرة عالمياً',
+  'app.pauseShortcutHint':
+    'أغلق الإعدادات، ثم اضغط Ctrl+Space لإيقاف التعليقات مؤقتاً أو استئنافها. يستمر تشغيل الفيديو دون تغيير.',
   'danmaku.modeDesc': 'اتجاه وسلوك عرض التعليقات',
   'danmaku.textOpacityDesc': 'الشفافية الكلية لنص التعليقات (50-100%)',
   'appearance.outlineEnabledDesc': 'إضافة حد داكن حول النص لتحسين قابلية القراءة',

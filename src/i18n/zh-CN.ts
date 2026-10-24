@@ -19,6 +19,7 @@ export const ZH_CN: Record<string, string> = {
   'status.disconnected': '已断开 — 点击重新加载',
   'status.waiting': '等待直播…',
   'app.reloadPending': '正在重启叠加层…',
+  'app.recoveryInProgress': '正在恢复弹幕层…视频继续播放。',
   'app.reloadWaiting': '仍在重启。如果一直未完成，请刷新页面。',
   'app.reloadRequested': '重启尝试已结束。请查看叠加层状态。',
   'app.reloadFailed': '无法重启叠加层。请选择按钮重试。',
@@ -220,6 +221,7 @@ export const ZH_CN: Record<string, string> = {
 
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': '在YouTube直播中打开或关闭弹幕显示',
+  'app.pauseShortcutHint': '关闭设置后按 Ctrl+Space 可暂停或继续弹幕。视频播放不受影响。',
   'danmaku.modeDesc': '弹幕显示方向和行为',
   'danmaku.textOpacityDesc': '弹幕文字的整体不透明度 (50-100%)',
   'appearance.outlineEnabledDesc': '在文字周围添加深色描边，提高可读性',

@@ -19,6 +19,7 @@ export const ES: Record<string, string> = {
   'status.disconnected': 'Desconectado — Haz clic para recargar',
   'status.waiting': 'Esperando transmisión en vivo…',
   'app.reloadPending': 'Reiniciando la superposición…',
+  'app.recoveryInProgress': 'Recuperando la superposición… El video sigue reproduciéndose.',
   'app.reloadWaiting': 'El reinicio continúa. Si no termina, recarga la página.',
   'app.reloadRequested': 'Terminó el intento de reinicio. Comprueba el estado de la superposición.',
   'app.reloadFailed': 'No se pudo reiniciar la superposición. Selecciona el botón para reintentar.',
@@ -249,6 +250,8 @@ export const ES: Record<string, string> = {
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc':
     'Activa o desactiva la superposición de chat en las transmisiones en vivo de YouTube',
+  'app.pauseShortcutHint':
+    'Cierra la configuración y pulsa Ctrl+Space para pausar o reanudar los comentarios. El video sigue reproduciéndose.',
   'danmaku.modeDesc': 'Dirección y comportamiento de los comentarios',
   'danmaku.textOpacityDesc': 'Opacidad general del texto de comentarios (50-100%)',
   'appearance.outlineEnabledDesc':

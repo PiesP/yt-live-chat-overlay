@@ -19,6 +19,7 @@ export const JA: Record<string, string> = {
   'status.disconnected': '切断されました — クリックして再読み込み',
   'status.waiting': 'ライブストリームを待機中…',
   'app.reloadPending': 'オーバーレイを再起動中…',
+  'app.recoveryInProgress': 'オーバーレイを復旧中…動画は再生を続けます。',
   'app.reloadWaiting': '再起動が続いています。終わらない場合はページを再読み込みしてください。',
   'app.reloadRequested': '再起動の試行が終わりました。オーバーレイの状態を確認してください。',
   'app.reloadFailed': 'オーバーレイを再起動できませんでした。ボタンを押して再試行してください。',
@@ -235,6 +236,8 @@ export const JA: Record<string, string> = {
 
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': 'YouTubeライブストリームでチャットオーバーレイをオン/オフします',
+  'app.pauseShortcutHint':
+    '設定を閉じてからCtrl+Spaceを押すと、コメントを一時停止または再開できます。動画の再生は続きます。',
   'danmaku.modeDesc': 'コメントの表示方向と動作',
   'danmaku.textOpacityDesc': 'コメントテキスト全体の不透明度 (50-100%)',
   'appearance.outlineEnabledDesc':

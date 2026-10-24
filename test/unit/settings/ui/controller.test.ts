@@ -316,6 +316,43 @@ describe('SettingsUi', () => {
     controller.destroy();
   });
 
+  it('shows automatic recovery outside the overlay and gives manual reload precedence', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let resolveReload: () => void = () => {};
+    const controller = makeController({
+      onReload: () =>
+        new Promise<void>((resolve) => {
+          resolveReload = resolve;
+        }),
+    });
+    await controller.attach();
+    const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    const feedback = player.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
+
+    controller.showRuntimeRecoveryStatus('recovering');
+    expect(feedback?.dataset.phase).toBe('recovering');
+    expect(feedback?.hidden).toBe(false);
+    expect(feedback?.textContent).toContain('Recovering overlay');
+    expect(button?.getAttribute('aria-busy')).toBeNull();
+
+    button?.click();
+    controller.showRuntimeRecoveryStatus('failed');
+    expect(feedback?.dataset.phase).toBe('pending');
+    resolveReload();
+    await Promise.resolve();
+    expect(feedback?.dataset.phase).toBe('requested');
+    vi.advanceTimersByTime(2500);
+    expect(feedback?.dataset.phase).toBe('failed');
+    controller.showRuntimeRecoveryStatus(null);
+    expect(feedback?.dataset.phase).toBe('idle');
+    expect(feedback?.hidden).toBe(true);
+    controller.destroy();
+  });
+
   it('shows a retryable reload failure and ignores completion after destroy', async () => {
     const player = document.createElement('div');
     player.id = 'movie_player';

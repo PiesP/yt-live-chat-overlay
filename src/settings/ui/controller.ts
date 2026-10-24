@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
+import type { RuntimeRecoveryStatus } from '@app/runtime-manager';
 import { getActiveLanguage, t } from '@i18n/index';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@settings/schema';
@@ -33,7 +34,7 @@ const TOAST_DURATION_MS = 2500;
 const RELOAD_WAITING_DURATION_MS = 5000;
 const RELOAD_FEEDBACK_DURATION_MS = 2500;
 
-type ReloadFeedbackState = 'idle' | 'pending' | 'waiting' | 'requested' | 'failed';
+type ReloadFeedbackState = 'idle' | 'pending' | 'waiting' | 'requested' | 'recovering' | 'failed';
 
 export class SettingsUi {
   /** Popover API feature detection — checked once at construction. */
@@ -48,6 +49,7 @@ export class SettingsUi {
   private reloadButton: HTMLButtonElement | null = null;
   private reloadFeedback: HTMLDivElement | null = null;
   private reloadFeedbackState: ReloadFeedbackState = 'idle';
+  private automaticRecoveryStatus: RuntimeRecoveryStatus = null;
   private reloadPending = false;
   private persistenceNotice: HTMLDivElement | null = null;
   private persistenceNoticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +103,12 @@ export class SettingsUi {
 
   showTranslationStatus(status: TranslationRuntimeStatus | null): void {
     this.form.setTranslationStatus(status);
+  }
+
+  showRuntimeRecoveryStatus(status: RuntimeRecoveryStatus): void {
+    if (this.automaticRecoveryStatus === status) return;
+    this.automaticRecoveryStatus = status;
+    this.renderReloadFeedback();
   }
 
   constructor(
@@ -397,18 +405,29 @@ export class SettingsUi {
   private renderReloadFeedback(): void {
     const button = this.reloadButton;
     if (!button) return;
-    const state = this.reloadFeedbackState;
+    const state =
+      this.reloadFeedbackState !== 'idle'
+        ? this.reloadFeedbackState
+        : (this.automaticRecoveryStatus ?? 'idle');
     const messageKey = {
       idle: 'app.reload',
       pending: 'app.reloadPending',
       waiting: 'app.reloadWaiting',
       requested: 'app.reloadRequested',
+      recovering: 'app.recoveryInProgress',
       failed: 'app.reloadFailed',
     }[state];
     const message = t(messageKey);
     button.textContent =
-      state === 'pending' || state === 'waiting' ? '…' : state === 'failed' ? '!' : '↻';
-    button.classList.toggle('yt-chat-overlay-reload-button--pending', this.reloadPending);
+      state === 'pending' || state === 'waiting' || state === 'recovering'
+        ? '…'
+        : state === 'failed'
+          ? '!'
+          : '↻';
+    button.classList.toggle(
+      'yt-chat-overlay-reload-button--pending',
+      this.reloadPending || state === 'recovering'
+    );
     button.classList.toggle('yt-chat-overlay-reload-button--failed', state === 'failed');
     button.setAttribute('aria-label', state === 'failed' ? t('app.reloadRetry') : message);
     if (this.reloadPending) button.setAttribute('aria-busy', 'true');
@@ -427,6 +446,7 @@ export class SettingsUi {
       else button.removeAttribute('title');
     }
     if (this.reloadFeedback) {
+      this.reloadFeedback.dataset.phase = state;
       this.reloadFeedback.textContent = state === 'idle' ? '' : message;
       this.reloadFeedback.hidden = state === 'idle';
       this.reloadFeedback.lang = getActiveLanguage();
@@ -437,6 +457,7 @@ export class SettingsUi {
   private handleReloadClick(): void {
     const button = this.reloadButton;
     if (!button || this.reloadPending) return;
+    this.automaticRecoveryStatus = null;
     this.reloadPending = true;
     this.reloadFeedbackState = 'pending';
     this.renderReloadFeedback();
@@ -952,6 +973,7 @@ export class SettingsUi {
     this.clearReloadFeedbackTimer();
     this.reloadPending = false;
     this.reloadFeedbackState = 'idle';
+    this.automaticRecoveryStatus = null;
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.form.destroy();
     this.form.setTranslationStatus(null);

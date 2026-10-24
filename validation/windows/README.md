@@ -100,10 +100,11 @@ Y-04 live and replay controls, Y-05 matched chat on moving media in normal,
 theater, and fullscreen fixture modes, and Y-06 narrow localized recovery
 states. Readability frames wait for decoded video to advance after matched chat
 is admitted, so moving text reaches the picture rather than only its edge. The
-controlled Y-06 fault uses a nonretryable HTTP 403 after healthy chat, records
-fault requests and the actual connection UI, then exercises a product recovery
-control after restoring the route. If the disconnected action never appears,
-the case fails with its observed status preserved. A separate owned Chrome
+controlled Y-06 fault uses HTTP 403 after healthy chat, records fault requests
+and the player-mounted automatic recovery status, then uses the existing Reload
+overlay control after restoring the route. The Canvas status action is recorded
+but is not an applicable requirement while the retained watchdog policy restarts
+the session before that action can appear. A separate owned Chrome
 profile sets the real page zoom to 200% through Chrome Settings, captures the
 resulting viewport with CDP `Page.captureScreenshot` without a Playwright clip,
 restores zoom, closes Chrome, and removes that owned profile. The output is one

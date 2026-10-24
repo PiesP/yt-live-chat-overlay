@@ -130,6 +130,76 @@ describe('RuntimeManager', () => {
     expect(() => new RuntimeManager(createOpts())).not.toThrow();
   });
 
+  it('projects managed recovery through actual health and terminal retry states', () => {
+    vi.useFakeTimers();
+    const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    const onRecoveryStatus = vi.fn();
+    const rm = new RuntimeManager({ ...createOpts(), onRecoveryStatus });
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      sessionGeneration: number;
+      chatSource: { getHealthSnapshot: () => object } | null;
+      requestManagedRestart: (reason: 'watchdog') => void;
+      clearRecoveryWhenHealthy: () => void;
+      handleStartFailure: (url: string, status: 'retryable') => void;
+    };
+
+    internals.state = 'active';
+    internals.targetUrl = url;
+    internals.sessionGeneration = 1;
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus.mock.calls).toEqual([['recovering']]);
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus).toHaveBeenCalledTimes(1);
+
+    internals.state = 'active';
+    internals.chatSource = {
+      getHealthSnapshot: () => ({
+        consecutiveErrors: 0,
+        observerAlive: true,
+        recentlyActive: true,
+      }),
+    };
+    internals.clearRecoveryWhenHealthy();
+    expect(onRecoveryStatus.mock.calls).toEqual([['recovering'], [null]]);
+
+    internals.chatSource = null;
+    internals.requestManagedRestart('watchdog');
+    internals.handleStartFailure(url, 'retryable');
+    internals.handleStartFailure(url, 'retryable');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['recovering']);
+    internals.handleStartFailure(url, 'retryable');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['failed']);
+    rm.destroy();
+    expect(onRecoveryStatus.mock.lastCall).toEqual([null]);
+  });
+
+  it('clears recovery feedback immediately when the overlay is disabled', () => {
+    vi.useFakeTimers();
+    let enabled = true;
+    const onRecoveryStatus = vi.fn();
+    const rm = new RuntimeManager({
+      ...createOpts(),
+      getSettings: () => makeDefaults({ enabled }),
+      onRecoveryStatus,
+    });
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      requestManagedRestart: (reason: 'watchdog') => void;
+    };
+    internals.state = 'active';
+    internals.targetUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['recovering']);
+
+    enabled = false;
+    rm.requestReconcile('settings-change');
+    expect(onRecoveryStatus.mock.lastCall).toEqual([null]);
+    rm.destroy();
+  });
+
   it('attributes late replay drops only to the current session', async () => {
     vi.spyOn(youtubeApi, 'bootstrapChatSession').mockResolvedValue({
       status: 'ready',

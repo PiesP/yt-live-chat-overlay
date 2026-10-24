@@ -291,6 +291,28 @@ describe('SettingsUiForm', () => {
     modal.remove();
   });
 
+  it('places the temporary pause shortcut beside the enabled control without toggling it', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const enabled = modal.querySelector<HTMLInputElement>('#pane-comments input[name="enabled"]');
+    const hint = modal.querySelector<HTMLElement>(
+      '#pane-comments .yt-chat-overlay-settings-pause-hint'
+    );
+    expect(enabled?.checked).toBe(true);
+    expect(hint?.textContent).toContain('Ctrl+Space');
+    expect(hint?.closest('label')).toBeNull();
+    hint?.click();
+    expect(enabled?.checked).toBe(true);
+
+    form.destroy();
+    modal.remove();
+  });
+
   it('previews accepted opacity, outline, safe-zone, and font values without raw invalid input', () => {
     const settings = makeDefaults({
       fontSize: 40,

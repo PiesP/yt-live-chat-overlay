@@ -686,11 +686,12 @@ async function exerciseConnectionFault({
   routeState.faultStatus = 403;
   routeState.disconnected = true;
   const statusAction = page.locator('#yt-chat-overlay-status-action');
-  try {
-    await statusAction.waitFor({ state: 'visible', timeout: 18_000 });
-  } catch (error) {
-    if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
-  }
+  await page
+    .locator(
+      '.yt-chat-overlay-reload-feedback[data-phase="recovering"], .yt-chat-overlay-reload-feedback[data-phase="failed"]'
+    )
+    .waitFor({ state: 'visible', timeout: 30_000 });
+  const feedback = page.locator('.yt-chat-overlay-reload-feedback');
   const actionVisible = await statusAction.isVisible();
   const status = await page.evaluate(() => {
     const action = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
@@ -707,17 +708,17 @@ async function exerciseConnectionFault({
     requestedHttpStatus: 403,
     faultRequests: routeState.faultRequests ?? 0,
     actionVisible,
+    legacyStatusAction: 'not-applicable-under-managed-restart',
+    automaticRecoveryPhase: await feedback.getAttribute('data-phase'),
+    automaticRecoveryText: await feedback.textContent(),
     status,
     state: await snapshot(page),
   });
   result.screenshots.push(await capture());
   assert((routeState.faultRequests ?? 0) > 0, 'Controlled chat fault was never requested');
 
-  const recoveryAction = actionVisible ? 'status-action' : 'reload-button';
-  if (!actionVisible) await page.locator('#movie_player').hover();
-  const recovery = page.locator(
-    actionVisible ? '#yt-chat-overlay-status-action' : '#yt-chat-overlay-reload-button'
-  );
+  await page.locator('#movie_player').hover();
+  const recovery = page.locator('#yt-chat-overlay-reload-button');
   const healthyResponse = page.waitForResponse(
     (response) => {
       const url = new URL(response.url());
@@ -735,13 +736,13 @@ async function exerciseConnectionFault({
   await waitForAnyRow(page, recoveredIds);
   result.observations.push({
     stage: `${stage}-recovery`,
-    action: recoveryAction,
+    action: 'reload-button',
     faultRequests: routeState.faultRequests ?? 0,
     healthyPollRequests: routeState.healthyPollRequests ?? 0,
     recoveredIds,
     state: await snapshot(page),
   });
-  assert(actionVisible, 'The real disconnected status action did not become visible');
+  assert((routeState.healthyPollRequests ?? 0) > 0, 'Controlled chat did not resume polling');
 }
 
 async function snapshot(page: Page): Promise<unknown> {
@@ -848,6 +849,19 @@ async function snapshot(page: Page): Promise<unknown> {
               text: element.textContent,
               bounds: rect(element),
               action: element.querySelector('button')?.textContent ?? null,
+            }
+          : null;
+      })(),
+      recovery: (() => {
+        const feedback = document.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
+        const button = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+        return feedback
+          ? {
+              phase: feedback.dataset.phase ?? null,
+              text: feedback.textContent,
+              visible: !feedback.hidden && getComputedStyle(feedback).display !== 'none',
+              bounds: rect(feedback),
+              buttonLabel: button?.getAttribute('aria-label') ?? null,
             }
           : null;
       })(),

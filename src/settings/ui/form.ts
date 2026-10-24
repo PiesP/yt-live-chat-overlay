@@ -796,6 +796,12 @@ export class SettingsUiForm {
           const el = this.buildField(field);
           if (field.type === 'enabled') el.classList.add('yt-chat-overlay-settings-enabled');
           container.appendChild(el);
+          if (field.type === 'enabled') {
+            const hint = document.createElement('p');
+            hint.className = 'yt-chat-overlay-settings-pause-hint';
+            hint.textContent = t('app.pauseShortcutHint');
+            container.appendChild(hint);
+          }
         }
       }
     }

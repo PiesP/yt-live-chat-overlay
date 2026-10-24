@@ -577,6 +577,13 @@ export const SETTINGS_UI_STYLES = `
         outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
         outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
+      .yt-chat-overlay-settings-pause-hint {
+        margin: ${spacing.xs}px ${spacing.md}px ${spacing.sm}px;
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        line-height: 1.4;
+        overflow-wrap: break-word;
+      }
       /* Authors grid — role="row" wrappers use display:contents so children
          become direct grid items (immune to wrapper insertion/removal) */
       .yt-chat-overlay-author-grid {
