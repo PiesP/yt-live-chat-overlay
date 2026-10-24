@@ -20,6 +20,7 @@
     "entry": "validation/windows/install-profile.ts",
     "assets": [
       "validation/windows/chrome-install.ts",
+      "validation/windows/installed-viewing-tasks.ts",
       "validation/windows/chromium-network-diagnostics.ts",
       "validation/windows/chromium-bootstrap-boundaries.ts",
       "validation/windows/profile.ts",

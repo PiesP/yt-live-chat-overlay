@@ -88,3 +88,4 @@ __pycache__/
 
 # Locally generated, source-bound viewing-experience acceptance footage
 /validation/windows/fixtures/viewing-*.mp4
+/validation/windows/inputs/installed-viewing-tasks.json
