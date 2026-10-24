@@ -46,6 +46,7 @@ type BitmapProbeResult = {
   decodeFailures?: number;
   failedCached?: boolean;
   fetchEvents?: Array<{ event: string; at: number; detail?: string }>;
+  fetchEventOverflow?: number;
 };
 
 type BitmapWorkerRecord = {
@@ -64,6 +65,19 @@ type ImageRoutePlan =
   | { kind: 'redirect'; location: string };
 
 type ImageRouteRecord = { url: string; kind: ImageRoutePlan['kind']; status: number | null };
+type RequestObservation = {
+  id: number;
+  url: string;
+  method: string;
+  resourceType: string;
+  redirectedFrom: string | null;
+  startedAt: number;
+  responseStatus: number | null;
+  terminal: 'finished' | 'failed' | null;
+  terminalAt: number | null;
+  errorText: string | null;
+};
+type RequestFailure = { id: number | null; url: string; errorText: string };
 type RouteCompletion = {
   url: string;
   kind: ImageRoutePlan['kind'];
@@ -72,6 +86,95 @@ type RouteCompletion = {
   outcome: 'fulfilled' | 'rejected' | null;
   error: string | null;
 };
+
+/** Accept a CDP abort only when this exact routed request has independent completion proof. */
+export function isCompletedRoutedBitmapFailure({
+  failure,
+  failures,
+  observations,
+  routes,
+  completions,
+  probes,
+  noOverflow,
+}: {
+  failure: RequestFailure;
+  failures: RequestFailure[];
+  observations: RequestObservation[];
+  routes: ImageRouteRecord[];
+  completions: RouteCompletion[];
+  probes: Array<{ id: string; url: string; result: BitmapProbeResult }>;
+  noOverflow: boolean;
+}): boolean {
+  if (!noOverflow || failure.errorText !== 'net::ERR_ABORTED' || failure.id === null) return false;
+  const sameFailure = failures.filter((item) => item.id === failure.id && item.url === failure.url);
+  const sameRequest = observations.filter(
+    (item) => item.id === failure.id && item.url === failure.url
+  );
+  if (
+    sameFailure.length !== 1 ||
+    sameRequest.length !== 1 ||
+    observations.filter((item) => item.id === failure.id || item.url === failure.url).length !== 1
+  )
+    return false;
+  const request = sameRequest[0];
+  if (
+    !request ||
+    request.method !== 'GET' ||
+    request.resourceType !== 'fetch' ||
+    request.redirectedFrom !== null ||
+    request.responseStatus !== 200 ||
+    request.terminal !== 'failed' ||
+    request.terminalAt === null ||
+    request.errorText !== failure.errorText
+  )
+    return false;
+  const matchingRoutes = routes.filter((route) => route.url === failure.url);
+  const matchingCompletions = completions.filter((completion) => completion.url === failure.url);
+  const matchingProbes = probes.filter((probe) => probe.url === failure.url);
+  if (
+    matchingRoutes.length !== 1 ||
+    matchingRoutes[0]?.kind !== 'png' ||
+    matchingRoutes[0].status !== 200 ||
+    matchingCompletions.length !== 1 ||
+    matchingCompletions[0]?.kind !== 'png' ||
+    matchingCompletions[0].outcome !== 'fulfilled' ||
+    matchingCompletions[0].settledAt === null ||
+    matchingCompletions[0].error !== null ||
+    matchingProbes.length !== 1
+  )
+    return false;
+  const result = matchingProbes[0]?.result;
+  if (
+    !result ||
+    result.phase !== 'acquire' ||
+    result.id !== matchingProbes[0]?.id ||
+    result.errorType !== undefined ||
+    result.fetchAttempts !== 1 ||
+    result.responseStatus !== 200 ||
+    result.finalUrl !== failure.url ||
+    result.fetchErrorType !== null ||
+    result.decodeAttempts !== 1 ||
+    result.decodeSuccesses !== 1 ||
+    result.decodeFailures !== 0 ||
+    result.failedCached !== false ||
+    result.owned !== true ||
+    result.width !== 4 ||
+    result.height !== 4 ||
+    result.drawError !== null ||
+    result.fetchEventOverflow !== 0 ||
+    result.pixel?.length !== 4 ||
+    result.pixel[0] !== 255 ||
+    result.pixel[1] !== 0 ||
+    result.pixel[2] !== 0 ||
+    result.pixel[3] !== 255
+  )
+    return false;
+  // The probe logs only transition events, so an extra abort, cancel, or error cannot hide.
+  return (
+    result.fetchEvents?.map(({ event, detail }) => `${event}:${detail ?? ''}`).join('|') ===
+    'fetch-start:|signal-state:active|fetch-response:200|body-reader:|body-read-done:|decode-start:|decode-success:'
+  );
+}
 
 declare global {
   interface Window {
@@ -143,10 +246,20 @@ function attachWorkerBitmapProbe(renderer: {
         let decodeSuccesses = 0;
         let decodeFailures = 0;
         const fetchEvents: NonNullable<BitmapProbeResult['fetchEvents']> = [];
+        let fetchEventOverflow = 0;
+        const recordFetchEvent = (entry: (typeof fetchEvents)[number]) => {
+          if (fetchEvents.length < 32) fetchEvents.push(entry);
+          else fetchEventOverflow++;
+        };
         if (phase === 'acquire') {
           const observedStreams = new WeakSet<ReadableStream>();
           const observedReaders = new WeakSet<ReadableStreamDefaultReader>();
           const nativeGetReader = ReadableStream.prototype.getReader;
+          const nativeGetReaderDescriptor = Object.getOwnPropertyDescriptor(
+            ReadableStream.prototype,
+            'getReader'
+          );
+          if (!nativeGetReaderDescriptor) throw new Error('Native stream reader unavailable');
           const nativeStreamCancel = ReadableStream.prototype.cancel;
           const nativeRead = ReadableStreamDefaultReader.prototype.read;
           const nativeReaderCancel = ReadableStreamDefaultReader.prototype.cancel;
@@ -158,20 +271,20 @@ function attachWorkerBitmapProbe(renderer: {
               const reader = Reflect.apply(nativeGetReader, this, args);
               if (observedStreams.has(this)) {
                 observedReaders.add(reader);
-                fetchEvents.push({ event: 'body-reader', at: Date.now() });
+                recordFetchEvent({ event: 'body-reader', at: Date.now() });
               }
               return reader;
             },
           });
           ReadableStream.prototype.cancel = function (...args) {
             const observed = observedStreams.has(this);
-            if (observed) fetchEvents.push({ event: 'body-cancel', at: Date.now() });
+            if (observed) recordFetchEvent({ event: 'body-cancel', at: Date.now() });
             const operation = Reflect.apply(nativeStreamCancel, this, args);
             if (observed)
               void operation.then(
-                () => fetchEvents.push({ event: 'body-cancel-done', at: Date.now() }),
+                () => recordFetchEvent({ event: 'body-cancel-done', at: Date.now() }),
                 (error: unknown) =>
-                  fetchEvents.push({
+                  recordFetchEvent({
                     event: 'body-cancel-error',
                     at: Date.now(),
                     detail: error instanceof Error ? error.name : typeof error,
@@ -185,10 +298,10 @@ function attachWorkerBitmapProbe(renderer: {
             if (observed)
               void operation.then(
                 (result) => {
-                  if (result.done) fetchEvents.push({ event: 'body-read-done', at: Date.now() });
+                  if (result.done) recordFetchEvent({ event: 'body-read-done', at: Date.now() });
                 },
                 (error: unknown) => {
-                  fetchEvents.push({
+                  recordFetchEvent({
                     event: 'body-read-error',
                     at: Date.now(),
                     detail: error instanceof Error ? error.name : typeof error,
@@ -199,13 +312,13 @@ function attachWorkerBitmapProbe(renderer: {
           };
           ReadableStreamDefaultReader.prototype.cancel = function (...args) {
             const observed = observedReaders.has(this);
-            if (observed) fetchEvents.push({ event: 'body-reader-cancel', at: Date.now() });
+            if (observed) recordFetchEvent({ event: 'body-reader-cancel', at: Date.now() });
             const operation = Reflect.apply(nativeReaderCancel, this, args);
             if (observed)
               void operation.then(
-                () => fetchEvents.push({ event: 'body-reader-cancel-done', at: Date.now() }),
+                () => recordFetchEvent({ event: 'body-reader-cancel-done', at: Date.now() }),
                 (error: unknown) =>
-                  fetchEvents.push({
+                  recordFetchEvent({
                     event: 'body-reader-cancel-error',
                     at: Date.now(),
                     detail: error instanceof Error ? error.name : typeof error,
@@ -216,10 +329,10 @@ function attachWorkerBitmapProbe(renderer: {
           globals.fetch = async (input, init) => {
             fetchAttempts++;
             const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-            fetchEvents.push({ event: 'fetch-start', at: Date.now() });
+            recordFetchEvent({ event: 'fetch-start', at: Date.now() });
             if (signal) {
-              const onAbort = () => fetchEvents.push({ event: 'signal-abort', at: Date.now() });
-              fetchEvents.push({
+              const onAbort = () => recordFetchEvent({ event: 'signal-abort', at: Date.now() });
+              recordFetchEvent({
                 event: 'signal-state',
                 at: Date.now(),
                 detail: signal.aborted ? 'aborted' : 'active',
@@ -231,7 +344,7 @@ function attachWorkerBitmapProbe(renderer: {
               const response = await nativeFetch.call(self, input, init);
               responseStatus = response.status;
               finalUrl = response.url;
-              fetchEvents.push({
+              recordFetchEvent({
                 event: 'fetch-response',
                 at: Date.now(),
                 detail: String(response.status),
@@ -240,21 +353,21 @@ function attachWorkerBitmapProbe(renderer: {
               return response;
             } catch (error) {
               fetchErrorType = error instanceof Error ? error.name : typeof error;
-              fetchEvents.push({ event: 'fetch-error', at: Date.now(), detail: fetchErrorType });
+              recordFetchEvent({ event: 'fetch-error', at: Date.now(), detail: fetchErrorType });
               throw error;
             }
           };
           globals.createImageBitmap = async (source) => {
             decodeAttempts++;
-            fetchEvents.push({ event: 'decode-start', at: Date.now() });
+            recordFetchEvent({ event: 'decode-start', at: Date.now() });
             try {
               const bitmap = await nativeCreateImageBitmap.call(self, source);
               decodeSuccesses++;
-              fetchEvents.push({ event: 'decode-success', at: Date.now() });
+              recordFetchEvent({ event: 'decode-success', at: Date.now() });
               return bitmap;
             } catch (error) {
               decodeFailures++;
-              fetchEvents.push({
+              recordFetchEvent({
                 event: 'decode-error',
                 at: Date.now(),
                 detail: error instanceof Error ? error.name : typeof error,
@@ -268,7 +381,7 @@ function attachWorkerBitmapProbe(renderer: {
             for (const cleanup of signalCleanups) cleanup();
             globals.fetch = nativeFetch;
             globals.createImageBitmap = nativeCreateImageBitmap;
-            ReadableStream.prototype.getReader = nativeGetReader;
+            Object.defineProperty(ReadableStream.prototype, 'getReader', nativeGetReaderDescriptor);
             ReadableStream.prototype.cancel = nativeStreamCancel;
             ReadableStreamDefaultReader.prototype.read = nativeRead;
             ReadableStreamDefaultReader.prototype.cancel = nativeReaderCancel;
@@ -308,6 +421,7 @@ function attachWorkerBitmapProbe(renderer: {
           decodeFailures,
           failedCached: renderer.failedImageFetches.has(url),
           fetchEvents,
+          fetchEventOverflow,
         });
         return;
       }
@@ -404,18 +518,6 @@ export async function runBitmapLifecycleFixture({
       consoleErrors.push({ text: message.text().slice(0, 250), url: message.location().url });
     else consoleErrorOverflow++;
   });
-  type RequestObservation = {
-    id: number;
-    url: string;
-    method: string;
-    resourceType: string;
-    redirectedFrom: string | null;
-    startedAt: number;
-    responseStatus: number | null;
-    terminal: 'finished' | 'failed' | null;
-    terminalAt: number | null;
-    errorText: string | null;
-  };
   const requestObservations = new Map<Request, RequestObservation>();
   let requestObservationOverflow = 0;
   page.on('request', (request) => {
@@ -447,7 +549,7 @@ export async function runBitmapLifecycleFixture({
     observation.terminal = 'finished';
     observation.terminalAt = Date.now();
   });
-  const requestFailures: Array<{ id: number | null; url: string; errorText: string }> = [];
+  const requestFailures: RequestFailure[] = [];
   let requestFailureOverflow = 0;
   page.on('requestfailed', (request) => {
     const observation = requestObservations.get(request);
@@ -1162,16 +1264,48 @@ export async function runBitmapLifecycleFixture({
       'Unexpected browser console error outside exact image fault URLs'
     );
     assert.equal(consoleErrorOverflow, 0);
+    const completedProbes = [
+      ...controls.map(({ target, url, acquired }) => ({
+        id: `control-${target}`,
+        url,
+        result: acquired,
+      })),
+      ...cases.map(({ id, recoveryUrl, recovery }) => ({
+        id: `${id}-recovery`,
+        url: recoveryUrl,
+        result: recovery,
+      })),
+    ];
+    const noObservationOverflow =
+      requestFailureOverflow === 0 &&
+      requestObservationOverflow === 0 &&
+      imageRequestOverflow === 0 &&
+      routeCompletionOverflow === 0 &&
+      probeOverflow.workers === 0 &&
+      probeOverflow.results === 0 &&
+      pageErrorOverflow === 0 &&
+      consoleErrorOverflow === 0;
     assert.deepEqual(
       requestFailures.filter(
-        (failure) => expectedRequestFailures.get(failure.url) !== failure.errorText
+        (failure) =>
+          expectedRequestFailures.get(failure.url) !== failure.errorText &&
+          !isCompletedRoutedBitmapFailure({
+            failure,
+            failures: requestFailures,
+            observations: [...requestObservations.values()],
+            routes: imageRequests,
+            completions: routeCompletions,
+            probes: completedProbes,
+            noOverflow: noObservationOverflow,
+          })
       ),
       [],
-      'Unexpected network failure outside exact injected faults or rejected-body cancellation'
+      'Unexpected network failure outside exact injected faults or completed routed bitmaps'
     );
     assert.equal(requestFailureOverflow, 0);
     assert.equal(requestObservationOverflow, 0);
     assert.equal(imageRequestOverflow, 0);
+    assert.equal(routeCompletionOverflow, 0);
     assert.equal(imageRequests.length, 31);
     redirectTransport.assertHealthy();
     assert.deepEqual(redirectTransport.binding.terminalRequests, finalUrls);
