@@ -291,8 +291,9 @@ describe('SettingsUiForm', () => {
     modal.remove();
   });
 
-  it('places the temporary pause shortcut beside the enabled control without toggling it', () => {
-    const form = new SettingsUiForm(getSettings, onPreview);
+  it('keeps the session pause action outside persisted settings and the enabled label', () => {
+    const onTogglePause = vi.fn();
+    const form = new SettingsUiForm(getSettings, onPreview, onTogglePause);
     const modal = document.createElement('dialog');
     modal.append(...form.createModalContent());
     document.body.appendChild(modal);
@@ -303,9 +304,25 @@ describe('SettingsUiForm', () => {
     const hint = modal.querySelector<HTMLElement>(
       '#pane-comments .yt-chat-overlay-settings-pause-hint'
     );
+    const pause = modal.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
     expect(enabled?.checked).toBe(true);
     expect(hint?.textContent).toContain('Ctrl+Space');
     expect(hint?.closest('label')).toBeNull();
+    expect(pause?.closest('label')).toBeNull();
+    expect(pause?.disabled).toBe(true);
+    form.setUserPauseState(false);
+    expect(pause?.disabled).toBe(false);
+    expect(pause?.textContent).toBe('Pause comments');
+    expect(pause?.getAttribute('aria-pressed')).toBe('false');
+    pause?.click();
+    expect(onTogglePause).toHaveBeenCalledOnce();
+    form.setUserPauseState(true);
+    expect(pause?.textContent).toBe('Pause comments');
+    expect(pause?.getAttribute('aria-pressed')).toBe('true');
+    expect(form.collectSettings().enabled).toBe(true);
+    expect(onPreview).not.toHaveBeenCalled();
+    form.setUserPauseState(null);
+    expect(pause?.disabled).toBe(true);
     hint?.click();
     expect(enabled?.checked).toBe(true);
 

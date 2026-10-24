@@ -234,7 +234,8 @@ export const AR: Record<string, string> = {
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': 'تفعيل أو تعطيل تراكب الدردشة على بثوث YouTube المباشرة عالمياً',
   'app.pauseShortcutHint':
-    'أغلق الإعدادات، ثم اضغط Ctrl+Space لإيقاف التعليقات مؤقتاً أو استئنافها. لن تتغير حالة تشغيل الفيديو.',
+    'اضغط «إيقاف التعليقات مؤقتاً» مرة أخرى لاستئنافها. لن تتغير حالة تشغيل الفيديو. يعمل Ctrl+Space أيضاً إذا سمحت به طريقة الإدخال.',
+  'app.pauseComments': 'إيقاف التعليقات مؤقتاً',
   'danmaku.modeDesc': 'اتجاه وسلوك عرض التعليقات',
   'danmaku.textOpacityDesc': 'الشفافية الكلية لنص التعليقات (50-100%)',
   'appearance.outlineEnabledDesc': 'إضافة حد داكن حول النص لتحسين قابلية القراءة',

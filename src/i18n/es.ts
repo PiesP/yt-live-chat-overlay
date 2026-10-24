@@ -251,7 +251,8 @@ export const ES: Record<string, string> = {
   'app.enabledDesc':
     'Activa o desactiva la superposición de chat en las transmisiones en vivo de YouTube',
   'app.pauseShortcutHint':
-    'Cierra la configuración y pulsa Ctrl+Space para pausar o reanudar los comentarios. La reproducción del video no cambia.',
+    'Pulsa Pausar comentarios otra vez para reanudarlos. La reproducción del video no cambia. Ctrl+Space también funciona si el método de entrada lo permite.',
+  'app.pauseComments': 'Pausar comentarios',
   'danmaku.modeDesc': 'Dirección y comportamiento de los comentarios',
   'danmaku.textOpacityDesc': 'Opacidad general del texto de comentarios (50-100%)',
   'appearance.outlineEnabledDesc':

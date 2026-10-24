@@ -111,6 +111,10 @@ export class SettingsUi {
     this.renderReloadFeedback();
   }
 
+  showUserPauseState(paused: boolean | null): void {
+    this.form.setUserPauseState(paused);
+  }
+
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
     private readonly onChange: (partial: Partial<OverlaySettings>) => void,
@@ -125,12 +129,17 @@ export class SettingsUi {
       state: () => PersistenceState;
       retry: () => Promise<PersistenceState>;
       resolveConflict: () => Promise<PersistenceState>;
-    }
+    },
+    onToggleUserPause?: () => void
   ) {
     this.activeTab = this.defaultTabId;
-    this.form = new SettingsUiForm(getSettings, () => {
-      this.queuePreview();
-    });
+    this.form = new SettingsUiForm(
+      getSettings,
+      () => {
+        this.queuePreview();
+      },
+      onToggleUserPause
+    );
   }
 
   /** Debounced live preview — applies settings immediately (memory only, no storage write). */
@@ -972,6 +981,7 @@ export class SettingsUi {
     this.automaticRecoveryStatus = null;
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.form.destroy();
+    this.form.setUserPauseState(null);
     this.form.setTranslationStatus(null);
     this.modal?.close();
     this.modal?.remove();

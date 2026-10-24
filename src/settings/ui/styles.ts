@@ -577,6 +577,29 @@ export const SETTINGS_UI_STYLES = `
         outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
         outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
+      .yt-chat-overlay-settings-pause-button {
+        display: block;
+        box-sizing: border-box;
+        min-width: 44px;
+        min-height: 44px;
+        margin: ${spacing.sm}px ${spacing.md}px 0;
+        padding: ${spacing.sm}px ${spacing.md}px;
+        border: 1px solid ${uiColors.border};
+        border-radius: ${borderRadius.sm};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.text};
+        font: inherit;
+        font-size: ${typography.fontSize.sm};
+        cursor: pointer;
+      }
+      .yt-chat-overlay-settings-pause-button:focus-visible {
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
+      }
+      .yt-chat-overlay-settings-pause-button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
       .yt-chat-overlay-settings-pause-hint {
         margin: ${spacing.xs}px ${spacing.md}px ${spacing.sm}px;
         color: ${uiColors.text};

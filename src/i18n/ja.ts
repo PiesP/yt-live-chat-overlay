@@ -237,7 +237,8 @@ export const JA: Record<string, string> = {
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': 'YouTubeライブストリームでチャットオーバーレイをオン/オフします',
   'app.pauseShortcutHint':
-    '設定を閉じてからCtrl+Spaceを押すと、コメントを一時停止または再開できます。動画の再生状態は変わりません。',
+    'もう一度「コメントを一時停止」を押すと再開します。動画の再生状態は変わりません。入力方式が許可する場合はCtrl+Spaceも使えます。',
+  'app.pauseComments': 'コメントを一時停止',
   'danmaku.modeDesc': 'コメントの表示方向と動作',
   'danmaku.textOpacityDesc': 'コメントテキスト全体の不透明度 (50-100%)',
   'appearance.outlineEnabledDesc':

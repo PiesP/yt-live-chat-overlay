@@ -456,6 +456,57 @@ export function assertNativeEditableCtrlSpace(
   return 'ime-consumed-before-document';
 }
 
+/** Preserve the native shortcut outcome even when the Korean IME owns it outside text input. */
+export function assertNativePlayerCtrlSpace(
+  state: ImeCheckpoint,
+  samples: NativeControlSample[],
+  originalInput: string | null
+): 'delivered' | 'unavailable-ime-consumed' {
+  const documentPresses = state.events.filter((event) => event.type === 'document-keydown');
+  const settledPresses = state.events.filter((event) => event.type === 'post-ctrl-space');
+  if (documentPresses.length > 0 || settledPresses.length > 0) {
+    assertNativeCtrlSpace(state, 'movie_player', [true, false]);
+    return 'delivered';
+  }
+
+  assert.equal(state.focus, 'movie_player');
+  assert.equal(state.input, originalInput);
+  assert.equal(state.overlayPaused, false);
+  assert.equal(state.videoPaused, false);
+  assert(samples.length >= 8, 'Native player shortcut sampler did not cover both actions');
+  const first = samples[0];
+  const last = samples.at(-1);
+  assert(first && last && last.atMs - first.atMs >= 500);
+  assert(
+    samples.every(
+      (sample) =>
+        sample.focus === 'movie_player' &&
+        sample.input === originalInput &&
+        sample.overlayPaused === false &&
+        sample.videoPaused === false &&
+        typeof sample.videoTime === 'number'
+    ),
+    'Player, overlay, or video changed during the unavailable native shortcut'
+  );
+  const midpoint = Math.floor(samples.length / 2);
+  for (const part of [samples.slice(0, midpoint + 1), samples.slice(midpoint)]) {
+    assert(
+      part.some((sample, index) => {
+        const previous = part[index - 1];
+        return (
+          previous &&
+          typeof previous.videoTime === 'number' &&
+          typeof sample.videoTime === 'number' &&
+          (sample.videoTime > previous.videoTime + 0.02 ||
+            sample.videoTime < previous.videoTime - 1)
+        );
+      }),
+      'Video did not advance across the native player shortcut attempt'
+    );
+  }
+  return 'unavailable-ime-consumed';
+}
+
 function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -744,6 +795,58 @@ async function assertVideoAdvances(page: Page): Promise<void> {
   );
 }
 
+async function exercisePauseButton(page: Page, result: Case, output: string): Promise<void> {
+  await openSettings(page);
+  try {
+    const button = page.locator(`${MODAL} #yt-chat-overlay-pause-button`);
+    await button.waitFor({ state: 'visible' });
+    assert.equal(await button.isEnabled(), true, 'Session pause button is unavailable');
+    assert.equal(await button.getAttribute('aria-pressed'), 'false');
+    const bounds = await button.boundingBox();
+    assert(bounds && bounds.width >= 44 && bounds.height >= 44, 'Pause target is below 44 px');
+    const settingsBefore = await page.evaluate(() =>
+      JSON.stringify(window.__ytChatOverlay?.getSettings?.())
+    );
+    const storedBefore = await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY);
+
+    await button.click();
+    await page
+      .locator('#yt-live-chat-overlay')
+      .getByText('Paused', { exact: true })
+      .waitFor({ state: 'visible' });
+    assert.equal(await button.getAttribute('aria-pressed'), 'true');
+    result.observations.push({
+      stage: 'pause-button-pointer',
+      bounds,
+      state: await snapshot(page),
+    });
+    result.screenshots.push(await screenshot(page, output, 'viewing-y04-pause-button'));
+    await assertVideoAdvances(page);
+
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await page
+      .locator('#yt-live-chat-overlay')
+      .getByText('Paused', { exact: true })
+      .waitFor({ state: 'hidden' });
+    assert.equal(await button.getAttribute('aria-pressed'), 'false');
+    result.observations.push({ stage: 'pause-button-keyboard', state: await snapshot(page) });
+    await assertVideoAdvances(page);
+    assert.equal(
+      await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.())),
+      settingsBefore,
+      'Session pause modified settings'
+    );
+    assert.equal(
+      await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY),
+      storedBefore,
+      'Session pause wrote settings storage'
+    );
+  } finally {
+    await closeSettings(page);
+  }
+}
+
 async function waitForMovingChatFrame(page: Page): Promise<void> {
   const start = await page.evaluate(() => {
     const video = document.querySelector<HTMLVideoElement>('#movie_player video');
@@ -998,6 +1101,17 @@ async function snapshot(page: Page): Promise<unknown> {
               modal.querySelector('.yt-chat-overlay-settings-runtime-status')?.textContent ?? null,
           }
         : null,
+      pauseButton: (() => {
+        const button = modal?.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+        return button
+          ? {
+              text: button.textContent,
+              pressed: button.getAttribute('aria-pressed'),
+              disabled: button.disabled,
+              bounds: rect(button),
+            }
+          : null;
+      })(),
       notice: (() => {
         const element = document.querySelector<HTMLElement>(
           '.yt-chat-overlay-settings-persistence-notice'
@@ -1202,6 +1316,7 @@ export async function runViewingExperienceFixture({
   const imeRequested = imeSelection !== 'not-run';
   const nativeOnly = imeSelection === 'only';
   let nativeImeInput: 'not-run' | 'failed' | 'verified' = imeRequested ? 'failed' : 'not-run';
+  let nativeShortcut: 'not-run' | 'delivered' | 'unavailable-ime-consumed' = 'not-run';
   const cases: Case[] = [];
   const pageErrors: string[] = [];
   const state: RouteState = { disconnected: false, servedIds: [], mediaRanges: [] };
@@ -1483,6 +1598,7 @@ export async function runViewingExperienceFixture({
             stage: 'native-ime-not-run',
             reason: 'Optional viewing-experience-ime.json selector is absent',
           });
+          await exercisePauseButton(replayPage, result, output);
         } else {
           assert.equal(
             process.platform,
@@ -1584,6 +1700,7 @@ export async function runViewingExperienceFixture({
               await assertVideoAdvances(replayPage);
 
               await resetViewingImeTrace(replayPage);
+              const noneditableBefore = await readViewingImeCheckpoint(replayPage);
               const noneditableControls = await runNativeImeAction({
                 page: replayPage,
                 root,
@@ -1602,7 +1719,16 @@ export async function runViewingExperienceFixture({
                 state: noneditableState,
               });
               assertNativeImeAction(noneditableControls, 'CtrlSpaceRoundTrip', true);
-              assertNativeCtrlSpace(noneditableState, 'movie_player', [true, false]);
+              nativeShortcut = assertNativePlayerCtrlSpace(
+                noneditableState,
+                noneditableControls.samples,
+                noneditableBefore.input
+              );
+              result.observations.push({
+                stage: 'native-ime-player-shortcut-route',
+                route: nativeShortcut,
+                functional: nativeShortcut === 'delivered',
+              });
               await assertVideoAdvances(replayPage);
             } catch (error) {
               controlError = error;
@@ -1641,10 +1767,21 @@ export async function runViewingExperienceFixture({
             } catch (error) {
               restorationError = error;
             }
-            if (controlError || restorationError) {
+            let pauseButtonError: unknown;
+            try {
+              await replayPage.locator('#yt-viewing-ime-input').evaluate((input) => {
+                (input as HTMLTextAreaElement).hidden = true;
+              });
+              await exercisePauseButton(replayPage, result, output);
+            } catch (error) {
+              pauseButtonError = error;
+            }
+            if (controlError || restorationError || pauseButtonError) {
               throw new AggregateError(
-                [controlError, restorationError].filter((error) => error !== undefined),
-                'Native shortcut or IME restoration failed'
+                [controlError, restorationError, pauseButtonError].filter(
+                  (error) => error !== undefined
+                ),
+                'Native shortcut, IME restoration, or pause button failed'
               );
             }
           } finally {
@@ -1990,6 +2127,7 @@ export async function runViewingExperienceFixture({
       firstTimeHumanObservation: false,
       humanReadabilityJudgment: nativeOnly ? 'not-run' : 'pending-review',
       nativeImeInput,
+      nativeShortcut,
       spokenScreenReaderCheck: 'not-run',
       nativeYouTubeControls: 'not-run',
       installedApplication: false,

@@ -131,16 +131,17 @@ against the caller-owned profile path in the same interactive desktop session.
 It records native action receipts, trusted composition start/update and input
 events, the observed composition end (including its `isTrusted` value), and
 actual `한글` text unchanged after blur and refocus. The final native Space
-keydown must be outside composition. Ctrl+Space is tried first in the focused
-textarea, where the overlay must stay active, and then on the focused player,
-where it must pause and resume. Both shortcuts must leave video playing at each
-observed step. A native control timeline samples focus, input, overlay, and
-video throughout both 500 ms-separated actions. A Korean IME can consume the
-editable shortcut before
-the document listener receives it; this route requires the validated native
-receipt, unchanged composed text, and stable sampled playback. The player route
-still requires two trusted document shortcuts and observed pause/resume. A final
-native word probe compares observed input behavior with the initial Korean-layout
+keydown must be outside composition. Ctrl+Space is tried in the focused textarea
+and on the focused player. A native control timeline samples focus, input,
+overlay, and video throughout each pair of 500 ms-separated actions. Korean IME
+may consume the shortcut before the document listener receives it in either
+focus state. That route requires a validated native receipt, unchanged text,
+stable overlay state, and continuing video, and is reported as unavailable for
+native pause. A delivered player shortcut still requires two trusted document
+events and observed pause/resume. Independently, the Comments pane Pause comments
+button is clicked and keyboard activated to prove pause/resume without changing
+video playback or saved settings. A final native word probe compares observed
+input behavior with the initial Korean-layout
 probe; receipts verify HKL restoration and balanced toggle actions, but do not
 prove TSF mode state. Missing Korean layout, session mismatch, incomplete
 restoration, absent trusted composition start/update or input, and an opted-in

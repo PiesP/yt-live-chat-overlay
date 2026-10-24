@@ -221,7 +221,9 @@ export const ZH_CN: Record<string, string> = {
 
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': '在YouTube直播中打开或关闭弹幕显示',
-  'app.pauseShortcutHint': '关闭设置后按 Ctrl+Space 可暂停或继续弹幕。视频播放不受影响。',
+  'app.pauseShortcutHint':
+    '再次按“暂停弹幕”可继续弹幕。视频播放状态不会改变。输入法允许时也可使用 Ctrl+Space。',
+  'app.pauseComments': '暂停弹幕',
   'danmaku.modeDesc': '弹幕显示方向和行为',
   'danmaku.textOpacityDesc': '弹幕文字的整体不透明度 (50-100%)',
   'appearance.outlineEnabledDesc': '在文字周围添加深色描边，提高可读性',

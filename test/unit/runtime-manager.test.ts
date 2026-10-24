@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 
 import type { OverlaySettings } from '@app-types';
+import { Overlay } from '@app/overlay';
 import { RuntimeManager } from '@app/runtime-manager';
 import { ReplayChatSource } from '@chat/source-replay';
 import * as youtubeApi from '@chat/youtube/api';
@@ -231,6 +232,38 @@ describe('RuntimeManager', () => {
     };
     internals.clearRecoveryWhenHealthy();
     expect(onRecoveryStatus.mock.lastCall).toEqual([null]);
+    rm.destroy();
+  });
+
+  it('rebinds pause state to the current overlay and detaches the retired overlay', () => {
+    const onUserPauseStatus = vi.fn();
+    const rm = new RuntimeManager({ ...createOpts(), onUserPauseStatus });
+    const internals = rm as unknown as {
+      overlay: Overlay | null;
+      bindUserPause: (overlay: Overlay) => void;
+      detachUserPause: () => void;
+    };
+    const first = new Overlay();
+    const second = new Overlay();
+    internals.overlay = first;
+    internals.bindUserPause(first);
+    expect(onUserPauseStatus.mock.calls).toEqual([[false]]);
+    first.toggleUserPause();
+    expect(onUserPauseStatus.mock.lastCall).toEqual([true]);
+
+    internals.overlay = second;
+    internals.bindUserPause(second);
+    expect(onUserPauseStatus.mock.lastCall).toEqual([false]);
+    onUserPauseStatus.mockClear();
+    first.toggleUserPause();
+    expect(onUserPauseStatus).not.toHaveBeenCalled();
+    second.toggleUserPause();
+    expect(onUserPauseStatus.mock.calls).toEqual([[true]]);
+    internals.detachUserPause();
+    expect(onUserPauseStatus.mock.lastCall).toEqual([null]);
+    onUserPauseStatus.mockClear();
+    second.toggleUserPause();
+    expect(onUserPauseStatus).not.toHaveBeenCalled();
     rm.destroy();
   });
 

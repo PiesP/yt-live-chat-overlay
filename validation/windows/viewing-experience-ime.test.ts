@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   assertNativeCtrlSpace,
   assertNativeEditableCtrlSpace,
+  assertNativePlayerCtrlSpace,
   imeWordBehavior,
   type ImeCheckpoint,
   type NativeControlSample,
@@ -136,6 +137,37 @@ test('editable IME may consume native Ctrl+Space before the document shortcut', 
   );
   assert.throws(
     () => assertNativeCtrlSpace(state, 'movie_player', [true, false]),
+    /Expected two native Ctrl\+Space keydown events/u
+  );
+});
+
+test('player shortcut is reported unavailable when the native IME consumes both actions', () => {
+  const samples: NativeControlSample[] = Array.from({ length: 12 }, (_, index) => ({
+    atMs: index * 75,
+    focus: 'movie_player',
+    input: '한글 ',
+    overlayPaused: false,
+    videoPaused: false,
+    videoTime: 2 + index * 0.075,
+  }));
+  const state = checkpoint({ focus: 'movie_player', input: '한글 ' });
+  assert.equal(assertNativePlayerCtrlSpace(state, samples, '한글 '), 'unavailable-ime-consumed');
+  assert.throws(
+    () =>
+      assertNativePlayerCtrlSpace(
+        state,
+        samples.map((sample) => ({ ...sample, overlayPaused: true })),
+        '한글 '
+      ),
+    /changed during the unavailable native shortcut/u
+  );
+  assert.throws(
+    () =>
+      assertNativePlayerCtrlSpace(
+        { ...state, events: [{ type: 'document-keydown', trusted: true, focus: 'movie_player' }] },
+        samples,
+        '한글 '
+      ),
     /Expected two native Ctrl\+Space keydown events/u
   );
 });

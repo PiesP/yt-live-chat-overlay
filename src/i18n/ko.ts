@@ -221,7 +221,8 @@ export const KO: Record<string, string> = {
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': 'YouTube 라이브 스트림에서 채팅 오버레이를 켜거나 끕니다',
   'app.pauseShortcutHint':
-    '설정을 닫은 다음 Ctrl+Space를 누르면 댓글을 일시정지하거나 다시 표시할 수 있습니다. 동영상 재생은 그대로 유지됩니다.',
+    '댓글 일시정지 버튼을 다시 누르면 댓글이 재개됩니다. 동영상 재생 상태는 바뀌지 않습니다. 입력기가 허용하면 Ctrl+Space도 사용할 수 있습니다.',
+  'app.pauseComments': '댓글 일시정지',
   'danmaku.modeDesc': '댓글 표시 방향과 동작 방식',
   'danmaku.fontWeightDesc': '볼드는 더 읽기 쉽고, 보통은 GPU 메모리를 적게 사용합니다',
   'danmaku.fontFamily': '글꼴 종류',

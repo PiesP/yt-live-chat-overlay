@@ -118,6 +118,7 @@ interface RuntimeManagerOptions {
   isValidPage: () => boolean;
   onTranslationStatus?: (status: TranslationRuntimeStatus | null) => void;
   onRecoveryStatus?: (status: RuntimeRecoveryStatus) => void;
+  onUserPauseStatus?: (paused: boolean | null) => void;
 }
 
 interface DesiredRuntimeState {
@@ -145,6 +146,9 @@ export class RuntimeManager {
   private readonly isValidPage: RuntimeManagerOptions['isValidPage'];
   private readonly onTranslationStatus: RuntimeManagerOptions['onTranslationStatus'];
   private readonly onRecoveryStatus: RuntimeManagerOptions['onRecoveryStatus'];
+  private readonly onUserPauseStatus: RuntimeManagerOptions['onUserPauseStatus'];
+  private userPauseUnsubscribe: (() => void) | null = null;
+  private publishedUserPause: boolean | null = null;
   private recoveryStatus: { url: string; phase: Exclude<RuntimeRecoveryStatus, null> } | null =
     null;
   private reconcileRequested = false;
@@ -260,6 +264,7 @@ export class RuntimeManager {
     this.isValidPage = options.isValidPage;
     this.onTranslationStatus = options.onTranslationStatus;
     this.onRecoveryStatus = options.onRecoveryStatus;
+    this.onUserPauseStatus = options.onUserPauseStatus;
     this.standbyController = new StandbyController(
       () => this.abortController.signal,
       () => this.isDisposedState,
@@ -323,6 +328,13 @@ export class RuntimeManager {
     this.clearRecoveryStatus();
     this.disposeActiveSession();
     await this.reconcileNow('session-restart');
+  }
+
+  toggleUserPause(): boolean | null {
+    const overlay = this.overlay;
+    if (!overlay || !this.isValidPage() || !this.getSettings().enabled) return null;
+    if (!overlay.getContainer()?.isConnected) return null;
+    return overlay.toggleUserPause();
   }
 
   destroy(): void {
@@ -757,6 +769,7 @@ export class RuntimeManager {
       // restartChatSourceSoft preserves old references but startSession
       // creates fresh instances — the old ones must be cleaned up to
       // prevent Worker, rAF, ResizeObserver, and fullscreen listener leaks.
+      this.detachUserPause();
       this.overlay?.destroy();
       this.overlay = null;
       this.renderer?.destroy();
@@ -776,6 +789,7 @@ export class RuntimeManager {
       // Assign overlay BEFORE throwIfAborted so the DOM is cleaned up
       // by disposeActiveSession() if a subsequent check throws.
       this.overlay = overlay;
+      this.bindUserPause(overlay);
       throwIfAborted(signal);
       this.renderer = this.createRenderer(overlay, settings);
       this.renderer.setConnectionStatus('connecting');
@@ -938,6 +952,7 @@ export class RuntimeManager {
 
     this.chatPanelObserver.stop();
 
+    this.detachUserPause();
     this.renderer?.destroy();
     this.renderer = null;
     this.onTranslationStatus?.(null);
@@ -951,6 +966,26 @@ export class RuntimeManager {
     this._recoveringFromError = false;
 
     log.info('runtime.session.disposed');
+  }
+
+  private publishUserPause(paused: boolean | null): void {
+    if (this.publishedUserPause === paused) return;
+    this.publishedUserPause = paused;
+    this.onUserPauseStatus?.(paused);
+  }
+
+  private bindUserPause(overlay: Overlay): void {
+    this.detachUserPause();
+    this.userPauseUnsubscribe = overlay.onUserPauseChanged((paused) => {
+      if (this.overlay === overlay) this.publishUserPause(paused);
+    });
+    this.publishUserPause(overlay.getUserPauseState());
+  }
+
+  private detachUserPause(): void {
+    this.userPauseUnsubscribe?.();
+    this.userPauseUnsubscribe = null;
+    this.publishUserPause(null);
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {

@@ -174,7 +174,8 @@ export const EN: Record<string, string> = {
   'app.enabled': 'Overlay Enabled',
   'app.enabledDesc': 'Globally enable or disable the chat overlay on YouTube live streams',
   'app.pauseShortcutHint':
-    'Close settings, then press Ctrl+Space to pause or resume comments. Video playback is unchanged.',
+    'Press Pause comments again to resume. Video playback is unchanged. Ctrl+Space also works when your input method passes it through.',
+  'app.pauseComments': 'Pause comments',
   'app.langChanged': 'Interface language changed to',
   'app.name': 'Live chat overlay',
   'app.reload': 'Reload overlay',
