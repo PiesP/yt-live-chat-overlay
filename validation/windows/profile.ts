@@ -15,6 +15,7 @@ import type {
   Request,
 } from '@playwright/test';
 
+import { runReloadFeedbackFixture } from './reload-feedback.ts';
 import { runSettingsPersistenceFixture } from './settings-persistence.ts';
 
 type ChatRenderer = { id: string; [key: string]: unknown };
@@ -1507,9 +1508,25 @@ export async function run({
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   if (selectedScenario !== null) {
-    assert.deepEqual(selectedScenario, { scenario: 'settings-persistence' });
-    assert(!installedContext, 'The focused settings fixture uses the production userscript');
+    assert(!installedContext, 'Focused fixtures use the production userscript');
     await mkdir(output, { recursive: true });
+    if (
+      typeof selectedScenario === 'object' &&
+      selectedScenario !== null &&
+      'scenario' in selectedScenario &&
+      selectedScenario.scenario === 'reload-feedback'
+    ) {
+      assert.deepEqual(selectedScenario, { scenario: 'reload-feedback' });
+      return runReloadFeedbackFixture({
+        browser,
+        root,
+        output,
+        userscript,
+        gmMocks,
+        watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
+    assert.deepEqual(selectedScenario, { scenario: 'settings-persistence' });
     return runSettingsPersistenceFixture({
       browser,
       root,
