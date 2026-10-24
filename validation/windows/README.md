@@ -128,15 +128,19 @@ The native check opens
 its own temporary headed Chrome profile and reads that browser's PID through
 CDP. The bundled `native-ime.ps1` independently checks the process command line
 against the caller-owned profile path in the same interactive desktop session.
-It records native action receipts, trusted composition start/update/end events,
-and actual `한글` text. Ctrl+Space is tried first in the focused textarea, where
+It records native action receipts, trusted composition start/update and input
+events, the observed composition end (including its `isTrusted` value), and
+actual `한글` text unchanged after blur and refocus. The final native Space
+keydown must be outside composition. Ctrl+Space is tried first in the focused
+textarea, where
 the overlay must stay active, and then on the focused player, where it must
 pause and resume.
 Both shortcuts must leave video playing at each observed step. A final native
 word probe compares observed input behavior with the initial Korean-layout
 probe; receipts verify HKL restoration and balanced toggle actions, but do not
 prove TSF mode state. Missing Korean layout, session mismatch, incomplete
-restoration, absent trusted composition, and an opted-in non-Windows run fail
+restoration, absent trusted composition start/update or input, and an opted-in
+non-Windows run fail
 the case with retained receipts. With no IME selector the check is `not-run`;
 Playwright keyboard input is never counted as IME evidence. Remove only the
 #327 selectors after collection.

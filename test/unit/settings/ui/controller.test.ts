@@ -338,6 +338,8 @@ describe('SettingsUi', () => {
     expect(feedback?.hidden).toBe(false);
     expect(feedback?.textContent).toContain('Recovering overlay');
     expect(button?.getAttribute('aria-busy')).toBeNull();
+    expect(button?.getAttribute('aria-label')).toBe('Reload overlay');
+    expect(button?.textContent).toBe('↻');
 
     button?.click();
     controller.showRuntimeRecoveryStatus('failed');

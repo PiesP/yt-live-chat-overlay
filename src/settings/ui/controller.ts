@@ -419,17 +419,13 @@ export class SettingsUi {
     }[state];
     const message = t(messageKey);
     button.textContent =
-      state === 'pending' || state === 'waiting' || state === 'recovering'
-        ? '…'
-        : state === 'failed'
-          ? '!'
-          : '↻';
-    button.classList.toggle(
-      'yt-chat-overlay-reload-button--pending',
-      this.reloadPending || state === 'recovering'
-    );
+      state === 'pending' || state === 'waiting' ? '…' : state === 'failed' ? '!' : '↻';
+    button.classList.toggle('yt-chat-overlay-reload-button--pending', this.reloadPending);
     button.classList.toggle('yt-chat-overlay-reload-button--failed', state === 'failed');
-    button.setAttribute('aria-label', state === 'failed' ? t('app.reloadRetry') : message);
+    button.setAttribute(
+      'aria-label',
+      state === 'failed' ? t('app.reloadRetry') : state === 'recovering' ? t('app.reload') : message
+    );
     if (this.reloadPending) button.setAttribute('aria-busy', 'true');
     else button.removeAttribute('aria-busy');
     if (SettingsUi.supportsHints) {

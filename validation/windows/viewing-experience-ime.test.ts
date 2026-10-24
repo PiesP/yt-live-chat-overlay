@@ -23,19 +23,39 @@ function checkpoint(overrides: Partial<ImeCheckpoint> = {}): ImeCheckpoint {
   };
 }
 
-test('Hangul proof requires the actual word and all trusted composition phases', () => {
-  const events = ['compositionstart', 'compositionupdate', 'compositionend'].map((type) => ({
-    type,
-    trusted: true,
-  }));
-  assert.equal(imeWordBehavior(checkpoint({ input: '한글 ', events })), 'hangul');
-  assert.equal(imeWordBehavior(checkpoint({ input: '한글 ', events: events.slice(1) })), 'unknown');
+test('Hangul proof accepts observed end with trusted native start, update, key and input', () => {
+  const events = [
+    { type: 'keydown', key: 'Process', trusted: true, isComposing: false },
+    { type: 'compositionstart', trusted: true, data: '' },
+    { type: 'compositionupdate', trusted: true, data: '한' },
+    { type: 'keydown', key: 'Process', trusted: true, isComposing: true },
+    { type: 'input', trusted: true },
+    { type: 'compositionend', trusted: false, data: '한' },
+    { type: 'keydown', key: ' ', trusted: true, isComposing: false },
+    { type: 'input', trusted: true },
+  ];
+  const committed = { input: '한글 ', settledInput: '한글 ', settledFocus: 'yt-viewing-ime-input' };
+  assert.equal(imeWordBehavior(checkpoint({ ...committed, events })), 'hangul');
+  assert.equal(imeWordBehavior(checkpoint({ ...committed, events: events.slice(2) })), 'unknown');
   assert.equal(
     imeWordBehavior(
-      checkpoint({ input: '한글 ', events: events.map((event) => ({ ...event, trusted: false })) })
+      checkpoint({
+        ...committed,
+        events: events.map((event) => ({ ...event, trusted: false })),
+      })
     ),
     'unknown'
   );
+  assert.equal(
+    imeWordBehavior(
+      checkpoint({
+        ...committed,
+        events: events.filter((event) => event.type !== 'compositionend'),
+      })
+    ),
+    'unknown'
+  );
+  assert.equal(imeWordBehavior(checkpoint({ input: '한글 ', events })), 'unknown');
   assert.equal(imeWordBehavior(checkpoint({ input: 'gksrmf ' })), 'latin');
   assert.equal(imeWordBehavior(checkpoint({ input: 'gksrmf ', events })), 'unknown');
 });

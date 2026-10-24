@@ -55,6 +55,8 @@ export type ImeCheckpoint = {
   title: string;
   focus: string | null;
   input: string | null;
+  settledInput?: string | null;
+  settledFocus?: string | null;
   events: Array<Record<string, unknown>>;
   videoPaused: boolean | null;
   videoTime: number | null;
@@ -258,14 +260,50 @@ export function imeWordBehavior(state: ImeCheckpoint): 'hangul' | 'latin' | 'unk
   const trustedComposition = state.events.filter(
     (event) => event.trusted === true && compositionTypes.includes(String(event.type))
   );
+  const start = state.events.findIndex(
+    (event) => event.type === 'compositionstart' && event.trusted === true
+  );
+  const update = state.events.findIndex(
+    (event, index) => index > start && event.type === 'compositionupdate' && event.trusted === true
+  );
+  const end = state.events.findIndex(
+    (event, index) =>
+      index > update &&
+      event.type === 'compositionend' &&
+      typeof event.data === 'string' &&
+      event.data.length > 0
+  );
+  const keydowns = state.events.filter((event) => event.type === 'keydown');
+  const lastKey = keydowns.at(-1);
   if (
     state.input?.trim() === '한글' &&
-    compositionTypes.every((type) => trustedComposition.some((event) => event.type === type))
+    state.settledInput === state.input &&
+    state.settledFocus === 'yt-viewing-ime-input' &&
+    start >= 0 &&
+    update > start &&
+    end > update &&
+    state.events.some(
+      (event) =>
+        event.type === 'keydown' &&
+        event.trusted === true &&
+        event.key === 'Process' &&
+        event.isComposing === true
+    ) &&
+    state.events.some((event) => event.type === 'input' && event.trusted === true) &&
+    lastKey?.trusted === true &&
+    lastKey.key === ' ' &&
+    lastKey.isComposing === false
   ) {
     return 'hangul';
   }
   if (state.input?.trim() === 'gksrmf' && trustedComposition.length === 0) return 'latin';
   return 'unknown';
+}
+
+function observedCompositionEnds(state: ImeCheckpoint): Array<{ data: unknown; trusted: unknown }> {
+  return state.events
+    .filter((event) => event.type === 'compositionend')
+    .map((event) => ({ data: event.data, trusted: event.trusted }));
 }
 
 export function assertNativeCtrlSpace(
@@ -987,18 +1025,29 @@ async function prepareViewingImeCheckpoint(page: Page): Promise<void> {
 }
 
 /** Read evidence after native input; this function never synthesizes a key event. */
-async function readViewingImeCheckpoint(page: Page): Promise<ImeCheckpoint> {
-  return page.evaluate(() => ({
-    title: document.title,
-    focus: document.activeElement?.id ?? null,
-    input: document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input')?.value ?? null,
-    events: window.__ytViewingImeEvents ?? [],
-    videoPaused: document.querySelector<HTMLVideoElement>('#movie_player video')?.paused ?? null,
-    videoTime: document.querySelector<HTMLVideoElement>('#movie_player video')?.currentTime ?? null,
-    overlayPaused: Array.from(
-      document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
-    ).some((node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'),
-  }));
+async function readViewingImeCheckpoint(page: Page, settle = false): Promise<ImeCheckpoint> {
+  return page.evaluate((settleComposition) => {
+    const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
+    const inputBeforeBlur = input?.value ?? null;
+    if (settleComposition && input) {
+      input.blur();
+      input.focus();
+    }
+    return {
+      title: document.title,
+      focus: document.activeElement?.id ?? null,
+      input: inputBeforeBlur,
+      settledInput: settleComposition ? (input?.value ?? null) : null,
+      settledFocus: settleComposition ? (document.activeElement?.id ?? null) : null,
+      events: window.__ytViewingImeEvents ?? [],
+      videoPaused: document.querySelector<HTMLVideoElement>('#movie_player video')?.paused ?? null,
+      videoTime:
+        document.querySelector<HTMLVideoElement>('#movie_player video')?.currentTime ?? null,
+      overlayPaused: Array.from(
+        document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
+      ).some((node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'),
+    };
+  }, settle);
 }
 
 async function resetViewingImeTrace(page: Page, clearInput = false): Promise<void> {
@@ -1340,13 +1389,14 @@ export async function runViewingExperienceFixture({
               focus: 'textarea',
               koreanLayout: true,
             });
-            const currentState = await readViewingImeCheckpoint(replayPage);
+            const currentState = await readViewingImeCheckpoint(replayPage, true);
             const initialBehavior = imeWordBehavior(currentState);
             result.observations.push({
               stage: 'native-ime-current-layout',
               ...current,
               state: currentState,
               behavior: initialBehavior,
+              compositionEnds: observedCompositionEnds(currentState),
             });
             assertNativeImeAction(current, 'ComposeCurrent', true);
             assert.notEqual(
@@ -1366,17 +1416,18 @@ export async function runViewingExperienceFixture({
                 focus: 'textarea',
                 koreanLayout: true,
               });
-              const toggledState = await readViewingImeCheckpoint(replayPage);
+              const toggledState = await readViewingImeCheckpoint(replayPage, true);
               result.observations.push({
                 stage: 'native-ime-existing-korean-layout',
                 ...toggled,
                 state: toggledState,
+                compositionEnds: observedCompositionEnds(toggledState),
               });
               assertNativeImeAction(toggled, 'ComposeToggleRoundTrip', true);
               assert.equal(
                 imeWordBehavior(toggledState),
                 'hangul',
-                'Trusted Korean composition start/update/end and 한글 text were not observed'
+                'Native Korean composition and committed 한글 text were not observed'
               );
             }
             await resetViewingImeTrace(replayPage);
@@ -1434,7 +1485,7 @@ export async function runViewingExperienceFixture({
               focus: 'textarea',
               koreanLayout: true,
             });
-            const restoredState = await readViewingImeCheckpoint(replayPage);
+            const restoredState = await readViewingImeCheckpoint(replayPage, true);
             const restoredBehavior = imeWordBehavior(restoredState);
             result.observations.push({
               stage: 'native-ime-mode-behavior-restoration',
@@ -1442,6 +1493,7 @@ export async function runViewingExperienceFixture({
               state: restoredState,
               initialBehavior,
               restoredBehavior,
+              compositionEnds: observedCompositionEnds(restoredState),
               tsfModeVerified: false,
             });
             assertNativeImeAction(restored, 'ComposeCurrent', true);
