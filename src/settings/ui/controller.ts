@@ -45,6 +45,8 @@ export class SettingsUi {
   private persistenceNotice: HTMLDivElement | null = null;
   private persistenceNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   private recoveryFeedbackPending = false;
+  /** dialog.close() queues a native close event after our closing guard resets. */
+  private suppressNextNativeClose = false;
   /** Timer for reload-complete checkmark → icon restoration. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private modal: HTMLDialogElement | null = null;
@@ -185,8 +187,9 @@ export class SettingsUi {
     }
     this.persistForm(this.form.collectSettings());
 
-    // Close the native dialog (fires 'close' event synchronously, but
-    // the closing guard prevents re-entry).
+    // The native close event may arrive in a later task. Its handler must not
+    // persist the same form a second time after this method has returned.
+    this.suppressNextNativeClose = true;
     this.modal.close();
 
     this.restoreDocumentLangDir();
@@ -526,6 +529,10 @@ export class SettingsUi {
     // At this point modal.open is already false, so we bypass the guard
     // in close() and persist directly.
     this.modal.addEventListener('close', () => {
+      if (this.suppressNextNativeClose) {
+        this.suppressNextNativeClose = false;
+        return;
+      }
       if (this.closing) return;
       // Only handle backdrop-initiated closes — our own code sets closing=true
       // before calling modal.close(), which would re-enter here harmlessly.

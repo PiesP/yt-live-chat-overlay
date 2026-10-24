@@ -13,6 +13,7 @@ declare global {
   interface Window {
     __ytAcceptanceDenySettings?: boolean;
     __ytAcceptanceDeniedWrites?: number;
+    __ytAcceptanceDeniedWriteStacks?: string[];
   }
 }
 
@@ -38,6 +39,7 @@ export async function runSettingsPersistenceFixture({
       (window as Window & { unsafeWindow?: Window }).unsafeWindow = window;
       window.__ytAcceptanceDenySettings = false;
       window.__ytAcceptanceDeniedWrites = 0;
+      window.__ytAcceptanceDeniedWriteStacks = [];
       if (localStorage.getItem(storageKey) === null) {
         localStorage.setItem(storageKey, JSON.stringify({ fontSize: 32, language: 'en' }));
       }
@@ -45,6 +47,9 @@ export async function runSettingsPersistenceFixture({
       Storage.prototype.setItem = function (key: string, value: string): void {
         if (key === storageKey && window.__ytAcceptanceDenySettings) {
           window.__ytAcceptanceDeniedWrites = (window.__ytAcceptanceDeniedWrites ?? 0) + 1;
+          if ((window.__ytAcceptanceDeniedWriteStacks?.length ?? 0) < 3) {
+            window.__ytAcceptanceDeniedWriteStacks?.push((new Error().stack ?? '').slice(0, 1200));
+          }
           throw new DOMException('Controlled settings write denial', 'QuotaExceededError');
         }
         original.call(this, key, value);
@@ -87,7 +92,15 @@ export async function runSettingsPersistenceFixture({
     await notice.getByRole('button', { name: 'Retry save' }).waitFor({ state: 'visible' });
     assert.match((await notice.textContent()) ?? '', /were not saved/u);
     assert.equal(await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY), before);
-    assert.equal(await page.evaluate(() => window.__ytAcceptanceDeniedWrites), 1);
+    const deniedWrites = await page.evaluate(() => ({
+      count: window.__ytAcceptanceDeniedWrites,
+      stacks: window.__ytAcceptanceDeniedWriteStacks,
+    }));
+    assert.equal(
+      deniedWrites.count,
+      1,
+      `Unexpected settings write attempts: ${JSON.stringify(deniedWrites)}`
+    );
     assert.equal(await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().fontSize), 44);
     await page.screenshot({ path: join(output, 'settings-unsaved.png') });
 

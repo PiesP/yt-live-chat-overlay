@@ -305,6 +305,34 @@ describe('SettingsUi', () => {
     expect(player.querySelector('.yt-chat-overlay-settings-persistence-notice')).toBeNull();
   });
 
+  it('persists once when the native close event arrives after a programmatic close', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const onPersist = vi.fn(async () => 'saved' as const);
+    const controller = new SettingsUi(() => makeDefaults(), vi.fn(), vi.fn(), onPersist);
+    await controller.attach();
+    const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+    expect(modal).not.toBeNull();
+    modal!.close = vi.fn(() => {
+      modal!.open = false;
+      queueMicrotask(() => modal!.dispatchEvent(new Event('close')));
+    });
+    modal!.open = true;
+    controller.close();
+    await vi.waitFor(() => expect(modal!.close).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(onPersist).toHaveBeenCalledTimes(1);
+
+    // A later native backdrop dismissal still persists its own form once.
+    modal!.open = true;
+    modal!.open = false;
+    modal!.dispatchEvent(new Event('close'));
+    expect(onPersist).toHaveBeenCalledTimes(2);
+    controller.destroy();
+  });
+
   it('keeps a remote conflict after ordinary dialog close until Save my values is chosen', async () => {
     const player = document.createElement('div');
     player.id = 'movie_player';
