@@ -132,18 +132,21 @@ It records native action receipts, trusted composition start/update and input
 events, the observed composition end (including its `isTrusted` value), and
 actual `한글` text unchanged after blur and refocus. The final native Space
 keydown must be outside composition. Ctrl+Space is tried first in the focused
-textarea, where
-the overlay must stay active, and then on the focused player, where it must
-pause and resume.
-Both shortcuts must leave video playing at each observed step. A final native
-word probe compares observed input behavior with the initial Korean-layout
+textarea, where the overlay must stay active, and then on the focused player,
+where it must pause and resume. Both shortcuts must leave video playing at each
+observed step. A native control timeline samples focus, input, overlay, and
+video throughout both 500 ms-separated actions. A Korean IME can consume the
+editable shortcut before
+the document listener receives it; this route requires the validated native
+receipt, unchanged composed text, and stable sampled playback. The player route
+still requires two trusted document shortcuts and observed pause/resume. A final
+native word probe compares observed input behavior with the initial Korean-layout
 probe; receipts verify HKL restoration and balanced toggle actions, but do not
 prove TSF mode state. Missing Korean layout, session mismatch, incomplete
 restoration, absent trusted composition start/update or input, and an opted-in
-non-Windows run fail
-the case with retained receipts. With no IME selector the check is `not-run`;
-Playwright keyboard input is never counted as IME evidence. Remove only the
-#327 selectors after collection.
+non-Windows run fail the case with retained receipts. With no IME selector the
+check is `not-run`; Playwright keyboard input is never counted as IME evidence.
+Remove only the #327 selectors after collection.
 
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable

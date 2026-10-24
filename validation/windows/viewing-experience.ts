@@ -69,7 +69,37 @@ type NativeImeStage =
   | 'ctrl-editable'
   | 'ctrl-noneditable'
   | 'compose-restoration';
-type NativeImeAction = { receiptFile: string; receipt: unknown; error: string | null };
+export type NativeControlSample = {
+  atMs: number;
+  focus: string | null;
+  input: string | null;
+  overlayPaused: boolean;
+  videoPaused: boolean | null;
+  videoTime: number | null;
+};
+type NativeImeAction = {
+  receiptFile: string;
+  receipt: unknown;
+  error: string | null;
+  samples: NativeControlSample[];
+};
+
+async function readNativeControlSample(page: Page): Promise<NativeControlSample> {
+  return page.evaluate(() => {
+    const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
+    const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+    return {
+      atMs: performance.now(),
+      focus: document.activeElement?.id ?? null,
+      input: input?.value ?? null,
+      overlayPaused: Array.from(
+        document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
+      ).some((node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'),
+      videoPaused: video?.paused ?? null,
+      videoTime: video?.currentTime ?? null,
+    };
+  });
+}
 
 type ViewingImeSelection = 'not-run' | 'full' | 'only';
 
@@ -190,11 +220,33 @@ async function runNativeImeAction({
   ];
   if (koreanLayout) args.push('-RequestExistingKoreanLayout');
   let error: string | null = null;
+  const samples: NativeControlSample[] = [];
+  let sampling = sequence === 'CtrlSpaceRoundTrip';
+  let samplingError: string | null = null;
+  const sampler = (async () => {
+    while (sampling && samples.length < 600) {
+      samples.push(await readNativeControlSample(page));
+      if (sampling) await new Promise((resolve) => setTimeout(resolve, 75));
+    }
+  })().catch((cause: unknown) => {
+    samplingError = String(cause);
+  });
   try {
     await execFileAsync(powershell, args, { timeout: 45_000, maxBuffer: 4_096, windowsHide: true });
   } catch (cause) {
     const failure = cause as { code?: string | number; signal?: string; killed?: boolean };
     error = `Native helper failed (code=${String(failure.code ?? 'unknown')}, signal=${String(failure.signal ?? 'none')}, timedOut=${failure.killed === true})`;
+  } finally {
+    sampling = false;
+    await sampler;
+    if (sequence === 'CtrlSpaceRoundTrip' && samplingError === null) {
+      try {
+        samples.push(await readNativeControlSample(page));
+      } catch (cause) {
+        samplingError = String(cause);
+      }
+    }
+    if (samplingError !== null) error ??= `Native control sampler failed (${samplingError})`;
   }
   let receipt: unknown = null;
   try {
@@ -203,7 +255,7 @@ async function runNativeImeAction({
     const failure = cause as NodeJS.ErrnoException;
     error ??= `Native helper left no readable receipt (${failure.code ?? 'invalid-json'})`;
   }
-  return { receiptFile, receipt, error };
+  return { receiptFile, receipt, error, samples };
 }
 
 function assertNativeImeAction(
@@ -231,6 +283,8 @@ function assertNativeImeAction(
       parityActionsBalanced?: unknown;
       hklRestored?: unknown;
     };
+    sendCounts?: { acceptedEvents?: unknown };
+    actions?: Array<{ kind?: unknown; label?: unknown; accepted?: unknown; atMs?: unknown }>;
     errors?: unknown;
   } | null;
   assert.equal(receipt?.status, 'action-dispatched');
@@ -252,6 +306,21 @@ function assertNativeImeAction(
   }
   if (receipt?.layoutDelivery?.restorePosted) {
     assert.equal(receipt.layoutDelivery.restoreAcknowledged, true);
+  }
+  if (sequence === 'CtrlSpaceRoundTrip') {
+    assert.equal(receipt?.sendCounts?.acceptedEvents, 8);
+    const actions = receipt?.actions?.filter((entry) => entry.kind === 'keyboard') ?? [];
+    assert.deepEqual(
+      actions.map((entry) => [entry.label, entry.accepted]),
+      [
+        ['Ctrl-Space-pause', 4],
+        ['Ctrl-Space-resume', 4],
+      ]
+    );
+    const firstAtMs = actions[0]?.atMs;
+    const secondAtMs = actions[1]?.atMs;
+    assert(typeof firstAtMs === 'number' && typeof secondAtMs === 'number');
+    assert(secondAtMs - firstAtMs >= 500, 'Native Ctrl+Space actions were not separated by 500 ms');
   }
 }
 
@@ -334,6 +403,57 @@ export function assertNativeCtrlSpace(
   );
   assert.equal(state.overlayPaused, false);
   assert.equal(state.videoPaused, false);
+}
+
+/** The Korean IME may consume Ctrl+Space before a document shortcut is dispatched. */
+export function assertNativeEditableCtrlSpace(
+  state: ImeCheckpoint,
+  samples: NativeControlSample[],
+  originalInput: string | null
+): 'document-shortcut-ignored' | 'ime-consumed-before-document' {
+  assert.equal(originalInput?.trim(), '한글');
+  assert.equal(state.input, originalInput, 'Native Ctrl+Space changed the composed input');
+  const documentPresses = state.events.filter((event) => event.type === 'document-keydown');
+  const settledPresses = state.events.filter((event) => event.type === 'post-ctrl-space');
+  if (documentPresses.length > 0 || settledPresses.length > 0) {
+    assertNativeCtrlSpace(state, 'yt-viewing-ime-input', [false, false]);
+    return 'document-shortcut-ignored';
+  }
+
+  assert.equal(state.focus, 'yt-viewing-ime-input');
+  assert.equal(state.overlayPaused, false);
+  assert.equal(state.videoPaused, false);
+  assert(samples.length >= 8, 'Native Ctrl+Space sampler did not cover both actions');
+  const first = samples[0];
+  const last = samples.at(-1);
+  assert(first && last && last.atMs - first.atMs >= 500);
+  assert(
+    samples.every(
+      (sample) =>
+        sample.focus === 'yt-viewing-ime-input' &&
+        sample.input === originalInput &&
+        sample.overlayPaused === false &&
+        sample.videoPaused === false &&
+        typeof sample.videoTime === 'number'
+    ),
+    'Focused input, overlay, or video changed during native Ctrl+Space'
+  );
+  const videoProgressed = (part: NativeControlSample[]): boolean =>
+    part.some((sample, index) => {
+      const previous = part[index - 1];
+      return (
+        previous &&
+        typeof previous.videoTime === 'number' &&
+        typeof sample.videoTime === 'number' &&
+        (sample.videoTime > previous.videoTime + 0.02 || sample.videoTime < previous.videoTime - 1)
+      );
+    });
+  const midpoint = Math.floor(samples.length / 2);
+  assert(
+    videoProgressed(samples.slice(0, midpoint + 1)) && videoProgressed(samples.slice(midpoint)),
+    'Video did not advance across both native Ctrl+Space actions'
+  );
+  return 'ime-consumed-before-document';
 }
 
 function sha256(bytes: Buffer): string {
@@ -1430,78 +1550,103 @@ export async function runViewingExperienceFixture({
                 'Native Korean composition and committed 한글 text were not observed'
               );
             }
-            await resetViewingImeTrace(replayPage);
-            const editableControls = await runNativeImeAction({
-              page: replayPage,
-              root,
-              output,
-              identity,
-              sequence: 'CtrlSpaceRoundTrip',
-              stage: 'ctrl-editable',
-              focus: 'textarea',
-              koreanLayout: true,
-            });
-            await replayPage.waitForTimeout(100);
-            const editableState = await readViewingImeCheckpoint(replayPage);
-            result.observations.push({
-              stage: 'native-ime-editable-control',
-              ...editableControls,
-              state: editableState,
-            });
-            assertNativeImeAction(editableControls, 'CtrlSpaceRoundTrip', true);
-            assertNativeCtrlSpace(editableState, 'yt-viewing-ime-input', [false, false]);
-            await assertVideoAdvances(replayPage);
+            let controlError: unknown;
+            try {
+              await resetViewingImeTrace(replayPage);
+              const editableBefore = await readViewingImeCheckpoint(replayPage);
+              const editableControls = await runNativeImeAction({
+                page: replayPage,
+                root,
+                output,
+                identity,
+                sequence: 'CtrlSpaceRoundTrip',
+                stage: 'ctrl-editable',
+                focus: 'textarea',
+                koreanLayout: true,
+              });
+              await replayPage.waitForTimeout(100);
+              const editableState = await readViewingImeCheckpoint(replayPage);
+              result.observations.push({
+                stage: 'native-ime-editable-control',
+                ...editableControls,
+                state: editableState,
+              });
+              assertNativeImeAction(editableControls, 'CtrlSpaceRoundTrip', true);
+              const editableRoute = assertNativeEditableCtrlSpace(
+                editableState,
+                editableControls.samples,
+                editableBefore.input
+              );
+              result.observations.push({
+                stage: 'native-ime-editable-route',
+                route: editableRoute,
+              });
+              await assertVideoAdvances(replayPage);
 
-            await resetViewingImeTrace(replayPage);
-            const noneditableControls = await runNativeImeAction({
-              page: replayPage,
-              root,
-              output,
-              identity,
-              sequence: 'CtrlSpaceRoundTrip',
-              stage: 'ctrl-noneditable',
-              focus: 'player',
-              koreanLayout: true,
-            });
-            await replayPage.waitForTimeout(100);
-            const noneditableState = await readViewingImeCheckpoint(replayPage);
-            result.observations.push({
-              stage: 'native-ime-noneditable-control',
-              ...noneditableControls,
-              state: noneditableState,
-            });
-            assertNativeImeAction(noneditableControls, 'CtrlSpaceRoundTrip', true);
-            assertNativeCtrlSpace(noneditableState, 'movie_player', [true, false]);
-            await assertVideoAdvances(replayPage);
+              await resetViewingImeTrace(replayPage);
+              const noneditableControls = await runNativeImeAction({
+                page: replayPage,
+                root,
+                output,
+                identity,
+                sequence: 'CtrlSpaceRoundTrip',
+                stage: 'ctrl-noneditable',
+                focus: 'player',
+                koreanLayout: true,
+              });
+              await replayPage.waitForTimeout(100);
+              const noneditableState = await readViewingImeCheckpoint(replayPage);
+              result.observations.push({
+                stage: 'native-ime-noneditable-control',
+                ...noneditableControls,
+                state: noneditableState,
+              });
+              assertNativeImeAction(noneditableControls, 'CtrlSpaceRoundTrip', true);
+              assertNativeCtrlSpace(noneditableState, 'movie_player', [true, false]);
+              await assertVideoAdvances(replayPage);
+            } catch (error) {
+              controlError = error;
+            }
 
-            await resetViewingImeTrace(replayPage, true);
-            const restored = await runNativeImeAction({
-              page: replayPage,
-              root,
-              output,
-              identity,
-              sequence: 'ComposeCurrent',
-              stage: 'compose-restoration',
-              focus: 'textarea',
-              koreanLayout: true,
-            });
-            const restoredState = await readViewingImeCheckpoint(replayPage, true);
-            const restoredBehavior = imeWordBehavior(restoredState);
-            result.observations.push({
-              stage: 'native-ime-mode-behavior-restoration',
-              ...restored,
-              state: restoredState,
-              initialBehavior,
-              restoredBehavior,
-              compositionEnds: observedCompositionEnds(restoredState),
-              tsfModeVerified: false,
-            });
-            assertNativeImeAction(restored, 'ComposeCurrent', true);
-            assert.equal(
-              restoredBehavior,
-              initialBehavior,
-              'Observed IME behavior changed after round trips'
-            );
+            let restorationError: unknown;
+            try {
+              await resetViewingImeTrace(replayPage, true);
+              const restored = await runNativeImeAction({
+                page: replayPage,
+                root,
+                output,
+                identity,
+                sequence: 'ComposeCurrent',
+                stage: 'compose-restoration',
+                focus: 'textarea',
+                koreanLayout: true,
+              });
+              const restoredState = await readViewingImeCheckpoint(replayPage, true);
+              const restoredBehavior = imeWordBehavior(restoredState);
+              result.observations.push({
+                stage: 'native-ime-mode-behavior-restoration',
+                ...restored,
+                state: restoredState,
+                initialBehavior,
+                restoredBehavior,
+                compositionEnds: observedCompositionEnds(restoredState),
+                tsfModeVerified: false,
+              });
+              assertNativeImeAction(restored, 'ComposeCurrent', true);
+              assert.equal(
+                restoredBehavior,
+                initialBehavior,
+                'Observed IME behavior changed after round trips'
+              );
+            } catch (error) {
+              restorationError = error;
+            }
+            if (controlError || restorationError) {
+              throw new AggregateError(
+                [controlError, restorationError].filter((error) => error !== undefined),
+                'Native shortcut or IME restoration failed'
+              );
+            }
           } finally {
             const cleanup = await replayPage.evaluate(
               ({ title, playerTabindex }) => {

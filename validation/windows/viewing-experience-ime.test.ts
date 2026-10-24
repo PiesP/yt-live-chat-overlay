@@ -6,8 +6,10 @@ import test from 'node:test';
 
 import {
   assertNativeCtrlSpace,
+  assertNativeEditableCtrlSpace,
   imeWordBehavior,
   type ImeCheckpoint,
+  type NativeControlSample,
 } from './viewing-experience.ts';
 
 function checkpoint(overrides: Partial<ImeCheckpoint> = {}): ImeCheckpoint {
@@ -94,5 +96,46 @@ test('native shortcut evidence checks both overlay and video states', () => {
   assert.throws(
     () => assertNativeCtrlSpace(checkpoint({ events }), 'movie_player', [true, false]),
     /expected focus/u
+  );
+});
+
+test('editable IME may consume native Ctrl+Space before the document shortcut', () => {
+  const samples: NativeControlSample[] = Array.from({ length: 12 }, (_, index) => ({
+    atMs: index * 75,
+    focus: 'yt-viewing-ime-input',
+    input: '한글 ',
+    overlayPaused: false,
+    videoPaused: false,
+    videoTime: 2 + index * 0.075,
+  }));
+  const state = checkpoint({
+    input: '한글 ',
+    events: [
+      { type: 'keydown', key: 'Control', trusted: true },
+      { type: 'keydown', key: 'HanjaMode', trusted: true },
+      { type: 'keydown', key: 'Control', trusted: true },
+      { type: 'keydown', key: 'HanjaMode', trusted: true },
+    ],
+  });
+  assert.equal(
+    assertNativeEditableCtrlSpace(state, samples, '한글 '),
+    'ime-consumed-before-document'
+  );
+  assert.throws(
+    () =>
+      assertNativeEditableCtrlSpace(
+        state,
+        samples.map((sample) => ({ ...sample, videoPaused: true })),
+        '한글 '
+      ),
+    /Focused input, overlay, or video changed/u
+  );
+  assert.throws(
+    () => assertNativeEditableCtrlSpace({ ...state, input: '한글 x' }, samples, '한글 '),
+    /changed the composed input/u
+  );
+  assert.throws(
+    () => assertNativeCtrlSpace(state, 'movie_player', [true, false]),
+    /Expected two native Ctrl\+Space keydown events/u
   );
 });
