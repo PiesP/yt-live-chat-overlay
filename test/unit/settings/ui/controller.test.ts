@@ -292,12 +292,14 @@ describe('SettingsUi', () => {
     const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
     const feedback = player.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
     expect(button).not.toBeNull();
+    expect(button?.getAttribute('title')).toBe('Reload overlay');
     button?.click();
     button?.click();
     expect(onReload).toHaveBeenCalledTimes(1);
     expect(button?.textContent).toBe('…');
     expect(button?.getAttribute('aria-busy')).toBe('true');
     expect(feedback?.textContent).toBe('Restarting overlay…');
+    expect(button?.getAttribute('title')).toBeNull();
     expect(button?.classList.contains('yt-chat-overlay-reload-button--done')).toBe(false);
 
     vi.advanceTimersByTime(5000);
@@ -307,8 +309,10 @@ describe('SettingsUi', () => {
     expect(button?.textContent).toBe('↻');
     expect(button?.hasAttribute('aria-busy')).toBe(false);
     expect(feedback?.textContent).toContain('attempt ended');
+    expect(button?.getAttribute('title')).toBeNull();
     vi.advanceTimersByTime(2500);
     expect(feedback?.hidden).toBe(true);
+    expect(button?.getAttribute('title')).toBe('Reload overlay');
     controller.destroy();
   });
 
@@ -336,6 +340,7 @@ describe('SettingsUi', () => {
     expect(button?.textContent).toBe('!');
     expect(feedback?.textContent).toContain('Could not restart');
     expect(button?.getAttribute('aria-label')).toContain('Try reloading');
+    expect(button?.getAttribute('title')).toBeNull();
     button?.click();
     expect(onReload).toHaveBeenCalledTimes(2);
     expect(button?.textContent).toBe('…');

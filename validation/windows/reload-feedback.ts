@@ -88,9 +88,23 @@ async function waitForHostState(
 async function snapshot(page: Page) {
   return page.evaluate(() => {
     const button = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    const player = document.querySelector<HTMLElement>('#movie_player');
+    const feedback = document.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
+    const tooltip = document.querySelector<HTMLElement>('#yt-chat-overlay-reload-tooltip');
     const video = document.querySelector<HTMLVideoElement>('#movie_player video');
     const status = document.querySelector('#yt-live-chat-overlay [role="status"]');
     const canvas = document.querySelector('#yt-live-chat-overlay canvas');
+    const box = (element: Element | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+      };
+    };
     return {
       atMs: Math.round(performance.now()),
       buttonText: button?.textContent ?? null,
@@ -98,8 +112,25 @@ async function snapshot(page: Page) {
       buttonLabel: button?.getAttribute('aria-label') ?? null,
       buttonDisabled: button?.disabled ?? null,
       buttonBusy: button?.getAttribute('aria-busy') ?? null,
-      reloadFeedbackText:
-        document.querySelector('.yt-chat-overlay-reload-feedback')?.textContent ?? null,
+      buttonInterestFor: button?.getAttribute('interestfor') ?? null,
+      buttonTitle: button?.getAttribute('title') ?? null,
+      reloadFeedbackText: feedback?.textContent ?? null,
+      feedbackPresentation: feedback
+        ? {
+            visible: !feedback.hidden && getComputedStyle(feedback).display !== 'none',
+            role: feedback.getAttribute('role'),
+            pointerEvents: getComputedStyle(feedback).pointerEvents,
+            whiteSpace: getComputedStyle(feedback).whiteSpace,
+            scrollWidth: feedback.scrollWidth,
+            clientWidth: feedback.clientWidth,
+            box: box(feedback),
+          }
+        : null,
+      reloadTooltipOpen: tooltip?.matches(':popover-open') ?? false,
+      reloadTooltipText: tooltip?.textContent ?? null,
+      playerBox: box(player),
+      buttonBox: box(button),
+      viewportWidth: innerWidth,
       statusText: status?.textContent ?? null,
       canvasPresent: Boolean(canvas),
       videoPresent: Boolean(video),
@@ -120,6 +151,44 @@ async function snapshot(page: Page) {
         : null,
     };
   });
+}
+
+function assertFeedbackPresentation(
+  state: Awaited<ReturnType<typeof snapshot>>,
+  phase: string
+): void {
+  if (!state.reloadFeedbackText) return;
+  const feedback = state.feedbackPresentation;
+  assert(feedback?.visible && feedback.box, `${phase}: feedback is not visible`);
+  assert.equal(feedback.role, 'status');
+  assert.equal(feedback.pointerEvents, 'none', `${phase}: feedback obstructs pointer focus`);
+  assert.equal(feedback.whiteSpace, 'normal', `${phase}: feedback cannot wrap`);
+  assert(
+    feedback.scrollWidth <= feedback.clientWidth + 1,
+    `${phase}: feedback has horizontal overflow`
+  );
+  assert(
+    feedback.box.left >= (state.playerBox?.left ?? 0) - 1,
+    `${phase}: feedback exits the player left edge`
+  );
+  assert(
+    feedback.box.right <= Math.min(state.playerBox?.right ?? Infinity, state.viewportWidth) + 1,
+    `${phase}: feedback exits the player or viewport right edge`
+  );
+  assert(
+    feedback.box.top >= (state.buttonBox?.bottom ?? 0) - 1,
+    `${phase}: feedback overlaps the reload action`
+  );
+  assert.equal(state.reloadTooltipOpen, false, `${phase}: duplicate reload tooltip is open`);
+  assert.equal(state.buttonInterestFor, null, `${phase}: tooltip trigger remains active`);
+  assert.equal(state.buttonTitle, null, `${phase}: native title duplicates feedback`);
+  if (state.reloadTooltipText !== null) {
+    assert.equal(
+      state.reloadTooltipText,
+      'Reload overlay',
+      `${phase}: tooltip repeats status copy`
+    );
+  }
 }
 
 /** Focused, observable baseline through the real built userscript and native media element. */
@@ -165,6 +234,7 @@ export async function runReloadFeedbackFixture({
   const record = async (nextPhase: string, currentPage: Page) => {
     phase = nextPhase;
     const state = await snapshot(currentPage);
+    assertFeedbackPresentation(state, phase);
     timeline.push({ phase, state });
     return state;
   };
@@ -311,6 +381,7 @@ export async function runReloadFeedbackFixture({
     assert.equal(held.buttonBusy, 'true');
     assert.equal(held.reloadFeedbackText, 'Restarting overlay…');
     assert(!held.buttonClass?.includes('--done'), 'Pending reload used success styling');
+    await page.screenshot({ path: join(output, 'reload-feedback-pending.png') });
     const requestsAtHold = chatRequests;
     await page.locator(RELOAD_BUTTON).focus();
     await page.keyboard.press('Enter');
@@ -324,6 +395,11 @@ export async function runReloadFeedbackFixture({
     const waitingMessage = await record('still-waiting-after-five-seconds', page);
     assert.equal(waitingMessage.buttonBusy, 'true');
     assert(waitingMessage.reloadFeedbackText?.startsWith('Still restarting'));
+    await page.screenshot({ path: join(output, 'reload-feedback-waiting.png') });
+    await page.setViewportSize({ width: 390, height: 720 });
+    await record('still-waiting-narrow', page);
+    await page.screenshot({ path: join(output, 'reload-feedback-waiting-narrow.png') });
+    await page.setViewportSize({ width: 1280, height: 720 });
     holdChatRequests = false;
     releaseHeldChatRequest();
     await waitForHostState(
@@ -368,6 +444,7 @@ export async function runReloadFeedbackFixture({
     });
     const standby = await record('legitimate-standby', page);
     assert(!standby.buttonClass?.includes('--done'), 'Standby reload used success styling');
+    await page.screenshot({ path: join(output, 'reload-feedback-standby.png') });
     const playerIdentity = await page.evaluate(() => {
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
       return {
@@ -396,6 +473,8 @@ export async function runReloadFeedbackFixture({
         sustainedViewingLifecycle: false,
         quietChatBootstrapped: chatRequests > 0,
         heldChatRequest,
+        feedbackFitsPlayer: true,
+        duplicateTooltipSuppressed: true,
         nativeVideoPreserved: playerIdentity.original && playerIdentity.paused,
         pageErrors: 0,
       },
@@ -409,7 +488,6 @@ export async function runReloadFeedbackFixture({
       },
     };
     await writeFile(join(output, 'reload-feedback.json'), JSON.stringify(result, null, 2));
-    await page.screenshot({ path: join(output, 'reload-feedback-standby.png') });
     return result;
   } catch (error) {
     await writeFile(

@@ -415,9 +415,16 @@ export class SettingsUi {
     else button.removeAttribute('aria-busy');
     if (SettingsUi.supportsHints) {
       const tooltip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
-      if (tooltip) tooltip.textContent = message;
+      if (tooltip) tooltip.textContent = t('app.reload');
+      if (state === 'idle') {
+        button.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
+      } else {
+        button.removeAttribute('interestfor');
+        if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
+      }
     } else {
-      button.title = message;
+      if (state === 'idle') button.title = t('app.reload');
+      else button.removeAttribute('title');
     }
     if (this.reloadFeedback) {
       this.reloadFeedback.textContent = state === 'idle' ? '' : message;

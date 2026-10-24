@@ -278,6 +278,8 @@ export const SETTINGS_UI_STYLES = `
         position: absolute;
         top: calc(${spacing.sm}px + ${uiSizing.buttonSize} + ${spacing.xs}px);
         inset-inline-start: ${spacing.sm}px;
+        box-sizing: border-box;
+        width: max-content;
         max-width: min(320px, calc(100% - ${spacing.sm * 2}px));
         padding: ${spacing.xs}px ${spacing.sm}px;
         border: 1px solid ${uiColors.border};
@@ -286,6 +288,8 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
         line-height: 1.4;
+        white-space: normal;
+        overflow-wrap: anywhere;
         z-index: ${zIndex.settingsButton};
         pointer-events: none;
       }
