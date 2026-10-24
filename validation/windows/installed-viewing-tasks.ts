@@ -633,6 +633,55 @@ async function readTranslationUi(modal: Locator) {
   };
 }
 
+async function selectServiceWithKeyboard(
+  modal: Locator,
+  key: 'Home' | 'End',
+  expected: 'auto' | 'off'
+) {
+  const select = modal.locator('select[name="translationService"]');
+  const options = await select.evaluate((node) =>
+    [...(node as HTMLSelectElement).options].map((option) => option.value)
+  );
+  assert.deepEqual(options, ['auto', 'off']);
+  await select.evaluate((node, pressedKey) => {
+    (node as HTMLSelectElement).addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key !== pressedKey) return;
+        const activation = navigator.userActivation;
+        (node as HTMLElement).dataset.installedViewingKey = JSON.stringify({
+          key: event.key,
+          isTrusted: event.isTrusted,
+          isActive: activation?.isActive ?? null,
+          hasBeenActive: activation?.hasBeenActive ?? null,
+        });
+      },
+      { once: true }
+    );
+  }, key);
+  await select.press(key);
+  await select.press('Tab');
+  const observation = await select.evaluate((node) => {
+    const element = node as HTMLSelectElement;
+    const keydown = element.dataset.installedViewingKey;
+    delete element.dataset.installedViewingKey;
+    return { value: element.value, selectedIndex: element.selectedIndex, keydown };
+  });
+  assert.equal(observation.value, expected);
+  const keydown = observation.keydown
+    ? (JSON.parse(observation.keydown) as {
+        key: string;
+        isTrusted: boolean;
+        isActive: boolean | null;
+        hasBeenActive: boolean | null;
+      })
+    : null;
+  assert(keydown, 'Translation setting did not receive a keyboard event');
+  assert.equal(keydown?.key, key);
+  assert.equal(keydown.isTrusted, true, 'Translation setting was not changed by trusted key input');
+  return { value: observation.value, selectedIndex: observation.selectedIndex, keydown };
+}
+
 async function readPermittedOriginals(
   page: Page,
   elapsedMs: number,
@@ -844,7 +893,12 @@ async function runB(
   }
   await modal.locator('select[name="translationSource"]').selectOption('en');
   await modal.locator('select[name="translationTarget"]').selectOption(chosen.target);
-  await modal.locator('select[name="translationService"]').selectOption('auto');
+  const initialActivation = await selectServiceWithKeyboard(modal, 'Home', 'auto');
+  result.timeline.push({
+    stage: 'normal-ui-initial-activation',
+    elapsedMs: Math.round(performance.now() - start),
+    observation: initialActivation,
+  });
   await closeSettings(page, modal);
   modal = await openSettings(page);
   await modal.locator('#tab-translation').click();
@@ -877,15 +931,28 @@ async function runB(
   if (phase === 'needs-action') {
     // One normal settings action provides the user activation required by some
     // browser models. It does not bypass model policy or install anything.
-    await modal.locator('select[name="translationService"]').selectOption('off');
+    const offActivation = await selectServiceWithKeyboard(modal, 'End', 'off');
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('.yt-chat-overlay-settings-runtime-status')
+          ?.getAttribute('data-phase') === 'off',
+      null,
+      { timeout: 5_000 }
+    );
     const retired = await readTranslationUi(modal);
-    await modal.locator('select[name="translationService"]').selectOption('auto');
+    const retryActivation = await selectServiceWithKeyboard(modal, 'Home', 'auto');
+    assert.equal(await modal.locator('select[name="translationSource"]').inputValue(), 'en');
+    assert.equal(
+      await modal.locator('select[name="translationTarget"]').inputValue(),
+      chosen.target
+    );
     ui = await readTranslationUi(modal);
     phase = ui.phase;
     result.timeline.push({
       stage: 'normal-ui-user-activation-retry',
       elapsedMs: Math.round(performance.now() - start),
-      observation: { before: 'needs-action', retired, after: ui },
+      observation: { before: 'needs-action', offActivation, retired, retryActivation, after: ui },
     });
     const retryUntil = Math.min(until, performance.now() + 15_000);
     while (

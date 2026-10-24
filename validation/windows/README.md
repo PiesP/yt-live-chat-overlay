@@ -414,7 +414,9 @@ persistent settings. Canvas sampling reads an image into a separate scratch
 canvas; an unavailable read or insufficient chat activity remains blocked.
 Its B timeline reads real Translator availability and drives the normal
 Translation settings; absence, preparation, readiness and effective messages
-remain distinct. A `needs-action` state gets one normal settings off/on retry.
+remain distinct. Service activation uses trusted keyboard input on the normal
+settings control, with selected values and browser activation state recorded.
+A `needs-action` state gets one normal settings off/on keyboard retry.
 When real creation reaches active, the task waits up to 20 seconds for a new
 chat message. Up to three actual Canvas captures are paired by time with private
 visual captures of the matching native chat row or a bounded rendering of the
