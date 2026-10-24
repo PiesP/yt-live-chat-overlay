@@ -322,7 +322,7 @@ function Request-TargetLayout([IntPtr]$layout, [string]$reason) {
     $receipt.actions += [ordered]@{ kind = 'hkl-request-observed'; reason = $reason; hkl = (HklHex $layout); atMs = $clock.ElapsedMilliseconds }
 }
 
-function Invoke-KeyBatch([ushort[]]$keys, [bool[]]$ups, [string]$label) {
+function Invoke-KeyBatch([System.UInt16[]]$keys, [bool[]]$ups, [string]$label) {
     Assert-OwnedForeground
     $sent = [NativeImeBridge]::SendKeyboard($target.Hwnd, $target.Pid, $target.Title, $keys, $ups)
     $receipt.sendCounts.calls++
@@ -345,17 +345,17 @@ function Invoke-KeyBatch([ushort[]]$keys, [bool[]]$ups, [string]$label) {
     }
 }
 
-function Invoke-KeyPress([ushort]$key, [string]$label) {
-    Invoke-KeyBatch ([ushort[]]@($key, $key)) ([bool[]]@($false, $true)) $label
+function Invoke-KeyPress([System.UInt16]$key, [string]$label) {
+    Invoke-KeyBatch ([System.UInt16[]]@($key, $key)) ([bool[]]@($false, $true)) $label
 }
 
-function Invoke-Combo([ushort]$modifier, [ushort]$key, [string]$label) {
-    Invoke-KeyBatch ([ushort[]]@($modifier, $key, $key, $modifier)) ([bool[]]@($false, $false, $true, $true)) $label
+function Invoke-Combo([System.UInt16]$modifier, [System.UInt16]$key, [string]$label) {
+    Invoke-KeyBatch ([System.UInt16[]]@($modifier, $key, $key, $modifier)) ([bool[]]@($false, $false, $true, $true)) $label
 }
 
 function Invoke-Word {
     # Synthesized ordinary native VKs for two-set Korean "한글": g k s r m f, then Space.
-    foreach ($key in [ushort[]]@(0x47, 0x4B, 0x53, 0x52, 0x4D, 0x46, 0x20)) {
+    foreach ($key in [System.UInt16[]]@(0x47, 0x4B, 0x53, 0x52, 0x4D, 0x46, 0x20)) {
         Invoke-KeyPress $key ('word-vk-{0:X2}' -f $key)
         Start-Sleep -Milliseconds 40
     }
@@ -447,7 +447,7 @@ try {
         try {
             Assert-OwnedForeground
             $key = $pressed[$pressed.Count - 1]
-            Invoke-KeyBatch ([ushort[]]@($key)) ([bool[]]@($true)) ('cleanup-keyup-{0:X2}' -f $key)
+            Invoke-KeyBatch ([System.UInt16[]]@($key)) ([bool[]]@($true)) ('cleanup-keyup-{0:X2}' -f $key)
         } catch {
             $receipt.cleanup.releasedKeys = $false
             $receipt.errors += ('Key release aborted: ' + $_.Exception.Message)
