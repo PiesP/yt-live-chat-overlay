@@ -18,6 +18,7 @@ import type {
 import { runReloadFeedbackFixture } from './reload-feedback.ts';
 import { runSettingsPersistenceFixture } from './settings-persistence.ts';
 import { runTranslationRuntimeFixture } from './translation-runtime.ts';
+import { runViewingExperienceFixture } from './viewing-experience.ts';
 
 type ChatRenderer = { id: string; [key: string]: unknown };
 type ChatAction = {
@@ -684,8 +685,10 @@ async function verifyFontGroupsAndPreferences(
           const field = element.querySelector<HTMLElement>(
             '.yt-chat-overlay-settings-font-custom-input'
           );
-          if (!field) throw new Error('Custom font input is unavailable');
+          const pause = element.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+          if (!field || !pause) throw new Error('Settings control is unavailable');
           const control = field.getBoundingClientRect();
+          const pauseBounds = pause.getBoundingClientRect();
           return {
             left: box.left,
             right: box.right,
@@ -694,6 +697,8 @@ async function verifyFontGroupsAndPreferences(
             clientWidth: element.clientWidth,
             customLeft: control.left,
             customRight: control.right,
+            pauseLeft: pauseBounds.left,
+            pauseRight: pauseBounds.right,
             focused: document.activeElement === field,
             direction: element.getAttribute('dir'),
             reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -711,6 +716,10 @@ async function verifyFontGroupsAndPreferences(
         assert(
           geometry.customLeft >= geometry.left - 1 && geometry.customRight <= geometry.right + 1,
           `${scenario.id}: custom font input clipped`
+        );
+        assert(
+          geometry.pauseLeft >= geometry.left - 1 && geometry.pauseRight <= geometry.right + 1,
+          `${scenario.id}: session pause overflows the dialog`
         );
         assert(geometry.focused, `${scenario.id}: keyboard focus was lost`);
         if (scenario.language) assert.equal(geometry.direction, 'rtl');
@@ -781,6 +790,62 @@ async function verifyFontGroupsAndPreferences(
   };
 }
 
+async function readPrimarySettingsGeometry(modal: Locator) {
+  return modal.evaluate((element) => {
+    const pane = element.querySelector('#pane-comments');
+    const stage = pane?.querySelector('.yt-chat-overlay-settings-font-preview-stage');
+    const text = pane?.querySelector('.yt-chat-overlay-settings-font-preview-text');
+    const pause = pane?.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+    const enabled = pane?.querySelector<HTMLElement>('.yt-chat-overlay-settings-enabled');
+    const requiredControls = [
+      'input[name="enabled"]',
+      'select[name="danmakuMode"]',
+      'input[name="fontSize"]',
+      'input[name="speedPxPerSec"]',
+      'input[name="opacity-slider"]',
+      'input[name="opacity"]',
+    ].map((selector) => pane?.querySelector(selector));
+    if (
+      !(pane instanceof HTMLElement) ||
+      !(stage instanceof HTMLElement) ||
+      !(text instanceof HTMLElement) ||
+      !(pause instanceof HTMLButtonElement) ||
+      !(enabled instanceof HTMLElement) ||
+      requiredControls.some((control) => !control)
+    ) {
+      throw new Error('Primary settings preview DOM is incomplete');
+    }
+    const modalRect = element.getBoundingClientRect();
+    const paneRect = pane.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const textRect = text.getBoundingClientRect();
+    const pauseRect = pause.getBoundingClientRect();
+    const enabledRect = enabled.getBoundingClientRect();
+    const containsVertically = (outer: DOMRect, inner: DOMRect) =>
+      inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+    const paneStyle = getComputedStyle(pane);
+    return {
+      controlsVisible: requiredControls.every(
+        (control) =>
+          control != null && containsVertically(paneRect, control.getBoundingClientRect())
+      ),
+      maskImage: paneStyle.maskImage,
+      modalHeight: modalRect.height,
+      modalWidth: modalRect.width,
+      opacity: getComputedStyle(text).opacity,
+      horizontalOverflow:
+        element.scrollWidth > element.clientWidth + 1 || pane.scrollWidth > pane.clientWidth + 1,
+      paneScrollTop: pane.scrollTop,
+      pauseVisible: containsVertically(paneRect, pauseRect),
+      pauseTarget: pauseRect.width >= 44 && pauseRect.height >= 44,
+      pauseBesideEnabled: Math.abs(pauseRect.top - enabledRect.top) <= 1,
+      sampleInsidePane: containsVertically(paneRect, textRect),
+      sampleInsideStage: containsVertically(stageRect, textRect),
+      webkitMaskImage: paneStyle.getPropertyValue('-webkit-mask-image'),
+    };
+  });
+}
+
 async function configureThroughSettingsUi(
   page: Page,
   installed: boolean,
@@ -806,48 +871,7 @@ async function configureThroughSettingsUi(
     'tab-comments',
     'The keyboard-opened dialog did not focus the active tab'
   );
-  const defaultPreviewState = await modal.evaluate((element) => {
-    const pane = element.querySelector('#pane-comments');
-    const stage = pane?.querySelector('.yt-chat-overlay-settings-font-preview-stage');
-    const text = pane?.querySelector('.yt-chat-overlay-settings-font-preview-text');
-    const requiredControls = [
-      'input[name="enabled"]',
-      'select[name="danmakuMode"]',
-      'input[name="fontSize"]',
-      'input[name="speedPxPerSec"]',
-      'input[name="opacity-slider"]',
-      'input[name="opacity"]',
-    ].map((selector) => pane?.querySelector(selector));
-    if (
-      !(pane instanceof HTMLElement) ||
-      !(stage instanceof HTMLElement) ||
-      !(text instanceof HTMLElement) ||
-      requiredControls.some((control) => !control)
-    ) {
-      throw new Error('Primary settings preview DOM is incomplete');
-    }
-    const modalRect = element.getBoundingClientRect();
-    const paneRect = pane.getBoundingClientRect();
-    const stageRect = stage.getBoundingClientRect();
-    const textRect = text.getBoundingClientRect();
-    const containsVertically = (outer: DOMRect, inner: DOMRect) =>
-      inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
-    const paneStyle = getComputedStyle(pane);
-    return {
-      controlsVisible: requiredControls.every(
-        (control) =>
-          control != null && containsVertically(paneRect, control.getBoundingClientRect())
-      ),
-      maskImage: paneStyle.maskImage,
-      modalHeight: modalRect.height,
-      modalWidth: modalRect.width,
-      opacity: getComputedStyle(text).opacity,
-      paneScrollTop: pane.scrollTop,
-      sampleInsidePane: containsVertically(paneRect, textRect),
-      sampleInsideStage: containsVertically(stageRect, textRect),
-      webkitMaskImage: paneStyle.getPropertyValue('-webkit-mask-image'),
-    };
-  });
+  const defaultPreviewState = await readPrimarySettingsGeometry(modal);
   await writeFile(
     join(output, 'yt-settings-default-geometry.json'),
     JSON.stringify(defaultPreviewState, null, 2)
@@ -865,9 +889,25 @@ async function configureThroughSettingsUi(
   assert.equal(defaultPreviewState.webkitMaskImage, 'none');
   assert.equal(defaultPreviewState.opacity, '1');
   assert.equal(defaultPreviewState.paneScrollTop, 0);
+  assert.equal(defaultPreviewState.horizontalOverflow, false);
   assert(defaultPreviewState.controlsVisible, 'A primary settings control starts clipped');
+  assert(defaultPreviewState.pauseVisible, 'Session pause starts clipped');
+  assert(defaultPreviewState.pauseTarget, 'Session pause target is below 44 px');
+  assert(defaultPreviewState.pauseBesideEnabled, 'Session pause is not beside Enabled');
   assert(defaultPreviewState.sampleInsidePane, 'The default opacity sample starts clipped');
   assert(defaultPreviewState.sampleInsideStage, 'The default sample overflows its preview stage');
+
+  await page.setViewportSize({ width: 401, height: 592 });
+  const compactPreviewState = await readPrimarySettingsGeometry(modal);
+  assert.equal(compactPreviewState.paneScrollTop, 0);
+  assert.equal(compactPreviewState.horizontalOverflow, false);
+  assert(compactPreviewState.controlsVisible, 'Compact primary settings start clipped');
+  assert(compactPreviewState.pauseVisible, 'Compact session pause starts clipped');
+  assert(compactPreviewState.pauseTarget, 'Compact session pause target is below 44 px');
+  assert(compactPreviewState.pauseBesideEnabled, 'Compact session pause is not beside Enabled');
+  assert(compactPreviewState.sampleInsidePane, 'Compact opacity sample starts clipped');
+  assert(compactPreviewState.sampleInsideStage, 'Compact sample overflows its preview stage');
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   const disclosure = modal.locator('.yt-chat-overlay-settings-disclosure');
   assert.equal(await disclosure.getAttribute('open'), null, 'Fine tuning must start collapsed');
@@ -879,6 +919,7 @@ async function configureThroughSettingsUi(
   const disclosureSummary = disclosure.locator('summary');
   for (const selector of [
     'input[name="enabled"]',
+    '#yt-chat-overlay-pause-button',
     'select[name="danmakuMode"]',
     'input[name="fontSize"]',
     'input[name="speedPxPerSec"]',
@@ -1081,7 +1122,7 @@ async function configureThroughSettingsUi(
       );
     });
   }
-  return { defaultPreviewState, localizedPreviewState, interactionState };
+  return { defaultPreviewState, compactPreviewState, localizedPreviewState, interactionState };
 }
 
 async function verifyIsolatedPaidCardInk(page: Page, output: string) {
@@ -1472,7 +1513,11 @@ async function verifySustainedViewingLifecycle(
   };
 }
 
-type FocusedScenario = 'settings-persistence' | 'reload-feedback' | 'translation-runtime';
+type FocusedScenario =
+  | 'settings-persistence'
+  | 'reload-feedback'
+  | 'translation-runtime'
+  | 'viewing-experience';
 
 async function hasScenarioSelector(root: string, scenario: FocusedScenario): Promise<boolean> {
   const path = join(root, 'validation/windows/inputs', `${scenario}.json`);
@@ -1495,13 +1540,15 @@ export async function readFocusedScenario(root: string): Promise<FocusedScenario
   const settings = await hasScenarioSelector(root, 'settings-persistence');
   const reload = await hasScenarioSelector(root, 'reload-feedback');
   const translation = await hasScenarioSelector(root, 'translation-runtime');
+  const viewing = await hasScenarioSelector(root, 'viewing-experience');
   assert(
-    Number(settings) + Number(reload) + Number(translation) <= 1,
+    Number(settings) + Number(reload) + Number(translation) + Number(viewing) <= 1,
     'Focused Windows scenario selectors are mutually exclusive'
   );
   if (settings) return 'settings-persistence';
   if (reload) return 'reload-feedback';
   if (translation) return 'translation-runtime';
+  if (viewing) return 'viewing-experience';
   return null;
 }
 
@@ -1554,6 +1601,16 @@ export async function run({
         output,
         userscript,
         watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
+    if (selectedScenario === 'viewing-experience') {
+      return runViewingExperienceFixture({
+        browser,
+        root,
+        output,
+        userscript,
+        watchHtml: createMockWatchHtml(previewHtml),
+        readPrimaryGeometry: readPrimarySettingsGeometry,
       });
     }
     return runSettingsPersistenceFixture({

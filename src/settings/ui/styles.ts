@@ -556,10 +556,21 @@ export const SETTINGS_UI_STYLES = `
         cursor: not-allowed;
       }
       /* Enabled toggle */
-      .yt-chat-overlay-settings-enabled {
+      .yt-chat-overlay-settings-pause-row {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
+        gap: ${spacing.xs}px;
+        min-width: 0;
+      }
+      .yt-chat-overlay-settings-enabled {
+        display: flex;
+        flex: 1 1 150px;
+        align-items: center;
         justify-content: space-between;
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 44px;
         padding: ${spacing.sm}px ${spacing.md}px;
         background: ${uiColors.backgroundLight};
         border-radius: ${borderRadius.sm};
@@ -576,6 +587,48 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-enabled input[type="checkbox"]:focus-visible {
         outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
         outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
+      }
+      .yt-chat-overlay-settings-pause-button {
+        display: block;
+        flex: 0 1 auto;
+        box-sizing: border-box;
+        min-width: 44px;
+        min-height: 44px;
+        max-width: 100%;
+        padding: ${spacing.sm}px ${spacing.md}px;
+        border: 1px solid ${uiColors.border};
+        border-radius: ${borderRadius.sm};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.text};
+        font: inherit;
+        font-size: ${typography.fontSize.sm};
+        overflow-wrap: anywhere;
+        cursor: pointer;
+      }
+      .yt-chat-overlay-settings-pause-button:focus-visible {
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
+      }
+      .yt-chat-overlay-settings-pause-button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .yt-chat-overlay-settings-pause-badge:not([hidden]) {
+        display: inline-block;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border: 1px solid ${uiColors.accent};
+        border-radius: ${borderRadius.pill};
+        background: ${uiColorsAlpha.accentBgLight};
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        font-weight: ${typography.fontWeight.semibold};
+      }
+      .yt-chat-overlay-settings-pause-hint {
+        margin: 0 ${spacing.md}px;
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        line-height: 1.4;
+        overflow-wrap: break-word;
       }
       /* Authors grid — role="row" wrappers use display:contents so children
          become direct grid items (immune to wrapper insertion/removal) */
@@ -767,17 +820,17 @@ export const SETTINGS_UI_STYLES = `
       }
       /* Toast notification */
       .yt-chat-overlay-settings-toast {
-        position: absolute;
-        bottom: 60px;
-        left: 50%;
-        transform: translateX(-50%);
+        box-sizing: border-box;
+        max-height: min(96px, 20dvh);
+        margin-bottom: ${spacing.xs}px;
+        overflow-y: auto;
+        overflow-wrap: anywhere;
         background: ${TOAST_BG};
         color: ${uiColors.text};
         font: ${TOAST_FONT};
         padding: ${TOAST_PADDING};
         border-radius: ${borderRadius.sm};
-        z-index: 2;
-        pointer-events: none;
+        pointer-events: auto;
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
       }
       .yt-chat-overlay-settings-capability {
@@ -1092,7 +1145,7 @@ export const SETTINGS_UI_STYLES = `
         dialog.yt-chat-overlay-settings-modal[open] {
           max-height: calc(100dvh - 16px);
           padding: ${spacing.md}px;
-          gap: ${spacing.sm}px;
+          gap: ${spacing.xs}px;
         }
         .yt-chat-overlay-settings-pane {
           padding-bottom: ${spacing.lg}px;

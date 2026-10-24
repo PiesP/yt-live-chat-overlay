@@ -86,6 +86,69 @@ a focused `SettingsUi` unit fixture because the production debug handle is
 frozen. Remove the selector after the run. This fixture does not
 establish installed extension or live-page behavior.
 
+For the #327 viewing-experience baseline, generate the three ignored, owned
+12-second moving-video inputs with
+`validation/windows/fixtures/generate-viewing-experience.sh`. The script requires
+FFmpeg with `libx264` and DejaVu Sans; verify its printed SHA-256 values against
+`viewing-experience.ts` before bundling. The clips are 640 × 360 H.264 MP4,
+each with a burned subtitle area. They provide bright, dark, and noisy detailed
+motion; they are controlled examples, not a sample of public YouTube videos.
+Create the ignored `validation/windows/inputs/viewing-experience.json` with exactly
+`{"scenario":"viewing-experience"}`. No other focused selector may be present.
+The common `yt-visual` profile then uses fresh controlled userscript pages for
+Y-04 live and replay controls, Y-05 matched chat on moving media in normal,
+theater, and fullscreen fixture modes, and Y-06 narrow localized recovery
+states. Readability frames wait for decoded video to advance after matched chat
+is admitted, so moving text reaches the picture rather than only its edge. The
+controlled Y-06 fault uses HTTP 403 after healthy chat, records fault requests
+and the player-mounted automatic recovery status, then uses the existing Reload
+overlay control after restoring the route. The Canvas status action is recorded
+but is not an applicable requirement while the retained watchdog policy restarts
+the session before that action can appear. A separate owned Chrome
+profile sets the real page zoom to 200% through Chrome Settings, captures the
+resulting viewport with CDP `Page.captureScreenshot` without a Playwright clip,
+restores zoom, closes Chrome, and removes that owned profile. The output is one
+`viewing-experience.json` with bounded case records and at most 32 decisive PNGs.
+Failure cases remain recorded in the JSON.
+
+The runner follows scripted control paths and records geometry, media state,
+accessible chat IDs, focus, labels, and screenshots. It does not measure how a
+first-time person finds a control or how readable a moving comment feels. Add a
+separate dated operator log with task times, wrong actions, help requests, and
+paired readability observations before drawing Y-04/Y-05 usability conclusions.
+Installed-extension behavior, live YouTube, spoken screen-reader operation, and
+Japanese IME composition are separate evidence. Native Korean IME input is
+optional: add the ignored `validation/windows/inputs/viewing-experience-ime.json`
+with exactly `{"enabled":true}` beside the #327 selector. Setting exactly
+`{"enabled":true,"only":true}` runs a focused diagnostic with
+only the Y04 replay and native IME case. The report marks Y04 live, Y05, and
+all Y06 cases `not-run` and requires verified native input for success. Restore
+the full selector after this diagnostic when collecting the complete baseline.
+The native check opens
+its own temporary headed Chrome profile and reads that browser's PID through
+CDP. The bundled `native-ime.ps1` independently checks the process command line
+against the caller-owned profile path in the same interactive desktop session.
+It records native action receipts, trusted composition start/update and input
+events, the observed composition end (including its `isTrusted` value), and
+actual `한글` text unchanged after blur and refocus. The final native Space
+keydown must be outside composition. Ctrl+Space is tried in the focused textarea
+and on the focused player. A native control timeline samples focus, input,
+overlay, and video throughout each pair of 500 ms-separated actions. Korean IME
+may consume the shortcut before the document listener receives it in either
+focus state. That route requires a validated native receipt, unchanged text,
+stable overlay state, and continuing video, and is reported as unavailable for
+native pause. A delivered player shortcut still requires two trusted document
+events and observed pause/resume. Independently, the Comments pane Pause comments
+button is clicked and keyboard activated to prove pause/resume without changing
+video playback or saved settings. A final native word probe compares observed
+input behavior with the initial Korean-layout
+probe; receipts verify HKL restoration and balanced toggle actions, but do not
+prove TSF mode state. Missing Korean layout, session mismatch, incomplete
+restoration, absent trusted composition start/update or input, and an opted-in
+non-Windows run fail the case with retained receipts. With no IME selector the
+check is `not-run`; Playwright keyboard input is never counted as IME evidence.
+Remove only the #327 selectors after collection.
+
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
 or Edge Stable instance, injects the production userscript, exercises the real settings dialog,

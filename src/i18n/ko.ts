@@ -19,6 +19,7 @@ export const KO: Record<string, string> = {
   'status.disconnected': '연결 끊김 — 클릭하여 새로고침',
   'status.waiting': '라이브 스트림 대기 중…',
   'app.reloadPending': '오버레이를 다시 시작하는 중…',
+  'app.recoveryInProgress': '오버레이를 복구하는 중… 동영상 재생 상태는 바뀌지 않습니다.',
   'app.reloadWaiting': '계속 다시 시작하는 중입니다. 완료되지 않으면 페이지를 새로고침하세요.',
   'app.reloadRequested': '다시 시작 시도가 끝났습니다. 오버레이 상태를 확인하세요.',
   'app.reloadFailed': '오버레이를 다시 시작하지 못했습니다. 버튼을 눌러 다시 시도하세요.',
@@ -219,6 +220,9 @@ export const KO: Record<string, string> = {
 
   // ── New tooltips (added 2026-05-29) ──
   'app.enabledDesc': 'YouTube 라이브 스트림에서 채팅 오버레이를 켜거나 끕니다',
+  'app.pauseShortcutHint':
+    '댓글 일시정지 버튼을 다시 누르면 댓글이 재개됩니다. 동영상 재생 상태는 바뀌지 않습니다. 입력기가 허용하면 Ctrl+Space도 사용할 수 있습니다.',
+  'app.pauseComments': '댓글 일시정지',
   'danmaku.modeDesc': '댓글 표시 방향과 동작 방식',
   'danmaku.fontWeightDesc': '볼드는 더 읽기 쉽고, 보통은 GPU 메모리를 적게 사용합니다',
   'danmaku.fontFamily': '글꼴 종류',

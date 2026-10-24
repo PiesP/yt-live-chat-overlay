@@ -46,6 +46,8 @@ class App {
     getSettings: () => this.settings.get(),
     isValidPage: () => this.pageWatcher.isValidPage(),
     onTranslationStatus: (status) => this.settingsUi.showTranslationStatus(status),
+    onRecoveryStatus: (status) => this.settingsUi.showRuntimeRecoveryStatus(status),
+    onUserPauseStatus: (paused) => this.settingsUi.showUserPauseState(paused),
   });
   private readonly settingsUi = new SettingsUi(
     () => this.settings.get(),
@@ -57,6 +59,9 @@ class App {
       state: () => this.settings.persistenceState(),
       retry: () => this.settings.retrySave(),
       resolveConflict: () => this.settings.chooseLocalAndPersist(),
+    },
+    () => {
+      this.runtimeManager.toggleUserPause();
     }
   );
   /** Unsubscribe from cross-tab settings sync. */

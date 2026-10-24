@@ -109,6 +109,7 @@ function setupTabKeyNavigation(tablist: HTMLElement): void {
 export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const RELOAD_BUTTON_ID = 'yt-chat-overlay-reload-button';
+export const PAUSE_BUTTON_ID = 'yt-chat-overlay-pause-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 
 const OUTLINE_NUMERIC_KEY_SET = new Set<string>(OUTLINE_NUMERIC_KEYS);
@@ -412,6 +413,7 @@ export class SettingsUiForm {
   private previewLayoutFrame: number | null = null;
   private previewSettings: Readonly<OverlaySettings> | null = null;
   private translationStatus: TranslationRuntimeStatus | null = null;
+  private userPauseState: boolean | null = null;
 
   // Track event listeners added to the modal so they can be removed before
   // re-adding on language change (which calls rebuildModalContent → setModal).
@@ -419,7 +421,8 @@ export class SettingsUiForm {
 
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
-    private readonly onPreview?: () => void
+    private readonly onPreview?: () => void,
+    private readonly onToggleUserPause?: () => void
   ) {}
 
   setModal(modal: HTMLDialogElement | null): void {
@@ -434,6 +437,7 @@ export class SettingsUiForm {
       this.bindAriaInvalidSync(modal);
       this.bindSettingsPreviewLayout(modal);
       this.renderTranslationStatus();
+      this.renderUserPauseState();
     }
     log.debug('Modal set', { attached: modal !== null });
   }
@@ -445,6 +449,25 @@ export class SettingsUiForm {
   setTranslationStatus(status: TranslationRuntimeStatus | null): void {
     this.translationStatus = status;
     this.renderTranslationStatus();
+  }
+
+  setUserPauseState(paused: boolean | null): void {
+    this.userPauseState = paused;
+    this.renderUserPauseState();
+  }
+
+  private renderUserPauseState(): void {
+    const button = this.modal?.querySelector<HTMLButtonElement>(`#${PAUSE_BUTTON_ID}`);
+    if (!button) return;
+    button.textContent = t('app.pauseComments');
+    button.setAttribute('aria-pressed', String(this.userPauseState === true));
+    button.disabled =
+      this.userPauseState === null || !this.onToggleUserPause || !this.getSettings().enabled;
+    const badge = this.modal?.querySelector<HTMLElement>('.yt-chat-overlay-settings-pause-badge');
+    if (badge) {
+      badge.textContent = t('Paused');
+      badge.hidden = this.userPauseState !== true || button.disabled;
+    }
   }
 
   private translationStatusText(settings: Readonly<OverlaySettings>): {
@@ -768,6 +791,12 @@ export class SettingsUiForm {
     }
 
     this.appendSections(pane, def.sections);
+    if (def.id === 'comments') {
+      const hint = document.createElement('p');
+      hint.className = 'yt-chat-overlay-settings-pause-hint';
+      hint.textContent = t('app.pauseShortcutHint');
+      pane.appendChild(hint);
+    }
     for (const disclosure of def.disclosures ?? []) {
       pane.appendChild(this.buildDisclosure(disclosure));
     }
@@ -794,8 +823,24 @@ export class SettingsUiForm {
       } else {
         for (const field of section.fields) {
           const el = this.buildField(field);
-          if (field.type === 'enabled') el.classList.add('yt-chat-overlay-settings-enabled');
-          container.appendChild(el);
+          if (field.type === 'enabled') {
+            const row = domDiv('yt-chat-overlay-settings-pause-row');
+            row.appendChild(el);
+            const pause = document.createElement('button');
+            pause.id = PAUSE_BUTTON_ID;
+            pause.type = 'button';
+            pause.className = 'yt-chat-overlay-settings-pause-button';
+            pause.addEventListener('click', () => this.onToggleUserPause?.());
+            row.appendChild(pause);
+            const badge = document.createElement('span');
+            badge.className = 'yt-chat-overlay-settings-pause-badge';
+            badge.setAttribute('aria-hidden', 'true');
+            badge.hidden = true;
+            row.appendChild(badge);
+            container.appendChild(row);
+          } else {
+            container.appendChild(el);
+          }
         }
       }
     }
@@ -1334,6 +1379,7 @@ export class SettingsUiForm {
     this.populateWeightToggle(settings);
     this.populateFontChips(settings);
     this.renderTranslationStatus();
+    this.renderUserPauseState();
     this.isUpdating = false;
   }
 

@@ -289,9 +289,13 @@ describe('SettingsUi', () => {
     );
     const controller = makeController({ onReload });
     await controller.attach();
+    const settingsButton = player.querySelector<HTMLButtonElement>(
+      '#yt-chat-overlay-settings-button'
+    );
     const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
     const feedback = player.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
     expect(button).not.toBeNull();
+    expect(settingsButton?.getAttribute('title')).toBe('Chat overlay settings');
     expect(button?.getAttribute('title')).toBe('Reload overlay');
     button?.click();
     button?.click();
@@ -299,6 +303,7 @@ describe('SettingsUi', () => {
     expect(button?.textContent).toBe('…');
     expect(button?.getAttribute('aria-busy')).toBe('true');
     expect(feedback?.textContent).toBe('Restarting overlay…');
+    expect(settingsButton?.getAttribute('title')).toBeNull();
     expect(button?.getAttribute('title')).toBeNull();
     expect(button?.classList.contains('yt-chat-overlay-reload-button--done')).toBe(false);
 
@@ -312,8 +317,113 @@ describe('SettingsUi', () => {
     expect(button?.getAttribute('title')).toBeNull();
     vi.advanceTimersByTime(2500);
     expect(feedback?.hidden).toBe(true);
+    expect(settingsButton?.getAttribute('title')).toBe('Chat overlay settings');
     expect(button?.getAttribute('title')).toBe('Reload overlay');
     controller.destroy();
+  });
+
+  it('shows automatic recovery outside the overlay and gives manual reload precedence', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let resolveReload: () => void = () => {};
+    const controller = makeController({
+      onReload: () =>
+        new Promise<void>((resolve) => {
+          resolveReload = resolve;
+        }),
+    });
+    await controller.attach();
+    const settingsButton = player.querySelector<HTMLButtonElement>(
+      '#yt-chat-overlay-settings-button'
+    );
+    const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    const feedback = player.querySelector<HTMLElement>('.yt-chat-overlay-reload-feedback');
+
+    controller.showRuntimeRecoveryStatus('recovering');
+    expect(feedback?.dataset.phase).toBe('recovering');
+    expect(feedback?.hidden).toBe(false);
+    expect(feedback?.textContent).toContain('Recovering overlay');
+    expect(settingsButton?.getAttribute('title')).toBeNull();
+    expect(button?.getAttribute('aria-busy')).toBeNull();
+    expect(button?.getAttribute('aria-label')).toBe('Reload overlay');
+    expect(button?.textContent).toBe('↻');
+
+    button?.click();
+    controller.showRuntimeRecoveryStatus('failed');
+    expect(feedback?.dataset.phase).toBe('pending');
+    resolveReload();
+    await Promise.resolve();
+    expect(feedback?.dataset.phase).toBe('requested');
+    vi.advanceTimersByTime(2500);
+    expect(feedback?.dataset.phase).toBe('failed');
+    controller.showRuntimeRecoveryStatus(null);
+    expect(feedback?.dataset.phase).toBe('idle');
+    expect(feedback?.hidden).toBe(true);
+    expect(settingsButton?.getAttribute('title')).toBe('Chat overlay settings');
+    controller.destroy();
+  });
+
+  it('closes open native tooltips during recovery and restores their anchors on idle', async () => {
+    const hints = SettingsUi as unknown as { supportsHints: boolean };
+    const original = hints.supportsHints;
+    hints.supportsHints = true;
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const controller = makeController({ onReload: vi.fn().mockResolvedValue(undefined) });
+    try {
+      await controller.attach();
+      const settingsButton = player.querySelector<HTMLButtonElement>(
+        '#yt-chat-overlay-settings-button'
+      );
+      const reloadButton = player.querySelector<HTMLButtonElement>(
+        '#yt-chat-overlay-reload-button'
+      );
+      const settingsTooltip = player.querySelector<HTMLElement>(
+        '#yt-chat-overlay-settings-tooltip'
+      );
+      const reloadTooltip = player.querySelector<HTMLElement>('#yt-chat-overlay-reload-tooltip');
+      expect(settingsButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-settings-tooltip');
+      expect(reloadButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-reload-tooltip');
+      const hideSettings = vi.fn();
+      const hideReload = vi.fn();
+      if (settingsTooltip) {
+        vi.spyOn(settingsTooltip, 'matches').mockReturnValue(true);
+        settingsTooltip.hidePopover = hideSettings;
+      }
+      if (reloadTooltip) {
+        vi.spyOn(reloadTooltip, 'matches').mockReturnValue(true);
+        reloadTooltip.hidePopover = hideReload;
+      }
+
+      settingsButton?.focus();
+      controller.showRuntimeRecoveryStatus('recovering');
+      expect(document.activeElement).toBe(settingsButton);
+      expect(settingsButton?.getAttribute('aria-label')).toBe('Chat overlay settings');
+      expect(settingsButton?.getAttribute('interestfor')).toBeNull();
+      expect(reloadButton?.getAttribute('interestfor')).toBeNull();
+      expect(hideSettings).toHaveBeenCalledOnce();
+      expect(hideReload).toHaveBeenCalledOnce();
+
+      controller.showRuntimeRecoveryStatus(null);
+      expect(settingsButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-settings-tooltip');
+      expect(reloadButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-reload-tooltip');
+      controller.showPersistenceState('unsaved');
+      expect(settingsButton?.getAttribute('interestfor')).toBeNull();
+      expect(reloadButton?.getAttribute('interestfor')).toBeNull();
+      expect(hideSettings).toHaveBeenCalledTimes(2);
+      expect(hideReload).toHaveBeenCalledTimes(2);
+      controller.showPersistenceState('pending');
+      expect(settingsButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-settings-tooltip');
+      expect(reloadButton?.getAttribute('interestfor')).toBe('yt-chat-overlay-reload-tooltip');
+    } finally {
+      controller.destroy();
+      hints.supportsHints = original;
+    }
   });
 
   it('shows a retryable reload failure and ignores completion after destroy', async () => {
@@ -379,6 +489,52 @@ describe('SettingsUi', () => {
     expect(retry).toHaveBeenCalledTimes(1);
     controller.destroy();
     expect(player.querySelector('.yt-chat-overlay-settings-persistence-notice')).toBeNull();
+  });
+
+  it('suppresses the Settings title while a persistence notice exists without Reload', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const controller = makeController();
+    await controller.attach();
+    const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+    expect(button?.title).toBe('Chat overlay settings');
+    controller.showPersistenceState('unsaved');
+    expect(button?.getAttribute('title')).toBeNull();
+    controller.showPersistenceState('conflict');
+    expect(button?.getAttribute('title')).toBeNull();
+    controller.showPersistenceState('saved');
+    expect(button?.getAttribute('title')).toBeNull();
+    vi.advanceTimersByTime(2500);
+    expect(player.querySelector('.yt-chat-overlay-settings-persistence-notice')).toBeNull();
+    expect(button?.title).toBe('Chat overlay settings');
+    controller.destroy();
+  });
+
+  it('keeps the Settings tooltip suppressed until recovery and persistence both end', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const controller = makeController({ onReload: vi.fn().mockResolvedValue(undefined) });
+    await controller.attach();
+    const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+    const reload = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-reload-button');
+    controller.showPersistenceState('unsaved');
+    expect(button?.getAttribute('title')).toBeNull();
+    expect(reload?.getAttribute('title')).toBeNull();
+    controller.showRuntimeRecoveryStatus('recovering');
+    controller.showPersistenceState('saved');
+    vi.advanceTimersByTime(2500);
+    expect(button?.getAttribute('title')).toBeNull();
+    expect(reload?.getAttribute('title')).toBeNull();
+    controller.showRuntimeRecoveryStatus(null);
+    expect(button?.title).toBe('Chat overlay settings');
+    expect(reload?.title).toBe('Reload overlay');
+    controller.destroy();
   });
 
   it('persists once when the native close event arrives after a programmatic close', async () => {
@@ -570,6 +726,10 @@ describe('SettingsUi', () => {
 
     expect(FileReaderMock).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('Import failed: settings file is too large');
+    const toast = document.querySelector('.yt-chat-overlay-settings-toast');
+    const footer = document.querySelector('.yt-chat-overlay-settings-actions-wrapper');
+    expect(toast?.parentElement).toBe(footer);
+    expect(footer?.firstElementChild).toBe(toast);
     c.destroy();
   });
 });

@@ -182,8 +182,10 @@ describe('Overlay', () => {
     const cb = vi.fn();
     const unsub = overlay.onUserPauseChanged(cb);
 
+    expect(overlay.getUserPauseState()).toBe(false);
     const result = overlay.toggleUserPause();
     expect(result).toBe(true);
+    expect(overlay.getUserPauseState()).toBe(true);
     expect(cb).toHaveBeenCalledWith(true);
 
     overlay.toggleUserPause();
@@ -192,6 +194,8 @@ describe('Overlay', () => {
     unsub();
     overlay.toggleUserPause();
     expect(cb).toHaveBeenCalledTimes(2);
+    overlay.destroy();
+    expect(overlay.getUserPauseState()).toBe(false);
   });
 
   it('shows the translated pause label when the user pauses the overlay', async () => {

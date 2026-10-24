@@ -82,7 +82,7 @@ export class Overlay {
   private static readonly SEEN_SNIPPET_MAX = 200;
   private static readonly PENDING_SNIPPET_MAX = Overlay.SEEN_SNIPPET_MAX;
 
-  /** User-initiated pause (Space key toggle). Independent from tab/video pause. */
+  /** User-initiated pause from the settings button or delivered shortcut. */
   private isUserPaused = false;
   private readonly userPauseCallbacks = new Set<(paused: boolean) => void>();
   private pauseIndicatorEl: HTMLDivElement | null = null;
@@ -439,7 +439,7 @@ export class Overlay {
 
   /**
    * Toggle user-initiated pause. Returns new state.
-   * Press Ctrl+Space to pause/resume overlay scrolling.
+   * Settings button and delivered Ctrl+Space both pause/resume overlay scrolling.
    * Independent from tab visibility and video pause.
    */
   toggleUserPause(): boolean {
@@ -452,6 +452,10 @@ export class Overlay {
       }
     }
     this.showPauseIndicator(this.isUserPaused);
+    return this.isUserPaused;
+  }
+
+  getUserPauseState(): boolean {
     return this.isUserPaused;
   }
 
@@ -487,6 +491,8 @@ export class Overlay {
    * Plain Space is intentionally NOT intercepted — that would block
    * YouTube's native play/pause shortcut.  Ctrl+Space is the overlay-only
    * gesture that pauses/resumes chat scrolling without affecting the video.
+   * Some input methods consume it before this handler; the settings button
+   * remains available in that case.
    */
   private attachKeyboardHandler(): void {
     this.keyboardHandler = (e: KeyboardEvent) => {
@@ -549,6 +555,8 @@ export class Overlay {
     this.dimensions = null;
     this.settings = null;
     this.dimensionChangeCallbacks.clear();
+    this.userPauseCallbacks.clear();
+    this.isUserPaused = false;
     this.liveRegion = null;
 
     // Prevent pending announcements from crossing runtime lifecycles.

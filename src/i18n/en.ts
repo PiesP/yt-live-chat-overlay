@@ -173,6 +173,9 @@ export const EN: Record<string, string> = {
   'app.close': 'Close settings',
   'app.enabled': 'Overlay Enabled',
   'app.enabledDesc': 'Globally enable or disable the chat overlay on YouTube live streams',
+  'app.pauseShortcutHint':
+    'Press Pause comments again to resume. Video playback is unchanged. Ctrl+Space also works when your input method passes it through.',
+  'app.pauseComments': 'Pause comments',
   'app.langChanged': 'Interface language changed to',
   'app.name': 'Live chat overlay',
   'app.reload': 'Reload overlay',
@@ -269,6 +272,7 @@ export const EN: Record<string, string> = {
   'status.unstable': 'Connection unstable',
   'status.waiting': 'Waiting for live stream…',
   'app.reloadPending': 'Restarting overlay…',
+  'app.recoveryInProgress': 'Recovering overlay… Video playback is unchanged.',
   'app.reloadWaiting': 'Still restarting. If this does not finish, refresh the page.',
   'app.reloadRequested': 'Restart attempt ended. Check overlay status.',
   'app.reloadFailed': 'Could not restart overlay. Select reload to try again.',

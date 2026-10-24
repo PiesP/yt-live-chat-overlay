@@ -96,6 +96,7 @@ const RENDERER_STUCK_THRESHOLD_MS = 10_000;
 const MAX_CONSECUTIVE_REFRESHES = 2;
 
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
+export type RuntimeRecoveryStatus = 'recovering' | 'failed' | null;
 
 interface RuntimeHealth {
   idleDurationMs: number;
@@ -116,6 +117,8 @@ interface RuntimeManagerOptions {
   getSettings: () => Readonly<OverlaySettings>;
   isValidPage: () => boolean;
   onTranslationStatus?: (status: TranslationRuntimeStatus | null) => void;
+  onRecoveryStatus?: (status: RuntimeRecoveryStatus) => void;
+  onUserPauseStatus?: (paused: boolean | null) => void;
 }
 
 interface DesiredRuntimeState {
@@ -142,6 +145,12 @@ export class RuntimeManager {
   private readonly getSettings: RuntimeManagerOptions['getSettings'];
   private readonly isValidPage: RuntimeManagerOptions['isValidPage'];
   private readonly onTranslationStatus: RuntimeManagerOptions['onTranslationStatus'];
+  private readonly onRecoveryStatus: RuntimeManagerOptions['onRecoveryStatus'];
+  private readonly onUserPauseStatus: RuntimeManagerOptions['onUserPauseStatus'];
+  private userPauseUnsubscribe: (() => void) | null = null;
+  private publishedUserPause: boolean | null = null;
+  private recoveryStatus: { url: string; phase: Exclude<RuntimeRecoveryStatus, null> } | null =
+    null;
   private reconcileRequested = false;
   /** When true, the next reconcile will always dispose the active session,
    *  even if the URL matches. Set by page-watcher on yt-navigate-finish
@@ -254,6 +263,8 @@ export class RuntimeManager {
     this.getSettings = options.getSettings;
     this.isValidPage = options.isValidPage;
     this.onTranslationStatus = options.onTranslationStatus;
+    this.onRecoveryStatus = options.onRecoveryStatus;
+    this.onUserPauseStatus = options.onUserPauseStatus;
     this.standbyController = new StandbyController(
       () => this.abortController.signal,
       () => this.isDisposedState,
@@ -281,7 +292,10 @@ export class RuntimeManager {
       return;
     }
 
+    if (!this.isValidPage() || !this.getSettings().enabled) this.clearRecoveryStatus();
+
     if (reason === 'page-change') {
+      this.clearRecoveryStatus();
       this.stopChatPreflightRecovery();
       this.lastPageChangeAt = Date.now();
       this.chatPreflight.reset();
@@ -311,8 +325,16 @@ export class RuntimeManager {
    */
   async restartSession(): Promise<void> {
     if (this.state === 'destroyed') return;
+    this.clearRecoveryStatus();
     this.disposeActiveSession();
     await this.reconcileNow('session-restart');
+  }
+
+  toggleUserPause(): boolean | null {
+    const overlay = this.overlay;
+    if (!overlay || !this.isValidPage() || !this.getSettings().enabled) return null;
+    if (!overlay.getContainer()?.isConnected) return null;
+    return overlay.toggleUserPause();
   }
 
   destroy(): void {
@@ -322,6 +344,7 @@ export class RuntimeManager {
 
     // Cancel any deferred restart timer
     this.clearRestartTimer();
+    this.clearRecoveryStatus();
 
     this.clearScheduledReconcile();
     this.stopChatPreflightRecovery();
@@ -379,6 +402,7 @@ export class RuntimeManager {
     }
 
     if (!desired.shouldRun) {
+      this.clearRecoveryStatus();
       this.stopChatPreflightRecovery();
       this.resetStartFailures();
       return;
@@ -469,6 +493,7 @@ export class RuntimeManager {
       // Session entered standby mode — keep it alive.
       // The session itself handles periodic recheck and transition.
       this.resetStartFailures();
+      this.clearRecoveryWhenHealthy();
       log.info('runtime.chat.start', {
         outcome: 'standby',
         reason: 'stream-not-yet-started',
@@ -477,12 +502,13 @@ export class RuntimeManager {
     }
 
     if (startStatus !== 'started') {
-      this.disposeActiveSession();
+      this.disposeActiveSession(true);
       this.handleStartFailure(desired.url, startStatus);
       return;
     }
 
     this.resetStartFailures();
+    this.clearRecoveryWhenHealthy();
     // Reset watchdog restart counter on successful session start so cooldown
     // does not ratchet across unrelated page navigations or manual restarts.
     this.consecutiveWatchdogRestarts = 0;
@@ -532,6 +558,7 @@ export class RuntimeManager {
           if (status === 'started') {
             this.state = 'active';
             this.consecutiveWatchdogRestarts = 0;
+            this.clearRecoveryWhenHealthy();
             log.info('runtime.session.started');
             // Apply settings that arrived while the chat-only restart was in
             // flight. The source provider is dynamic, but the renderer and
@@ -540,7 +567,7 @@ export class RuntimeManager {
           } else {
             // Chat-only restart failed — escalate to full restart.
             log.warn('runtime.chat.restart-only-failed', { status });
-            this.disposeActiveSession();
+            this.disposeActiveSession(true);
             this.requestReconcile('session-restart');
           }
         })
@@ -556,7 +583,7 @@ export class RuntimeManager {
             return;
           }
           log.warn('runtime.chat.restart-only-error', { error: String(error) });
-          this.disposeActiveSession();
+          this.disposeActiveSession(true);
           this.requestReconcile('session-restart');
         })
         .finally(() => {
@@ -742,6 +769,7 @@ export class RuntimeManager {
       // restartChatSourceSoft preserves old references but startSession
       // creates fresh instances — the old ones must be cleaned up to
       // prevent Worker, rAF, ResizeObserver, and fullscreen listener leaks.
+      this.detachUserPause();
       this.overlay?.destroy();
       this.overlay = null;
       this.renderer?.destroy();
@@ -761,6 +789,7 @@ export class RuntimeManager {
       // Assign overlay BEFORE throwIfAborted so the DOM is cleaned up
       // by disposeActiveSession() if a subsequent check throws.
       this.overlay = overlay;
+      this.bindUserPause(overlay);
       throwIfAborted(signal);
       this.renderer = this.createRenderer(overlay, settings);
       this.renderer.setConnectionStatus('connecting');
@@ -923,6 +952,7 @@ export class RuntimeManager {
 
     this.chatPanelObserver.stop();
 
+    this.detachUserPause();
     this.renderer?.destroy();
     this.renderer = null;
     this.onTranslationStatus?.(null);
@@ -936,6 +966,26 @@ export class RuntimeManager {
     this._recoveringFromError = false;
 
     log.info('runtime.session.disposed');
+  }
+
+  private publishUserPause(paused: boolean | null): void {
+    if (this.publishedUserPause === paused) return;
+    this.publishedUserPause = paused;
+    this.onUserPauseStatus?.(paused);
+  }
+
+  private bindUserPause(overlay: Overlay): void {
+    this.detachUserPause();
+    this.userPauseUnsubscribe = overlay.onUserPauseChanged((paused) => {
+      if (this.overlay === overlay) this.publishUserPause(paused);
+    });
+    this.publishUserPause(overlay.getUserPauseState());
+  }
+
+  private detachUserPause(): void {
+    this.userPauseUnsubscribe?.();
+    this.userPauseUnsubscribe = null;
+    this.publishUserPause(null);
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
@@ -1398,7 +1448,14 @@ export class RuntimeManager {
       log.warn('runtime.restart.max-reached', {
         consecutiveRestarts: this.consecutiveWatchdogRestarts - 1,
       });
+      if (this.targetUrl !== null && this.recoveryStatus?.url === this.targetUrl) {
+        this.setRecoveryStatus('failed', this.targetUrl);
+      }
       return;
+    }
+
+    if (this.state === 'active' && this.targetUrl !== null) {
+      this.setRecoveryStatus('recovering', this.targetUrl);
     }
 
     log.info('runtime.restart.scheduled', {
@@ -1791,6 +1848,9 @@ export class RuntimeManager {
         // Propagate connection status to renderer for visual feedback
         const connStatus = this.computeConnectionStatus();
         this.renderer?.setConnectionStatus(connStatus);
+        if (connStatus === 'connected' || connStatus === 'standby') {
+          this.clearRecoveryWhenHealthy();
+        }
 
         // Track error recovery: when the chat source has errors, flag
         // that the next successful message batch should route through
@@ -1972,12 +2032,13 @@ export class RuntimeManager {
     }
   }
 
-  private disposeActiveSession(): void {
+  private disposeActiveSession(preserveRecovery = false): void {
     // Capture targetUrl before nulling — the act of reading + nulling is the
     // re-entrant guard. If disposeSession re-enters disposeActiveSession,
     // targetUrl is already null and the second call becomes a no-op.
     const _url = this.targetUrl;
     this.clearRestartTimer();
+    if (!preserveRecovery) this.clearRecoveryStatus();
     this.sessionGeneration += 1;
     this.targetUrl = null;
     this.settings = null;
@@ -1991,6 +2052,7 @@ export class RuntimeManager {
     // This is expected on VOD pages — not a recoverable error.
     // Log at info level and wait for a page-change event to reset state.
     if (status === 'unavailable') {
+      if (this.recoveryStatus?.url === url) this.clearRecoveryStatus();
       this.startFailureState = { url, attempts: MAX_START_ATTEMPTS };
       log.info('runtime.chat.start', {
         outcome: 'unavailable',
@@ -2020,6 +2082,28 @@ export class RuntimeManager {
       reason: `bootstrap-${status}`,
       attempts: MAX_START_ATTEMPTS,
     });
+    if (this.recoveryStatus?.url === url) this.setRecoveryStatus('failed', url);
+  }
+
+  private setRecoveryStatus(phase: Exclude<RuntimeRecoveryStatus, null>, url: string): void {
+    if (this.getCurrentUrl() !== url || !this.isValidPage() || !this.getSettings().enabled) return;
+    if (this.recoveryStatus?.url === url && this.recoveryStatus.phase === phase) return;
+    this.recoveryStatus = { url, phase };
+    this.onRecoveryStatus?.(phase);
+  }
+
+  private clearRecoveryStatus(): void {
+    if (this.recoveryStatus === null) return;
+    this.recoveryStatus = null;
+    this.onRecoveryStatus?.(null);
+  }
+
+  private clearRecoveryWhenHealthy(): void {
+    if (this.recoveryStatus === null) return;
+    if (this.recoveryStatus.url !== this.getCurrentUrl()) return;
+    if (this.standbyController.isStandby() || this.computeConnectionStatus() === 'connected') {
+      this.clearRecoveryStatus();
+    }
   }
 
   private resetStartFailures(): void {

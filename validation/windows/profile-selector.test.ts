@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { readFocusedScenario } from './profile.ts';
+import { readViewingImeSelection } from './viewing-experience.ts';
 
 test('focused Windows selectors dispatch by their own file and reject ambiguity', async () => {
   const root = await mkdtemp(join(tmpdir(), 'yt-visual-selector-'));
@@ -15,6 +16,7 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
   const settings = join(inputs, 'settings-persistence.json');
   const reload = join(inputs, 'reload-feedback.json');
   const translation = join(inputs, 'translation-runtime.json');
+  const viewing = join(inputs, 'viewing-experience.json');
   try {
     await mkdir(inputs, { recursive: true });
     assert.equal(await readFocusedScenario(root), null);
@@ -27,10 +29,19 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
     assert.equal(await readFocusedScenario(root), 'translation-runtime');
     await rm(translation);
 
+    await writeFile(viewing, '{"scenario":"viewing-experience"}');
+    assert.equal(await readFocusedScenario(root), 'viewing-experience');
+    await rm(viewing);
+
     await writeFile(settings, '{"scenario":"settings-persistence"}');
     assert.equal(await readFocusedScenario(root), 'settings-persistence');
     await writeFile(reload, '{"scenario":"reload-feedback"}');
     await assert.rejects(readFocusedScenario(root), /mutually exclusive/u);
+
+    await writeFile(viewing, '{"scenario":"viewing-experience"}');
+    await assert.rejects(readFocusedScenario(root), /mutually exclusive/u);
+
+    await rm(viewing);
 
     await rm(reload);
     await writeFile(translation, '{"scenario":"translation-runtime"}');
@@ -39,6 +50,32 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
     await rm(settings);
     await writeFile(translation, '{"scenario":"settings-persistence"}');
     await assert.rejects(readFocusedScenario(root), /does not match its file/u);
+
+    await rm(translation);
+    await writeFile(viewing, '{"scenario":"translation-runtime"}');
+    await assert.rejects(readFocusedScenario(root), /does not match its file/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('native viewing IME requires an exact opt-in selector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'yt-viewing-ime-selector-'));
+  const inputs = join(root, 'validation/windows/inputs');
+  const selector = join(inputs, 'viewing-experience-ime.json');
+  try {
+    await mkdir(inputs, { recursive: true });
+    assert.equal(await readViewingImeSelection(root), 'not-run');
+    await writeFile(selector, '{"enabled":true}');
+    assert.equal(await readViewingImeSelection(root), 'full');
+    await writeFile(selector, '{"enabled":true,"only":true}');
+    assert.equal(await readViewingImeSelection(root), 'only');
+    await writeFile(selector, '{"enabled":false}');
+    await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
+    await writeFile(selector, '{"enabled":true,"only":false}');
+    await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
+    await writeFile(selector, '{"enabled":true,"script":"other.ps1"}');
+    await assert.rejects(readViewingImeSelection(root), /Invalid viewing IME selector/u);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

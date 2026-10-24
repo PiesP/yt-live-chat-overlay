@@ -230,9 +230,42 @@ test.describe('Settings UI Visual', () => {
       await expect(previewText).toBeVisible();
 
       await expect(modal.locator('#tab-comments')).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(modal.locator('input[name="enabled"]')).toBeFocused();
+      const pauseButton = modal.locator('#yt-chat-overlay-pause-button');
+      const mode = modal.locator('select[name="danmakuMode"]');
+      await page.evaluate(() => {
+        const enabled = document.querySelector('input[name="enabled"]');
+        const pause = document.querySelector('#yt-chat-overlay-pause-button');
+        if (!(enabled instanceof HTMLInputElement) || !(pause instanceof HTMLButtonElement)) {
+          throw new Error('Settings controls are missing');
+        }
+        const observed = window as Window & { __pauseTabDisabled?: boolean };
+        const captureTab = (event: KeyboardEvent): void => {
+          if (event.key !== 'Tab' || event.shiftKey || document.activeElement !== enabled) return;
+          observed.__pauseTabDisabled = pause.disabled;
+          document.removeEventListener('keydown', captureTab, true);
+        };
+        document.addEventListener('keydown', captureTab, true);
+      });
+      await page.keyboard.press('Tab');
+      const pauseWasDisabled = await page.evaluate(() => {
+        const observed = window as Window & { __pauseTabDisabled?: boolean };
+        const value = observed.__pauseTabDisabled;
+        delete observed.__pauseTabDisabled;
+        if (typeof value !== 'boolean') throw new Error('Pause state was not captured on Tab');
+        return value;
+      });
+      if (pauseWasDisabled) {
+        // No active session: Tab must skip the disabled control.
+        await expect(mode).toBeFocused();
+      } else {
+        // An active session: Tab must reach the available control.
+        await expect(pauseButton).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(mode).toBeFocused();
+      }
       for (const selector of [
-        'input[name="enabled"]',
-        'select[name="danmakuMode"]',
         'input[name="fontSize"]',
         'input[name="speedPxPerSec"]',
         'input[name="opacity-slider"]',

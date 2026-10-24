@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 
 import type { OverlaySettings } from '@app-types';
+import { Overlay } from '@app/overlay';
 import { RuntimeManager } from '@app/runtime-manager';
 import { ReplayChatSource } from '@chat/source-replay';
 import * as youtubeApi from '@chat/youtube/api';
@@ -128,6 +129,142 @@ describe('RuntimeManager', () => {
 
   it('constructs without throwing', () => {
     expect(() => new RuntimeManager(createOpts())).not.toThrow();
+  });
+
+  it('projects managed recovery through actual health and terminal retry states', () => {
+    vi.useFakeTimers();
+    const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    const onRecoveryStatus = vi.fn();
+    const rm = new RuntimeManager({ ...createOpts(), onRecoveryStatus });
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      sessionGeneration: number;
+      chatSource: { getHealthSnapshot: () => object } | null;
+      requestManagedRestart: (reason: 'watchdog') => void;
+      clearRecoveryWhenHealthy: () => void;
+      handleStartFailure: (url: string, status: 'retryable') => void;
+    };
+
+    internals.state = 'active';
+    internals.targetUrl = url;
+    internals.sessionGeneration = 1;
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus.mock.calls).toEqual([['recovering']]);
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus).toHaveBeenCalledTimes(1);
+
+    internals.state = 'active';
+    internals.chatSource = {
+      getHealthSnapshot: () => ({
+        consecutiveErrors: 0,
+        observerAlive: true,
+        recentlyActive: true,
+      }),
+    };
+    internals.clearRecoveryWhenHealthy();
+    expect(onRecoveryStatus.mock.calls).toEqual([['recovering'], [null]]);
+
+    internals.chatSource = null;
+    internals.requestManagedRestart('watchdog');
+    internals.handleStartFailure(url, 'retryable');
+    internals.handleStartFailure(url, 'retryable');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['recovering']);
+    internals.handleStartFailure(url, 'retryable');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['failed']);
+    rm.destroy();
+    expect(onRecoveryStatus.mock.lastCall).toEqual([null]);
+  });
+
+  it('clears recovery feedback immediately when the overlay is disabled', () => {
+    vi.useFakeTimers();
+    let enabled = true;
+    const onRecoveryStatus = vi.fn();
+    const rm = new RuntimeManager({
+      ...createOpts(),
+      getSettings: () => makeDefaults({ enabled }),
+      onRecoveryStatus,
+    });
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      requestManagedRestart: (reason: 'watchdog') => void;
+    };
+    internals.state = 'active';
+    internals.targetUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['recovering']);
+
+    enabled = false;
+    rm.requestReconcile('settings-change');
+    expect(onRecoveryStatus.mock.lastCall).toEqual([null]);
+    rm.destroy();
+  });
+
+  it('clears terminal restart feedback if the active chat source heals naturally', () => {
+    vi.useFakeTimers();
+    const onRecoveryStatus = vi.fn();
+    const rm = new RuntimeManager({ ...createOpts(), onRecoveryStatus });
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      consecutiveWatchdogRestarts: number;
+      chatSource: { getHealthSnapshot: () => object; stop: () => void } | null;
+      requestManagedRestart: (reason: 'watchdog') => void;
+      clearRecoveryWhenHealthy: () => void;
+    };
+    internals.state = 'active';
+    internals.targetUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['recovering']);
+
+    internals.state = 'active';
+    internals.consecutiveWatchdogRestarts = 4;
+    internals.requestManagedRestart('watchdog');
+    expect(onRecoveryStatus.mock.lastCall).toEqual(['failed']);
+    internals.chatSource = {
+      getHealthSnapshot: () => ({
+        consecutiveErrors: 0,
+        observerAlive: true,
+        recentlyActive: true,
+      }),
+      stop: vi.fn(),
+    };
+    internals.clearRecoveryWhenHealthy();
+    expect(onRecoveryStatus.mock.lastCall).toEqual([null]);
+    rm.destroy();
+  });
+
+  it('rebinds pause state to the current overlay and detaches the retired overlay', () => {
+    const onUserPauseStatus = vi.fn();
+    const rm = new RuntimeManager({ ...createOpts(), onUserPauseStatus });
+    const internals = rm as unknown as {
+      overlay: Overlay | null;
+      bindUserPause: (overlay: Overlay) => void;
+      detachUserPause: () => void;
+    };
+    const first = new Overlay();
+    const second = new Overlay();
+    internals.overlay = first;
+    internals.bindUserPause(first);
+    expect(onUserPauseStatus.mock.calls).toEqual([[false]]);
+    first.toggleUserPause();
+    expect(onUserPauseStatus.mock.lastCall).toEqual([true]);
+
+    internals.overlay = second;
+    internals.bindUserPause(second);
+    expect(onUserPauseStatus.mock.lastCall).toEqual([false]);
+    onUserPauseStatus.mockClear();
+    first.toggleUserPause();
+    expect(onUserPauseStatus).not.toHaveBeenCalled();
+    second.toggleUserPause();
+    expect(onUserPauseStatus.mock.calls).toEqual([[true]]);
+    internals.detachUserPause();
+    expect(onUserPauseStatus.mock.lastCall).toEqual([null]);
+    onUserPauseStatus.mockClear();
+    second.toggleUserPause();
+    expect(onUserPauseStatus).not.toHaveBeenCalled();
+    rm.destroy();
   });
 
   it('attributes late replay drops only to the current session', async () => {

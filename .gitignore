@@ -85,3 +85,6 @@ __pycache__/
 /validation/windows/release-upgrade/public-v0.45.7-chrome/
 /validation/windows/release-upgrade/public-v0.45.8-chrome/
 .vitest/
+
+# Locally generated, source-bound viewing-experience acceptance footage
+/validation/windows/fixtures/viewing-*.mp4

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
+import type { RuntimeRecoveryStatus } from '@app/runtime-manager';
 import { getActiveLanguage, t } from '@i18n/index';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@settings/schema';
@@ -33,7 +34,7 @@ const TOAST_DURATION_MS = 2500;
 const RELOAD_WAITING_DURATION_MS = 5000;
 const RELOAD_FEEDBACK_DURATION_MS = 2500;
 
-type ReloadFeedbackState = 'idle' | 'pending' | 'waiting' | 'requested' | 'failed';
+type ReloadFeedbackState = 'idle' | 'pending' | 'waiting' | 'requested' | 'recovering' | 'failed';
 
 export class SettingsUi {
   /** Popover API feature detection — checked once at construction. */
@@ -48,6 +49,7 @@ export class SettingsUi {
   private reloadButton: HTMLButtonElement | null = null;
   private reloadFeedback: HTMLDivElement | null = null;
   private reloadFeedbackState: ReloadFeedbackState = 'idle';
+  private automaticRecoveryStatus: RuntimeRecoveryStatus = null;
   private reloadPending = false;
   private persistenceNotice: HTMLDivElement | null = null;
   private persistenceNoticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,6 +105,16 @@ export class SettingsUi {
     this.form.setTranslationStatus(status);
   }
 
+  showRuntimeRecoveryStatus(status: RuntimeRecoveryStatus): void {
+    if (this.automaticRecoveryStatus === status) return;
+    this.automaticRecoveryStatus = status;
+    this.renderReloadFeedback();
+  }
+
+  showUserPauseState(paused: boolean | null): void {
+    this.form.setUserPauseState(paused);
+  }
+
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
     private readonly onChange: (partial: Partial<OverlaySettings>) => void,
@@ -117,12 +129,17 @@ export class SettingsUi {
       state: () => PersistenceState;
       retry: () => Promise<PersistenceState>;
       resolveConflict: () => Promise<PersistenceState>;
-    }
+    },
+    onToggleUserPause?: () => void
   ) {
     this.activeTab = this.defaultTabId;
-    this.form = new SettingsUiForm(getSettings, () => {
-      this.queuePreview();
-    });
+    this.form = new SettingsUiForm(
+      getSettings,
+      () => {
+        this.queuePreview();
+      },
+      onToggleUserPause
+    );
   }
 
   /** Debounced live preview — applies settings immediately (memory only, no storage write). */
@@ -240,7 +257,10 @@ export class SettingsUi {
     this.persistenceNoticeTimer = clearSafeTimeout(this.persistenceNoticeTimer);
     this.persistenceNotice?.remove();
     this.persistenceNotice = null;
-    if (state === 'pending' || !this.playerElement || (state === 'saved' && !hadNotice)) return;
+    if (state === 'pending' || !this.playerElement || (state === 'saved' && !hadNotice)) {
+      this.renderReloadFeedback();
+      return;
+    }
     this.recoveryFeedbackPending = false;
 
     const notice = document.createElement('div');
@@ -281,11 +301,13 @@ export class SettingsUi {
     }
     this.playerElement.appendChild(notice);
     this.persistenceNotice = notice;
+    this.renderReloadFeedback();
     if (state === 'saved') {
       this.persistenceNoticeTimer = setTimeout(() => {
         notice.remove();
         if (this.persistenceNotice === notice) this.persistenceNotice = null;
         this.persistenceNoticeTimer = null;
+        this.renderReloadFeedback();
       }, TOAST_DURATION_MS);
     }
   }
@@ -394,15 +416,40 @@ export class SettingsUi {
     this.reloadFeedbackTimer = clearSafeTimeout(this.reloadFeedbackTimer);
   }
 
+  private renderSettingsTooltip(suppress: boolean): void {
+    const button = this.button;
+    if (!button) return;
+    if (SettingsUi.supportsHints) {
+      const tooltip = document.getElementById(SettingsUi.SETTINGS_TOOLTIP_ID);
+      if (tooltip) tooltip.textContent = t('app.settings');
+      if (suppress) {
+        button.removeAttribute('interestfor');
+        if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
+      } else {
+        button.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
+      }
+    } else if (suppress) {
+      button.removeAttribute('title');
+    } else {
+      button.title = t('app.settings');
+    }
+  }
+
   private renderReloadFeedback(): void {
+    const state =
+      this.reloadFeedbackState !== 'idle'
+        ? this.reloadFeedbackState
+        : (this.automaticRecoveryStatus ?? 'idle');
+    const suppressTooltips = state !== 'idle' || this.persistenceNotice !== null;
+    this.renderSettingsTooltip(suppressTooltips);
     const button = this.reloadButton;
     if (!button) return;
-    const state = this.reloadFeedbackState;
     const messageKey = {
       idle: 'app.reload',
       pending: 'app.reloadPending',
       waiting: 'app.reloadWaiting',
       requested: 'app.reloadRequested',
+      recovering: 'app.recoveryInProgress',
       failed: 'app.reloadFailed',
     }[state];
     const message = t(messageKey);
@@ -410,23 +457,30 @@ export class SettingsUi {
       state === 'pending' || state === 'waiting' ? '…' : state === 'failed' ? '!' : '↻';
     button.classList.toggle('yt-chat-overlay-reload-button--pending', this.reloadPending);
     button.classList.toggle('yt-chat-overlay-reload-button--failed', state === 'failed');
-    button.setAttribute('aria-label', state === 'failed' ? t('app.reloadRetry') : message);
+    button.setAttribute(
+      'aria-label',
+      state === 'failed' ? t('app.reloadRetry') : state === 'recovering' ? t('app.reload') : message
+    );
     if (this.reloadPending) button.setAttribute('aria-busy', 'true');
     else button.removeAttribute('aria-busy');
     if (SettingsUi.supportsHints) {
       const tooltip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
       if (tooltip) tooltip.textContent = t('app.reload');
-      if (state === 'idle') {
+      if (!suppressTooltips) {
         button.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
       } else {
         button.removeAttribute('interestfor');
         if (tooltip?.matches(':popover-open')) tooltip.hidePopover();
       }
     } else {
-      if (state === 'idle') button.title = t('app.reload');
-      else button.removeAttribute('title');
+      if (!suppressTooltips) {
+        button.title = t('app.reload');
+      } else {
+        button.removeAttribute('title');
+      }
     }
     if (this.reloadFeedback) {
+      this.reloadFeedback.dataset.phase = state;
       this.reloadFeedback.textContent = state === 'idle' ? '' : message;
       this.reloadFeedback.hidden = state === 'idle';
       this.reloadFeedback.lang = getActiveLanguage();
@@ -437,6 +491,7 @@ export class SettingsUi {
   private handleReloadClick(): void {
     const button = this.reloadButton;
     if (!button || this.reloadPending) return;
+    this.automaticRecoveryStatus = null;
     this.reloadPending = true;
     this.reloadFeedbackState = 'pending';
     this.renderReloadFeedback();
@@ -908,7 +963,9 @@ export class SettingsUi {
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
     toast.textContent = message;
-    this.modal.appendChild(toast);
+    const footer = this.modal.querySelector('.yt-chat-overlay-settings-actions-wrapper');
+    if (footer) footer.prepend(toast);
+    else this.modal.appendChild(toast);
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       toast.remove();
@@ -952,8 +1009,10 @@ export class SettingsUi {
     this.clearReloadFeedbackTimer();
     this.reloadPending = false;
     this.reloadFeedbackState = 'idle';
+    this.automaticRecoveryStatus = null;
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.form.destroy();
+    this.form.setUserPauseState(null);
     this.form.setTranslationStatus(null);
     this.modal?.close();
     this.modal?.remove();
