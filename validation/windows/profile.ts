@@ -1512,6 +1512,7 @@ export async function run({
     await mkdir(output, { recursive: true });
     return runSettingsPersistenceFixture({
       browser,
+      root,
       output,
       userscript,
       watchHtml: createMockWatchHtml(previewHtml),
