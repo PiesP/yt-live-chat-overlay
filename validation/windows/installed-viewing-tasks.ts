@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { BrowserContext, Locator, Page } from '@playwright/test';
+import type { BrowserContext, Frame, Locator, Page } from '@playwright/test';
 
 import { restoreFixtureSettings } from './fixture-settings.ts';
 import { readPublicPageBrowserState } from './live-rendering.ts';
@@ -32,6 +32,21 @@ export type CanvasSample =
       height: number;
     }
   | { status: 'unavailable'; reason: string };
+
+export function summarizeReviewCandidate(
+  messageId: string,
+  original: string,
+  layer: 'native-chat-frame' | 'product-accessible-mirror',
+  elapsedMs: number
+) {
+  return {
+    messageIdSha256: createHash('sha256').update(messageId).digest('hex'),
+    textSha256: createHash('sha256').update(original).digest('hex'),
+    codepointLength: Array.from(original).length,
+    layer,
+    elapsedMs,
+  };
+}
 
 export function assessCanvasMotion(
   before: readonly CanvasSample[],
@@ -135,12 +150,18 @@ export type InstalledViewingTasks = {
     effectiveMessage: string;
     reviewEvidence: {
       candidates: Array<{
-        messageId: string;
-        original: string;
+        messageIdSha256: string;
+        textSha256: string;
+        codepointLength: number;
         layer: 'native-chat-frame' | 'product-accessible-mirror';
         elapsedMs: number;
       }>;
-      captures: Array<{ screenshot: string; elapsedMs: number; messageIds: string[] }>;
+      captures: Array<{
+        screenshot: string;
+        originalScreenshot: string;
+        elapsedMs: number;
+        messageIdsSha256: string[];
+      }>;
     } | null;
   };
   c: { status: 'blocked'; reason: 'participant-unavailable'; evidenceLayer: 'human-observation' };
@@ -612,7 +633,13 @@ async function readTranslationUi(modal: Locator) {
   };
 }
 
-async function readPermittedOriginals(page: Page, elapsedMs: number) {
+async function readPermittedOriginals(
+  page: Page,
+  elapsedMs: number,
+  previousIds: ReadonlySet<string>,
+  output: string,
+  index: number
+) {
   const mirror = await page.evaluate(() =>
     [
       ...document.querySelectorAll<HTMLParagraphElement>(
@@ -621,12 +648,12 @@ async function readPermittedOriginals(page: Page, elapsedMs: number) {
     ]
       .slice(-8)
       .map((node) => ({
-        messageId: (node.dataset.messageId ?? '').slice(0, 96),
+        messageId: node.dataset.messageId ?? '',
         original: (node.textContent ?? '').trim().slice(0, 120),
       }))
       .filter((item) => item.messageId && item.original)
   );
-  const native = new Map<string, string>();
+  const native = new Map<string, { original: string; row: number; frame: Frame }>();
   for (const frame of page
     .frames()
     .filter((item) => {
@@ -640,24 +667,87 @@ async function readPermittedOriginals(page: Page, elapsedMs: number) {
     const entries = await frame
       .evaluate(() =>
         [...document.querySelectorAll<HTMLElement>('yt-live-chat-text-message-renderer[id]')]
-          .slice(-40)
-          .map((item) => ({
-            messageId: item.id.slice(0, 96),
+          .map((item, row) => ({
+            messageId: item.id,
             original: (item.querySelector('#message')?.textContent ?? '').trim().slice(0, 120),
+            row,
           }))
+          .slice(-40)
           .filter((item) => item.messageId && item.original)
       )
       .catch(() => []);
-    for (const item of entries) native.set(item.messageId, item.original);
+    for (const item of entries)
+      native.set(item.messageId, { original: item.original, row: item.row, frame });
   }
-  return mirror.map((item) => ({
-    messageId: item.messageId,
-    original: native.get(item.messageId) ?? item.original,
-    layer: native.has(item.messageId)
-      ? ('native-chat-frame' as const)
-      : ('product-accessible-mirror' as const),
-    elapsedMs,
-  }));
+  const item = mirror.findLast((entry) => !previousIds.has(entry.messageId));
+  if (!item) return null;
+  const nativeEntry = native.get(item.messageId);
+  const original = nativeEntry?.original ?? item.original;
+  let capturedOriginal = original;
+  const messageIdSha256 = createHash('sha256').update(item.messageId).digest('hex');
+  const originalScreenshot = `installed-viewing-b-original-${index}.png`;
+  let layer: 'native-chat-frame' | 'product-accessible-mirror' = nativeEntry
+    ? 'native-chat-frame'
+    : 'product-accessible-mirror';
+  if (nativeEntry) {
+    const row = nativeEntry.frame
+      .locator('yt-live-chat-text-message-renderer[id]')
+      .nth(nativeEntry.row);
+    try {
+      assert.equal(await row.getAttribute('id'), item.messageId);
+      const before = ((await row.locator('#message').textContent()) ?? '').trim().slice(0, 120);
+      assert(before);
+      await row.screenshot({ path: join(output, originalScreenshot), timeout: 3_000 });
+      assert.equal(
+        ((await row.locator('#message').textContent()) ?? '').trim().slice(0, 120),
+        before
+      );
+      capturedOriginal = before;
+    } catch {
+      layer = 'product-accessible-mirror';
+    }
+  }
+  if (layer === 'product-accessible-mirror') {
+    // The real accessible mirror is visually hidden. Show its matching DOM
+    // text briefly for a private capture without switching away from playback.
+    capturedOriginal = await page.evaluate(
+      ({ messageId, messageIdSha256 }) => {
+        const source = [
+          ...document.querySelectorAll<HTMLElement>(
+            '.yt-live-chat-overlay-live-region > p[data-message-id]'
+          ),
+        ].find((node) => node.dataset.messageId === messageId);
+        if (!source) throw new Error('matching accessible mirror message disappeared');
+        const panel = document.createElement('div');
+        panel.id = 'yt-installed-viewing-original-capture';
+        panel.style.cssText =
+          'position:fixed;left:0;top:0;z-index:2147483647;background:white;color:black;font:16px sans-serif;max-width:680px;padding:16px;pointer-events:none';
+        const id = document.createElement('p');
+        id.textContent = `ID SHA-256: ${messageIdSha256}`;
+        const text = document.createElement('p');
+        const capturedText = (source.textContent ?? '').trim().slice(0, 120);
+        text.textContent = capturedText;
+        panel.append(id, text);
+        document.body.append(panel);
+        return capturedText;
+      },
+      { messageId: item.messageId, messageIdSha256 }
+    );
+    try {
+      await page.locator('#yt-installed-viewing-original-capture').screenshot({
+        path: join(output, originalScreenshot),
+        timeout: 3_000,
+      });
+    } finally {
+      await page.evaluate(() =>
+        document.querySelector('#yt-installed-viewing-original-capture')?.remove()
+      );
+    }
+  }
+  return {
+    candidate: summarizeReviewCandidate(item.messageId, capturedOriginal, layer, elapsedMs),
+    originalScreenshot,
+  };
 }
 
 async function runB(
@@ -784,10 +874,40 @@ async function runB(
     elapsedMs: Math.round(performance.now() - start),
     observation: { ui },
   });
+  if (phase === 'needs-action') {
+    // One normal settings action provides the user activation required by some
+    // browser models. It does not bypass model policy or install anything.
+    await modal.locator('select[name="translationService"]').selectOption('off');
+    const retired = await readTranslationUi(modal);
+    await modal.locator('select[name="translationService"]').selectOption('auto');
+    ui = await readTranslationUi(modal);
+    phase = ui.phase;
+    result.timeline.push({
+      stage: 'normal-ui-user-activation-retry',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: { before: 'needs-action', retired, after: ui },
+    });
+    const retryUntil = Math.min(until, performance.now() + 15_000);
+    while (
+      performance.now() < retryUntil &&
+      phase &&
+      !['active', 'unavailable', 'failed'].includes(phase)
+    ) {
+      await page.waitForTimeout(750);
+      ui = await readTranslationUi(modal);
+      phase = ui.phase;
+    }
+    result.timeline.push({
+      stage: 'normal-ui-user-activation-result',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: ui,
+    });
+  }
   await modal.screenshot({ path: join(output, 'installed-viewing-b-status.png') });
   result.screenshots.push('installed-viewing-b-status.png');
   result.creation = phase === 'active' ? 'ready' : (phase ?? 'unobserved');
   result.effectiveMessage = 'unobserved';
+  let newMessageObserved = false;
   if (phase === 'preparing' || phase === 'downloading') {
     await modal.locator('select[name="translationService"]').selectOption('off');
     await closeSettings(page, modal);
@@ -814,21 +934,54 @@ async function runB(
     }
     assert(await videoAdvances(page), 'Native video did not advance during translation');
     await closeSettings(page, modal);
+    const previousIds = new Set(
+      await page
+        .locator('.yt-live-chat-overlay-live-region > p[data-message-id]')
+        .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.messageId ?? ''))
+    );
+    const activeElapsedMs = Math.round(performance.now() - start);
+    try {
+      await page.waitForFunction(
+        (ids) =>
+          [
+            ...document.querySelectorAll<HTMLElement>(
+              '.yt-live-chat-overlay-live-region > p[data-message-id]'
+            ),
+          ].some((node) => !!node.dataset.messageId && !ids.includes(node.dataset.messageId)),
+        [...previousIds],
+        { timeout: Math.min(20_000, Math.max(1_000, start + TASK_DEADLINE_MS - performance.now())) }
+      );
+      newMessageObserved = true;
+    } catch {
+      // A quiet public chat is a blocked observation, not translated-message proof.
+    }
+    result.timeline.push({
+      stage: 'post-active-new-message',
+      elapsedMs: Math.round(performance.now() - start),
+      observation: { activeElapsedMs, observed: newMessageObserved },
+    });
     const candidates = new Map<
       string,
-      Awaited<ReturnType<typeof readPermittedOriginals>>[number]
+      NonNullable<Awaited<ReturnType<typeof readPermittedOriginals>>>['candidate']
     >();
     const captures: NonNullable<InstalledViewingTasks['b']['reviewEvidence']>['captures'] = [];
-    for (let index = 0; index < 3; index++) {
+    for (let index = 0; newMessageObserved && index < 3; index++) {
       const elapsedMs = Math.round(performance.now() - start);
-      const observed = await readPermittedOriginals(page, elapsedMs);
-      for (const item of observed) candidates.set(item.messageId, item);
+      const observed = await readPermittedOriginals(page, elapsedMs, previousIds, output, index);
+      if (!observed) break;
+      candidates.set(observed.candidate.messageIdSha256, observed.candidate);
       const screenshot = `installed-viewing-b-active-canvas-${index}.png`;
       await page
         .locator('#yt-live-chat-overlay canvas')
         .screenshot({ path: join(output, screenshot) });
       result.screenshots.push(screenshot);
-      captures.push({ screenshot, elapsedMs, messageIds: observed.map((item) => item.messageId) });
+      result.screenshots.push(observed.originalScreenshot);
+      captures.push({
+        screenshot,
+        originalScreenshot: observed.originalScreenshot,
+        elapsedMs,
+        messageIdsSha256: [observed.candidate.messageIdSha256],
+      });
       if (index < 2) await page.waitForTimeout(400);
     }
     result.reviewEvidence = { candidates: [...candidates.values()].slice(-8), captures };
@@ -853,8 +1006,9 @@ async function runB(
     });
     // The accessible mirror carries original text. Do not claim Canvas translation
     // solely from API readiness or an unchanged accessible-chat count.
-    result.reason =
-      result.effectiveMessage === 'manual-review-pending'
+    result.reason = !newMessageObserved
+      ? 'no-new-message-after-translator-active'
+      : result.effectiveMessage === 'manual-review-pending'
         ? 'actual-translated-message-manual-review-pending'
         : 'real-message-identity-unavailable';
   } else if (result.creation !== 'preparation-retired') {

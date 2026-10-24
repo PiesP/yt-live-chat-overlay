@@ -13,6 +13,7 @@ import {
   assessCanvasMotion,
   readInstalledViewingTaskSelector,
   requireInstalledViewingTaskSuccess,
+  summarizeReviewCandidate,
   type CanvasSample,
   type InstalledViewingTasks,
   VIEWING_TASK_URL,
@@ -132,12 +133,34 @@ it('keeps API availability and service readiness separate from an effective mess
   result.b.reviewEvidence = { candidates: [], captures: [] };
   expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/review evidence is missing/u);
   result.b.reviewEvidence = {
-    candidates: [
-      { messageId: 'public-id', original: 'Hello', layer: 'native-chat-frame', elapsedMs: 3000 },
+    candidates: [summarizeReviewCandidate('public-id', 'Hello', 'native-chat-frame', 3000)],
+    captures: [
+      {
+        screenshot: 'canvas.png',
+        originalScreenshot: 'native.png',
+        elapsedMs: 3000,
+        messageIdsSha256: [
+          summarizeReviewCandidate('public-id', 'Hello', 'native-chat-frame', 3000).messageIdSha256,
+        ],
+      },
     ],
-    captures: [{ screenshot: 'canvas.png', elapsedMs: 3000, messageIds: ['public-id'] }],
   };
   expect(() => requireInstalledViewingTaskSuccess(result)).not.toThrow();
   result.cleanup.settingsRestored = false;
   expect(() => requireInstalledViewingTaskSuccess(result)).toThrow(/settings were not restored/u);
+});
+
+it('keeps content-bearing public message IDs and originals out of JSON review evidence', () => {
+  const id = '1720000000:Alice:text:private chat 🧪';
+  const original = 'private chat 🧪';
+  const summary = summarizeReviewCandidate(id, original, 'product-accessible-mirror', 1234);
+  expect(summary.codepointLength).toBe(Array.from(original).length);
+  expect(summary.messageIdSha256).toMatch(/^[a-f0-9]{64}$/u);
+  expect(summary.textSha256).toMatch(/^[a-f0-9]{64}$/u);
+  expect(
+    JSON.stringify({
+      candidates: [summary],
+      captures: [{ messageIdsSha256: [summary.messageIdSha256] }],
+    })
+  ).not.toMatch(/Alice|private chat|🧪|1720000000/u);
 });

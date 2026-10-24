@@ -414,13 +414,18 @@ persistent settings. Canvas sampling reads an image into a separate scratch
 canvas; an unavailable read or insufficient chat activity remains blocked.
 Its B timeline reads real Translator availability and drives the normal
 Translation settings; absence, preparation, readiness and effective messages
-remain distinct. When real creation reaches active, bounded original-message
-IDs/text from the native chat frame or accessible mirror are paired by time with
-three actual Canvas captures for separate manual review. Active status or a
+remain distinct. A `needs-action` state gets one normal settings off/on retry.
+When real creation reaches active, the task waits up to 20 seconds for a new
+chat message. Up to three actual Canvas captures are paired by time with private
+visual captures of the matching native chat row or a bounded rendering of the
+product's accessible mirror. No new message remains blocked. Active status or a
 capture alone does not pass effective translation.
 The real page has no substituted chat, service or network response. Screenshots
-are captured into the private output directory; public chat text is not copied
-into JSON. C is explicitly blocked while no consenting first-time viewer is
+are captured into the private output directory; JSON retains only message ID
+and original text SHA-256 digests, codepoint length, evidence layer, and timing.
+Original public chat text stays only in private images and short-lived memory;
+raw message IDs stay in memory for matching and are hashed before capture.
+C is explicitly blocked while no consenting first-time viewer is
 available. The profile fails closed when a required technical case is incomplete,
 while retaining the separate fixture and A/B/C receipts and owned-profile cleanup.
 Remove only this task-owned selector after collection.
