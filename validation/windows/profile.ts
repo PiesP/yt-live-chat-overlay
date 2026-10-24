@@ -15,7 +15,9 @@ import type {
   Request,
 } from '@playwright/test';
 
+import { runReloadFeedbackFixture } from './reload-feedback.ts';
 import { runSettingsPersistenceFixture } from './settings-persistence.ts';
+import { runTranslationRuntimeFixture } from './translation-runtime.ts';
 
 type ChatRenderer = { id: string; [key: string]: unknown };
 type ChatAction = {
@@ -1470,6 +1472,39 @@ async function verifySustainedViewingLifecycle(
   };
 }
 
+type FocusedScenario = 'settings-persistence' | 'reload-feedback' | 'translation-runtime';
+
+async function hasScenarioSelector(root: string, scenario: FocusedScenario): Promise<boolean> {
+  const path = join(root, 'validation/windows/inputs', `${scenario}.json`);
+  let contents: string;
+  try {
+    contents = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(
+    JSON.parse(contents),
+    { scenario },
+    `${scenario} selector does not match its file`
+  );
+  return true;
+}
+
+export async function readFocusedScenario(root: string): Promise<FocusedScenario | null> {
+  const settings = await hasScenarioSelector(root, 'settings-persistence');
+  const reload = await hasScenarioSelector(root, 'reload-feedback');
+  const translation = await hasScenarioSelector(root, 'translation-runtime');
+  assert(
+    Number(settings) + Number(reload) + Number(translation) <= 1,
+    'Focused Windows scenario selectors are mutually exclusive'
+  );
+  if (settings) return 'settings-persistence';
+  if (reload) return 'reload-feedback';
+  if (translation) return 'translation-runtime';
+  return null;
+}
+
 export async function run({
   browser,
   root,
@@ -1498,18 +1533,29 @@ export async function run({
     readFile(join(root, GM_MOCKS_PATH), 'utf8'),
   ]);
   assert.match(userscript, /==UserScript==/u, 'Production userscript metadata is missing');
-  let selectedScenario: unknown = null;
-  try {
-    selectedScenario = JSON.parse(
-      await readFile(join(root, 'validation/windows/inputs/settings-persistence.json'), 'utf8')
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  const selectedScenario = await readFocusedScenario(root);
   if (selectedScenario !== null) {
-    assert.deepEqual(selectedScenario, { scenario: 'settings-persistence' });
-    assert(!installedContext, 'The focused settings fixture uses the production userscript');
+    assert(!installedContext, 'Focused fixtures use the production userscript');
     await mkdir(output, { recursive: true });
+    if (selectedScenario === 'reload-feedback') {
+      return runReloadFeedbackFixture({
+        browser,
+        root,
+        output,
+        userscript,
+        gmMocks,
+        watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
+    if (selectedScenario === 'translation-runtime') {
+      return runTranslationRuntimeFixture({
+        browser,
+        root,
+        output,
+        userscript,
+        watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
     return runSettingsPersistenceFixture({
       browser,
       root,

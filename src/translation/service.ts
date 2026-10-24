@@ -9,9 +9,8 @@
  *
  * Design notes:
  * - One translator instance per language pair (cached after creation).
- * - `Translator.create()` requires user activation (click/keypress within
- *   5 seconds). The first successful create typically happens when the
- *   user clicks Save in the settings dialog.
+ * - Model setup may require user activation and can also be blocked by
+ *   browser policy or user settings. A settings action can retry creation.
  * - Sequential translations only — a large text blocks subsequent calls.
  *   For chat (short messages), this is acceptable.
  */
@@ -55,6 +54,35 @@ type ConfigurationReservation = {
 
 type ConfigurationRaceResult<T> = { cancelled: true } | { cancelled: false; value: T };
 
+export type TranslationRuntimePhase =
+  | 'off'
+  | 'preparing'
+  | 'downloading'
+  | 'active'
+  | 'unavailable'
+  | 'needs-action'
+  | 'failed';
+
+export type TranslationRuntimeReason =
+  | 'disabled'
+  | 'service-off'
+  | 'api-unavailable'
+  | 'pair-unavailable'
+  | 'model-pending'
+  | 'blocked'
+  | 'create-failed'
+  | 'translator-failed'
+  | null;
+
+export type TranslationRuntimeStatus = Readonly<{
+  phase: TranslationRuntimePhase;
+  reason: TranslationRuntimeReason;
+  source: string | null;
+  target: string | null;
+  progressPercent: number | null;
+  generation: number;
+}>;
+
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
@@ -62,6 +90,15 @@ type ConfigurationRaceResult<T> = { cancelled: true } | { cancelled: false; valu
  * Created once per renderer lifecycle.
  */
 export class TranslationService {
+  private runtimeStatus: TranslationRuntimeStatus = Object.freeze({
+    phase: 'off',
+    reason: 'disabled',
+    source: null,
+    target: null,
+    progressPercent: null,
+    generation: 0,
+  });
+  private readonly runtimeStatusListeners = new Set<(status: TranslationRuntimeStatus) => void>();
   private translator: TranslatorInstance | null = null;
   private currentTarget: string | null = null;
   private currentSource: string | null = null;
@@ -109,6 +146,34 @@ export class TranslationService {
    * unbounded growth during sustained chat bursts. */
   private static readonly MAX_TRANSLATE_QUEUE_SIZE = 1000;
 
+  getStatus(): TranslationRuntimeStatus {
+    return this.runtimeStatus;
+  }
+
+  subscribeStatus(listener: (status: TranslationRuntimeStatus) => void): () => void {
+    this.runtimeStatusListeners.add(listener);
+    listener(this.runtimeStatus);
+    return () => this.runtimeStatusListeners.delete(listener);
+  }
+
+  private publishStatus(
+    phase: TranslationRuntimePhase,
+    reason: TranslationRuntimeReason = null,
+    progressPercent: number | null = null,
+    source: string | null = this.pendingSource ?? this.currentSource,
+    target: string | null = this.pendingTarget ?? this.currentTarget
+  ): void {
+    this.runtimeStatus = Object.freeze({
+      phase,
+      reason,
+      source,
+      target,
+      progressPercent,
+      generation: this.configurationGeneration,
+    });
+    for (const listener of this.runtimeStatusListeners) listener(this.runtimeStatus);
+  }
+
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
     enabled: boolean;
@@ -128,12 +193,14 @@ export class TranslationService {
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {
       this.disableTranslation();
+      this.publishStatus('off', settings.enabled ? 'service-off' : 'disabled');
       return;
     }
 
     if (!getTranslator()) {
       log.warn('translation.service.api-unavailable');
       this.disableTranslation();
+      this.publishStatus('unavailable', 'api-unavailable', null, resolvedSource, resolvedTarget);
       return;
     }
 
@@ -146,6 +213,7 @@ export class TranslationService {
       if (!getTranslator()) {
         log.warn('translation.service.api-unavailable');
         this.disableTranslation();
+        this.publishStatus('unavailable', 'api-unavailable', null, resolvedSource, resolvedTarget);
         return;
       }
       if (
@@ -264,6 +332,7 @@ export class TranslationService {
     this.resolveStaleQueueEntries(generation);
     this.pendingSource = sourceLanguage;
     this.pendingTarget = targetLanguage;
+    this.publishStatus('preparing');
     return { generation, cancellation };
   }
 
@@ -465,13 +534,15 @@ export class TranslationService {
         this.currentSource = null;
         this.configuringGeneration = null;
         this.resolveQueueEntriesForGeneration(generation);
+        this.publishStatus('unavailable', 'pair-unavailable');
         return;
       }
 
-      // For both 'available' and 'downloadable', attempt to create the translator.
-      // When 'downloadable', Translator.create() triggers the model download
-      // (requires user activation within 5 seconds). The Promise resolves once
-      // the download completes and the translator is ready.
+      // Availability does not establish readiness. create() may prepare or
+      // download a model and only its resolved translator is active.
+      if (availability === 'downloadable' || availability === 'downloading') {
+        this.publishStatus('preparing', 'model-pending');
+      }
       const createResult = await this.raceConfiguration(
         getTranslator()?.create({
           sourceLanguage,
@@ -479,11 +550,22 @@ export class TranslationService {
           monitor: (monitor: EventTarget) => {
             monitor.addEventListener('downloadprogress', (e: Event) => {
               const evt = e as TranslatorDownloadEvent;
-              if (evt.total > 0) {
-                log.debug(
-                  `Translator model download: ${Math.round((evt.loaded / evt.total) * 100)}%`
-                );
-              }
+              if (
+                cancellation.cancelled ||
+                generation !== this.configurationGeneration ||
+                !this.enabled
+              )
+                return;
+              const fraction =
+                Number.isFinite(evt.loaded) && evt.loaded >= 0 && evt.loaded <= 1
+                  ? evt.loaded
+                  : Number.isFinite(evt.total) && evt.total > 0
+                    ? evt.loaded / evt.total
+                    : NaN;
+              if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) return;
+              const percent = Math.round(fraction * 100);
+              log.debug(`Translator model download: ${percent}%`);
+              this.publishStatus('downloading', null, percent);
             });
           },
         }),
@@ -511,6 +593,7 @@ export class TranslationService {
         this.currentTarget = null;
         this.currentSource = null;
         this.resolveQueueEntriesForGeneration(generation);
+        this.publishStatus('failed', 'create-failed');
         return;
       }
 
@@ -531,6 +614,7 @@ export class TranslationService {
         this.disposeTranslator(previousTranslator);
       }
       log.info('translation.service.ready', { source: sourceLanguage, target: targetLanguage });
+      this.publishStatus('active');
       this.startDrainIfNeeded();
     } catch (err: unknown) {
       // create() may fail if user activation was missing (NotAllowedError)
@@ -548,6 +632,10 @@ export class TranslationService {
       this.configuringGeneration = null;
       this.translatorGeneration = null;
       this.resolveQueueEntriesForGeneration(generation);
+      this.publishStatus(
+        err instanceof Error && err.name === 'NotAllowedError' ? 'needs-action' : 'failed',
+        err instanceof Error && err.name === 'NotAllowedError' ? 'blocked' : 'create-failed'
+      );
       // pendingSource/pendingTarget stay set so onUserActivation() can retry.
     }
   }
@@ -739,6 +827,7 @@ export class TranslationService {
               this.currentTarget = null;
               this.currentSource = null;
               this.consecutiveFailures = 0;
+              this.publishStatus('failed', 'translator-failed');
             } else {
               log.debug('translation.service.translate-failed', {
                 errorName: errName,
@@ -795,5 +884,7 @@ export class TranslationService {
     }
     this.translateQueue = [];
     this.translationCache.clear();
+    this.publishStatus('off', 'disabled');
+    this.runtimeStatusListeners.clear();
   }
 }

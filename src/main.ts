@@ -45,6 +45,7 @@ class App {
     getCurrentUrl: () => location.href,
     getSettings: () => this.settings.get(),
     isValidPage: () => this.pageWatcher.isValidPage(),
+    onTranslationStatus: (status) => this.settingsUi.showTranslationStatus(status),
   });
   private readonly settingsUi = new SettingsUi(
     () => this.settings.get(),

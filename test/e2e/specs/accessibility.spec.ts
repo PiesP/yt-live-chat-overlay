@@ -238,8 +238,12 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
 
     await reloadButton.click();
 
-    await expect(reloadButton).toHaveText('✓');
-    await expect(reloadButton).toHaveClass(/yt-chat-overlay-reload-button--done/);
+    await expect(reloadButton).not.toHaveText('✓');
+    await expect(reloadButton).not.toHaveClass(/yt-chat-overlay-reload-button--done/);
+    await expect(page.locator('.yt-chat-overlay-reload-feedback')).toHaveAttribute(
+      'role',
+      'status'
+    );
 
     await expect(canvas).toBeAttached();
     await expect(canvas).not.toHaveAttribute('data-e2e-before-restart', 'true');

@@ -265,9 +265,36 @@ export const SETTINGS_UI_STYLES = `
           opacity: 1;
         }
       }
-      .yt-chat-overlay-reload-button--done {
-        color: ${uiColors.success};
-        border-color: ${uiColors.success}80;
+      .yt-chat-overlay-reload-button--pending {
+        color: ${uiColors.info};
+        border-color: ${uiColors.info};
+        cursor: progress;
+      }
+      .yt-chat-overlay-reload-button--failed {
+        color: ${uiColors.danger};
+        border-color: ${uiColors.danger};
+      }
+      .yt-chat-overlay-reload-feedback {
+        position: absolute;
+        top: calc(${spacing.sm}px + ${uiSizing.buttonSize} + ${spacing.xs}px);
+        inset-inline-start: ${spacing.sm}px;
+        box-sizing: border-box;
+        width: max-content;
+        max-width: min(320px, calc(100% - ${spacing.sm * 2}px));
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border: 1px solid ${uiColors.border};
+        border-radius: ${borderRadius.sm};
+        background: ${uiColors.background};
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        line-height: 1.4;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        z-index: ${zIndex.settingsButton};
+        pointer-events: none;
+      }
+      .yt-chat-overlay-reload-feedback[hidden] {
+        display: none;
       }
       @keyframes yt-overlay-fade-in {
         from { opacity: 0; }
@@ -766,6 +793,17 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-capability[data-supported="false"] {
         border-inline-start-color: ${uiColors.warning};
         background: color-mix(in srgb, ${uiColors.warning} 10%, ${uiColors.background});
+      }
+      .yt-chat-overlay-settings-runtime-status {
+        margin-block: ${spacing.sm}px;
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+        line-height: 1.5;
+      }
+      .yt-chat-overlay-settings-runtime-status[data-phase="unavailable"],
+      .yt-chat-overlay-settings-runtime-status[data-phase="needs-action"],
+      .yt-chat-overlay-settings-runtime-status[data-phase="failed"] {
+        color: ${uiColors.warning};
       }
       /* Range slider (dual: slider + number) */
       .yt-chat-overlay-settings-range {

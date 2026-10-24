@@ -6,6 +6,9 @@
     "test/visual/preview.html",
     "test/visual/gm-mocks.js",
     "validation/windows/settings-persistence.ts",
+    "validation/windows/reload-feedback.ts",
+    "validation/windows/translation-runtime.ts",
+    "validation/windows/fixtures/autoplay-av.webm",
     "validation/windows/inputs"
   ],
   "installation": {

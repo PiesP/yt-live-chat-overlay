@@ -18,6 +18,11 @@ export const ZH_CN: Record<string, string> = {
   'status.unstable': '连接不稳定',
   'status.disconnected': '已断开 — 点击重新加载',
   'status.waiting': '等待直播…',
+  'app.reloadPending': '正在重启叠加层…',
+  'app.reloadWaiting': '仍在重启。如果一直未完成，请刷新页面。',
+  'app.reloadRequested': '重启尝试已结束。请查看叠加层状态。',
+  'app.reloadFailed': '无法重启叠加层。请选择按钮重试。',
+  'app.reloadRetry': '重试重启叠加层',
   'settings.saved': '设置已保存。',
   'settings.unsaved': '设置已应用于当前会话，但尚未保存。',
   'settings.retry': '重试保存',
@@ -47,6 +52,16 @@ export const ZH_CN: Record<string, string> = {
     '此浏览器提供内置 Translator API。语言对和模型是否可用将在开始翻译时检查。',
   'translation.capabilityUnavailable':
     '此浏览器未提供内置 Translator API。您的偏好设置会保留，但翻译在此浏览器中将保持未启用状态。',
+  'translation.stateOff': '翻译已关闭。',
+  'translation.stateServiceOff': '服务已关闭，因此翻译未运行。',
+  'translation.stateApiUnavailable': '此浏览器没有 Translator API，翻译无法运行。',
+  'translation.stateWaitingSession': '等待叠加层会话开始后检查翻译状态。',
+  'translation.statePreparing': '正在检查或准备所选语言组合的翻译…',
+  'translation.stateDownloading': '正在准备翻译模型（下载 {percent}%）…',
+  'translation.stateActive': '{source} → {target} 翻译已启用。',
+  'translation.statePairUnavailable': '所选语言组合无法使用翻译。',
+  'translation.stateNeedsAction': '浏览器阻止了翻译准备。请在设置中重试或检查浏览器权限。',
+  'translation.stateFailed': '翻译准备失败。更改一项翻译设置后重试。',
   'translation.serviceDesc': '用于处理消息的翻译后端服务',
 
   // ── Field labels ──

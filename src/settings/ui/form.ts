@@ -40,7 +40,7 @@ import {
   type PaneDef,
   type WeightToggleField,
 } from '@settings/ui/panes';
-import { TranslationService } from '@translation/service';
+import { TranslationService, type TranslationRuntimeStatus } from '@translation/service';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('SettingsUiForm');
@@ -411,6 +411,7 @@ export class SettingsUiForm {
   private previewResizeObserver: ResizeObserver | null = null;
   private previewLayoutFrame: number | null = null;
   private previewSettings: Readonly<OverlaySettings> | null = null;
+  private translationStatus: TranslationRuntimeStatus | null = null;
 
   // Track event listeners added to the modal so they can be removed before
   // re-adding on language change (which calls rebuildModalContent → setModal).
@@ -432,12 +433,88 @@ export class SettingsUiForm {
       this.bindNumberInputKeys(modal);
       this.bindAriaInvalidSync(modal);
       this.bindSettingsPreviewLayout(modal);
+      this.renderTranslationStatus();
     }
     log.debug('Modal set', { attached: modal !== null });
   }
 
   destroy(): void {
     this.setModal(null);
+  }
+
+  setTranslationStatus(status: TranslationRuntimeStatus | null): void {
+    this.translationStatus = status;
+    this.renderTranslationStatus();
+  }
+
+  private translationStatusText(settings: Readonly<OverlaySettings>): {
+    phase: string;
+    text: string;
+  } {
+    if (!settings.translationEnabled) {
+      return { phase: 'off', text: t('translation.stateOff') };
+    }
+    if (settings.translationService === 'off') {
+      return { phase: 'off', text: t('translation.stateServiceOff') };
+    }
+    if (!TranslationService.isSupported()) {
+      return { phase: 'unavailable', text: t('translation.stateApiUnavailable') };
+    }
+    const status = this.translationStatus;
+    if (!status) {
+      return { phase: 'preparing', text: t('translation.stateWaitingSession') };
+    }
+    if (
+      (settings.translationSource !== 'auto' && status.source !== settings.translationSource) ||
+      (settings.translationTarget !== 'auto' && status.target !== settings.translationTarget)
+    ) {
+      return { phase: 'preparing', text: t('translation.statePreparing') };
+    }
+    switch (status.phase) {
+      case 'off':
+        return { phase: 'preparing', text: t('translation.stateWaitingSession') };
+      case 'preparing':
+        return { phase: 'preparing', text: t('translation.statePreparing') };
+      case 'downloading':
+        return {
+          phase: 'downloading',
+          text:
+            status.progressPercent === null
+              ? t('translation.statePreparing')
+              : t('translation.stateDownloading').replace(
+                  '{percent}',
+                  String(status.progressPercent)
+                ),
+        };
+      case 'active':
+        return {
+          phase: 'active',
+          text: t('translation.stateActive')
+            .replace('{source}', status.source ?? '')
+            .replace('{target}', status.target ?? ''),
+        };
+      case 'unavailable':
+        return {
+          phase: 'unavailable',
+          text: t(
+            status.reason === 'api-unavailable'
+              ? 'translation.stateApiUnavailable'
+              : 'translation.statePairUnavailable'
+          ),
+        };
+      case 'needs-action':
+        return { phase: 'needs-action', text: t('translation.stateNeedsAction') };
+      case 'failed':
+        return { phase: 'failed', text: t('translation.stateFailed') };
+    }
+  }
+
+  private renderTranslationStatus(): void {
+    const line = this.modal?.querySelector<HTMLElement>('.yt-chat-overlay-settings-runtime-status');
+    if (!line) return;
+    const status = this.translationStatusText(this.getSettings());
+    line.dataset.phase = status.phase;
+    line.textContent = status.text;
   }
 
   private bindSettingsPreviewLayout(modal: HTMLElement): void {
@@ -680,6 +757,14 @@ export class SettingsUiForm {
         supported ? 'translation.capabilityDetected' : 'translation.capabilityUnavailable'
       );
       pane.appendChild(msg);
+      const runtime = domDiv('yt-chat-overlay-settings-runtime-status');
+      runtime.setAttribute('role', 'status');
+      runtime.setAttribute('aria-live', 'polite');
+      runtime.setAttribute('aria-atomic', 'true');
+      const state = this.translationStatusText(this.getSettings());
+      runtime.dataset.phase = state.phase;
+      runtime.textContent = state.text;
+      pane.appendChild(runtime);
     }
 
     this.appendSections(pane, def.sections);
@@ -1248,6 +1333,7 @@ export class SettingsUiForm {
     this.populateSettingsPreview(settings);
     this.populateWeightToggle(settings);
     this.populateFontChips(settings);
+    this.renderTranslationStatus();
     this.isUpdating = false;
   }
 

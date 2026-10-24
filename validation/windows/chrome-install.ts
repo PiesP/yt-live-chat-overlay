@@ -2392,6 +2392,8 @@ export async function runChromeInstallation({
     );
     if (result.userscriptUpgrade) {
       assert(upgradeInputs && 'candidateUnsafeWindowGrant' in result.userscriptUpgrade);
+      assert('installedApplicationDelivery' in result.fixture.checks);
+      assert('sustainedViewingLifecycle' in result.fixture.checks);
       assert.equal(result.fixture.checks.installedApplicationDelivery, true);
       const pageFetch = requireInstalledPageFetchEvidence(result.fixture);
       result.userscriptUpgrade.effectiveGrantEvidence = {

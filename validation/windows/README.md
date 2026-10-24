@@ -74,6 +74,18 @@ This is a controlled localStorage boundary, not an installed extension or live
 YouTube result. Remove only this task-owned selector after the run; a normal
 profile has no selector.
 
+For a focused reload-feedback run, create the ignored
+`validation/windows/inputs/reload-feedback.json` with exactly
+`{"scenario":"reload-feedback"}` before bundling. This built-userscript fixture
+holds a chat response during pointer and keyboard reload activation, records
+feedback before and after the old 1.5-second icon timer, then releases it. It
+also checks a healthy quiet chat session, a real decoded and seeked video
+element, and a legitimate pre-live standby state. `reload-feedback.json` is a
+timeline of observed UI and media state. A rejecting `onReload` callback requires
+a focused `SettingsUi` unit fixture because the production debug handle is
+frozen. Remove the selector after the run. This fixture does not
+establish installed extension or live-page behavior.
+
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
 or Edge Stable instance, injects the production userscript, exercises the real settings dialog,

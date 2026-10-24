@@ -18,6 +18,11 @@ export const JA: Record<string, string> = {
   'status.unstable': '接続が不安定です',
   'status.disconnected': '切断されました — クリックして再読み込み',
   'status.waiting': 'ライブストリームを待機中…',
+  'app.reloadPending': 'オーバーレイを再起動中…',
+  'app.reloadWaiting': '再起動が続いています。終わらない場合はページを再読み込みしてください。',
+  'app.reloadRequested': '再起動の試行が終わりました。オーバーレイの状態を確認してください。',
+  'app.reloadFailed': 'オーバーレイを再起動できませんでした。ボタンを押して再試行してください。',
+  'app.reloadRetry': 'オーバーレイの再起動を再試行',
   'settings.saved': '設定を保存しました。',
   'settings.unsaved': '設定はこのセッションに適用されましたが、保存されていません。',
   'settings.retry': '保存を再試行',
@@ -47,6 +52,18 @@ export const JA: Record<string, string> = {
     'このブラウザでは組み込み Translator API を利用できます。言語ペアとモデルの利用可否は、翻訳開始時に確認されます。',
   'translation.capabilityUnavailable':
     'このブラウザでは組み込み Translator API を利用できません。設定は保持されますが、ここでは翻訳は無効のままです。',
+  'translation.stateOff': '翻訳はオフです。',
+  'translation.stateServiceOff': 'サービスがオフのため、翻訳は動作していません。',
+  'translation.stateApiUnavailable':
+    'このブラウザに Translator API がないため、翻訳は動作していません。',
+  'translation.stateWaitingSession': 'オーバーレイのセッション開始後に翻訳状態を確認します。',
+  'translation.statePreparing': '選択した言語ペアの翻訳を確認または準備中…',
+  'translation.stateDownloading': '翻訳モデルを準備中（ダウンロード {percent}%）…',
+  'translation.stateActive': '{source} → {target} の翻訳が有効です。',
+  'translation.statePairUnavailable': '選択した言語ペアでは翻訳を利用できません。',
+  'translation.stateNeedsAction':
+    'ブラウザが翻訳の準備を拒否しました。設定から再試行するか、ブラウザの権限を確認してください。',
+  'translation.stateFailed': '翻訳の準備に失敗しました。翻訳設定を変更して再試行してください。',
   'translation.serviceDesc': 'メッセージ処理用の翻訳バックエンドサービス',
 
   // ── Field labels ──

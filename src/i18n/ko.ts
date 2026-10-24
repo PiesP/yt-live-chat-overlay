@@ -18,6 +18,11 @@ export const KO: Record<string, string> = {
   'status.unstable': '연결 불안정',
   'status.disconnected': '연결 끊김 — 클릭하여 새로고침',
   'status.waiting': '라이브 스트림 대기 중…',
+  'app.reloadPending': '오버레이를 다시 시작하는 중…',
+  'app.reloadWaiting': '계속 다시 시작하는 중입니다. 완료되지 않으면 페이지를 새로고침하세요.',
+  'app.reloadRequested': '다시 시작 시도가 끝났습니다. 오버레이 상태를 확인하세요.',
+  'app.reloadFailed': '오버레이를 다시 시작하지 못했습니다. 버튼을 눌러 다시 시도하세요.',
+  'app.reloadRetry': '오버레이 다시 시작 재시도',
   'settings.saved': '설정을 저장했습니다.',
   'settings.unsaved': '설정이 현재 세션에 적용되었지만 저장되지 않았습니다.',
   'settings.retry': '저장 다시 시도',
@@ -47,6 +52,18 @@ export const KO: Record<string, string> = {
     '이 브라우저에서 내장 Translator API를 사용할 수 있습니다. 언어 조합과 모델의 사용 가능 여부는 번역을 시작할 때 확인합니다.',
   'translation.capabilityUnavailable':
     '이 브라우저는 내장 Translator API를 제공하지 않습니다. 설정은 유지되지만 이 브라우저에서는 번역이 비활성 상태로 유지됩니다.',
+  'translation.stateOff': '번역이 꺼져 있습니다.',
+  'translation.stateServiceOff': '서비스가 꺼져 있어 번역이 비활성 상태입니다.',
+  'translation.stateApiUnavailable':
+    '이 브라우저에서는 Translator API를 사용할 수 없어 번역이 비활성 상태입니다.',
+  'translation.stateWaitingSession': '오버레이 세션이 시작되면 번역 상태를 확인합니다.',
+  'translation.statePreparing': '선택한 언어 조합의 번역을 확인하거나 준비하는 중…',
+  'translation.stateDownloading': '번역 모델을 준비하는 중(다운로드 {percent}%)…',
+  'translation.stateActive': '{source} → {target} 번역이 활성화되었습니다.',
+  'translation.statePairUnavailable': '선택한 언어 조합에서는 번역을 사용할 수 없습니다.',
+  'translation.stateNeedsAction':
+    '브라우저가 번역 준비를 차단했습니다. 설정에서 다시 시도하거나 브라우저 권한을 확인하세요.',
+  'translation.stateFailed': '번역 준비에 실패했습니다. 번역 설정을 변경하여 다시 시도하세요.',
   'translation.serviceDesc': '메시지 처리를 위한 번역 백엔드 서비스',
 
   // ── Field labels ──

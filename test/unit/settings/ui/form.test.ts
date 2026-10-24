@@ -5,6 +5,7 @@ import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage, t } from '@i18n/index';
 import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
+import type { TranslationRuntimeStatus } from '@translation/service';
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
@@ -504,6 +505,53 @@ describe('SettingsUiForm', () => {
       expect(capability?.textContent.toLowerCase()).not.toContain('ready');
       expect(modal.querySelector('#pane-translation [name="translationEnabled"]')).not.toBeNull();
 
+      form.destroy();
+    } finally {
+      globalThis.Translator = previousTranslator;
+    }
+  });
+
+  it('renders runtime progress and readiness only for the current enabled pair', () => {
+    const previousTranslator = globalThis.Translator;
+    globalThis.Translator = {
+      availability: async () => 'available' as const,
+      create: async () => ({ translate: async (text: string) => text, destroy: () => undefined }),
+    };
+    try {
+      let settings = makeDefaults({ translationEnabled: true, translationSource: 'en' });
+      const form = new SettingsUiForm(() => settings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      form.setModal(modal);
+      const line = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-runtime-status');
+      expect(line?.getAttribute('role')).toBe('status');
+      expect(line?.textContent).toContain('Waiting for an overlay session');
+
+      const status: TranslationRuntimeStatus = {
+        phase: 'downloading',
+        reason: null,
+        source: 'en',
+        target: 'en',
+        progressPercent: 42,
+        generation: 1,
+      };
+      form.setTranslationStatus(status);
+      expect(line?.dataset.phase).toBe('downloading');
+      expect(line?.textContent).toContain('download 42%');
+
+      form.setTranslationStatus({ ...status, phase: 'active', progressPercent: null });
+      expect(line?.dataset.phase).toBe('active');
+      expect(line?.textContent).toContain('en → en');
+
+      settings = makeDefaults({ translationEnabled: true, translationSource: 'ja' });
+      form.populateForm(settings);
+      expect(line?.dataset.phase).toBe('preparing');
+      expect(line?.textContent).not.toContain('active');
+
+      settings = makeDefaults({ translationEnabled: true, translationService: 'off' });
+      form.populateForm(settings);
+      expect(line?.dataset.phase).toBe('off');
+      expect(line?.textContent).toContain('Service is Off');
       form.destroy();
     } finally {
       globalThis.Translator = previousTranslator;

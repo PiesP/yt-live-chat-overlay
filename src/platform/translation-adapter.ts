@@ -28,7 +28,7 @@ export interface TranslatorCreateOptions {
   monitor?: (monitor: EventTarget) => void;
 }
 
-export type TranslatorAvailability = 'available' | 'downloadable' | 'unavailable';
+export type TranslatorAvailability = 'available' | 'downloadable' | 'downloading' | 'unavailable';
 
 export interface TranslatorStatic {
   create(options: TranslatorCreateOptions): Promise<TranslatorInstance>;
