@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 PiesP
-# Artifact-only native input helper for the YT #327 prepared Windows VM checkpoint.
-# The caller owns the headed browser, focused textarea, and post-action DOM trace.
+# Artifact-only native input helper for the YT viewing IME checkpoints.
+# The caller owns the headed browser, focused input target, and post-action DOM trace.
 # Caller supplies the owned browser PID from CDP SystemInfo.getProcessInfo
 # (type=browser) and confirms Browser.getBrowserCommandLine uses the same profile.
 
@@ -9,7 +9,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip')]
+    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseDuringComposition', 'NativeSpace')]
     [string]$Sequence,
 
     [Parameter(Mandatory = $true)]
@@ -31,7 +31,8 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateRange(1, 4294967295)]
     [uint32]$ExpectedBrowserPID,
-    [switch]$RequestExistingKoreanLayout
+    [switch]$RequestExistingKoreanLayout,
+    [switch]$RequestExistingJapaneseLayout
 )
 
 Set-StrictMode -Version Latest
@@ -48,6 +49,12 @@ if (-not [Environment]::UserInteractive -or [Diagnostics.Process]::GetCurrentPro
 }
 if ($ExpectedWindowTitle -cne 'YT Viewing IME Checkpoint') {
     throw 'The requested title is not the source-bound YT viewing IME checkpoint.'
+}
+if ($RequestExistingKoreanLayout -and $RequestExistingJapaneseLayout) {
+    throw 'Select exactly one existing input language.'
+}
+if (($Sequence -like 'Japanese*' -or $Sequence -eq 'NativeSpace') -and -not $RequestExistingJapaneseLayout) {
+    throw 'Japanese sequences require the existing Japanese input layout.'
 }
 
 $outputDirectory = [IO.Path]::GetFullPath($OwnedOutputDirectory).TrimEnd('\')
@@ -242,6 +249,7 @@ $receipt = [ordered]@{
     expectedTitlePrefix = $ExpectedWindowTitle
     expectedProfileSha256 = $profileHash
     requestedExistingKoreanLayout = [bool]$RequestExistingKoreanLayout
+    requestedExistingJapaneseLayout = [bool]$RequestExistingJapaneseLayout
     target = $null
     hklBefore = $null
     hklAfter = $null
@@ -258,7 +266,7 @@ $receipt = [ordered]@{
     cleanup = [ordered]@{
         releasedKeys = $true
         restoreActionDispatched = $false
-        parityActionsBalanced = $(if ($Sequence -eq 'ComposeCurrent') { 'not-applicable' } else { $false })
+        parityActionsBalanced = $(if ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip')) { $false } else { 'not-applicable' })
         modeRestored = 'not-observed'
         hklRestored = 'not-checked'
     }
@@ -361,6 +369,19 @@ function Invoke-Word {
     }
 }
 
+function Invoke-JapaneseWord([bool]$convert) {
+    # Romaji "nihongo" through ordinary native VKs; Space opens conversion candidates.
+    foreach ($key in [System.UInt16[]]@(0x4E, 0x49, 0x48, 0x4F, 0x4E, 0x47, 0x4F)) {
+        Invoke-KeyPress $key ('japanese-word-vk-{0:X2}' -f $key)
+        Start-Sleep -Milliseconds 40
+    }
+    if ($convert) {
+        Invoke-KeyPress 0x20 'japanese-conversion-candidate'
+        Start-Sleep -Milliseconds 150
+    }
+    Invoke-KeyPress 0x0D 'japanese-commit'
+}
+
 try {
     $windows = @([NativeImeBridge]::FindWindows($ExpectedWindowTitle))
     if ($windows.Count -ne 1) { throw "Expected one titled Chrome/Edge window; found $($windows.Count)." }
@@ -416,6 +437,11 @@ try {
         if ($korean.Count -ne 1) { throw "Expected one existing Korean HKL; found $($korean.Count)." }
         if ($korean[0] -ne $originalHkl) { Request-TargetLayout $korean[0] 'existing-Korean' }
     }
+    if ($RequestExistingJapaneseLayout) {
+        $japanese = @([NativeImeBridge]::ExistingLayouts() | Where-Object { ($_.ToInt64() -band 0xffff) -eq 0x0411 })
+        if ($japanese.Count -ne 1) { throw "Expected one existing Japanese HKL; found $($japanese.Count)." }
+        if ($japanese[0] -ne $originalHkl) { Request-TargetLayout $japanese[0] 'existing-Japanese' }
+    }
 
     switch ($Sequence) {
         'ComposeCurrent' {
@@ -436,6 +462,35 @@ try {
             $receipt.cleanup.restoreActionDispatched = $true
             $receipt.cleanup.parityActionsBalanced = $true
         }
+        'JapaneseCurrent' { Invoke-JapaneseWord $true }
+        'JapaneseHiragana' {
+            Invoke-Combo 0x11 0x14 'Japanese-Ctrl-CapsLock-Hiragana'
+            Start-Sleep -Milliseconds 100
+            Invoke-JapaneseWord $true
+        }
+        'JapaneseDirect' {
+            Invoke-Combo 0x10 0x14 'Japanese-Shift-CapsLock-Alphanumeric'
+            Start-Sleep -Milliseconds 100
+            Invoke-JapaneseWord $false
+        }
+        'JapaneseDuringComposition' {
+            Invoke-Combo 0x11 0x14 'Japanese-Ctrl-CapsLock-Hiragana'
+            Start-Sleep -Milliseconds 100
+            foreach ($key in [System.UInt16[]]@(0x4E, 0x49, 0x48, 0x4F, 0x4E)) {
+                Invoke-KeyPress $key ('japanese-pending-vk-{0:X2}' -f $key)
+                Start-Sleep -Milliseconds 40
+            }
+            Invoke-Combo 0x11 0x20 'Japanese-Ctrl-Space-during-composition'
+            Start-Sleep -Milliseconds 100
+            foreach ($key in [System.UInt16[]]@(0x47, 0x4F)) {
+                Invoke-KeyPress $key ('japanese-finish-vk-{0:X2}' -f $key)
+                Start-Sleep -Milliseconds 40
+            }
+            Invoke-KeyPress 0x20 'japanese-conversion-candidate'
+            Start-Sleep -Milliseconds 150
+            Invoke-KeyPress 0x0D 'japanese-commit'
+        }
+        'NativeSpace' { Invoke-KeyPress 0x20 'native-player-space' }
     }
     $receipt.status = 'action-dispatched'
 } catch {
@@ -475,7 +530,7 @@ try {
             }
         }
     }
-    if ($partialInput -and $Sequence -ne 'ComposeCurrent') {
+    if ($partialInput -and $Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip')) {
         $receipt.cleanup.parityActionsBalanced = $false
     }
     if ($null -ne $target -and $originalHkl -ne [IntPtr]::Zero) {
@@ -519,7 +574,7 @@ try {
     $receipt.cleanup.togglePending = $pendingToggle
     $receipt.cleanup.elapsedMs = $clock.ElapsedMilliseconds
     if ($receipt.errors.Count -gt 0 -or -not $receipt.cleanup.releasedKeys -or
-        ($Sequence -ne 'ComposeCurrent' -and $receipt.cleanup.parityActionsBalanced -ne $true) -or
+        ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip') -and $receipt.cleanup.parityActionsBalanced -ne $true) -or
         $receipt.cleanup.hklRestored -ne 'verified') {
         $receipt.status = 'aborted'
     }

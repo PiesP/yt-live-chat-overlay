@@ -149,6 +149,31 @@ non-Windows run fail the case with retained receipts. With no IME selector the
 check is `not-run`; Playwright keyboard input is never counted as IME evidence.
 Remove only the #327 selectors after collection.
 
+For #331, the separate ignored `validation/windows/inputs/japanese-ime.json`
+selector must contain exactly `{"scenario":"japanese-ime"}`. Do not combine it
+with a `viewing-experience.json` or another focused selector. Generate the same
+three source-bound viewing clips, then run the prepared Windows VM's headed
+Chrome `yt-visual` profile. The interactive TestUser must already have the
+Japanese Microsoft IME registered. Keep the prior language/input configuration
+and restore it after this campaign; an available IME binary or Japanese browser
+locale is not evidence that composition works.
+
+This path uses a fresh owned browser profile and the existing PID, foreground,
+profile, and HKL guards. It sends ordinary native virtual keys to a textarea,
+contenteditable checkpoint, and player focus. The selected 101-key Microsoft IME
+controls request Hiragana with Ctrl+CapsLock and alphanumeric input with
+Shift+CapsLock. Native Space opens a conversion candidate and Enter commits;
+the report checks committed text, trusted composition/input events and unchanged
+text after blur/refocus. It separately records IME-consumed versus delivered
+Ctrl+Space, the independent Pause button across disable/re-enable, a fixture
+player's Space behavior, and a final word in the original observed mode. The
+fixture's plain-Space player handler models the expected YouTube action; it is
+not installed-extension or live YouTube evidence. The result's JI-01 to JI-04
+statuses, native receipts, and cleanup must be reviewed together. An HKL
+acknowledgement does not establish TSF conversion mode, so actual text/events
+are decisive. Preserve failed receipts and remove only the task-owned selector
+and profile after collection.
+
 `yt-visual` is an artifact-only smoke profile for the common Windows acceptance runner. It
 opens a deterministic YouTube watch-page fixture in the runner-provided headed Chrome Stable
 or Edge Stable instance, injects the production userscript, exercises the real settings dialog,

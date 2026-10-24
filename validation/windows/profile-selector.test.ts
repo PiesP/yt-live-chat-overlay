@@ -17,6 +17,7 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
   const reload = join(inputs, 'reload-feedback.json');
   const translation = join(inputs, 'translation-runtime.json');
   const viewing = join(inputs, 'viewing-experience.json');
+  const japanese = join(inputs, 'japanese-ime.json');
   try {
     await mkdir(inputs, { recursive: true });
     assert.equal(await readFocusedScenario(root), null);
@@ -32,6 +33,13 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
     await writeFile(viewing, '{"scenario":"viewing-experience"}');
     assert.equal(await readFocusedScenario(root), 'viewing-experience');
     await rm(viewing);
+
+    await writeFile(japanese, '{"scenario":"japanese-ime"}');
+    assert.equal(await readFocusedScenario(root), 'japanese-ime');
+    await writeFile(viewing, '{"scenario":"viewing-experience"}');
+    await assert.rejects(readFocusedScenario(root), /mutually exclusive/u);
+    await rm(viewing);
+    await rm(japanese);
 
     await writeFile(settings, '{"scenario":"settings-persistence"}');
     assert.equal(await readFocusedScenario(root), 'settings-persistence');
@@ -53,6 +61,9 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
 
     await rm(translation);
     await writeFile(viewing, '{"scenario":"translation-runtime"}');
+    await assert.rejects(readFocusedScenario(root), /does not match its file/u);
+    await rm(viewing);
+    await writeFile(japanese, '{"scenario":"viewing-experience"}');
     await assert.rejects(readFocusedScenario(root), /does not match its file/u);
   } finally {
     await rm(root, { recursive: true, force: true });

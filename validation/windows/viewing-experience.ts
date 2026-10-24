@@ -58,6 +58,7 @@ declare global {
   interface Window {
     __ytViewingDenyWrites?: boolean;
     __ytViewingImeEvents?: Array<Record<string, unknown>>;
+    __ytViewingPlayerSpaceHandler?: (event: KeyboardEvent) => void;
   }
 }
 
@@ -65,24 +66,45 @@ export type ImeCheckpoint = {
   title: string;
   focus: string | null;
   input: string | null;
+  editable?: string | null;
   settledInput?: string | null;
+  settledEditable?: string | null;
   settledFocus?: string | null;
   events: Array<Record<string, unknown>>;
   videoPaused: boolean | null;
   videoTime: number | null;
   overlayPaused: boolean;
 };
-type NativeImeSequence = 'ComposeCurrent' | 'ComposeToggleRoundTrip' | 'CtrlSpaceRoundTrip';
+type NativeImeSequence =
+  | 'ComposeCurrent'
+  | 'ComposeToggleRoundTrip'
+  | 'CtrlSpaceRoundTrip'
+  | 'JapaneseCurrent'
+  | 'JapaneseHiragana'
+  | 'JapaneseDirect'
+  | 'JapaneseDuringComposition'
+  | 'NativeSpace';
 type NativeImeStage =
   | 'compose-initial'
   | 'compose-toggle'
   | 'ctrl-editable'
   | 'ctrl-noneditable'
-  | 'compose-restoration';
+  | 'compose-restoration'
+  | 'japanese-initial'
+  | 'japanese-textarea'
+  | 'japanese-editable'
+  | 'japanese-direct'
+  | 'japanese-composing-shortcut'
+  | 'japanese-editable-shortcut'
+  | 'japanese-player-shortcut'
+  | 'japanese-player-space'
+  | 'japanese-player-space-resume'
+  | 'japanese-final';
 export type NativeControlSample = {
   atMs: number;
   focus: string | null;
   input: string | null;
+  editable?: string | null;
   overlayPaused: boolean;
   videoPaused: boolean | null;
   videoTime: number | null;
@@ -97,11 +119,13 @@ type NativeImeAction = {
 async function readNativeControlSample(page: Page): Promise<NativeControlSample> {
   return page.evaluate(() => {
     const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
+    const editable = document.querySelector<HTMLElement>('#yt-viewing-ime-editable');
     const video = document.querySelector<HTMLVideoElement>('#movie_player video');
     return {
       atMs: performance.now(),
       focus: document.activeElement?.id ?? null,
       input: input?.value ?? null,
+      editable: editable?.textContent ?? null,
       overlayPaused: Array.from(
         document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
       ).some((node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'),
@@ -167,6 +191,7 @@ async function runNativeImeAction({
   stage,
   focus,
   koreanLayout = false,
+  japaneseLayout = false,
 }: {
   page: Page;
   root: string;
@@ -174,19 +199,26 @@ async function runNativeImeAction({
   identity: { pid: number; profile: string };
   sequence: NativeImeSequence;
   stage: NativeImeStage;
-  focus: 'textarea' | 'player';
+  focus: 'textarea' | 'editable' | 'player';
   koreanLayout?: boolean;
+  japaneseLayout?: boolean;
 }): Promise<NativeImeAction> {
   assert.equal(process.platform, 'win32', 'Native IME requires the Windows runner');
   await page.bringToFront();
   const targetFocused = await page.evaluate(
     ({ target, title }) => {
       const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
+      const editable = document.querySelector<HTMLElement>('#yt-viewing-ime-editable');
       const player = document.querySelector<HTMLElement>('#movie_player');
       if (document.title !== title || !input?.isConnected || !player?.isConnected) return false;
       if (target === 'textarea') {
         input.focus();
         return document.activeElement === input && !input.disabled && !input.readOnly;
+      }
+      if (target === 'editable') {
+        if (!editable?.isContentEditable) return false;
+        editable.focus();
+        return document.activeElement === editable;
       }
       if (player.isContentEditable) return false;
       player.setAttribute('tabindex', '-1');
@@ -229,9 +261,12 @@ async function runNativeImeAction({
     String(identity.pid),
   ];
   if (koreanLayout) args.push('-RequestExistingKoreanLayout');
+  if (japaneseLayout) args.push('-RequestExistingJapaneseLayout');
   let error: string | null = null;
   const samples: NativeControlSample[] = [];
-  let sampling = sequence === 'CtrlSpaceRoundTrip';
+  const sampleAction =
+    sequence === 'CtrlSpaceRoundTrip' || sequence === 'JapaneseDuringComposition';
+  let sampling = sampleAction;
   let samplingError: string | null = null;
   const sampler = (async () => {
     while (sampling && samples.length < 600) {
@@ -249,7 +284,7 @@ async function runNativeImeAction({
   } finally {
     sampling = false;
     await sampler;
-    if (sequence === 'CtrlSpaceRoundTrip' && samplingError === null) {
+    if (sampleAction && samplingError === null) {
       try {
         samples.push(await readNativeControlSample(page));
       } catch (cause) {
@@ -271,13 +306,15 @@ async function runNativeImeAction({
 function assertNativeImeAction(
   action: NativeImeAction,
   sequence: NativeImeSequence,
-  koreanLayout: boolean
+  koreanLayout: boolean,
+  japaneseLayout = false
 ): void {
   assert.equal(action.error, null, `${sequence} native action failed`);
   const receipt = action.receipt as {
     status?: unknown;
     sequence?: unknown;
     requestedExistingKoreanLayout?: unknown;
+    requestedExistingJapaneseLayout?: unknown;
     target?: { profileMatched?: unknown };
     layoutDelivery?: {
       requestPosted?: unknown;
@@ -300,6 +337,7 @@ function assertNativeImeAction(
   assert.equal(receipt?.status, 'action-dispatched');
   assert.equal(receipt?.sequence, sequence);
   assert.equal(receipt?.requestedExistingKoreanLayout, koreanLayout);
+  assert.equal(receipt?.requestedExistingJapaneseLayout, japaneseLayout);
   assert.equal(receipt?.target?.profileMatched, true);
   assert.deepEqual(receipt?.errors, []);
   assert.equal(receipt?.cleanup?.releasedKeys, true);
@@ -308,7 +346,9 @@ function assertNativeImeAction(
   assert.equal(receipt?.cleanup?.hklRestored, 'verified');
   assert.equal(
     receipt?.cleanup?.parityActionsBalanced,
-    sequence === 'ComposeCurrent' ? 'not-applicable' : true
+    sequence === 'ComposeToggleRoundTrip' || sequence === 'CtrlSpaceRoundTrip'
+      ? true
+      : 'not-applicable'
   );
   assert.equal(receipt?.layoutDelivery?.processingUncertain, false);
   if (receipt?.layoutDelivery?.requestPosted) {
@@ -377,6 +417,137 @@ export function imeWordBehavior(state: ImeCheckpoint): 'hangul' | 'latin' | 'unk
   }
   if (state.input?.trim() === 'gksrmf' && trustedComposition.length === 0) return 'latin';
   return 'unknown';
+}
+
+/** Classify actual committed text and trusted browser events, never the requested HKL alone. */
+export function japaneseWordBehavior(
+  state: ImeCheckpoint,
+  target: 'textarea' | 'editable'
+): 'converted-japanese' | 'direct-latin' | 'unknown' {
+  const targetId = target === 'textarea' ? 'yt-viewing-ime-input' : 'yt-viewing-ime-editable';
+  const text = target === 'textarea' ? state.input : state.editable;
+  const settled = target === 'textarea' ? state.settledInput : state.settledEditable;
+  const events = state.events.filter((event) => event.target === targetId);
+  const trustedInput = events.some((event) => event.type === 'input' && event.trusted === true);
+  if (!text || settled !== text || state.settledFocus !== targetId || !trustedInput)
+    return 'unknown';
+  const compositionStart = events.findIndex(
+    (event) => event.type === 'compositionstart' && event.trusted === true
+  );
+  const compositionUpdate = events.findIndex(
+    (event, index) =>
+      index > compositionStart && event.type === 'compositionupdate' && event.trusted === true
+  );
+  const compositionEnd = events.findIndex(
+    (event, index) =>
+      index > compositionUpdate &&
+      event.type === 'compositionend' &&
+      typeof event.data === 'string' &&
+      event.data.length > 0
+  );
+  if (
+    /\p{Script=Han}/u.test(text) &&
+    compositionStart >= 0 &&
+    compositionUpdate > compositionStart &&
+    compositionEnd > compositionUpdate
+  )
+    return 'converted-japanese';
+  if (text.trim() === 'nihongo' && compositionStart === -1 && compositionUpdate === -1) {
+    return 'direct-latin';
+  }
+  return 'unknown';
+}
+
+function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeImeSequence): void {
+  assertNativeImeAction(action, sequence, false, true);
+  const receipt = action.receipt as {
+    actions?: Array<{ kind?: string; label?: string; accepted?: number }>;
+    sendCounts?: { acceptedEvents?: number };
+  };
+  const keyboard = receipt.actions?.filter((entry) => entry.kind === 'keyboard') ?? [];
+  const labels = keyboard.map((entry) => entry.label);
+  assert(keyboard.every((entry) => entry.accepted === 2 || entry.accepted === 4));
+  if (sequence === 'NativeSpace') {
+    assert.deepEqual(labels, ['native-player-space']);
+    assert.equal(receipt.sendCounts?.acceptedEvents, 2);
+    return;
+  }
+  if (sequence === 'JapaneseDirect') {
+    assert.equal(labels[0], 'Japanese-Shift-CapsLock-Alphanumeric');
+    assert(!labels.includes('japanese-conversion-candidate'));
+  }
+  if (sequence === 'JapaneseHiragana') assert.equal(labels[0], 'Japanese-Ctrl-CapsLock-Hiragana');
+  if (sequence === 'JapaneseDuringComposition') {
+    const pending = labels.indexOf('japanese-pending-vk-4E');
+    const shortcut = labels.indexOf('Japanese-Ctrl-Space-during-composition');
+    const finish = labels.indexOf('japanese-finish-vk-47');
+    assert(pending >= 0 && shortcut > pending && finish > shortcut);
+  }
+  if (sequence !== 'JapaneseDirect' && sequence !== 'CtrlSpaceRoundTrip') {
+    assert(labels.includes('japanese-conversion-candidate'));
+  }
+  if (sequence !== 'CtrlSpaceRoundTrip') assert.equal(labels.at(-1), 'japanese-commit');
+}
+
+export function assertJapaneseShortcut(
+  state: ImeCheckpoint,
+  samples: NativeControlSample[],
+  focus: 'yt-viewing-ime-input' | 'yt-viewing-ime-editable' | 'movie_player',
+  originalText: string | null
+): 'delivered' | 'document-ignored' | 'ime-consumed' {
+  const targetText = focus === 'yt-viewing-ime-editable' ? state.editable : state.input;
+  assert.equal(targetText, originalText, 'Japanese shortcut changed committed text');
+  const presses = state.events.filter((event) => event.type === 'document-keydown');
+  const settled = state.events.filter((event) => event.type === 'post-ctrl-space');
+  assert.equal(presses.length, settled.length);
+  assert(
+    presses.length === 0 || presses.length === 2,
+    'Incomplete Japanese native shortcut delivery'
+  );
+  assert.equal(state.focus, focus);
+  assert.equal(state.overlayPaused, false);
+  assert.equal(state.videoPaused, false);
+  assert(samples.length >= 8, 'Native Japanese shortcut sampler missed an action');
+  const first = samples[0];
+  const last = samples.at(-1);
+  assert(first && last && last.atMs - first.atMs >= 500);
+  assert(
+    samples.every(
+      (sample) =>
+        sample.focus === focus &&
+        sample.videoPaused === false &&
+        (focus === 'yt-viewing-ime-editable' ? sample.editable : sample.input) === originalText &&
+        typeof sample.videoTime === 'number'
+    ),
+    'Focused text or video changed during Japanese shortcut'
+  );
+  const midpoint = Math.floor(samples.length / 2);
+  for (const section of [samples.slice(0, midpoint + 1), samples.slice(midpoint)]) {
+    assert(
+      section.some((sample, index) => {
+        const previous = section[index - 1];
+        return (
+          previous &&
+          typeof sample.videoTime === 'number' &&
+          typeof previous.videoTime === 'number' &&
+          (sample.videoTime > previous.videoTime + 0.02 ||
+            sample.videoTime < previous.videoTime - 1)
+        );
+      }),
+      'Video did not advance across both Japanese shortcut actions'
+    );
+  }
+  if (presses.length === 2) {
+    assert(presses.every((event) => event.trusted === true && event.focus === focus));
+    assert.deepEqual(
+      settled.map((event) => event.overlayPaused),
+      focus === 'movie_player' ? [true, false] : [false, false]
+    );
+    assert(settled.every((event) => event.videoPaused === false));
+    return focus === 'movie_player' ? 'delivered' : 'document-ignored';
+  }
+  assert(samples.every((sample) => sample.overlayPaused === false));
+  return 'ime-consumed';
 }
 
 function observedCompositionEnds(state: ImeCheckpoint): Array<{ data: unknown; trusted: unknown }> {
@@ -805,7 +976,12 @@ async function assertVideoAdvances(page: Page): Promise<void> {
   );
 }
 
-async function exercisePauseButton(page: Page, result: Case, output: string): Promise<void> {
+async function exercisePauseButton(
+  page: Page,
+  result: Case,
+  output: string,
+  verifyDisableEnable = false
+): Promise<void> {
   await openSettings(page);
   try {
     const button = page.locator(`${MODAL} #yt-chat-overlay-pause-button`);
@@ -852,7 +1028,43 @@ async function exercisePauseButton(page: Page, result: Case, output: string): Pr
       storedBefore,
       'Session pause wrote settings storage'
     );
+    if (verifyDisableEnable) {
+      const enabled = page.locator(`${MODAL} input[name="enabled"]`);
+      assert(await enabled.isChecked(), 'Comments unexpectedly start disabled');
+      await enabled.click();
+      await page.waitForFunction(() => {
+        const button = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+        return button?.disabled === true;
+      });
+      assert.equal(await button.getAttribute('aria-pressed'), 'false');
+      assert.notEqual(
+        await button.evaluate((node) => document.activeElement === node),
+        true,
+        'Disabled pause retained keyboard focus'
+      );
+      result.observations.push({ stage: 'pause-comments-disabled', state: await snapshot(page) });
+      await assertVideoAdvances(page);
+      await enabled.click();
+      await page.waitForFunction(() => {
+        const button = document.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+        return button?.disabled === false;
+      });
+      assert.equal(await button.getAttribute('aria-pressed'), 'false');
+      assert.equal(
+        await page.evaluate(() => JSON.stringify(window.__ytChatOverlay?.getSettings?.())),
+        settingsBefore,
+        'Disable and re-enable changed another setting'
+      );
+      await button.focus();
+      assert(await button.evaluate((node) => document.activeElement === node));
+      result.observations.push({ stage: 'pause-comments-reenabled', state: await snapshot(page) });
+      await assertVideoAdvances(page);
+    }
   } finally {
+    if (verifyDisableEnable) {
+      const enabled = page.locator(`${MODAL} input[name="enabled"]`);
+      if ((await enabled.count()) && !(await enabled.isChecked())) await enabled.click();
+    }
     await closeSettings(page);
   }
 }
@@ -1313,8 +1525,8 @@ async function runCase(id: string, work: (result: Case) => Promise<void>): Promi
 }
 
 /** Prepare an owned browser focus target for an in-process native Windows input helper. */
-async function prepareViewingImeCheckpoint(page: Page): Promise<void> {
-  await page.evaluate(() => {
+async function prepareViewingImeCheckpoint(page: Page, japanese = false): Promise<void> {
+  await page.evaluate((includeEditable) => {
     document.title = 'YT Viewing IME Checkpoint';
     const input = document.createElement('textarea');
     input.id = 'yt-viewing-ime-input';
@@ -1322,27 +1534,43 @@ async function prepareViewingImeCheckpoint(page: Page): Promise<void> {
     input.style.cssText =
       'position:fixed;left:12px;top:12px;width:320px;height:80px;z-index:2147483647';
     document.body.appendChild(input);
+    const editable = document.createElement('div');
+    if (includeEditable) {
+      editable.id = 'yt-viewing-ime-editable';
+      editable.contentEditable = 'true';
+      editable.setAttribute('role', 'textbox');
+      editable.setAttribute('aria-label', 'Native Japanese editable checkpoint');
+      editable.style.cssText =
+        'position:fixed;left:12px;top:100px;width:320px;height:80px;z-index:2147483647;background:white;color:black';
+      document.body.appendChild(editable);
+    }
     window.__ytViewingImeEvents = [];
-    for (const type of [
+    const types = [
       'compositionstart',
       'compositionupdate',
       'compositionend',
       'beforeinput',
       'input',
       'keydown',
-    ]) {
-      input.addEventListener(type, (event) => {
-        const keyboard = event instanceof KeyboardEvent ? event : null;
-        const composition = event instanceof CompositionEvent ? event : null;
-        window.__ytViewingImeEvents?.push({
-          type,
-          trusted: event.isTrusted,
-          isComposing: keyboard?.isComposing ?? null,
-          key: keyboard?.key ?? null,
-          data: composition?.data ?? null,
-          atMs: performance.now(),
+    ];
+    for (const target of includeEditable ? [input, editable] : [input]) {
+      for (const type of types)
+        target.addEventListener(type, (event) => {
+          const keyboard = event instanceof KeyboardEvent ? event : null;
+          const composition = event instanceof CompositionEvent ? event : null;
+          const inputEvent = event instanceof InputEvent ? event : null;
+          if ((window.__ytViewingImeEvents?.length ?? 0) >= 200) return;
+          window.__ytViewingImeEvents?.push({
+            type,
+            target: target.id,
+            trusted: event.isTrusted,
+            isComposing: keyboard?.isComposing ?? null,
+            key: keyboard?.key ?? null,
+            data: composition?.data ?? inputEvent?.data ?? null,
+            inputType: inputEvent?.inputType ?? null,
+            atMs: performance.now(),
+          });
         });
-      });
     }
     document.addEventListener(
       'keydown',
@@ -1374,42 +1602,277 @@ async function prepareViewingImeCheckpoint(page: Page): Promise<void> {
       },
       true
     );
+    if (includeEditable) {
+      const handler = (event: KeyboardEvent) => {
+        if (
+          !event.isTrusted ||
+          event.key !== ' ' ||
+          event.ctrlKey ||
+          event.altKey ||
+          event.isComposing ||
+          document.activeElement?.id !== 'movie_player'
+        )
+          return;
+        const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+        if (!video) return;
+        event.preventDefault();
+        if (video.paused) void video.play();
+        else video.pause();
+        window.__ytViewingImeEvents?.push({
+          type: 'fixture-native-player-space',
+          trusted: event.isTrusted,
+          focus: document.activeElement?.id,
+          videoPaused: video.paused,
+          atMs: performance.now(),
+        });
+      };
+      window.__ytViewingPlayerSpaceHandler = handler;
+      document.addEventListener('keydown', handler);
+    }
     input.focus();
-  });
+  }, japanese);
 }
 
 /** Read evidence after native input; this function never synthesizes a key event. */
-async function readViewingImeCheckpoint(page: Page, settle = false): Promise<ImeCheckpoint> {
-  return page.evaluate((settleComposition) => {
-    const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
-    const inputBeforeBlur = input?.value ?? null;
-    if (settleComposition && input) {
-      input.blur();
-      input.focus();
-    }
-    return {
-      title: document.title,
-      focus: document.activeElement?.id ?? null,
-      input: inputBeforeBlur,
-      settledInput: settleComposition ? (input?.value ?? null) : null,
-      settledFocus: settleComposition ? (document.activeElement?.id ?? null) : null,
-      events: window.__ytViewingImeEvents ?? [],
-      videoPaused: document.querySelector<HTMLVideoElement>('#movie_player video')?.paused ?? null,
-      videoTime:
-        document.querySelector<HTMLVideoElement>('#movie_player video')?.currentTime ?? null,
-      overlayPaused: Array.from(
-        document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
-      ).some((node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'),
-    };
-  }, settle);
+async function readViewingImeCheckpoint(
+  page: Page,
+  settle = false,
+  target: 'textarea' | 'editable' = 'textarea'
+): Promise<ImeCheckpoint> {
+  return page.evaluate(
+    ({ settleComposition, focusedTarget }) => {
+      const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
+      const editable = document.querySelector<HTMLElement>('#yt-viewing-ime-editable');
+      const inputBeforeBlur = input?.value ?? null;
+      const editableBeforeBlur = editable?.textContent ?? null;
+      const selected = focusedTarget === 'editable' ? editable : input;
+      if (settleComposition && selected) {
+        selected.blur();
+        selected.focus();
+      }
+      return {
+        title: document.title,
+        focus: document.activeElement?.id ?? null,
+        input: inputBeforeBlur,
+        editable: editableBeforeBlur,
+        settledInput: settleComposition ? (input?.value ?? null) : null,
+        settledEditable: settleComposition ? (editable?.textContent ?? null) : null,
+        settledFocus: settleComposition ? (document.activeElement?.id ?? null) : null,
+        events: window.__ytViewingImeEvents ?? [],
+        videoPaused:
+          document.querySelector<HTMLVideoElement>('#movie_player video')?.paused ?? null,
+        videoTime:
+          document.querySelector<HTMLVideoElement>('#movie_player video')?.currentTime ?? null,
+        overlayPaused: Array.from(
+          document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
+        ).some(
+          (node) => node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'
+        ),
+      };
+    },
+    { settleComposition: settle, focusedTarget: target }
+  );
 }
 
 async function resetViewingImeTrace(page: Page, clearInput = false): Promise<void> {
   await page.evaluate((clear) => {
     const input = document.querySelector<HTMLTextAreaElement>('#yt-viewing-ime-input');
     if (clear && input) input.value = '';
+    const editable = document.querySelector<HTMLElement>('#yt-viewing-ime-editable');
+    if (clear && editable) editable.textContent = '';
     window.__ytViewingImeEvents = [];
   }, clearInput);
+}
+
+async function exerciseJapaneseIme(
+  page: Page,
+  root: string,
+  output: string,
+  identity: { pid: number; profile: string },
+  result: Case
+): Promise<void> {
+  const verdicts: Record<string, { status: 'Pass' | 'Fail' | 'Not run'; reason?: string }> = {
+    'JI-01': { status: 'Not run' },
+    'JI-02': { status: 'Not run' },
+    'JI-03': { status: 'Not run' },
+    'JI-04': { status: 'Not run' },
+  };
+  const errors: unknown[] = [];
+  let initialBehavior: ReturnType<typeof japaneseWordBehavior> = 'unknown';
+  const act = async (
+    sequence: NativeImeSequence,
+    stage: NativeImeStage,
+    focus: 'textarea' | 'editable' | 'player',
+    settle = false
+  ) => {
+    const action = await runNativeImeAction({
+      page,
+      root,
+      output,
+      identity,
+      sequence,
+      stage,
+      focus,
+      japaneseLayout: true,
+    });
+    await page.waitForTimeout(100);
+    const state = await readViewingImeCheckpoint(
+      page,
+      settle,
+      focus === 'editable' ? 'editable' : 'textarea'
+    );
+    result.observations.push({ stage, native: action, state });
+    assertJapaneseNativeReceipt(action, sequence);
+    return { action, state };
+  };
+
+  try {
+    try {
+      const initial = await act('JapaneseCurrent', 'japanese-initial', 'textarea', true);
+      initialBehavior = japaneseWordBehavior(initial.state, 'textarea');
+      assert.notEqual(initialBehavior, 'unknown', 'Original Japanese input mode was not observed');
+      result.observations.push({
+        stage: 'japanese-initial-mode',
+        observedBehavior: initialBehavior,
+      });
+
+      await resetViewingImeTrace(page, true);
+      const textarea = await act('JapaneseHiragana', 'japanese-textarea', 'textarea', true);
+      assert.equal(japaneseWordBehavior(textarea.state, 'textarea'), 'converted-japanese');
+      assert.equal(textarea.state.overlayPaused, false);
+      assert.equal(textarea.state.videoPaused, false);
+
+      await resetViewingImeTrace(page, true);
+      const editable = await act('JapaneseHiragana', 'japanese-editable', 'editable', true);
+      assert.equal(japaneseWordBehavior(editable.state, 'editable'), 'converted-japanese');
+      assert.equal(editable.state.overlayPaused, false);
+      assert.equal(editable.state.videoPaused, false);
+
+      await resetViewingImeTrace(page, true);
+      const direct = await act('JapaneseDirect', 'japanese-direct', 'textarea', true);
+      assert.equal(japaneseWordBehavior(direct.state, 'textarea'), 'direct-latin');
+      assert.equal(direct.state.videoPaused, false);
+      verdicts['JI-01'] = { status: 'Pass' };
+      await assertVideoAdvances(page);
+    } catch (error) {
+      verdicts['JI-01'] = { status: 'Fail', reason: String(error) };
+      errors.push(error);
+    }
+
+    if (verdicts['JI-01']?.status === 'Pass') {
+      try {
+        await resetViewingImeTrace(page);
+        const editableBefore = await readViewingImeCheckpoint(page);
+        const editable = await act('CtrlSpaceRoundTrip', 'japanese-editable-shortcut', 'editable');
+        const editableRoute = assertJapaneseShortcut(
+          editable.state,
+          editable.action.samples,
+          'yt-viewing-ime-editable',
+          editableBefore.editable ?? null
+        );
+        result.observations.push({
+          stage: 'japanese-editable-shortcut-route',
+          route: editableRoute,
+        });
+        await assertVideoAdvances(page);
+
+        await resetViewingImeTrace(page, true);
+        const composing = await act(
+          'JapaneseDuringComposition',
+          'japanese-composing-shortcut',
+          'textarea',
+          true
+        );
+        assert.equal(japaneseWordBehavior(composing.state, 'textarea'), 'converted-japanese');
+        const composingPresses = composing.state.events.filter(
+          (event) => event.type === 'document-keydown'
+        );
+        assert(composingPresses.length <= 1, 'Composing shortcut was delivered more than once');
+        assert(
+          composingPresses.every(
+            (event) => event.trusted === true && event.focus === 'yt-viewing-ime-input'
+          )
+        );
+        assert.equal(composing.state.overlayPaused, false);
+        assert.equal(composing.state.videoPaused, false);
+        result.observations.push({
+          stage: 'japanese-composing-shortcut-route',
+          route: composingPresses.length ? 'document-ignored' : 'ime-consumed',
+          trustedDocumentPresses: composingPresses.length,
+        });
+        await assertVideoAdvances(page);
+
+        await resetViewingImeTrace(page);
+        const playerBefore = await readViewingImeCheckpoint(page);
+        const player = await act('CtrlSpaceRoundTrip', 'japanese-player-shortcut', 'player');
+        const playerRoute = assertJapaneseShortcut(
+          player.state,
+          player.action.samples,
+          'movie_player',
+          playerBefore.input
+        );
+        result.observations.push({ stage: 'japanese-player-shortcut-route', route: playerRoute });
+        await assertVideoAdvances(page);
+        verdicts['JI-02'] = { status: 'Pass' };
+      } catch (error) {
+        verdicts['JI-02'] = { status: 'Fail', reason: String(error) };
+        errors.push(error);
+      }
+    }
+
+    try {
+      const textarea = page.locator('#yt-viewing-ime-input');
+      await textarea.evaluate((node) => {
+        (node as HTMLTextAreaElement).hidden = true;
+      });
+      await exercisePauseButton(page, result, output, true);
+      verdicts['JI-03'] = { status: 'Pass' };
+    } catch (error) {
+      verdicts['JI-03'] = { status: 'Fail', reason: String(error) };
+      errors.push(error);
+    }
+
+    if (initialBehavior !== 'unknown') {
+      try {
+        const firstSpace = await act('NativeSpace', 'japanese-player-space', 'player');
+        assert.equal(firstSpace.state.videoPaused, true, 'Native player Space did not pause video');
+        assert.equal(firstSpace.state.overlayPaused, false);
+        const secondSpace = await act('NativeSpace', 'japanese-player-space-resume', 'player');
+        assert.equal(
+          secondSpace.state.videoPaused,
+          false,
+          'Native player Space did not resume video'
+        );
+        await assertVideoAdvances(page);
+
+        await page.locator('#yt-viewing-ime-input').evaluate((node) => {
+          (node as HTMLTextAreaElement).hidden = false;
+        });
+        await resetViewingImeTrace(page, true);
+        const sequence = initialBehavior === 'direct-latin' ? 'JapaneseDirect' : 'JapaneseHiragana';
+        const final = await act(sequence, 'japanese-final', 'textarea', true);
+        assert.equal(japaneseWordBehavior(final.state, 'textarea'), initialBehavior);
+        result.observations.push({
+          stage: 'japanese-observed-mode-restored',
+          initialBehavior,
+          finalBehavior: japaneseWordBehavior(final.state, 'textarea'),
+          tsfModeVerified: false,
+        });
+        verdicts['JI-04'] = { status: 'Pass' };
+      } catch (error) {
+        verdicts['JI-04'] = { status: 'Fail', reason: String(error) };
+        errors.push(error);
+      }
+    } else {
+      verdicts['JI-04'] = {
+        status: 'Not run',
+        reason: 'The original Japanese input mode was not observed; native retries are withheld.',
+      };
+    }
+  } finally {
+    result.observations.push({ stage: 'japanese-case-verdicts', verdicts });
+  }
+  if (errors.length) throw new AggregateError(errors, 'Japanese native IME cases failed');
 }
 
 /** Run the source-bound baseline in the prepared Windows browser. */
@@ -1420,6 +1883,7 @@ export async function runViewingExperienceFixture({
   userscript,
   watchHtml,
   readPrimaryGeometry,
+  japaneseIme = false,
 }: {
   browser: Browser;
   root: string;
@@ -1427,6 +1891,7 @@ export async function runViewingExperienceFixture({
   userscript: string;
   watchHtml: string;
   readPrimaryGeometry: (modal: Locator) => Promise<PrimarySettingsGeometry>;
+  japaneseIme?: boolean;
 }) {
   const media = {} as Record<Scene, Buffer>;
   for (const scene of Object.keys(MEDIA) as Scene[]) {
@@ -1435,8 +1900,15 @@ export async function runViewingExperienceFixture({
     media[scene] = bytes;
   }
   const imeSelection = await readViewingImeSelection(root);
-  const imeRequested = imeSelection !== 'not-run';
-  const nativeOnly = imeSelection === 'only';
+  if (japaneseIme) {
+    assert.equal(
+      imeSelection,
+      'not-run',
+      'Japanese and Korean IME selectors are mutually exclusive'
+    );
+  }
+  const imeRequested = japaneseIme || imeSelection !== 'not-run';
+  const nativeOnly = japaneseIme || imeSelection === 'only';
   let nativeImeInput: 'not-run' | 'failed' | 'verified' = imeRequested ? 'failed' : 'not-run';
   let nativeShortcut: 'not-run' | 'delivered' | 'unavailable-ime-consumed' = 'not-run';
   const cases: Case[] = [];
@@ -1825,184 +2297,193 @@ export async function runViewingExperienceFixture({
             .locator('#movie_player')
             .getAttribute('tabindex');
           try {
-            await prepareViewingImeCheckpoint(replayPage);
+            await prepareViewingImeCheckpoint(replayPage, japaneseIme);
             assert(nativeReplayProfile, 'Native IME profile was not created');
             const replayBrowser = activeReplayContext.browser();
             assert(replayBrowser, 'Native IME browser is unavailable');
             const identity = await ownedBrowserIdentity(replayBrowser, nativeReplayProfile);
-            const current = await runNativeImeAction({
-              page: replayPage,
-              root,
-              output,
-              identity,
-              sequence: 'ComposeCurrent',
-              stage: 'compose-initial',
-              focus: 'textarea',
-              koreanLayout: true,
-            });
-            const currentState = await readViewingImeCheckpoint(replayPage, true);
-            const initialBehavior = imeWordBehavior(currentState);
-            result.observations.push({
-              stage: 'native-ime-current-layout',
-              ...current,
-              state: currentState,
-              behavior: initialBehavior,
-              compositionEnds: observedCompositionEnds(currentState),
-            });
-            assertNativeImeAction(current, 'ComposeCurrent', true);
-            assert.notEqual(
-              initialBehavior,
-              'unknown',
-              'Initial Korean layout behavior is unclear'
-            );
-            if (initialBehavior === 'latin') {
-              await resetViewingImeTrace(replayPage, true);
-              const toggled = await runNativeImeAction({
-                page: replayPage,
-                root,
-                output,
-                identity,
-                sequence: 'ComposeToggleRoundTrip',
-                stage: 'compose-toggle',
-                focus: 'textarea',
-                koreanLayout: true,
-              });
-              const toggledState = await readViewingImeCheckpoint(replayPage, true);
-              result.observations.push({
-                stage: 'native-ime-existing-korean-layout',
-                ...toggled,
-                state: toggledState,
-                compositionEnds: observedCompositionEnds(toggledState),
-              });
-              assertNativeImeAction(toggled, 'ComposeToggleRoundTrip', true);
-              assert.equal(
-                imeWordBehavior(toggledState),
-                'hangul',
-                'Native Korean composition and committed 한글 text were not observed'
-              );
-            }
-            let controlError: unknown;
-            try {
-              await resetViewingImeTrace(replayPage);
-              const editableBefore = await readViewingImeCheckpoint(replayPage);
-              const editableControls = await runNativeImeAction({
-                page: replayPage,
-                root,
-                output,
-                identity,
-                sequence: 'CtrlSpaceRoundTrip',
-                stage: 'ctrl-editable',
-                focus: 'textarea',
-                koreanLayout: true,
-              });
-              await replayPage.waitForTimeout(100);
-              const editableState = await readViewingImeCheckpoint(replayPage);
-              result.observations.push({
-                stage: 'native-ime-editable-control',
-                ...editableControls,
-                state: editableState,
-              });
-              assertNativeImeAction(editableControls, 'CtrlSpaceRoundTrip', true);
-              const editableRoute = assertNativeEditableCtrlSpace(
-                editableState,
-                editableControls.samples,
-                editableBefore.input
-              );
-              result.observations.push({
-                stage: 'native-ime-editable-route',
-                route: editableRoute,
-              });
-              await assertVideoAdvances(replayPage);
-
-              await resetViewingImeTrace(replayPage);
-              const noneditableBefore = await readViewingImeCheckpoint(replayPage);
-              const noneditableControls = await runNativeImeAction({
-                page: replayPage,
-                root,
-                output,
-                identity,
-                sequence: 'CtrlSpaceRoundTrip',
-                stage: 'ctrl-noneditable',
-                focus: 'player',
-                koreanLayout: true,
-              });
-              await replayPage.waitForTimeout(100);
-              const noneditableState = await readViewingImeCheckpoint(replayPage);
-              result.observations.push({
-                stage: 'native-ime-noneditable-control',
-                ...noneditableControls,
-                state: noneditableState,
-              });
-              assertNativeImeAction(noneditableControls, 'CtrlSpaceRoundTrip', true);
-              nativeShortcut = assertNativePlayerCtrlSpace(
-                noneditableState,
-                noneditableControls.samples,
-                noneditableBefore.input
-              );
-              result.observations.push({
-                stage: 'native-ime-player-shortcut-route',
-                route: nativeShortcut,
-                functional: nativeShortcut === 'delivered',
-              });
-              await assertVideoAdvances(replayPage);
-            } catch (error) {
-              controlError = error;
-            }
-
-            let restorationError: unknown;
-            try {
-              await resetViewingImeTrace(replayPage, true);
-              const restored = await runNativeImeAction({
+            if (japaneseIme) {
+              await exerciseJapaneseIme(replayPage, root, output, identity, result);
+            } else {
+              const current = await runNativeImeAction({
                 page: replayPage,
                 root,
                 output,
                 identity,
                 sequence: 'ComposeCurrent',
-                stage: 'compose-restoration',
+                stage: 'compose-initial',
                 focus: 'textarea',
                 koreanLayout: true,
               });
-              const restoredState = await readViewingImeCheckpoint(replayPage, true);
-              const restoredBehavior = imeWordBehavior(restoredState);
+              const currentState = await readViewingImeCheckpoint(replayPage, true);
+              const initialBehavior = imeWordBehavior(currentState);
               result.observations.push({
-                stage: 'native-ime-mode-behavior-restoration',
-                ...restored,
-                state: restoredState,
-                initialBehavior,
-                restoredBehavior,
-                compositionEnds: observedCompositionEnds(restoredState),
-                tsfModeVerified: false,
+                stage: 'native-ime-current-layout',
+                ...current,
+                state: currentState,
+                behavior: initialBehavior,
+                compositionEnds: observedCompositionEnds(currentState),
               });
-              assertNativeImeAction(restored, 'ComposeCurrent', true);
-              assert.equal(
-                restoredBehavior,
+              assertNativeImeAction(current, 'ComposeCurrent', true);
+              assert.notEqual(
                 initialBehavior,
-                'Observed IME behavior changed after round trips'
+                'unknown',
+                'Initial Korean layout behavior is unclear'
               );
-            } catch (error) {
-              restorationError = error;
-            }
-            let pauseButtonError: unknown;
-            try {
-              await replayPage.locator('#yt-viewing-ime-input').evaluate((input) => {
-                (input as HTMLTextAreaElement).hidden = true;
-              });
-              await exercisePauseButton(replayPage, result, output);
-            } catch (error) {
-              pauseButtonError = error;
-            }
-            if (controlError || restorationError || pauseButtonError) {
-              throw new AggregateError(
-                [controlError, restorationError, pauseButtonError].filter(
-                  (error) => error !== undefined
-                ),
-                'Native shortcut, IME restoration, or pause button failed'
-              );
+              if (initialBehavior === 'latin') {
+                await resetViewingImeTrace(replayPage, true);
+                const toggled = await runNativeImeAction({
+                  page: replayPage,
+                  root,
+                  output,
+                  identity,
+                  sequence: 'ComposeToggleRoundTrip',
+                  stage: 'compose-toggle',
+                  focus: 'textarea',
+                  koreanLayout: true,
+                });
+                const toggledState = await readViewingImeCheckpoint(replayPage, true);
+                result.observations.push({
+                  stage: 'native-ime-existing-korean-layout',
+                  ...toggled,
+                  state: toggledState,
+                  compositionEnds: observedCompositionEnds(toggledState),
+                });
+                assertNativeImeAction(toggled, 'ComposeToggleRoundTrip', true);
+                assert.equal(
+                  imeWordBehavior(toggledState),
+                  'hangul',
+                  'Native Korean composition and committed 한글 text were not observed'
+                );
+              }
+              let controlError: unknown;
+              try {
+                await resetViewingImeTrace(replayPage);
+                const editableBefore = await readViewingImeCheckpoint(replayPage);
+                const editableControls = await runNativeImeAction({
+                  page: replayPage,
+                  root,
+                  output,
+                  identity,
+                  sequence: 'CtrlSpaceRoundTrip',
+                  stage: 'ctrl-editable',
+                  focus: 'textarea',
+                  koreanLayout: true,
+                });
+                await replayPage.waitForTimeout(100);
+                const editableState = await readViewingImeCheckpoint(replayPage);
+                result.observations.push({
+                  stage: 'native-ime-editable-control',
+                  ...editableControls,
+                  state: editableState,
+                });
+                assertNativeImeAction(editableControls, 'CtrlSpaceRoundTrip', true);
+                const editableRoute = assertNativeEditableCtrlSpace(
+                  editableState,
+                  editableControls.samples,
+                  editableBefore.input
+                );
+                result.observations.push({
+                  stage: 'native-ime-editable-route',
+                  route: editableRoute,
+                });
+                await assertVideoAdvances(replayPage);
+
+                await resetViewingImeTrace(replayPage);
+                const noneditableBefore = await readViewingImeCheckpoint(replayPage);
+                const noneditableControls = await runNativeImeAction({
+                  page: replayPage,
+                  root,
+                  output,
+                  identity,
+                  sequence: 'CtrlSpaceRoundTrip',
+                  stage: 'ctrl-noneditable',
+                  focus: 'player',
+                  koreanLayout: true,
+                });
+                await replayPage.waitForTimeout(100);
+                const noneditableState = await readViewingImeCheckpoint(replayPage);
+                result.observations.push({
+                  stage: 'native-ime-noneditable-control',
+                  ...noneditableControls,
+                  state: noneditableState,
+                });
+                assertNativeImeAction(noneditableControls, 'CtrlSpaceRoundTrip', true);
+                nativeShortcut = assertNativePlayerCtrlSpace(
+                  noneditableState,
+                  noneditableControls.samples,
+                  noneditableBefore.input
+                );
+                result.observations.push({
+                  stage: 'native-ime-player-shortcut-route',
+                  route: nativeShortcut,
+                  functional: nativeShortcut === 'delivered',
+                });
+                await assertVideoAdvances(replayPage);
+              } catch (error) {
+                controlError = error;
+              }
+
+              let restorationError: unknown;
+              try {
+                await resetViewingImeTrace(replayPage, true);
+                const restored = await runNativeImeAction({
+                  page: replayPage,
+                  root,
+                  output,
+                  identity,
+                  sequence: 'ComposeCurrent',
+                  stage: 'compose-restoration',
+                  focus: 'textarea',
+                  koreanLayout: true,
+                });
+                const restoredState = await readViewingImeCheckpoint(replayPage, true);
+                const restoredBehavior = imeWordBehavior(restoredState);
+                result.observations.push({
+                  stage: 'native-ime-mode-behavior-restoration',
+                  ...restored,
+                  state: restoredState,
+                  initialBehavior,
+                  restoredBehavior,
+                  compositionEnds: observedCompositionEnds(restoredState),
+                  tsfModeVerified: false,
+                });
+                assertNativeImeAction(restored, 'ComposeCurrent', true);
+                assert.equal(
+                  restoredBehavior,
+                  initialBehavior,
+                  'Observed IME behavior changed after round trips'
+                );
+              } catch (error) {
+                restorationError = error;
+              }
+              let pauseButtonError: unknown;
+              try {
+                await replayPage.locator('#yt-viewing-ime-input').evaluate((input) => {
+                  (input as HTMLTextAreaElement).hidden = true;
+                });
+                await exercisePauseButton(replayPage, result, output);
+              } catch (error) {
+                pauseButtonError = error;
+              }
+              if (controlError || restorationError || pauseButtonError) {
+                throw new AggregateError(
+                  [controlError, restorationError, pauseButtonError].filter(
+                    (error) => error !== undefined
+                  ),
+                  'Native shortcut, IME restoration, or pause button failed'
+                );
+              }
             }
           } finally {
             const cleanup = await replayPage.evaluate(
               ({ title, playerTabindex }) => {
                 document.querySelector('#yt-viewing-ime-input')?.remove();
+                document.querySelector('#yt-viewing-ime-editable')?.remove();
+                if (window.__ytViewingPlayerSpaceHandler) {
+                  document.removeEventListener('keydown', window.__ytViewingPlayerSpaceHandler);
+                  delete window.__ytViewingPlayerSpaceHandler;
+                }
                 delete window.__ytViewingImeEvents;
                 const player = document.querySelector<HTMLElement>('#movie_player');
                 if (playerTabindex === null) player?.removeAttribute('tabindex');
@@ -2011,6 +2492,7 @@ export async function runViewingExperienceFixture({
                 return {
                   title: document.title,
                   inputRemoved: document.querySelector('#yt-viewing-ime-input') === null,
+                  editableRemoved: document.querySelector('#yt-viewing-ime-editable') === null,
                   traceRemoved: !('__ytViewingImeEvents' in window),
                   playerTabindex: player?.getAttribute('tabindex') ?? null,
                 };
@@ -2021,6 +2503,7 @@ export async function runViewingExperienceFixture({
             assert.deepEqual(cleanup, {
               title: originalTitle,
               inputRemoved: true,
+              editableRemoved: true,
               traceRemoved: true,
               playerTabindex: originalPlayerTabindex,
             });
@@ -2372,7 +2855,7 @@ export async function runViewingExperienceFixture({
       pageErrors,
     },
     observations: {
-      profileMode: nativeOnly ? 'native-ime-only' : 'full',
+      profileMode: japaneseIme ? 'japanese-ime-only' : nativeOnly ? 'native-ime-only' : 'full',
       mediaSha256: MEDIA,
       browserVersion: browser.version(),
       cases,

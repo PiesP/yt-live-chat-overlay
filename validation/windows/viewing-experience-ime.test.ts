@@ -9,6 +9,8 @@ import {
   assertNativeEditableCtrlSpace,
   assertNativePlayerCtrlSpace,
   imeWordBehavior,
+  japaneseWordBehavior,
+  assertJapaneseShortcut,
   type ImeCheckpoint,
   type NativeControlSample,
 } from './viewing-experience.ts';
@@ -61,6 +63,113 @@ test('Hangul proof accepts observed end with trusted native start, update, key a
   assert.equal(imeWordBehavior(checkpoint({ input: '한글 ', events })), 'unknown');
   assert.equal(imeWordBehavior(checkpoint({ input: 'gksrmf ' })), 'latin');
   assert.equal(imeWordBehavior(checkpoint({ input: 'gksrmf ', events })), 'unknown');
+});
+
+test('Japanese evidence requires committed converted text and trusted composition in the selected target', () => {
+  const target = 'yt-viewing-ime-editable';
+  const events = [
+    { type: 'compositionstart', target, trusted: true },
+    { type: 'compositionupdate', target, trusted: true, data: 'にほんご' },
+    { type: 'compositionupdate', target, trusted: true, data: '日本語' },
+    { type: 'compositionend', target, trusted: false, data: '日本語' },
+    { type: 'input', target, trusted: true, data: '日本語' },
+  ];
+  const converted = checkpoint({
+    focus: target,
+    editable: '日本語',
+    settledEditable: '日本語',
+    settledFocus: target,
+    events,
+  });
+  assert.equal(japaneseWordBehavior(converted, 'editable'), 'converted-japanese');
+  assert.equal(
+    japaneseWordBehavior({ ...converted, events: events.slice(1) }, 'editable'),
+    'unknown'
+  );
+  assert.equal(
+    japaneseWordBehavior(
+      { ...converted, events: events.map((event) => ({ ...event, trusted: false })) },
+      'editable'
+    ),
+    'unknown'
+  );
+  assert.equal(japaneseWordBehavior({ ...converted, editable: 'にほんご' }, 'editable'), 'unknown');
+  assert.equal(
+    japaneseWordBehavior({ ...converted, settledEditable: 'altered' }, 'editable'),
+    'unknown'
+  );
+  assert.equal(
+    japaneseWordBehavior({ ...converted, input: '日本語', settledInput: '日本語' }, 'textarea'),
+    'unknown'
+  );
+
+  const direct = checkpoint({
+    input: 'nihongo',
+    settledInput: 'nihongo',
+    settledFocus: 'yt-viewing-ime-input',
+    events: [{ type: 'input', target: 'yt-viewing-ime-input', trusted: true }],
+  });
+  assert.equal(japaneseWordBehavior(direct, 'textarea'), 'direct-latin');
+  assert.equal(japaneseWordBehavior({ ...direct, events: [] }, 'textarea'), 'unknown');
+});
+
+test('Japanese native shortcut validates focus, preserved text, and player progress', () => {
+  const samples: NativeControlSample[] = Array.from({ length: 16 }, (_, index) => ({
+    atMs: index * 75,
+    focus: 'yt-viewing-ime-editable',
+    input: '',
+    editable: '日本語',
+    overlayPaused: false,
+    videoPaused: false,
+    videoTime: 2 + index * 0.075,
+  }));
+  const state = checkpoint({ focus: 'yt-viewing-ime-editable', editable: '日本語' });
+  assert.equal(
+    assertJapaneseShortcut(state, samples, 'yt-viewing-ime-editable', '日本語'),
+    'ime-consumed'
+  );
+  assert.throws(
+    () =>
+      assertJapaneseShortcut(
+        state,
+        samples.map((sample) => ({ ...sample, videoTime: 2 })),
+        'yt-viewing-ime-editable',
+        '日本語'
+      ),
+    /Video did not advance/u
+  );
+  assert.throws(
+    () =>
+      assertJapaneseShortcut(
+        state,
+        samples.map((sample) => ({ ...sample, editable: 'changed' })),
+        'yt-viewing-ime-editable',
+        '日本語'
+      ),
+    /Focused text/u
+  );
+  const delivered = checkpoint({
+    focus: 'movie_player',
+    input: '',
+    events: [
+      { type: 'document-keydown', trusted: true, focus: 'movie_player' },
+      { type: 'post-ctrl-space', focus: 'movie_player', overlayPaused: true, videoPaused: false },
+      { type: 'document-keydown', trusted: true, focus: 'movie_player' },
+      { type: 'post-ctrl-space', focus: 'movie_player', overlayPaused: false, videoPaused: false },
+    ],
+  });
+  const playerSamples = samples.map((sample) => ({ ...sample, focus: 'movie_player', input: '' }));
+  assert.equal(assertJapaneseShortcut(delivered, playerSamples, 'movie_player', ''), 'delivered');
+  assert.throws(
+    () =>
+      assertJapaneseShortcut(
+        { ...delivered, events: delivered.events.slice(0, 2) },
+        playerSamples,
+        'movie_player',
+        ''
+      ),
+    /Incomplete/u
+  );
 });
 
 test('native shortcut evidence checks both overlay and video states', () => {
