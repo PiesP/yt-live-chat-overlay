@@ -10,13 +10,13 @@ engineStrict: true
 # Keep paired tooling and plugin peer requirements compatible during installs.
 strictPeerDependencies: true
 
-# The exact managed alias bundles Vite 8.3.4, within these callers' peer ranges.
+# The exact managed alias bundles Vite 8.3.5, within these callers' peer ranges.
 # Recheck callers, alias and bundled Vite together on each toolchain update.
 peerDependencyRules:
   allowedVersions:
-    "@vitest/mocker@5.0.5>vite": 1.3.0
-    "vitest@5.0.5>vite": 1.3.0
-    "vite-plugin-monkey@8.1.1>vite": 1.3.0
+    "@vitest/mocker@5.0.5>vite": 1.4.0
+    "vitest@5.0.5>vite": 1.4.0
+    "vite-plugin-monkey@8.1.1>vite": 1.4.0
 
 # Enforce a 24-hour supply-chain observation window, including registries that
 # omit publication timestamps.
@@ -26,9 +26,9 @@ trustPolicy: no-downgrade
 # Old transitive releases predate widespread provenance; scrutinize recent ones.
 trustPolicyIgnoreAfter: 525600
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vitest: 5.0.5
-  vite-plus: 1.3.0
+  vite-plus: 1.4.0
   "@vitest/coverage-v8": 5.0.5
 overrides:
   vite@*: "catalog:"

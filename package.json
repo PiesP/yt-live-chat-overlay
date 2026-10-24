@@ -53,7 +53,7 @@
     "test": "vp test run",
     "test:ci": "node --experimental-strip-types --test scripts/ci/repository-authority.test.ts scripts/release/verify-source.test.ts scripts/release/verify-publication.test.ts",
     "test:core": "pnpm --dir packages/core install --frozen-lockfile && pnpm --dir packages/core verify",
-    "test:watch": "vp test",
+    "test:watch": "vp test watch",
     "test:cov": "vp test run --coverage",
     "test:e2e": "playwright test --config test/e2e/playwright.config.ts",
     "test:e2e:headed": "pnpm test:e2e --headed",

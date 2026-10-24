@@ -45,6 +45,8 @@ type BitmapProbeResult = {
   decodeSuccesses?: number;
   decodeFailures?: number;
   failedCached?: boolean;
+  fetchEvents?: Array<{ event: string; at: number; detail?: string }>;
+  fetchEventOverflow?: number;
 };
 
 type BitmapWorkerRecord = {
@@ -63,6 +65,116 @@ type ImageRoutePlan =
   | { kind: 'redirect'; location: string };
 
 type ImageRouteRecord = { url: string; kind: ImageRoutePlan['kind']; status: number | null };
+type RequestObservation = {
+  id: number;
+  url: string;
+  method: string;
+  resourceType: string;
+  redirectedFrom: string | null;
+  startedAt: number;
+  responseStatus: number | null;
+  terminal: 'finished' | 'failed' | null;
+  terminalAt: number | null;
+  errorText: string | null;
+};
+type RequestFailure = { id: number | null; url: string; errorText: string };
+type RouteCompletion = {
+  url: string;
+  kind: ImageRoutePlan['kind'];
+  startedAt: number;
+  settledAt: number | null;
+  outcome: 'fulfilled' | 'rejected' | null;
+  error: string | null;
+};
+
+/** Accept a CDP abort only when this exact routed request has independent completion proof. */
+export function isCompletedRoutedBitmapFailure({
+  failure,
+  failures,
+  observations,
+  routes,
+  completions,
+  probes,
+  noOverflow,
+}: {
+  failure: RequestFailure;
+  failures: RequestFailure[];
+  observations: RequestObservation[];
+  routes: ImageRouteRecord[];
+  completions: RouteCompletion[];
+  probes: Array<{ id: string; url: string; result: BitmapProbeResult }>;
+  noOverflow: boolean;
+}): boolean {
+  if (!noOverflow || failure.errorText !== 'net::ERR_ABORTED' || failure.id === null) return false;
+  const sameFailure = failures.filter((item) => item.id === failure.id && item.url === failure.url);
+  const sameRequest = observations.filter(
+    (item) => item.id === failure.id && item.url === failure.url
+  );
+  if (
+    sameFailure.length !== 1 ||
+    sameRequest.length !== 1 ||
+    observations.filter((item) => item.id === failure.id || item.url === failure.url).length !== 1
+  )
+    return false;
+  const request = sameRequest[0];
+  if (
+    !request ||
+    request.method !== 'GET' ||
+    request.resourceType !== 'fetch' ||
+    request.redirectedFrom !== null ||
+    request.responseStatus !== 200 ||
+    request.terminal !== 'failed' ||
+    request.terminalAt === null ||
+    request.errorText !== failure.errorText
+  )
+    return false;
+  const matchingRoutes = routes.filter((route) => route.url === failure.url);
+  const matchingCompletions = completions.filter((completion) => completion.url === failure.url);
+  const matchingProbes = probes.filter((probe) => probe.url === failure.url);
+  if (
+    matchingRoutes.length !== 1 ||
+    matchingRoutes[0]?.kind !== 'png' ||
+    matchingRoutes[0].status !== 200 ||
+    matchingCompletions.length !== 1 ||
+    matchingCompletions[0]?.kind !== 'png' ||
+    matchingCompletions[0].outcome !== 'fulfilled' ||
+    matchingCompletions[0].settledAt === null ||
+    matchingCompletions[0].error !== null ||
+    matchingProbes.length !== 1
+  )
+    return false;
+  const result = matchingProbes[0]?.result;
+  if (
+    !result ||
+    result.phase !== 'acquire' ||
+    result.id !== matchingProbes[0]?.id ||
+    result.errorType !== undefined ||
+    result.fetchAttempts !== 1 ||
+    result.responseStatus !== 200 ||
+    result.finalUrl !== failure.url ||
+    result.fetchErrorType !== null ||
+    result.decodeAttempts !== 1 ||
+    result.decodeSuccesses !== 1 ||
+    result.decodeFailures !== 0 ||
+    result.failedCached !== false ||
+    result.owned !== true ||
+    result.width !== 4 ||
+    result.height !== 4 ||
+    result.drawError !== null ||
+    result.fetchEventOverflow !== 0 ||
+    result.pixel?.length !== 4 ||
+    result.pixel[0] !== 255 ||
+    result.pixel[1] !== 0 ||
+    result.pixel[2] !== 0 ||
+    result.pixel[3] !== 255
+  )
+    return false;
+  // The probe logs only transition events, so an extra abort, cancel, or error cannot hide.
+  return (
+    result.fetchEvents?.map(({ event, detail }) => `${event}:${detail ?? ''}`).join('|') ===
+    'fetch-start:|signal-state:active|fetch-response:200|body-reader:|body-read-done:|decode-start:|decode-success:'
+  );
+}
 
 declare global {
   interface Window {
@@ -133,35 +245,146 @@ function attachWorkerBitmapProbe(renderer: {
         let decodeAttempts = 0;
         let decodeSuccesses = 0;
         let decodeFailures = 0;
+        const fetchEvents: NonNullable<BitmapProbeResult['fetchEvents']> = [];
+        let fetchEventOverflow = 0;
+        const recordFetchEvent = (entry: (typeof fetchEvents)[number]) => {
+          if (fetchEvents.length < 32) fetchEvents.push(entry);
+          else fetchEventOverflow++;
+        };
         if (phase === 'acquire') {
+          const observedStreams = new WeakSet<ReadableStream>();
+          const observedReaders = new WeakSet<ReadableStreamDefaultReader>();
+          const nativeGetReader = ReadableStream.prototype.getReader;
+          const nativeGetReaderDescriptor = Object.getOwnPropertyDescriptor(
+            ReadableStream.prototype,
+            'getReader'
+          );
+          if (!nativeGetReaderDescriptor) throw new Error('Native stream reader unavailable');
+          const nativeStreamCancel = ReadableStream.prototype.cancel;
+          const nativeRead = ReadableStreamDefaultReader.prototype.read;
+          const nativeReaderCancel = ReadableStreamDefaultReader.prototype.cancel;
+          const signalCleanups: Array<() => void> = [];
+          Object.defineProperty(ReadableStream.prototype, 'getReader', {
+            configurable: true,
+            writable: true,
+            value: function (this: ReadableStream, ...args: unknown[]) {
+              const reader = Reflect.apply(nativeGetReader, this, args);
+              if (observedStreams.has(this)) {
+                observedReaders.add(reader);
+                recordFetchEvent({ event: 'body-reader', at: Date.now() });
+              }
+              return reader;
+            },
+          });
+          ReadableStream.prototype.cancel = function (...args) {
+            const observed = observedStreams.has(this);
+            if (observed) recordFetchEvent({ event: 'body-cancel', at: Date.now() });
+            const operation = Reflect.apply(nativeStreamCancel, this, args);
+            if (observed)
+              void operation.then(
+                () => recordFetchEvent({ event: 'body-cancel-done', at: Date.now() }),
+                (error: unknown) =>
+                  recordFetchEvent({
+                    event: 'body-cancel-error',
+                    at: Date.now(),
+                    detail: error instanceof Error ? error.name : typeof error,
+                  })
+              );
+            return operation;
+          };
+          ReadableStreamDefaultReader.prototype.read = function (...args) {
+            const observed = observedReaders.has(this);
+            const operation = Reflect.apply(nativeRead, this, args);
+            if (observed)
+              void operation.then(
+                (result) => {
+                  if (result.done) recordFetchEvent({ event: 'body-read-done', at: Date.now() });
+                },
+                (error: unknown) => {
+                  recordFetchEvent({
+                    event: 'body-read-error',
+                    at: Date.now(),
+                    detail: error instanceof Error ? error.name : typeof error,
+                  });
+                }
+              );
+            return operation;
+          };
+          ReadableStreamDefaultReader.prototype.cancel = function (...args) {
+            const observed = observedReaders.has(this);
+            if (observed) recordFetchEvent({ event: 'body-reader-cancel', at: Date.now() });
+            const operation = Reflect.apply(nativeReaderCancel, this, args);
+            if (observed)
+              void operation.then(
+                () => recordFetchEvent({ event: 'body-reader-cancel-done', at: Date.now() }),
+                (error: unknown) =>
+                  recordFetchEvent({
+                    event: 'body-reader-cancel-error',
+                    at: Date.now(),
+                    detail: error instanceof Error ? error.name : typeof error,
+                  })
+              );
+            return operation;
+          };
           globals.fetch = async (input, init) => {
             fetchAttempts++;
+            const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+            recordFetchEvent({ event: 'fetch-start', at: Date.now() });
+            if (signal) {
+              const onAbort = () => recordFetchEvent({ event: 'signal-abort', at: Date.now() });
+              recordFetchEvent({
+                event: 'signal-state',
+                at: Date.now(),
+                detail: signal.aborted ? 'aborted' : 'active',
+              });
+              signal.addEventListener('abort', onAbort);
+              signalCleanups.push(() => signal.removeEventListener('abort', onAbort));
+            }
             try {
               const response = await nativeFetch.call(self, input, init);
               responseStatus = response.status;
               finalUrl = response.url;
+              recordFetchEvent({
+                event: 'fetch-response',
+                at: Date.now(),
+                detail: String(response.status),
+              });
+              if (response.body) observedStreams.add(response.body);
               return response;
             } catch (error) {
               fetchErrorType = error instanceof Error ? error.name : typeof error;
+              recordFetchEvent({ event: 'fetch-error', at: Date.now(), detail: fetchErrorType });
               throw error;
             }
           };
           globals.createImageBitmap = async (source) => {
             decodeAttempts++;
+            recordFetchEvent({ event: 'decode-start', at: Date.now() });
             try {
               const bitmap = await nativeCreateImageBitmap.call(self, source);
               decodeSuccesses++;
+              recordFetchEvent({ event: 'decode-success', at: Date.now() });
               return bitmap;
             } catch (error) {
               decodeFailures++;
+              recordFetchEvent({
+                event: 'decode-error',
+                at: Date.now(),
+                detail: error instanceof Error ? error.name : typeof error,
+              });
               throw error;
             }
           };
           try {
             await renderer.prefetchImages([url], cache);
           } finally {
+            for (const cleanup of signalCleanups) cleanup();
             globals.fetch = nativeFetch;
             globals.createImageBitmap = nativeCreateImageBitmap;
+            Object.defineProperty(ReadableStream.prototype, 'getReader', nativeGetReaderDescriptor);
+            ReadableStream.prototype.cancel = nativeStreamCancel;
+            ReadableStreamDefaultReader.prototype.read = nativeRead;
+            ReadableStreamDefaultReader.prototype.cancel = nativeReaderCancel;
           }
         }
         const bitmap = cache.get(url);
@@ -197,6 +420,8 @@ function attachWorkerBitmapProbe(renderer: {
           decodeSuccesses,
           decodeFailures,
           failedCached: renderer.failedImageFetches.has(url),
+          fetchEvents,
+          fetchEventOverflow,
         });
         return;
       }
@@ -293,18 +518,6 @@ export async function runBitmapLifecycleFixture({
       consoleErrors.push({ text: message.text().slice(0, 250), url: message.location().url });
     else consoleErrorOverflow++;
   });
-  type RequestObservation = {
-    id: number;
-    url: string;
-    method: string;
-    resourceType: string;
-    redirectedFrom: string | null;
-    startedAt: number;
-    responseStatus: number | null;
-    terminal: 'finished' | 'failed' | null;
-    terminalAt: number | null;
-    errorText: string | null;
-  };
   const requestObservations = new Map<Request, RequestObservation>();
   let requestObservationOverflow = 0;
   page.on('request', (request) => {
@@ -336,7 +549,7 @@ export async function runBitmapLifecycleFixture({
     observation.terminal = 'finished';
     observation.terminalAt = Date.now();
   });
-  const requestFailures: Array<{ id: number | null; url: string; errorText: string }> = [];
+  const requestFailures: RequestFailure[] = [];
   let requestFailureOverflow = 0;
   page.on('requestfailed', (request) => {
     const observation = requestObservations.get(request);
@@ -356,32 +569,78 @@ export async function runBitmapLifecycleFixture({
   const imageRoutes = new Map<string, ImageRoutePlan>();
   const imageRequests: ImageRouteRecord[] = [];
   let imageRequestOverflow = 0;
+  const routeCompletions: RouteCompletion[] = [];
+  let routeCompletionOverflow = 0;
+  const observeRouteCompletion = (
+    url: string,
+    kind: ImageRoutePlan['kind'],
+    startedAt: number,
+    operation: Promise<void>
+  ) => {
+    if (routeCompletions.length >= 64) {
+      routeCompletionOverflow++;
+      return operation;
+    }
+    const record: RouteCompletion = {
+      url,
+      kind,
+      startedAt,
+      settledAt: null,
+      outcome: null,
+      error: null,
+    };
+    routeCompletions.push(record);
+    void operation.then(
+      () => {
+        record.settledAt = Date.now();
+        record.outcome = 'fulfilled';
+      },
+      (error: unknown) => {
+        record.settledAt = Date.now();
+        record.outcome = 'rejected';
+        record.error = error instanceof Error ? error.name : typeof error;
+      }
+    );
+    return operation;
+  };
   const imageRoute = (route: Route) => {
     const url = route.request().url();
     const plan = imageRoutes.get(url);
     assert(plan, `Unplanned image route: ${url}`);
+    const startedAt = Date.now();
     const status = plan.kind === 'http' ? plan.status : plan.kind === 'redirect' ? 302 : 200;
     if (imageRequests.length < 64)
       imageRequests.push({ url, kind: plan.kind, status: plan.kind === 'abort' ? null : status });
     else imageRequestOverflow++;
-    if (plan.kind === 'abort') return route.abort('failed');
+    if (plan.kind === 'abort')
+      return observeRouteCompletion(url, plan.kind, startedAt, route.abort('failed'));
     if (plan.kind === 'redirect') {
-      return route.fulfill({
-        status,
-        headers: {
-          location: plan.location,
-          'access-control-allow-origin': '*',
-          'cache-control': 'no-store',
-        },
-      });
+      return observeRouteCompletion(
+        url,
+        plan.kind,
+        startedAt,
+        route.fulfill({
+          status,
+          headers: {
+            location: plan.location,
+            'access-control-allow-origin': '*',
+            'cache-control': 'no-store',
+          },
+        })
+      );
     }
     if (plan.kind === 'http') {
-      return route.fulfill({
-        status,
-        contentType: 'text/plain',
-        headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
-        body: 'Image fixture HTTP failure',
-      });
+      return observeRouteCompletion(
+        url,
+        plan.kind,
+        startedAt,
+        route.fulfill({
+          status,
+          contentType: 'text/plain',
+          headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
+          body: 'Image fixture HTTP failure',
+        })
+      );
     }
     const body =
       plan.kind === 'empty'
@@ -393,19 +652,24 @@ export async function runBitmapLifecycleFixture({
             : plan.kind === 'truncated'
               ? RED_PNG.subarray(0, 12)
               : RED_PNG;
-    return route.fulfill({
-      status,
-      contentType: plan.kind === 'html' ? 'text/html' : 'image/png',
-      headers:
-        plan.kind === 'cors'
-          ? {
-              // Playwright fills a missing ACAO header with the request origin.
-              'access-control-allow-origin': 'https://cors-denied.example.test',
-              'cache-control': 'no-store',
-            }
-          : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
-      body,
-    });
+    return observeRouteCompletion(
+      url,
+      plan.kind,
+      startedAt,
+      route.fulfill({
+        status,
+        contentType: plan.kind === 'html' ? 'text/html' : 'image/png',
+        headers:
+          plan.kind === 'cors'
+            ? {
+                // Playwright fills a missing ACAO header with the request origin.
+                'access-control-allow-origin': 'https://cors-denied.example.test',
+                'cache-control': 'no-store',
+              }
+            : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
+        body,
+      })
+    );
   };
   let selfFetchRequests = 0;
   const selfFetchRoute = (route: Route) => {
@@ -1000,16 +1264,48 @@ export async function runBitmapLifecycleFixture({
       'Unexpected browser console error outside exact image fault URLs'
     );
     assert.equal(consoleErrorOverflow, 0);
+    const completedProbes = [
+      ...controls.map(({ target, url, acquired }) => ({
+        id: `control-${target}`,
+        url,
+        result: acquired,
+      })),
+      ...cases.map(({ id, recoveryUrl, recovery }) => ({
+        id: `${id}-recovery`,
+        url: recoveryUrl,
+        result: recovery,
+      })),
+    ];
+    const noObservationOverflow =
+      requestFailureOverflow === 0 &&
+      requestObservationOverflow === 0 &&
+      imageRequestOverflow === 0 &&
+      routeCompletionOverflow === 0 &&
+      probeOverflow.workers === 0 &&
+      probeOverflow.results === 0 &&
+      pageErrorOverflow === 0 &&
+      consoleErrorOverflow === 0;
     assert.deepEqual(
       requestFailures.filter(
-        (failure) => expectedRequestFailures.get(failure.url) !== failure.errorText
+        (failure) =>
+          expectedRequestFailures.get(failure.url) !== failure.errorText &&
+          !isCompletedRoutedBitmapFailure({
+            failure,
+            failures: requestFailures,
+            observations: [...requestObservations.values()],
+            routes: imageRequests,
+            completions: routeCompletions,
+            probes: completedProbes,
+            noOverflow: noObservationOverflow,
+          })
       ),
       [],
-      'Unexpected network failure outside exact injected faults or rejected-body cancellation'
+      'Unexpected network failure outside exact injected faults or completed routed bitmaps'
     );
     assert.equal(requestFailureOverflow, 0);
     assert.equal(requestObservationOverflow, 0);
     assert.equal(imageRequestOverflow, 0);
+    assert.equal(routeCompletionOverflow, 0);
     assert.equal(imageRequests.length, 31);
     redirectTransport.assertHealthy();
     assert.deepEqual(redirectTransport.binding.terminalRequests, finalUrls);
@@ -1032,6 +1328,8 @@ export async function runBitmapLifecycleFixture({
         cases,
         imageRequests,
         imageRequestOverflow,
+        routeCompletions,
+        routeCompletionOverflow,
         redirectTransport: redirectTransport.binding,
         requestFailures,
         requestFailureOverflow,
@@ -1071,6 +1369,8 @@ export async function runBitmapLifecycleFixture({
             pageScriptProbeProvenance,
             imageRequests,
             imageRequestOverflow,
+            routeCompletions,
+            routeCompletionOverflow,
             workerObservations,
             pageErrors,
             pageErrorOverflow,
