@@ -133,6 +133,62 @@ test('Japanese evidence requires committed converted text and trusted compositio
   assert.equal(japaneseWordBehavior({ ...direct, events: [] }, 'textarea'), 'unknown');
 });
 
+test('Japanese textarea proof admits one native Enter line break after committed composition', () => {
+  const target = 'yt-viewing-ime-input';
+  const events: ImeCheckpoint['events'] = [
+    { type: 'compositionstart', target, trusted: true },
+    { type: 'compositionupdate', target, trusted: true, data: '日本語' },
+    { type: 'input', target, trusted: true, data: '日本語' },
+    { type: 'compositionend', target, trusted: false, data: '日本語' },
+    { type: 'keydown', target, trusted: true, key: 'Enter', isComposing: false },
+    { type: 'beforeinput', target, trusted: true, inputType: 'insertLineBreak' },
+    { type: 'input', target, trusted: true, inputType: 'insertLineBreak' },
+  ];
+  const converted = checkpoint({
+    input: '日本語\n',
+    settledInput: '日本語\n',
+    settledFocus: target,
+    events,
+  });
+  assert.equal(japaneseWordBehavior(converted, 'textarea'), 'converted-japanese');
+  for (const changed of [
+    events.filter((event) => event.type !== 'keydown'),
+    events.filter((event) => event.type !== 'beforeinput'),
+    events.filter((event) => event.inputType !== 'insertLineBreak'),
+    events.map((event) => (event.type === 'keydown' ? { ...event, trusted: false } : event)),
+    events.map((event) =>
+      event.inputType === 'insertLineBreak' ? { ...event, trusted: false } : event
+    ),
+    events.map((event) => (event.type === 'keydown' ? { ...event, isComposing: true } : event)),
+    events.slice(0, 4).concat(events.slice(5), events.slice(4, 5)),
+  ]) {
+    assert.equal(japaneseWordBehavior({ ...converted, events: changed }, 'textarea'), 'unknown');
+  }
+  for (const text of ['\n日本語', ' 日本語', '日本語\n\n', '日本語x', '日本語 \n']) {
+    assert.equal(
+      japaneseWordBehavior({ ...converted, input: text, settledInput: text }, 'textarea'),
+      'unknown'
+    );
+  }
+  assert.equal(
+    japaneseWordBehavior({ ...converted, settledInput: '日本語' }, 'textarea'),
+    'unknown'
+  );
+  assert.equal(
+    japaneseWordBehavior(
+      checkpoint({
+        focus: 'yt-viewing-ime-editable',
+        editable: '日本語\n',
+        settledEditable: '日本語\n',
+        settledFocus: 'yt-viewing-ime-editable',
+        events: events.map((event) => ({ ...event, target: 'yt-viewing-ime-editable' })),
+      }),
+      'editable'
+    ),
+    'unknown'
+  );
+});
+
 test('pause settings comparison only ignores valid hex color letter case', () => {
   const before = JSON.stringify({
     enabled: true,

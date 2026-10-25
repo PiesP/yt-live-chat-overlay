@@ -532,8 +532,40 @@ export function japaneseWordBehavior(
       typeof event.data === 'string' &&
       event.data.length > 0
   );
+  let committedText = text === '日本語';
   if (
-    text === '日本語' &&
+    target === 'textarea' &&
+    text === '日本語\n' &&
+    compositionEnd >= 0 &&
+    events[compositionEnd]?.data === '日本語'
+  ) {
+    const enter = events.findIndex(
+      (event, index) =>
+        index > compositionEnd &&
+        event.type === 'keydown' &&
+        event.key === 'Enter' &&
+        event.trusted === true &&
+        event.isComposing === false
+    );
+    const beforeLineBreak = events.findIndex(
+      (event, index) =>
+        index > enter &&
+        event.type === 'beforeinput' &&
+        event.trusted === true &&
+        event.inputType === 'insertLineBreak'
+    );
+    const lineBreak = events.findIndex(
+      (event, index) =>
+        index > beforeLineBreak &&
+        event.type === 'input' &&
+        event.trusted === true &&
+        event.inputType === 'insertLineBreak'
+    );
+    committedText =
+      enter > compositionEnd && beforeLineBreak > enter && lineBreak > beforeLineBreak;
+  }
+  if (
+    committedText &&
     compositionStart >= 0 &&
     compositionUpdate > compositionStart &&
     compositionEnd > compositionUpdate
