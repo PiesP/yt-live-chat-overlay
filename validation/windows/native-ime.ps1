@@ -9,7 +9,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseToggleProbe', 'JapaneseDuringComposition', 'NativeSpace')]
+    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseDirectCtrlSpaceRoundTrip', 'JapaneseToggleProbe', 'JapaneseDuringComposition', 'NativeSpace')]
     [string]$Sequence,
 
     [Parameter(Mandatory = $true)]
@@ -266,7 +266,7 @@ $receipt = [ordered]@{
     cleanup = [ordered]@{
         releasedKeys = $true
         restoreActionDispatched = $false
-        parityActionsBalanced = $(if ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip')) { $false } else { 'not-applicable' })
+        parityActionsBalanced = $(if ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseDirectCtrlSpaceRoundTrip')) { $false } else { 'not-applicable' })
         modeRestored = 'not-observed'
         hklRestored = 'not-checked'
     }
@@ -473,6 +473,39 @@ try {
             Start-Sleep -Milliseconds 100
             Invoke-JapaneseWord $false
         }
+        'JapaneseDirectCtrlSpaceRoundTrip' {
+            Invoke-Combo 0x10 0x14 'Japanese-Shift-CapsLock-Alphanumeric'
+            Start-Sleep -Milliseconds 100
+            Invoke-JapaneseWord $false
+            $pendingMarker = $receiptFile + '.pending'
+            $gateAck = $receiptFile + '.ack'
+            if ([IO.File]::Exists($pendingMarker) -or [IO.File]::Exists($gateAck)) {
+                throw 'Direct-control gate files already exist.'
+            }
+            $directToken = [guid]::NewGuid().ToString('N')
+            [IO.File]::WriteAllText($pendingMarker, (@{
+                kind = 'direct-control'
+                token = $directToken
+                target = 'yt-viewing-ime-editable'
+            } | ConvertTo-Json -Compress))
+            $receipt.actions += [ordered]@{ kind = 'direct-control-gate'; label = 'direct-observation-requested'; atMs = $clock.ElapsedMilliseconds }
+            while (-not [IO.File]::Exists($gateAck)) {
+                Assert-OwnedForeground
+                Start-Sleep -Milliseconds 40
+            }
+            $gate = Get-Content -LiteralPath $gateAck -Raw | ConvertFrom-Json
+            if ($gate.allow -cne $true -or $gate.token -cne $directToken) {
+                throw 'Owned browser did not acknowledge the same direct-control observation token.'
+            }
+            $receipt.actions += [ordered]@{ kind = 'direct-control-gate'; label = 'direct-observation-acknowledged'; atMs = $clock.ElapsedMilliseconds }
+            Invoke-Combo 0x11 0x20 'Ctrl-Space-pause'
+            $pendingToggle = 'ctrl-space'
+            Start-Sleep -Milliseconds 500
+            Invoke-Combo 0x11 0x20 'Ctrl-Space-resume'
+            $pendingToggle = $null
+            $receipt.cleanup.restoreActionDispatched = $true
+            $receipt.cleanup.parityActionsBalanced = $true
+        }
         'JapaneseToggleProbe' {
             # Only the caller's observed direct-latin result may authorize this one toggle.
             Invoke-Combo 0x12 0xC0 'Japanese-Alt-Backquote-IME-toggle'
@@ -552,7 +585,7 @@ try {
             }
         }
     }
-    if ($partialInput -and $Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip')) {
+    if ($partialInput -and $Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseDirectCtrlSpaceRoundTrip')) {
         $receipt.cleanup.parityActionsBalanced = $false
     }
     if ($null -ne $target -and $originalHkl -ne [IntPtr]::Zero) {
@@ -596,7 +629,7 @@ try {
     $receipt.cleanup.togglePending = $pendingToggle
     $receipt.cleanup.elapsedMs = $clock.ElapsedMilliseconds
     if ($receipt.errors.Count -gt 0 -or -not $receipt.cleanup.releasedKeys -or
-        ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip') -and $receipt.cleanup.parityActionsBalanced -ne $true) -or
+        ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseDirectCtrlSpaceRoundTrip') -and $receipt.cleanup.parityActionsBalanced -ne $true) -or
         $receipt.cleanup.hklRestored -ne 'verified') {
         $receipt.status = 'aborted'
     }

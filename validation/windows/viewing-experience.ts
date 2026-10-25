@@ -85,6 +85,7 @@ type NativeImeSequence =
   | 'JapaneseCurrent'
   | 'JapaneseHiragana'
   | 'JapaneseDirect'
+  | 'JapaneseDirectCtrlSpaceRoundTrip'
   | 'JapaneseToggleProbe'
   | 'JapaneseDuringComposition'
   | 'NativeSpace';
@@ -103,8 +104,8 @@ type NativeImeStage =
   | 'japanese-toggle-confirm-editable'
   | 'japanese-direct'
   | 'japanese-direct-editable'
+  | 'japanese-direct-editable-shortcut'
   | 'japanese-composing-shortcut'
-  | 'japanese-editable-shortcut'
   | 'japanese-player-shortcut'
   | 'japanese-player-space'
   | 'japanese-player-space-resume'
@@ -129,12 +130,24 @@ type CompositionGate = {
   eventCount: number;
   traceOverflow: boolean;
 };
+type DirectGate = {
+  observed: boolean;
+  focus: string | null;
+  editable: string | null;
+  eventCount: number;
+  traceOverflow: boolean;
+  atMs: number;
+  overlayPaused: boolean;
+  videoPaused: boolean | null;
+  videoTime: number | null;
+};
 type NativeImeAction = {
   receiptFile: string;
   receipt: unknown;
   error: string | null;
   samples: NativeControlSample[];
   compositionGate: CompositionGate | undefined;
+  directGate: DirectGate | undefined;
 };
 
 /** Require an unclosed trusted composition on the owned textarea at the key boundary. */
@@ -153,6 +166,229 @@ export function japaneseCompositionOpen(
       .some((event) => event.type === 'compositionupdate' && event.trusted === true) &&
     !events.slice(start + 1).some((event) => event.type === 'compositionend')
   );
+}
+
+/** Recognize the observed interruption of an open Japanese composition at Ctrl+Space. */
+export function assertInterruptedJapaneseComposition(
+  state: ImeCheckpoint,
+  gate: CompositionGate | undefined
+): {
+  route: 'not-delivered-to-document';
+  preGatePrefix: string;
+  literalSpace: string;
+  continuedComposition: string;
+  committedText: string;
+} {
+  const target = 'yt-viewing-ime-input';
+  assert(gate?.open === true && gate.focus === target && gate.traceOverflow === false);
+  assert.equal(state.traceOverflow, false);
+  assert(
+    Number.isInteger(gate.eventCount) &&
+      gate.eventCount > 0 &&
+      gate.eventCount < state.events.length,
+    'Open composition gate has no ordered event boundary'
+  );
+  const before = state.events.slice(0, gate.eventCount);
+  const after = state.events.slice(gate.eventCount);
+  assert(
+    japaneseCompositionOpen({ focus: gate.focus, events: before, traceOverflow: false }),
+    'Trusted Japanese composition was not open at the native shortcut gate'
+  );
+  const preUpdate = before.findLastIndex(
+    (event) =>
+      event.type === 'compositionupdate' &&
+      event.target === target &&
+      event.trusted === true &&
+      typeof event.data === 'string'
+  );
+  const prefix = before[preUpdate]?.data;
+  assert(
+    typeof prefix === 'string' && prefix.length >= 2 && /[\u3040-\u309f]/u.test(prefix),
+    'Open composition lacks a Japanese prefix'
+  );
+  assert(
+    before.findIndex(
+      (event, index) =>
+        index > preUpdate &&
+        event.type === 'input' &&
+        event.target === target &&
+        event.trusted === true &&
+        event.inputType === 'insertCompositionText' &&
+        event.data === prefix
+    ) > preUpdate,
+    'Open composition prefix was not delivered as trusted input'
+  );
+  const literalSpace = `${prefix} `;
+  const spaceUpdate = after.findIndex(
+    (event) =>
+      event.type === 'compositionupdate' && event.target === target && event.trusted === true
+  );
+  const spaceInput = after.findIndex(
+    (event, index) =>
+      index > spaceUpdate &&
+      event.type === 'input' &&
+      event.target === target &&
+      event.trusted === true &&
+      event.inputType === 'insertCompositionText'
+  );
+  assert(
+    spaceUpdate >= 0 &&
+      after[spaceUpdate]?.data === literalSpace &&
+      spaceInput > spaceUpdate &&
+      after[spaceInput]?.data === literalSpace,
+    'Native shortcut produced no trusted literal-space composition effect'
+  );
+  const continuedUpdate = after.findIndex(
+    (event, index) =>
+      index > spaceInput &&
+      event.type === 'compositionupdate' &&
+      event.target === target &&
+      event.trusted === true &&
+      typeof event.data === 'string' &&
+      event.data.startsWith(literalSpace) &&
+      event.data.length > literalSpace.length &&
+      /[\u3040-\u309f\u4e00-\u9fff]/u.test(event.data.slice(literalSpace.length))
+  );
+  const continued = after[continuedUpdate]?.data;
+  assert(typeof continued === 'string');
+  assert(
+    after
+      .slice(spaceUpdate + 1, continuedUpdate)
+      .every(
+        (event) =>
+          event.type !== 'compositionupdate' ||
+          event.target !== target ||
+          (event.trusted === true &&
+            typeof event.data === 'string' &&
+            event.data.startsWith(literalSpace))
+      ),
+    'Intermediate composition update lost the literal-space prefix'
+  );
+  const continuedInput = after.findIndex(
+    (event, index) =>
+      index > continuedUpdate &&
+      event.type === 'input' &&
+      event.target === target &&
+      event.trusted === true &&
+      event.inputType === 'insertCompositionText' &&
+      event.data === continued
+  );
+  assert(
+    continuedUpdate > spaceInput && continuedInput > continuedUpdate,
+    'Japanese composition did not continue after the literal-space effect'
+  );
+  const commit = after.findLastIndex(
+    (event, index) =>
+      index > continuedInput &&
+      event.type === 'compositionend' &&
+      event.target === target &&
+      typeof event.data === 'string' &&
+      event.data.length > 0
+  );
+  const committed = after[commit]?.data;
+  assert(
+    typeof committed === 'string' &&
+      committed !== prefix &&
+      /[\u3040-\u309f\u4e00-\u9fff]/u.test(committed) &&
+      committed === state.input &&
+      committed === state.settledInput,
+    'Actual Japanese commit and settled text differ'
+  );
+  assert(
+    after.findIndex(
+      (event, index) =>
+        index > continuedInput &&
+        index < commit &&
+        event.type === 'input' &&
+        event.target === target &&
+        event.trusted === true &&
+        event.inputType === 'insertCompositionText' &&
+        event.data === committed
+    ) > continuedInput,
+    'Committed Japanese text lacks trusted input'
+  );
+  assert.equal(state.focus, target);
+  assert.equal(state.settledFocus, target);
+  assert.equal(state.overlayPaused, false);
+  assert.equal(state.videoPaused, false);
+  assert.equal(
+    state.events.filter((event) => event.type === 'document-keydown').length,
+    0,
+    'Interrupted shortcut reached the document keydown listener'
+  );
+  assert.equal(state.events.filter((event) => event.type === 'post-ctrl-space').length, 0);
+  return {
+    route: 'not-delivered-to-document',
+    preGatePrefix: prefix,
+    literalSpace,
+    continuedComposition: continued,
+    committedText: committed,
+  };
+}
+
+/** Require genuine direct Latin input in the owned editable before native shortcut dispatch. */
+export function japaneseDirectGateObserved(
+  state: Pick<
+    ImeCheckpoint,
+    'focus' | 'editable' | 'events' | 'traceOverflow' | 'overlayPaused' | 'videoPaused'
+  >
+): boolean {
+  if (
+    state.focus !== 'yt-viewing-ime-editable' ||
+    state.editable !== 'nihongo' ||
+    state.traceOverflow ||
+    state.overlayPaused ||
+    state.videoPaused !== false
+  )
+    return false;
+  const target = state.events.filter((event) => event.target === 'yt-viewing-ime-editable');
+  if (
+    target.some((event) => String(event.type).startsWith('composition')) ||
+    state.events.some((event) => event.type === 'document-keydown')
+  )
+    return false;
+  let last = -1;
+  for (const letter of 'nihongo') {
+    const key = target.findIndex(
+      (event, index) =>
+        index > last &&
+        event.type === 'keydown' &&
+        event.trusted === true &&
+        event.isComposing === false &&
+        event.key === letter
+    );
+    const before = target.findIndex(
+      (event, index) =>
+        index > key &&
+        event.type === 'beforeinput' &&
+        event.trusted === true &&
+        event.inputType === 'insertText' &&
+        event.data === letter
+    );
+    const input = target.findIndex(
+      (event, index) =>
+        index > before &&
+        event.type === 'input' &&
+        event.trusted === true &&
+        event.inputType === 'insertText' &&
+        event.data === letter
+    );
+    if (key <= last || before <= key || input <= before) return false;
+    last = input;
+  }
+  return true;
+}
+
+/** Accept only a fresh direct-control request shape; the native helper checks the matching ACK token. */
+export function directControlGateToken(markerText: string): string {
+  const request: unknown = JSON.parse(markerText);
+  assert(request && typeof request === 'object' && !Array.isArray(request));
+  assert('kind' in request && request.kind === 'direct-control');
+  assert('target' in request && request.target === 'yt-viewing-ime-editable');
+  assert(
+    'token' in request && typeof request.token === 'string' && /^[0-9a-f]{32}$/u.test(request.token)
+  );
+  return request.token;
 }
 
 async function readNativeControlSample(page: Page): Promise<NativeControlSample> {
@@ -304,10 +540,13 @@ async function runNativeImeAction({
   let error: string | null = null;
   const samples: NativeControlSample[] = [];
   const sampleAction =
-    sequence === 'CtrlSpaceRoundTrip' || sequence === 'JapaneseDuringComposition';
+    sequence === 'CtrlSpaceRoundTrip' ||
+    sequence === 'JapaneseDuringComposition' ||
+    sequence === 'JapaneseDirectCtrlSpaceRoundTrip';
   let sampling = sampleAction;
   let samplingError: string | null = null;
   let compositionGate: CompositionGate | undefined;
+  let directGate: DirectGate | undefined;
   let gateError: string | null = null;
   const sampler = (async () => {
     while (sampling && samples.length < 600) {
@@ -318,34 +557,82 @@ async function runNativeImeAction({
     samplingError = String(cause);
   });
   const gate =
-    sequence === 'JapaneseDuringComposition'
+    sequence === 'JapaneseDuringComposition' || sequence === 'JapaneseDirectCtrlSpaceRoundTrip'
       ? (async () => {
           const marker = `${receiptPath}.pending`;
           const acknowledgement = `${receiptPath}.ack`;
           const deadline = Date.now() + 30_000;
           while (Date.now() < deadline) {
             try {
-              await readFile(marker, 'utf8');
+              const markerText = await readFile(marker, 'utf8');
               const observationDeadline = Math.min(deadline, Date.now() + 1_500);
-              do {
-                const observed = await page.evaluate(() => ({
-                  focus: document.activeElement?.id ?? null,
-                  events: window.__ytViewingImeEvents ?? [],
-                  traceOverflow: window.__ytViewingImeTraceOverflow === true,
-                }));
-                compositionGate = {
-                  open: japaneseCompositionOpen(observed),
-                  focus: observed.focus,
-                  eventCount: observed.events.length,
-                  traceOverflow: observed.traceOverflow,
-                };
-                if (compositionGate.open || compositionGate.traceOverflow) break;
-                await new Promise((resolve) => setTimeout(resolve, 50));
-              } while (Date.now() < observationDeadline);
-              assert(compositionGate);
+              let token: string | undefined;
+              if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip') {
+                token = directControlGateToken(markerText);
+                do {
+                  const observed = await page.evaluate(() => {
+                    const editable = document.querySelector<HTMLElement>(
+                      '#yt-viewing-ime-editable'
+                    );
+                    const video = document.querySelector<HTMLVideoElement>('#movie_player video');
+                    return {
+                      atMs: performance.now(),
+                      focus: document.activeElement?.id ?? null,
+                      editable: editable?.textContent ?? null,
+                      events: window.__ytViewingImeEvents ?? [],
+                      traceOverflow: window.__ytViewingImeTraceOverflow === true,
+                      overlayPaused: Array.from(
+                        document.querySelectorAll<HTMLElement>('#yt-live-chat-overlay div')
+                      ).some(
+                        (node) =>
+                          node.textContent === 'Paused' && getComputedStyle(node).display !== 'none'
+                      ),
+                      videoPaused: video?.paused ?? null,
+                      videoTime: video?.currentTime ?? null,
+                    };
+                  });
+                  directGate = {
+                    observed: japaneseDirectGateObserved(observed),
+                    focus: observed.focus,
+                    editable: observed.editable,
+                    eventCount: observed.events.length,
+                    traceOverflow: observed.traceOverflow,
+                    atMs: observed.atMs,
+                    overlayPaused: observed.overlayPaused,
+                    videoPaused: observed.videoPaused,
+                    videoTime: observed.videoTime,
+                  };
+                  if (directGate.observed || directGate.traceOverflow) break;
+                  await new Promise((resolve) => setTimeout(resolve, 50));
+                } while (Date.now() < observationDeadline);
+                assert(directGate);
+              } else {
+                do {
+                  const observed = await page.evaluate(() => ({
+                    focus: document.activeElement?.id ?? null,
+                    events: window.__ytViewingImeEvents ?? [],
+                    traceOverflow: window.__ytViewingImeTraceOverflow === true,
+                  }));
+                  compositionGate = {
+                    open: japaneseCompositionOpen(observed),
+                    focus: observed.focus,
+                    eventCount: observed.events.length,
+                    traceOverflow: observed.traceOverflow,
+                  };
+                  if (compositionGate.open || compositionGate.traceOverflow) break;
+                  await new Promise((resolve) => setTimeout(resolve, 50));
+                } while (Date.now() < observationDeadline);
+                assert(compositionGate);
+              }
               await writeFile(
                 `${acknowledgement}.tmp`,
-                JSON.stringify({ allow: compositionGate.open }),
+                JSON.stringify({
+                  allow:
+                    sequence === 'JapaneseDirectCtrlSpaceRoundTrip'
+                      ? directGate?.observed === true
+                      : compositionGate?.open === true,
+                  ...(token ? { token } : {}),
+                }),
                 { flag: 'wx' }
               );
               await rename(`${acknowledgement}.tmp`, acknowledgement);
@@ -367,6 +654,17 @@ async function runNativeImeAction({
     error = `Native helper failed (code=${String(failure.code ?? 'unknown')}, signal=${String(failure.signal ?? 'none')}, timedOut=${failure.killed === true})`;
   } finally {
     await gate;
+    const directGateAtMs = directGate?.observed === true ? directGate.atMs : null;
+    if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip' && directGateAtMs !== null) {
+      const until = Date.now() + 1_500;
+      while (Date.now() < until && samplingError === null) {
+        const postGate = samples.filter((sample) => sample.atMs >= directGateAtMs);
+        const first = postGate[0];
+        const last = postGate.at(-1);
+        if (postGate.length >= 8 && first && last && last.atMs - first.atMs >= 500) break;
+        await new Promise((resolve) => setTimeout(resolve, 75));
+      }
+    }
     sampling = false;
     await sampler;
     if (sampleAction && samplingError === null) {
@@ -386,7 +684,7 @@ async function runNativeImeAction({
     const failure = cause as NodeJS.ErrnoException;
     error ??= `Native helper left no readable receipt (${failure.code ?? 'invalid-json'})`;
   }
-  return { receiptFile, receipt, error, samples, compositionGate };
+  return { receiptFile, receipt, error, samples, compositionGate, directGate };
 }
 
 function assertNativeImeAction(
@@ -432,7 +730,9 @@ function assertNativeImeAction(
   assert.equal(receipt?.cleanup?.hklRestored, 'verified');
   assert.equal(
     receipt?.cleanup?.parityActionsBalanced,
-    sequence === 'ComposeToggleRoundTrip' || sequence === 'CtrlSpaceRoundTrip'
+    sequence === 'ComposeToggleRoundTrip' ||
+      sequence === 'CtrlSpaceRoundTrip' ||
+      sequence === 'JapaneseDirectCtrlSpaceRoundTrip'
       ? true
       : 'not-applicable'
   );
@@ -664,7 +964,7 @@ export function japaneseIncompleteVerdicts(
 function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeImeSequence): void {
   assertNativeImeAction(action, sequence, false, true);
   const receipt = action.receipt as {
-    actions?: Array<{ kind?: string; label?: string; accepted?: number }>;
+    actions?: Array<{ kind?: string; label?: string; accepted?: number; atMs?: number }>;
     sendCounts?: { acceptedEvents?: number };
   };
   const keyboard = receipt.actions?.filter((entry) => entry.kind === 'keyboard') ?? [];
@@ -678,6 +978,41 @@ function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeIm
   if (sequence === 'JapaneseDirect') {
     assert.equal(labels[0], 'Japanese-Shift-CapsLock-Alphanumeric');
     assert(!labels.includes('japanese-conversion-candidate'));
+  }
+  if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip') {
+    assert.deepEqual(labels, [
+      'Japanese-Shift-CapsLock-Alphanumeric',
+      ...[0x4e, 0x49, 0x48, 0x4f, 0x4e, 0x47, 0x4f].map(
+        (key) => `japanese-word-vk-${key.toString(16).toUpperCase()}`
+      ),
+      'japanese-commit',
+      'Ctrl-Space-pause',
+      'Ctrl-Space-resume',
+    ]);
+    assert.equal(receipt.sendCounts?.acceptedEvents, 28);
+    const gateLabels = receipt.actions
+      ?.filter((entry) => entry.kind === 'direct-control-gate')
+      .map((entry) => entry.label);
+    assert.deepEqual(gateLabels, [
+      'direct-observation-requested',
+      'direct-observation-acknowledged',
+    ]);
+    const actions = receipt.actions ?? [];
+    const acknowledged = actions.findIndex(
+      (entry) => entry.label === 'direct-observation-acknowledged'
+    );
+    const pause = actions.findIndex((entry) => entry.label === 'Ctrl-Space-pause');
+    const resume = actions.findIndex((entry) => entry.label === 'Ctrl-Space-resume');
+    assert(
+      acknowledged > 0 && pause === acknowledged + 1 && resume === pause + 1,
+      'Native direct mode changed between browser observation and Ctrl+Space actions'
+    );
+    const pauseAt = actions[pause]?.atMs;
+    const resumeAt = actions[resume]?.atMs;
+    assert(
+      typeof pauseAt === 'number' && typeof resumeAt === 'number' && resumeAt - pauseAt >= 500
+    );
+    return;
   }
   if (sequence === 'JapaneseHiragana') assert.equal(labels[0], 'Japanese-Ctrl-CapsLock-Hiragana');
   if (sequence === 'JapaneseToggleProbe') {
@@ -763,6 +1098,44 @@ export function assertJapaneseShortcut(
   }
   assert(samples.every((sample) => sample.overlayPaused === false));
   return 'not-delivered-to-document';
+}
+
+/** Compare both native Ctrl+Space actions to the direct text observed inside that same action. */
+export function assertJapaneseDirectShortcut(
+  state: ImeCheckpoint,
+  samples: NativeControlSample[],
+  gate: DirectGate | undefined
+): 'delivered' | 'document-ignored' | 'not-delivered-to-document' {
+  assert(
+    gate?.observed === true &&
+      gate.traceOverflow === false &&
+      Number.isInteger(gate.eventCount) &&
+      gate.eventCount > 0 &&
+      gate.eventCount <= state.events.length &&
+      Number.isFinite(gate.atMs),
+    'Direct Latin input was not observed at the same native action boundary'
+  );
+  assert(
+    japaneseDirectGateObserved({
+      focus: gate.focus,
+      editable: gate.editable,
+      events: state.events.slice(0, gate.eventCount),
+      traceOverflow: gate.traceOverflow,
+      overlayPaused: gate.overlayPaused,
+      videoPaused: gate.videoPaused,
+    }),
+    'Trusted direct Latin trace changed before Ctrl+Space'
+  );
+  assert.equal(state.settledEditable, gate.editable);
+  assert.equal(state.settledFocus, gate.focus);
+  assert(
+    typeof gate.videoTime === 'number' &&
+      typeof state.videoTime === 'number' &&
+      (state.videoTime > gate.videoTime + 0.02 || state.videoTime < gate.videoTime - 1),
+    'Video did not advance from the observed direct-input gate'
+  );
+  const shortcutSamples = samples.filter((sample) => sample.atMs >= gate.atMs);
+  return assertJapaneseShortcut(state, shortcutSamples, 'yt-viewing-ime-editable', gate.editable);
 }
 
 /** The fixture player model must receive exactly one trusted native Space per action. */
@@ -2069,6 +2442,13 @@ async function exerciseJapaneseIme(
     if (sequence === 'JapaneseDuringComposition') {
       assert.equal(action.compositionGate?.open, true, 'Composition was not open at shortcut gate');
     }
+    if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip') {
+      assert.equal(
+        action.directGate?.observed,
+        true,
+        'Trusted direct Latin input was not observed before Ctrl+Space'
+      );
+    }
     return { action, state };
   };
   const convertedWord = async (
@@ -2154,18 +2534,25 @@ async function exerciseJapaneseIme(
 
     if (verdicts['JI-01']?.status === 'Pass') {
       try {
-        await resetViewingImeTrace(page);
-        const editableBefore = await readViewingImeCheckpoint(page);
-        const editable = await act('CtrlSpaceRoundTrip', 'japanese-editable-shortcut', 'editable');
-        const editableRoute = assertJapaneseShortcut(
+        await resetViewingImeTrace(page, true);
+        const editable = await act(
+          'JapaneseDirectCtrlSpaceRoundTrip',
+          'japanese-direct-editable-shortcut',
+          'editable',
+          true
+        );
+        const editableRoute = assertJapaneseDirectShortcut(
           editable.state,
           editable.action.samples,
-          'yt-viewing-ime-editable',
-          editableBefore.editable ?? null
+          editable.action.directGate
         );
         result.observations.push({
-          stage: 'japanese-editable-shortcut-route',
+          stage: 'japanese-direct-editable-shortcut-route',
           route: editableRoute,
+          directGate: editable.action.directGate,
+          postGateSampleCount: editable.action.samples.filter(
+            (sample) => sample.atMs >= (editable.action.directGate?.atMs ?? Infinity)
+          ).length,
         });
         await assertVideoAdvances(page);
 
@@ -2176,22 +2563,15 @@ async function exerciseJapaneseIme(
           'textarea',
           true
         );
-        assert.equal(japaneseWordBehavior(composing.state, 'textarea'), 'converted-japanese');
-        const composingPresses = composing.state.events.filter(
-          (event) => event.type === 'document-keydown'
+        const interruption = assertInterruptedJapaneseComposition(
+          composing.state,
+          composing.action.compositionGate
         );
-        assert(composingPresses.length <= 1, 'Composing shortcut was delivered more than once');
-        assert(
-          composingPresses.every(
-            (event) => event.trusted === true && event.focus === 'yt-viewing-ime-input'
-          )
-        );
-        assert.equal(composing.state.overlayPaused, false);
-        assert.equal(composing.state.videoPaused, false);
         result.observations.push({
           stage: 'japanese-composing-shortcut-route',
-          route: composingPresses.length ? 'document-ignored' : 'not-delivered-to-document',
-          trustedDocumentPresses: composingPresses.length,
+          ...interruption,
+          nativeEffect: 'literal-space-in-composition',
+          trustedDocumentPresses: 0,
         });
         await assertVideoAdvances(page);
 

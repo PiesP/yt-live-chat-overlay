@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -17,6 +18,10 @@ import {
   japaneseCapsLockComparison,
   japaneseIncompleteVerdicts,
   japaneseCompositionOpen,
+  assertInterruptedJapaneseComposition,
+  japaneseDirectGateObserved,
+  assertJapaneseDirectShortcut,
+  directControlGateToken,
   assertJapanesePlayerSpace,
   assertJapaneseShortcut,
   type ImeCheckpoint,
@@ -35,6 +40,101 @@ function checkpoint(overrides: Partial<ImeCheckpoint> = {}): ImeCheckpoint {
     overlayPaused: false,
     ...overrides,
   };
+}
+
+// Projected from retained Japanese Enter 08 native browser trace; event order and gate offset are exact.
+type Actual08TraceRow = readonly [
+  string,
+  boolean,
+  string | null,
+  string | null,
+  string | null,
+  boolean | null,
+];
+const actual08CompositionRows: Actual08TraceRow[] = [
+  ['keydown', true, null, null, 'Control', false],
+  ['keydown', true, null, null, 'Process', false],
+  ['compositionstart', true, '', null, null, null],
+  ['compositionupdate', true, 'ｎ', null, null, null],
+  ['beforeinput', true, 'ｎ', 'insertCompositionText', null, null],
+  ['input', true, 'ｎ', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'に', null, null, null],
+  ['beforeinput', true, 'に', 'insertCompositionText', null, null],
+  ['input', true, 'に', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'にｈ', null, null, null],
+  ['beforeinput', true, 'にｈ', 'insertCompositionText', null, null],
+  ['input', true, 'にｈ', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'にほ', null, null, null],
+  ['beforeinput', true, 'にほ', 'insertCompositionText', null, null],
+  ['input', true, 'にほ', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'にほｎ', null, null, null],
+  ['beforeinput', true, 'にほｎ', 'insertCompositionText', null, null],
+  ['input', true, 'にほｎ', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['keydown', true, null, null, 'Control', true],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'にほｎ ', null, null, null],
+  ['beforeinput', true, 'にほｎ ', 'insertCompositionText', null, null],
+  ['input', true, 'にほｎ ', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'にほｎ ｇ', null, null, null],
+  ['beforeinput', true, 'にほｎ ｇ', 'insertCompositionText', null, null],
+  ['input', true, 'にほｎ ｇ', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, 'にほｎ ご', null, null, null],
+  ['beforeinput', true, 'にほｎ ご', 'insertCompositionText', null, null],
+  ['input', true, 'にほｎ ご', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, '丹保n 語', null, null, null],
+  ['beforeinput', true, '丹保n 語', 'insertCompositionText', null, null],
+  ['input', true, '丹保n 語', 'insertCompositionText', null, null],
+  ['keydown', true, null, null, 'Process', true],
+  ['compositionupdate', true, '丹保n 語', null, null, null],
+  ['beforeinput', true, '丹保n 語', 'insertCompositionText', null, null],
+  ['input', true, '丹保n 語', 'insertCompositionText', null, null],
+  ['compositionend', false, '丹保n 語', null, null, null],
+];
+const actual08DirectRows: Actual08TraceRow[] = [
+  ['keydown', true, null, null, 'Shift', false],
+  ['keydown', true, null, null, 'n', false],
+  ['beforeinput', true, 'n', 'insertText', null, null],
+  ['input', true, 'n', 'insertText', null, null],
+  ['keydown', true, null, null, 'i', false],
+  ['beforeinput', true, 'i', 'insertText', null, null],
+  ['input', true, 'i', 'insertText', null, null],
+  ['keydown', true, null, null, 'h', false],
+  ['beforeinput', true, 'h', 'insertText', null, null],
+  ['input', true, 'h', 'insertText', null, null],
+  ['keydown', true, null, null, 'o', false],
+  ['beforeinput', true, 'o', 'insertText', null, null],
+  ['input', true, 'o', 'insertText', null, null],
+  ['keydown', true, null, null, 'n', false],
+  ['beforeinput', true, 'n', 'insertText', null, null],
+  ['input', true, 'n', 'insertText', null, null],
+  ['keydown', true, null, null, 'g', false],
+  ['beforeinput', true, 'g', 'insertText', null, null],
+  ['input', true, 'g', 'insertText', null, null],
+  ['keydown', true, null, null, 'o', false],
+  ['beforeinput', true, 'o', 'insertText', null, null],
+  ['input', true, 'o', 'insertText', null, null],
+  ['keydown', true, null, null, 'Enter', false],
+  ['beforeinput', true, null, 'insertParagraph', null, null],
+  ['input', true, null, 'insertParagraph', null, null],
+];
+function actual08Events(rows: Actual08TraceRow[], target: string): ImeCheckpoint['events'] {
+  return rows.map(([type, trusted, data, inputType, key, isComposing]) => ({
+    type,
+    target,
+    trusted,
+    data,
+    inputType,
+    key,
+    isComposing,
+  }));
 }
 
 test('Hangul proof accepts observed end with trusted native start, update, key and input', () => {
@@ -404,6 +504,179 @@ test('Japanese composing shortcut gate requires an open trusted composition', ()
   );
   assert.equal(japaneseCompositionOpen({ ...active, focus: 'movie_player' }), false);
   assert.equal(japaneseCompositionOpen({ ...active, traceOverflow: true }), false);
+});
+
+test('actual Enter 08 interrupted composition records native literal space without document delivery', () => {
+  const target = 'yt-viewing-ime-input';
+  const events = actual08Events(actual08CompositionRows, target);
+  const state = checkpoint({
+    input: '丹保n 語',
+    settledInput: '丹保n 語',
+    settledFocus: target,
+    events,
+  });
+  const gate = { open: true, focus: target, eventCount: 22, traceOverflow: false };
+  assert.deepEqual(assertInterruptedJapaneseComposition(state, gate), {
+    route: 'not-delivered-to-document',
+    preGatePrefix: 'にほｎ',
+    literalSpace: 'にほｎ ',
+    continuedComposition: 'にほｎ ご',
+    committedText: '丹保n 語',
+  });
+  const changed = (index: number, patch: Record<string, unknown>): ImeCheckpoint => ({
+    ...state,
+    events: events.map((event, position) => (position === index ? { ...event, ...patch } : event)),
+  });
+  for (const invalid of [
+    () => assertInterruptedJapaneseComposition(state, undefined),
+    () => assertInterruptedJapaneseComposition(state, { ...gate, open: false }),
+    () => assertInterruptedJapaneseComposition(state, { ...gate, focus: 'movie_player' }),
+    () => assertInterruptedJapaneseComposition(state, { ...gate, eventCount: 21 }),
+    () => assertInterruptedJapaneseComposition(changed(19, { trusted: false }), gate),
+    () => assertInterruptedJapaneseComposition(changed(21, { trusted: false }), gate),
+    () => assertInterruptedJapaneseComposition(changed(25, { data: 'unrelated ' }), gate),
+    () => assertInterruptedJapaneseComposition(changed(27, { trusted: false }), gate),
+    () => assertInterruptedJapaneseComposition(changed(29, { data: 'unrelated' }), gate),
+    () => assertInterruptedJapaneseComposition(changed(33, { data: 'unrelated ご' }), gate),
+    () =>
+      assertInterruptedJapaneseComposition(
+        {
+          ...state,
+          events: events.map((event, index) =>
+            index === 39 || index === 43 ? { ...event, trusted: false } : event
+          ),
+        },
+        gate
+      ),
+    () => assertInterruptedJapaneseComposition(changed(44, { data: 'different' }), gate),
+    () => assertInterruptedJapaneseComposition({ ...state, settledInput: 'different' }, gate),
+    () => assertInterruptedJapaneseComposition({ ...state, focus: 'movie_player' }, gate),
+    () =>
+      assertInterruptedJapaneseComposition(
+        {
+          ...state,
+          events: [...events, { type: 'document-keydown', focus: target, trusted: true }],
+        },
+        gate
+      ),
+  ].entries())
+    assert.throws(invalid[1], /./u, `Interrupted trace variant ${invalid[0]}`);
+});
+
+test('actual Enter 08 direct input gates the same native shortcut boundary', () => {
+  const target = 'yt-viewing-ime-editable';
+  const events = actual08Events(actual08DirectRows, target);
+  const state = checkpoint({
+    focus: target,
+    editable: 'nihongo',
+    settledEditable: 'nihongo',
+    settledFocus: target,
+    events,
+  });
+  assert.equal(japaneseDirectGateObserved(state), true);
+  const gate = {
+    observed: true,
+    focus: target,
+    editable: 'nihongo',
+    eventCount: events.length,
+    traceOverflow: false,
+    atMs: 1000,
+    overlayPaused: false,
+    videoPaused: false,
+    videoTime: 1,
+  };
+  const beforeTyping: NativeControlSample[] = [
+    {
+      atMs: 0,
+      focus: target,
+      input: '',
+      editable: '',
+      overlayPaused: false,
+      videoPaused: false,
+      videoTime: 1,
+    },
+  ];
+  const postGate: NativeControlSample[] = Array.from({ length: 12 }, (_, index) => ({
+    atMs: 1000 + index * 75,
+    focus: target,
+    input: '',
+    editable: 'nihongo',
+    overlayPaused: false,
+    videoPaused: false,
+    videoTime: 2 + index * 0.075,
+  }));
+  assert.equal(
+    assertJapaneseDirectShortcut(state, [...beforeTyping, ...postGate], gate),
+    'not-delivered-to-document'
+  );
+  const changed = (index: number, patch: Record<string, unknown>): ImeCheckpoint => ({
+    ...state,
+    events: events.map((event, position) => (position === index ? { ...event, ...patch } : event)),
+  });
+  for (const invalid of [
+    { ...state, editable: 'arbitrary' },
+    { ...state, focus: 'movie_player' },
+    { ...state, traceOverflow: true },
+    changed(3, { trusted: false }),
+    changed(1, { isComposing: true }),
+    { ...state, events: [...events, { type: 'compositionstart', target, trusted: true }] },
+    { ...state, events: [...events, { type: 'document-keydown', focus: target, trusted: true }] },
+  ])
+    assert.equal(japaneseDirectGateObserved(invalid), false);
+  for (const invalidGate of [
+    undefined,
+    { ...gate, observed: false },
+    { ...gate, eventCount: 1 },
+    { ...gate, editable: 'stale' },
+  ]) {
+    assert.throws(() =>
+      assertJapaneseDirectShortcut(state, [...beforeTyping, ...postGate], invalidGate)
+    );
+  }
+  assert.throws(() =>
+    assertJapaneseDirectShortcut(
+      state,
+      [...beforeTyping, ...postGate.map((sample) => ({ ...sample, editable: 'changed' }))],
+      gate
+    )
+  );
+  assert.throws(() =>
+    assertJapaneseDirectShortcut(
+      { ...state, settledEditable: 'changed' },
+      [...beforeTyping, ...postGate],
+      gate
+    )
+  );
+  assert.throws(() =>
+    assertJapaneseDirectShortcut({ ...state, videoTime: 1 }, [...beforeTyping, ...postGate], gate)
+  );
+});
+
+test('direct-control marker rejects forged requests and native ACK requires the same token', () => {
+  const token = 'a'.repeat(32);
+  const marker = { kind: 'direct-control', target: 'yt-viewing-ime-editable', token };
+  assert.equal(directControlGateToken(JSON.stringify(marker)), token);
+  for (const invalid of [
+    '{',
+    JSON.stringify({ ...marker, kind: 'composition' }),
+    JSON.stringify({ ...marker, target: 'movie_player' }),
+    JSON.stringify({ ...marker, token: 'stale-token' }),
+    JSON.stringify({ ...marker, token: undefined }),
+  ])
+    assert.throws(() => directControlGateToken(invalid));
+  const native = readFileSync(new URL('./native-ime.ps1', import.meta.url), 'utf8');
+  assert.match(native, /\$gate\.allow -cne \$true -or \$gate\.token -cne \$directToken/u);
+  const direct = native.slice(
+    native.indexOf("'JapaneseDirectCtrlSpaceRoundTrip' {"),
+    native.indexOf("'JapaneseToggleProbe' {")
+  );
+  const acknowledged = direct.indexOf("label = 'direct-observation-acknowledged'");
+  const pause = direct.indexOf("Invoke-Combo 0x11 0x20 'Ctrl-Space-pause'");
+  assert(acknowledged >= 0 && pause > acknowledged);
+  assert.doesNotMatch(
+    direct.slice(acknowledged, pause),
+    /Request-TargetLayout|Alphanumeric|Hiragana/u
+  );
 });
 
 test('fixture player Space requires one trusted event in the focused player', () => {
