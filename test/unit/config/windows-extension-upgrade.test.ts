@@ -126,7 +126,10 @@ function archive(files: Record<string, Buffer>, replacement?: { name: string; by
   return Buffer.concat([...local, centralBytes, end]);
 }
 
-async function makeFixture(previousVersion: '0.45.7' | '0.45.8' = '0.45.7') {
+async function makeFixture(
+  previousVersion: '0.45.7' | '0.45.8' = '0.45.7',
+  candidateVersion: '0.45.8' | '0.45.9' = '0.45.8'
+) {
   const root = await mkdtemp(join(tmpdir(), 'yt-extension-upgrade-'));
   roots.push(root);
   const publicPath = previousVersion === '0.45.7' ? PUBLIC : SAME_VERSION_PUBLIC;
@@ -152,7 +155,7 @@ async function makeFixture(previousVersion: '0.45.7' | '0.45.8' = '0.45.7') {
         ? JSON.stringify({
             manifest_version: 3,
             name: 'YouTube Live Chat Overlay',
-            version: '0.45.8',
+            version: candidateVersion,
           })
         : `candidate-${name}`;
     files[name] = Buffer.from(previous);
@@ -165,7 +168,7 @@ async function makeFixture(previousVersion: '0.45.7' | '0.45.8' = '0.45.7') {
   const input = {
     schemaVersion: 1,
     previousVersion,
-    candidateVersion: '0.45.8',
+    candidateVersion,
     publicAssetUrl: publicUrl,
     publicArchive: { path: `${publicPath}/artifact.zip`, sha256: sha(zip) },
     previousExtension: {
@@ -389,6 +392,37 @@ describe('optional public Chrome extension update inputs', () => {
     expect(checked?.baseline.files['manifest.json']).toBe(
       checked?.candidate.files['manifest.json']
     );
+  });
+
+  it('admits the pinned public 0.45.8 to candidate 0.45.9 transition', async () => {
+    const fixture = await makeFixture('0.45.8', '0.45.9');
+    const checked = await readExtensionUpgradeInput(fixture.root);
+    expect(checked?.input.publicAssetUrl).toBe(SAME_VERSION_URL);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.45.8-to-candidate-0.45.9'
+    );
+    expect(checked?.input.publicArchive.path).toBe(`${SAME_VERSION_PUBLIC}/artifact.zip`);
+    expect(checked?.baseline.files['manifest.json']).not.toBe(
+      checked?.candidate.files['manifest.json']
+    );
+  });
+
+  it('rejects unsupported version pairs and crossed public paths for candidate 0.45.9', async () => {
+    const fixture = await makeFixture('0.45.8', '0.45.9');
+    for (const overrides of [
+      { previousVersion: '0.45.7' },
+      { candidateVersion: '0.45.10' },
+      { publicAssetUrl: URL },
+      { publicArchive: { ...fixture.input.publicArchive, path: `${PUBLIC}/artifact.zip` } },
+      {
+        previousExtension: {
+          ...fixture.input.previousExtension,
+          path: `${PUBLIC}/unpacked`,
+        },
+      },
+    ]) {
+      expect(() => validateExtensionUpgradeInput({ ...fixture.input, ...overrides })).toThrow();
+    }
   });
 
   it('rejects a same-version update when the actual inventories are identical', async () => {

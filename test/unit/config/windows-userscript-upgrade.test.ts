@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,23 +29,30 @@ console.log('fixture');
 `;
 
 async function fixture(
-  overrides: { baseline?: string; candidate?: string; input?: Record<string, unknown> } = {}
+  overrides: {
+    baseline?: string;
+    candidate?: string;
+    input?: Record<string, unknown>;
+    candidateVersion?: '0.45.8' | '0.45.9';
+  } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'yt-upgrade-input-test-'));
   roots.push(root);
   const directory = join(root, 'validation/windows/release-upgrade');
   await mkdir(directory, { recursive: true });
   await mkdir(join(root, 'dist'));
-  const baseline = overrides.baseline ?? metadata(baselineVersion, true, candidateDownloadUrl);
-  const candidate = overrides.candidate ?? metadata(candidateVersion, true, candidateDownloadUrl);
+  const nextVersion = overrides.candidateVersion ?? candidateVersion;
+  const previousVersion = nextVersion === '0.45.9' ? '0.45.8' : baselineVersion;
+  const baseline = overrides.baseline ?? metadata(previousVersion, true, candidateDownloadUrl);
+  const candidate = overrides.candidate ?? metadata(nextVersion, true, candidateDownloadUrl);
   const input = overrides.input ?? {
     schemaVersion: 1,
     baselineSha256: upgrade.sha256(Buffer.from(baseline)),
-    candidateVersion,
-    publishedAssetUrl: assetUrl,
+    candidateVersion: nextVersion,
+    publishedAssetUrl: assetUrl.replace('v0.45.7/', `v${previousVersion}/`),
   };
   await writeFile(join(directory, 'input.json'), JSON.stringify(input));
-  await writeFile(join(directory, 'public-v0.45.7.user.js'), baseline);
+  await writeFile(join(directory, `public-v${previousVersion}.user.js`), baseline);
   await writeFile(join(root, 'dist/yt-live-chat-overlay.user.js'), candidate);
   return { root, directory };
 }
@@ -91,6 +98,44 @@ describe('installed manager upgrade inputs', () => {
       const { root } = await fixture(overrides);
       await expect(upgrade.loadUpgradeInputs(root)).rejects.toThrow('download URL changed');
     }
+  });
+
+  it('loads the pinned public 0.45.8 baseline for candidate 0.45.9', async () => {
+    const { root } = await fixture({ candidateVersion: '0.45.9' });
+    const input = await upgrade.loadUpgradeInputs(root);
+    expect(input?.baseline.version).toBe('0.45.8');
+    expect(input?.candidate.version).toBe('0.45.9');
+    expect(input?.baselinePath).toBe(
+      join(root, 'validation/windows/release-upgrade/public-v0.45.8.user.js')
+    );
+    expect(input?.publishedAssetUrl).toBe(assetUrl.replace('v0.45.7/', 'v0.45.8/'));
+    expect(await readFile('.gitignore', 'utf8')).toContain(
+      '/validation/windows/release-upgrade/public-v0.45.8.user.js'
+    );
+  });
+
+  it('rejects crossed release URLs and mismatched public versions for the new transition', async () => {
+    for (const [version, url] of [
+      ['0.45.9', assetUrl],
+      ['0.45.8', assetUrl.replace('v0.45.7/', 'v0.45.8/')],
+      ['0.45.10', assetUrl.replace('v0.45.7/', 'v0.45.8/')],
+    ]) {
+      expect(() =>
+        upgrade.validateUpgradeInput({
+          schemaVersion: 1,
+          baselineSha256: 'a'.repeat(64),
+          candidateVersion: version,
+          publishedAssetUrl: url,
+        })
+      ).toThrow();
+    }
+    const { root } = await fixture({
+      candidateVersion: '0.45.9',
+      baseline: metadata('0.45.7', true, candidateDownloadUrl),
+    });
+    await expect(upgrade.loadUpgradeInputs(root)).rejects.toThrow(
+      'baseline script version changed'
+    );
   });
 
   it('rejects an unknown field, wrong public URL, wrong version and missing baseline digest', () => {
