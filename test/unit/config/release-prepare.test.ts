@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -30,7 +31,18 @@ function createReleaseFixture(): string {
     join(root, 'scripts', 'release', 'prepare.ts'),
     join(fixtureRoot, 'scripts', 'release', 'prepare.ts')
   );
-  writeFileSync(join(fixtureRoot, 'package.json'), '{"version":"1.2.3"}\n');
+  copyFileSync(
+    join(root, 'scripts', 'release', 'footprint.ts'),
+    join(fixtureRoot, 'scripts', 'release', 'footprint.ts')
+  );
+  writeFileSync(
+    join(fixtureRoot, 'package.json'),
+    '{"version":"1.2.3","packageManager":"pnpm@12.15.0"}\n'
+  );
+  writeFileSync(join(fixtureRoot, '.gitignore'), 'test-results/\nrelease-bundle/\n');
+  writeFileSync(join(fixtureRoot, 'pnpm-lock.yaml'), 'lockfileVersion: test\n');
+  mkdirSync(join(fixtureRoot, 'node_modules', 'vite'), { recursive: true });
+  writeFileSync(join(fixtureRoot, 'node_modules', 'vite', 'package.json'), '{"version":"1.2.3"}\n');
   writeFileSync(
     join(fixtureRoot, 'CHANGELOG.md'),
     '# Changelog\n\n## [1.2.3] - 2026-09-26\n\n- Test release.\n'
@@ -48,12 +60,26 @@ function createReleaseFixture(): string {
     join(fixtureRoot, 'dist-extension-firefox', 'manifest.json'),
     '{"version":"1.2.3"}\n'
   );
+  for (const target of ['dist-extension', 'dist-extension-firefox']) {
+    mkdirSync(join(fixtureRoot, target, 'workers'), { recursive: true });
+    writeFileSync(join(fixtureRoot, target, 'workers', 'renderer.js'), 'worker();\n');
+  }
   execFileSync('git', ['init', '--quiet'], { cwd: fixtureRoot });
   execFileSync('git', ['config', 'user.name', 'Release Test'], { cwd: fixtureRoot });
   execFileSync('git', ['config', 'user.email', 'release-test@example.invalid'], {
     cwd: fixtureRoot,
   });
   execFileSync('git', ['add', '.'], { cwd: fixtureRoot });
+  execFileSync(
+    'git',
+    [
+      'update-index',
+      '--add',
+      '--cacheinfo',
+      '160000,3a8868b348fce1ccb32c1a6e9ac4c00001372469,packages/core',
+    ],
+    { cwd: fixtureRoot }
+  );
   execFileSync('git', ['commit', '--quiet', '-m', 'test fixture'], { cwd: fixtureRoot });
   return fixtureRoot;
 }
@@ -73,6 +99,20 @@ function runPrepare(
       env,
     }
   );
+}
+
+function recordFixtureFootprint(fixtureRoot: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      '--input-type=module',
+      '-e',
+      `import(${JSON.stringify(join(fixtureRoot, 'scripts', 'release', 'footprint.ts'))}).then(({recordFootprint}) => recordFootprint(524288))`,
+    ],
+    { cwd: fixtureRoot, encoding: 'utf8' }
+  );
+  expect(result.status, result.stderr).toBe(0);
 }
 
 afterEach(() => {
@@ -99,7 +139,11 @@ describe('release preparation artifact versions', () => {
       cwd: fixtureRoot,
       encoding: 'utf8',
     }).trim();
-    expect(metadata).toMatchObject({ commit: sourceCommit, version: '1.2.3' });
+    expect(metadata).toMatchObject({
+      commit: sourceCommit,
+      version: '1.2.3',
+      footprint: { status: 'unavailable' },
+    });
     expect(
       readFileSync(join(releaseDirectory, 'checksums.txt'), 'utf8').trim().split('\n')
     ).toHaveLength(4);
@@ -119,6 +163,70 @@ describe('release preparation artifact versions', () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('does not match checked out commit');
+    expect(existsSync(join(fixtureRoot, 'release-bundle'))).toBe(false);
+  });
+
+  it('requires a producing-build footprint when an exact release SHA is supplied', () => {
+    const fixtureRoot = createReleaseFixture();
+    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixtureRoot,
+      encoding: 'utf8',
+    }).trim();
+    const result = runPrepare(fixtureRoot, { RELEASE_SHA: sourceCommit });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Missing producing-build distribution footprint receipt');
+    expect(existsSync(join(fixtureRoot, 'release-bundle'))).toBe(false);
+  });
+
+  it('retains file, unpacked and archive measurements from the producing receipt', () => {
+    const fixtureRoot = createReleaseFixture();
+    recordFixtureFootprint(fixtureRoot);
+    const result = runPrepare(fixtureRoot);
+    expect(result.status, String(result.stderr)).toBe(0);
+    const releaseDirectory = join(fixtureRoot, 'release-bundle', 'release');
+    const metadata = JSON.parse(readFileSync(join(releaseDirectory, 'metadata.json'), 'utf8')) as {
+      footprint: {
+        files: Array<{ path: string; bytes: number; sha256: string }>;
+        targets: Array<{ name: string; unpackedBytes: number }>;
+        archives: Array<{ name: string; bytes: number; sha256: string }>;
+      };
+    };
+    expect(metadata.footprint.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'dist/yt-live-chat-overlay.user.js',
+          bytes: readFileSync(join(fixtureRoot, 'dist/yt-live-chat-overlay.user.js')).length,
+        }),
+        expect.objectContaining({
+          path: 'dist/yt-live-chat-overlay.meta.js',
+          bytes: readFileSync(join(fixtureRoot, 'dist/yt-live-chat-overlay.meta.js')).length,
+        }),
+      ])
+    );
+    for (const target of metadata.footprint.targets) {
+      expect(target.unpackedBytes).toBe(
+        metadata.footprint.files
+          .filter((file) => file.path.startsWith(`${target.name}/`))
+          .reduce((total, file) => total + file.bytes, 0)
+      );
+    }
+    for (const archive of metadata.footprint.archives) {
+      const bytes = readFileSync(join(releaseDirectory, archive.name));
+      expect(archive.bytes).toBe(bytes.length);
+      expect(archive.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+    }
+  });
+
+  it('rejects a changed output after its producing receipt was recorded', () => {
+    const fixtureRoot = createReleaseFixture();
+    recordFixtureFootprint(fixtureRoot);
+    writeFileSync(
+      join(fixtureRoot, 'dist-extension', 'manifest.json'),
+      '{"version":"1.2.3", "changed":true}\n'
+    );
+    const result = runPrepare(fixtureRoot);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match current source, inputs or files');
     expect(existsSync(join(fixtureRoot, 'release-bundle'))).toBe(false);
   });
 

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
+import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit.ts';
+import { recordFootprint } from '../release/footprint.ts';
 
 interface ExtensionManifest {
   browser_specific_settings?: { gecko?: { id?: string; strict_min_version?: string } };
@@ -47,6 +50,20 @@ function assertBidiLicense(relativePath: string): void {
       throw new Error(`${relativePath} is missing the bundled bidi-js MIT license notice.`);
     }
   }
+}
+
+export function assertPackagedWorkerSource(file: string): number {
+  if (!existsSync(file)) throw new Error(`Missing packaged worker source: ${file}`);
+  const size = statSync(file).size;
+  if (size === 0) throw new Error(`Packaged worker source is empty: ${file}`);
+  if (size > MAX_PACKAGED_WORKER_BYTES) {
+    throw new Error(
+      `Packaged worker source exceeds ${MAX_PACKAGED_WORKER_BYTES} UTF-8 bytes: ${file} (${size})`
+    );
+  }
+  // The runtime measures the decoded source when creating its Blob.
+  new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file));
+  return size;
 }
 
 function stripExpectedBidiBanner(source: string, relativePath: string): string {
@@ -129,6 +146,9 @@ function checkFirefoxContract(): void {
 }
 
 export function checkArtifacts(args: readonly string[] = process.argv): void {
+  if (args.includes('--record-footprint') && args.includes('--e2e')) {
+    throw new Error('Production footprint cannot be recorded from E2E outputs');
+  }
   if (args.includes('--e2e')) {
     assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
   } else {
@@ -151,6 +171,10 @@ export function checkArtifacts(args: readonly string[] = process.argv): void {
   ]) {
     assertBidiLicense(artifact);
   }
+  for (const directory of ['dist-extension', 'dist-extension-firefox']) {
+    assertPackagedWorkerSource(join(root, directory, 'workers/renderer.js'));
+  }
+  if (args.includes('--record-footprint')) recordFootprint(MAX_PACKAGED_WORKER_BYTES);
   console.log('Build artifact references are valid.');
 }
 

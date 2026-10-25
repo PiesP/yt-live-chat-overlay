@@ -3,10 +3,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
+import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit';
 import {
   createPageWorkerBlobUrl,
   loadPackagedWorkerSource,
-  MAX_PACKAGED_WORKER_BYTES,
   retainWorkerBlobUrlForDocument,
 } from '../../extension/worker-source-loader';
 

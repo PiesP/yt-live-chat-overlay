@@ -12,6 +12,8 @@ import {
 import { arch, platform } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
+import { sha256, verifiedFootprint } from './footprint.ts';
+
 const root = resolve(import.meta.dirname, '..', '..');
 const distDir = join(root, 'dist');
 const bundleDir = join(root, 'release-bundle');
@@ -148,6 +150,7 @@ export function prepareRelease(): void {
   validateUserscriptVersion(userscriptMetadataFile, 'userscript metadata', version);
   validateExtensionVersion('dist-extension', 'Chrome extension', version);
   validateExtensionVersion('dist-extension-firefox', 'Firefox extension', version);
+  const measured = verifiedFootprint(releaseCommit, version, expectedCommit !== undefined);
 
   rmSync(bundleDir, { force: true, recursive: true });
   mkdirSync(releaseDir, { recursive: true });
@@ -173,6 +176,39 @@ export function prepareRelease(): void {
   });
   writeFileSync(join(releaseDir, 'checksums.txt'), `${checksums.join('\n')}\n`);
 
+  const footprint =
+    'status' in measured
+      ? measured
+      : {
+          ...measured,
+          targets: ['dist', 'dist-extension', 'dist-extension-firefox'].map((target) => ({
+            name: target,
+            unpackedBytes: measured.files
+              .filter((file) => file.path.startsWith(`${target}/`))
+              .reduce((total, file) => total + file.bytes, 0),
+          })),
+          archives: archives.map((path) => {
+            const data = readFileSync(path);
+            return { name: basename(path), bytes: data.length, sha256: sha256(data) };
+          }),
+          renderers: ['dist-extension', 'dist-extension-firefox'].map((target) => {
+            const file = measured.files.find(
+              (entry) => entry.path === `${target}/workers/renderer.js`
+            );
+            if (!file) throw new Error(`Footprint receipt is missing ${target} renderer`);
+            return {
+              target,
+              bytes: file.bytes,
+              limitBytes: measured.workerLimitBytes,
+              headroomBytes: measured.workerLimitBytes - file.bytes,
+              preparation:
+                target === 'dist-extension'
+                  ? 'Chrome background fetches worker source before page startup'
+                  : 'Firefox content script fetches worker source before page startup',
+            };
+          }),
+        };
+
   const buildDate = new Date().toISOString();
   const commit = releaseCommit;
   const nodeVersion = process.versions.node;
@@ -192,6 +228,7 @@ export function prepareRelease(): void {
         runner_arch: runnerArch,
         runner_image: runnerImage,
         runner_image_version: runnerImageVersion,
+        footprint,
       },
       null,
       2

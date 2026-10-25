@@ -169,7 +169,7 @@ describe('Verification configuration', () => {
         calls.filter(([name, ...args]) => name === 'vp' && args.includes('--config'))
       ).toHaveLength(6);
       expect(calls.filter(([name]) => name === 'check:artifacts')).toEqual([
-        ['check:artifacts'],
+        ['check:artifacts', '--record-footprint'],
         ['check:artifacts', '--e2e'],
       ]);
     } finally {
@@ -209,7 +209,7 @@ describe('Verification configuration', () => {
 
   it.each([
     ['verify:full', 'vp build --config vite.config.extension.cs.firefox.ts'],
-    ['verify:full', 'check:artifacts'],
+    ['verify:full', 'check:artifacts --record-footprint'],
     ['verify:full', 'vp build --mode development'],
     ['verify:full', 'check:artifacts --e2e'],
     ['test:e2e', 'vp build --config vite.config.extension.page.ts'],
@@ -443,7 +443,7 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'build:ci',
         'build:extension:ci',
         'build:extension:firefox:ci',
-        'check:artifacts',
+        '--record-footprint',
       ];
       expect(run('build:targets:ci').calls.map((call) => call.at(-1))).toEqual(targets);
       expect(run('verify').calls.map((call) => call.at(-1))).toEqual([
