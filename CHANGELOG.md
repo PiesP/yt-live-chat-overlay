@@ -4,9 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.9] - 2026-10-26
+
 ### Fixed
 
+- **Settings saves** — Keep unsaved edits visible when a browser storage write fails, offer Retry save, and preserve local edits when another tab changes settings. Save my values explicitly resolves the conflict; closing settings does not overwrite that newer decision.
+- **Pause and recovery controls** — Add Pause comments beside Enabled so comments can pause independently of the video and keyboard IME shortcuts. Keep automatic recovery feedback beside Reload overlay, show pending and retryable reload states, and preserve pause while native Picture-in-Picture is active.
+- **Translation readiness** — Report whether translation is off, unavailable, preparing, downloading, active, or needs attention. Original comments remain available while setup is pending or fails.
 - **Chat translation lifetime** — Cancel requests when their Main or Worker messages leave the renderer, bound the pending text queue, and let recent and paid messages progress during bursts while retaining oldest-message turns. Keep browser translation work serialized across renderer replacement until its native Promise settles; original comments remain visible if translation stalls.
+
+### Changed
+
+- **Distribution verification** — Record source-bound build footprints and check extension Worker source headroom before preparing a release. Preserve the readable single-file userscript and bundled Chrome/Firefox artifacts. Existing settings remain compatible; no reset or migration is required.
+- **Maintenance** — Refresh dependencies, the shared-core pin, and installed-browser validation. These changes do not establish a measured rendering-speed or chat-latency improvement.
 
 ## [0.45.8] - 2026-10-21
 

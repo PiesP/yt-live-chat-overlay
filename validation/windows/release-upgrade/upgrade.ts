@@ -90,18 +90,34 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 const DIRECTORY = 'validation/windows/release-upgrade';
 const INPUT_FILE = `${DIRECTORY}/input.json`;
-const BASELINE_FILE = `${DIRECTORY}/public-v0.45.7.user.js`;
 const CANDIDATE_FILE = 'dist/yt-live-chat-overlay.user.js';
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const SCRIPT_NAMESPACE = 'https://github.com/PiesP';
-const BASELINE_VERSION = '0.45.7';
-const PUBLIC_ASSET_URL =
-  'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay.user.js';
+const PUBLIC_RELEASES = {
+  '0.45.8': {
+    baselineVersion: '0.45.7',
+    file: `${DIRECTORY}/public-v0.45.7.user.js`,
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay.user.js',
+  },
+  '0.45.9': {
+    baselineVersion: '0.45.8',
+    file: `${DIRECTORY}/public-v0.45.8.user.js`,
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay.user.js',
+  },
+} as const;
 const UPDATE_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js';
 const CANDIDATE_DOWNLOAD_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js';
 const MAX_SCRIPT_BYTES = 16 * 1024 * 1024;
+
+function publicRelease(candidateVersion: string) {
+  assert(
+    candidateVersion === '0.45.8' || candidateVersion === '0.45.9',
+    'Unexpected candidate version'
+  );
+  return PUBLIC_RELEASES[candidateVersion];
+}
 
 export function sha256(bytes: Buffer | Uint8Array) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -118,8 +134,9 @@ export function validateUpgradeInput(value: unknown): UpgradeInput {
   assert.equal(input.schemaVersion, 1, 'Unsupported upgrade input schema');
   assert(typeof input.baselineSha256 === 'string');
   assert.match(input.baselineSha256, /^[a-f0-9]{64}$/u, 'Invalid public baseline SHA-256');
-  assert.equal(input.candidateVersion, '0.45.8', 'Unexpected candidate version');
-  assert.equal(input.publishedAssetUrl, PUBLIC_ASSET_URL, 'Unexpected public asset URL');
+  assert(typeof input.candidateVersion === 'string');
+  const release = publicRelease(input.candidateVersion);
+  assert.equal(input.publishedAssetUrl, release.url, 'Unexpected public asset URL');
   return input as UpgradeInput;
 }
 
@@ -158,7 +175,7 @@ export function requireUpgradeMetadata(
   candidateVersion: string
 ) {
   const scripts: [string, UserscriptMetadata, string][] = [
-    ['baseline', baseline, BASELINE_VERSION],
+    ['baseline', baseline, publicRelease(candidateVersion).baselineVersion],
     ['candidate', candidate, candidateVersion],
   ];
   for (const [label, metadata, version] of scripts) {
@@ -263,8 +280,9 @@ export async function loadUpgradeInputs(root: string) {
     throw error;
   }
   const input = validateUpgradeInput(JSON.parse(inputBytes.toString('utf8')));
+  const release = publicRelease(input.candidateVersion);
   const [baselineBytes, candidateBytes] = await Promise.all([
-    readBoundedFile(root, BASELINE_FILE),
+    readBoundedFile(root, release.file),
     readBoundedFile(root, CANDIDATE_FILE),
   ]);
   const baselineSha256 = sha256(baselineBytes);
@@ -276,7 +294,7 @@ export async function loadUpgradeInputs(root: string) {
   const candidate = readUserscriptMetadata(decoder.decode(candidateBytes));
   requireUpgradeMetadata(baseline, candidate, input.candidateVersion);
   return {
-    baselinePath: join(root, BASELINE_FILE),
+    baselinePath: join(root, release.file),
     candidatePath: join(root, CANDIDATE_FILE),
     baselineSha256,
     candidateSha256,

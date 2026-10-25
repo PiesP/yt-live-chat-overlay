@@ -17,18 +17,16 @@ const INPUT = 'validation/windows/release-upgrade/extension-input.json';
 const CANDIDATE = 'dist-extension';
 const PUBLIC_RELEASES = {
   '0.45.7': {
-    candidateVersion: '0.45.8',
+    candidateVersions: ['0.45.8'],
     archive: 'validation/windows/release-upgrade/public-v0.45.7-chrome/artifact.zip',
     baseline: 'validation/windows/release-upgrade/public-v0.45.7-chrome/unpacked',
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay-chrome.zip',
-    transition: 'public-0.45.7-to-candidate-0.45.8',
   },
   '0.45.8': {
-    candidateVersion: '0.45.8',
+    candidateVersions: ['0.45.8', '0.45.9'],
     archive: 'validation/windows/release-upgrade/public-v0.45.8-chrome/artifact.zip',
     baseline: 'validation/windows/release-upgrade/public-v0.45.8-chrome/unpacked',
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip',
-    transition: 'public-0.45.8-to-candidate-0.45.8',
   },
 } as const;
 type PublicVersion = keyof typeof PUBLIC_RELEASES;
@@ -75,7 +73,7 @@ const DIRECTORIES = ['icons', 'workers'] as const;
 type ExtensionInput = {
   schemaVersion: 1;
   previousVersion: PublicVersion;
-  candidateVersion: '0.45.8';
+  candidateVersion: '0.45.8' | '0.45.9';
   publicAssetUrl: PublicRelease['url'];
   publicArchive: { path: PublicRelease['archive']; sha256: string };
   previousExtension: { path: PublicRelease['baseline']; inventorySha256: string };
@@ -118,7 +116,10 @@ export function validateExtensionUpgradeInput(value: unknown): ExtensionInput {
   assert.equal(input.schemaVersion, 1);
   assert(input.previousVersion === '0.45.7' || input.previousVersion === '0.45.8');
   const release = PUBLIC_RELEASES[input.previousVersion];
-  assert.equal(input.candidateVersion, release.candidateVersion);
+  assert(
+    release.candidateVersions.some((version) => version === input.candidateVersion),
+    'Unsupported extension upgrade transition'
+  );
   assert.equal(input.publicAssetUrl, release.url);
   const archive = object(input.publicArchive);
   keys(archive, ['path', 'sha256']);
@@ -134,8 +135,9 @@ export function validateExtensionUpgradeInput(value: unknown): ExtensionInput {
   return input as ExtensionInput;
 }
 
-export function extensionUpgradeTransition(input: ExtensionInput): PublicRelease['transition'] {
-  return PUBLIC_RELEASES[input.previousVersion].transition;
+export function extensionUpgradeTransition(input: ExtensionInput): string {
+  validateExtensionUpgradeInput(input);
+  return `public-${input.previousVersion}-to-candidate-${input.candidateVersion}`;
 }
 
 function sameFile(before: BigIntStats, after: BigIntStats): boolean {
@@ -441,7 +443,7 @@ export async function readExtensionUpgradeInput(root: string): Promise<{
 type VerifiedInput = NonNullable<Awaited<ReturnType<typeof readExtensionUpgradeInput>>>;
 type UpgradeReceipt = {
   status: 'failed' | 'passed';
-  transition: PublicRelease['transition'];
+  transition: string;
   method: 'same-path-unpacked-runtime-reload';
   publicAssetUrl: PublicRelease['url'];
   publicArchiveSha256: string;
@@ -765,7 +767,11 @@ async function setFontSizeThroughUi(page: Page, value: number): Promise<void> {
   await modal.waitFor({ state: 'hidden' });
 }
 
-async function candidateDetails(context: BrowserContext, id: string): Promise<Page> {
+async function candidateDetails(
+  context: BrowserContext,
+  id: string,
+  candidateVersion: ExtensionInput['candidateVersion']
+): Promise<Page> {
   const deadline = Date.now() + 10_000;
   let lastError: unknown;
   do {
@@ -773,7 +779,7 @@ async function candidateDetails(context: BrowserContext, id: string): Promise<Pa
     try {
       const details = await extensionDetails(page, id);
       assert.equal(details.id, id, 'Updated extension ID changed');
-      assert.equal(details.version, '0.45.8', 'Updated runtime manifest did not activate');
+      assert.equal(details.version, candidateVersion, 'Updated runtime manifest did not activate');
       return page;
     } catch (error) {
       lastError = error;
@@ -918,7 +924,7 @@ export async function runExtensionUpgrade({
     }
     await extensionPage.close().catch(() => {});
     extensionPage = null;
-    candidateExtensionPage = await candidateDetails(context, id);
+    candidateExtensionPage = await candidateDetails(context, id, verified.input.candidateVersion);
     receipt.activeStage = 'verify-candidate-settings';
     receipt.candidateStorageFontSize = await readExtensionStoredFontSize(candidateExtensionPage);
     assert.equal(
