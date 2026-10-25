@@ -41,6 +41,18 @@ function createReleaseFixture(): string {
   );
   writeFileSync(join(fixtureRoot, '.gitignore'), 'test-results/\nrelease-bundle/\n');
   writeFileSync(join(fixtureRoot, 'pnpm-lock.yaml'), 'lockfileVersion: test\n');
+  mkdirSync(join(fixtureRoot, 'tooling', 'vite'), { recursive: true });
+  writeFileSync(join(fixtureRoot, 'tooling', 'vite', 'config.ts'), 'export {};\n');
+  for (const name of [
+    'vite.config.ts',
+    'vite.config.extension.ts',
+    'vite.config.extension.cs.ts',
+    'vite.config.extension.page.ts',
+    'vite.config.extension.firefox.ts',
+    'vite.config.extension.cs.firefox.ts',
+    'vite.config.extension.page.firefox.ts',
+  ])
+    writeFileSync(join(fixtureRoot, name), 'export {};\n');
   mkdirSync(join(fixtureRoot, 'node_modules', 'vite'), { recursive: true });
   writeFileSync(join(fixtureRoot, 'node_modules', 'vite', 'package.json'), '{"version":"1.2.3"}\n');
   mkdirSync(join(fixtureRoot, 'node_modules', 'vite-plus'), { recursive: true });
@@ -106,18 +118,25 @@ function runPrepare(
   );
 }
 
-function recordFixtureFootprint(fixtureRoot: string): void {
-  const result = spawnSync(
+function runFootprintRecorder(
+  fixtureRoot: string,
+  changeConfig = false
+): ReturnType<typeof spawnSync> {
+  return spawnSync(
     process.execPath,
     [
       '--experimental-strip-types',
       '--input-type=module',
       '-e',
-      `import(${JSON.stringify(join(fixtureRoot, 'scripts', 'release', 'footprint.ts'))}).then(({recordFootprint}) => recordFootprint(524288))`,
+      `import(${JSON.stringify(join(fixtureRoot, 'scripts', 'release', 'footprint.ts'))}).then(({captureBuildIdentity,recordFootprint}) => {const identity=captureBuildIdentity();${changeConfig ? "import('node:fs').then(({appendFileSync})=>{appendFileSync('vite.config.ts','changed\\n');recordFootprint(identity,524288)})" : 'recordFootprint(identity,524288)'}})`,
     ],
     { cwd: fixtureRoot, encoding: 'utf8' }
   );
-  expect(result.status, result.stderr).toBe(0);
+}
+
+function recordFixtureFootprint(fixtureRoot: string): void {
+  const result = runFootprintRecorder(fixtureRoot);
+  expect(result.status, String(result.stderr)).toBe(0);
 }
 
 afterEach(() => {
@@ -233,6 +252,18 @@ describe('release preparation artifact versions', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('does not match current source, inputs or files');
     expect(existsSync(join(fixtureRoot, 'release-bundle'))).toBe(false);
+  });
+
+  it('does not record a receipt when build configuration changes during production', () => {
+    const fixtureRoot = createReleaseFixture();
+    const result = runFootprintRecorder(fixtureRoot, true);
+    expect(result.status).not.toBe(0);
+    expect(String(result.stderr)).toContain(
+      'Build inputs changed while producing distribution artifacts'
+    );
+    expect(existsSync(join(fixtureRoot, 'test-results', 'distribution-footprint.json'))).toBe(
+      false
+    );
   });
 
   it.each([undefined, '0.0.0'])(

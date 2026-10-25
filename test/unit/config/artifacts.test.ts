@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
 import { MAX_PACKAGED_WORKER_BYTES } from '../../../extension/worker-source-limit';
-import { assertPackagedWorkerSource } from '../../../scripts/check/artifacts';
+import { assertPackagedWorkerSource, checkArtifacts } from '../../../scripts/check/artifacts';
 
 const temporaryRoots: string[] = [];
 
@@ -25,6 +25,12 @@ afterEach(() => {
 });
 
 describe('packaged worker artifact contract', () => {
+  it('keeps standalone artifact checking from claiming build provenance', () => {
+    expect(() => checkArtifacts(['node', 'artifacts.ts', '--record-footprint'])).toThrow(
+      'use the all-target build to record a footprint'
+    );
+  });
+
   it('accepts an exact-limit UTF-8 source', () => {
     const file = workerFile('a'.repeat(MAX_PACKAGED_WORKER_BYTES));
     expect(assertPackagedWorkerSource(file)).toBe(MAX_PACKAGED_WORKER_BYTES);

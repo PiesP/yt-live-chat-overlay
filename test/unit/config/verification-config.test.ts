@@ -30,6 +30,8 @@ function createVerificationFixture(): {
   mkdirSync(join(directory, 'outputs'));
   const fixtureScripts = {
     ...scripts,
+    'build:targets:ci':
+      'pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts',
     quality: 'sh ./record.sh quality',
     'check:versions': 'sh ./record.sh check:versions',
     'check:artifacts': 'sh ./record.sh check:artifacts',
@@ -134,6 +136,9 @@ describe('Verification configuration', () => {
       expect(scripts.verify).toBe(
         'pnpm -s quality && pnpm -s check:versions && pnpm -s build:targets:ci'
       );
+      expect(scripts['build:targets:ci']).toBe(
+        'node --experimental-strip-types scripts/build/targets.ts'
+      );
       const calls: string[][] = [];
       for (const stage of [
         'quality',
@@ -169,7 +174,7 @@ describe('Verification configuration', () => {
         calls.filter(([name, ...args]) => name === 'vp' && args.includes('--config'))
       ).toHaveLength(6);
       expect(calls.filter(([name]) => name === 'check:artifacts')).toEqual([
-        ['check:artifacts', '--record-footprint'],
+        ['check:artifacts'],
         ['check:artifacts', '--e2e'],
       ]);
     } finally {
@@ -209,7 +214,7 @@ describe('Verification configuration', () => {
 
   it.each([
     ['verify:full', 'vp build --config vite.config.extension.cs.firefox.ts'],
-    ['verify:full', 'check:artifacts --record-footprint'],
+    ['verify:full', 'check:artifacts'],
     ['verify:full', 'vp build --mode development'],
     ['verify:full', 'check:artifacts --e2e'],
     ['test:e2e', 'vp build --config vite.config.extension.page.ts'],
@@ -439,13 +444,9 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         ],
         ['pnpm', '-s', 'quality'],
       ]);
-      const targets = [
-        'build:ci',
-        'build:extension:ci',
-        'build:extension:firefox:ci',
-        '--record-footprint',
-      ];
-      expect(run('build:targets:ci').calls.map((call) => call.at(-1))).toEqual(targets);
+      expect(scripts['build:targets:ci']).toBe(
+        'node --experimental-strip-types scripts/build/targets.ts'
+      );
       expect(run('verify').calls.map((call) => call.at(-1))).toEqual([
         'quality',
         'check:versions',

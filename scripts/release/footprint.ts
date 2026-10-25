@@ -17,6 +17,32 @@ import { join, relative, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..', '..');
 const receiptPath = join(root, 'test-results', 'distribution-footprint.json');
 const targets = ['dist', 'dist-extension', 'dist-extension-firefox'] as const;
+const buildConfigs = [
+  'package.json',
+  'vite.config.ts',
+  'vite.config.extension.ts',
+  'vite.config.extension.cs.ts',
+  'vite.config.extension.page.ts',
+  'vite.config.extension.firefox.ts',
+  'vite.config.extension.cs.firefox.ts',
+  'vite.config.extension.page.firefox.ts',
+  'tooling/vite',
+] as const;
+
+export interface BuildIdentity {
+  sourceSha: string;
+  coreSha: string;
+  lockfileSha256: string;
+  configSha256: string;
+  sourceDiffSha256: string;
+  worktreeStatus: string;
+  packageManager: string;
+  pnpmVersion: string;
+  nodeVersion: string;
+  viteVersion: string;
+  vitePlusVersion: string;
+  buildVersion: string;
+}
 
 export interface MeasuredFile {
   path: string;
@@ -29,6 +55,8 @@ export interface FootprintReceipt {
   sourceSha: string;
   coreSha: string;
   lockfileSha256: string;
+  configSha256: string;
+  sourceDiffSha256: string;
   packageManager: string;
   pnpmVersion: string;
   nodeVersion: string;
@@ -77,7 +105,24 @@ function lockfileSha256(): string {
   return sha256(readFileSync(join(root, 'pnpm-lock.yaml')));
 }
 
-export function recordFootprint(workerLimitBytes: number): string {
+function configSha256(): string {
+  const hash = createHash('sha256');
+  function visit(path: string): void {
+    const absolute = join(root, path);
+    const stats = lstatSync(absolute);
+    if (stats.isDirectory()) {
+      for (const child of readdirSync(absolute).sort()) visit(`${path}/${child}`);
+    } else if (stats.isFile()) {
+      hash.update(path).update('\0').update(readFileSync(absolute)).update('\0');
+    } else {
+      throw new Error(`Non-file build configuration entry: ${path}`);
+    }
+  }
+  for (const path of buildConfigs) visit(path);
+  return hash.digest('hex');
+}
+
+export function captureBuildIdentity(): BuildIdentity {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
     version: string;
     packageManager: string;
@@ -86,11 +131,15 @@ export function recordFootprint(workerLimitBytes: number): string {
     cwd: root,
     encoding: 'utf8',
   }).trim();
-  const receipt: FootprintReceipt = {
-    schemaVersion: 1,
+  return {
     sourceSha: git(['rev-parse', 'HEAD']),
     coreSha: git(['rev-parse', 'HEAD:packages/core']),
     lockfileSha256: lockfileSha256(),
+    configSha256: configSha256(),
+    sourceDiffSha256: sha256(
+      execFileSync('git', ['diff', '--binary', 'HEAD', '--', '.'], { cwd: root })
+    ),
+    worktreeStatus: git(['status', '--porcelain', '--untracked-files=all']),
     packageManager: manifest.packageManager,
     pnpmVersion,
     nodeVersion: process.versions.node,
@@ -105,10 +154,21 @@ export function recordFootprint(workerLimitBytes: number): string {
       }
     ).version,
     buildVersion: process.env.BUILD_VERSION ?? manifest.version,
+  };
+}
+
+export function recordFootprint(identity: BuildIdentity, workerLimitBytes: number): void {
+  if (JSON.stringify(captureBuildIdentity()) !== JSON.stringify(identity)) {
+    throw new Error('Build inputs changed while producing distribution artifacts');
+  }
+  const { worktreeStatus, ...inputs } = identity;
+  const receipt: FootprintReceipt = {
+    schemaVersion: 1,
+    ...inputs,
     mode: 'production',
     command: 'pnpm build:targets:ci',
     workerLimitBytes,
-    sourceBound: git(['status', '--porcelain', '--untracked-files=all']).length === 0,
+    sourceBound: worktreeStatus.length === 0,
     files: measuredFiles(),
   };
   if (receipt.files.length === 0) throw new Error('Distribution footprint has no files');
@@ -116,7 +176,6 @@ export function recordFootprint(workerLimitBytes: number): string {
   const temporary = `${receiptPath}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`);
   renameSync(temporary, receiptPath);
-  return receiptPath;
 }
 
 export function verifiedFootprint(
@@ -129,11 +188,14 @@ export function verifiedFootprint(
     return { status: 'unavailable' };
   }
   const receipt = JSON.parse(readFileSync(receiptPath, 'utf8')) as FootprintReceipt;
+  const current = captureBuildIdentity();
   const mismatch = [
     [receipt.schemaVersion === 1, 'schema'],
-    [receipt.sourceSha === sourceSha, 'source'],
-    [receipt.coreSha === git(['rev-parse', 'HEAD:packages/core']), 'core'],
-    [receipt.lockfileSha256 === lockfileSha256(), 'lockfile'],
+    [receipt.sourceSha === sourceSha && receipt.sourceSha === current.sourceSha, 'source'],
+    [receipt.coreSha === current.coreSha, 'core'],
+    [receipt.lockfileSha256 === current.lockfileSha256, 'lockfile'],
+    [receipt.configSha256 === current.configSha256, 'configuration'],
+    [receipt.sourceDiffSha256 === current.sourceDiffSha256, 'source diff'],
     [receipt.buildVersion === version, 'build version'],
     [receipt.mode === 'production', 'mode'],
     [receipt.command === 'pnpm build:targets:ci', 'command'],
@@ -148,10 +210,7 @@ export function verifiedFootprint(
       `Distribution footprint receipt does not match current source, inputs or files (${mismatch})`
     );
   }
-  if (
-    required &&
-    (!receipt.sourceBound || git(['status', '--porcelain', '--untracked-files=all']).length !== 0)
-  ) {
+  if (required && (!receipt.sourceBound || current.worktreeStatus.length !== 0)) {
     throw new Error('Release distribution footprint requires a clean source-bound build');
   }
   return receipt;

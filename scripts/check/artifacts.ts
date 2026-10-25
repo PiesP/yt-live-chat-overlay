@@ -5,7 +5,6 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit.ts';
-import { recordFootprint } from '../release/footprint.ts';
 
 interface ExtensionManifest {
   browser_specific_settings?: { gecko?: { id?: string; strict_min_version?: string } };
@@ -146,8 +145,12 @@ function checkFirefoxContract(): void {
 }
 
 export function checkArtifacts(args: readonly string[] = process.argv): void {
-  if (args.includes('--record-footprint') && args.includes('--e2e')) {
-    throw new Error('Production footprint cannot be recorded from E2E outputs');
+  for (const option of args.slice(2)) {
+    if (option !== '--e2e') {
+      throw new Error(
+        `Unsupported artifact-check option: ${option}; use the all-target build to record a footprint`
+      );
+    }
   }
   if (args.includes('--e2e')) {
     assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
@@ -174,7 +177,6 @@ export function checkArtifacts(args: readonly string[] = process.argv): void {
   for (const directory of ['dist-extension', 'dist-extension-firefox']) {
     assertPackagedWorkerSource(join(root, directory, 'workers/renderer.js'));
   }
-  if (args.includes('--record-footprint')) recordFootprint(MAX_PACKAGED_WORKER_BYTES);
   console.log('Build artifact references are valid.');
 }
 
