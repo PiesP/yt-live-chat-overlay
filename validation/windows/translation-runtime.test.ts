@@ -9,9 +9,26 @@ import { test } from 'node:test';
 
 import {
   fixtureChatAction,
+  pollObservedValue,
   qualifiesWorkerTranslationProof,
   readInstalledTranslationWorkerSelector,
 } from './translation-runtime.ts';
+
+test('Worker snapshot polling waits for the resolved observation', async () => {
+  let samples = 0;
+  const motion = await pollObservedValue(
+    async () => {
+      samples++;
+      await Promise.resolve();
+      return samples === 3 ? { id: 'lifetime-paid', height: 120 } : null;
+    },
+    100,
+    'Worker snapshot missing',
+    1
+  );
+  assert.deepEqual(motion, { id: 'lifetime-paid', height: 120 });
+  assert.equal(samples, 3);
+});
 
 test('installed Worker translation requires its own exact selector', async () => {
   const root = await mkdtemp(join(tmpdir(), 'yt-translation-worker-selector-'));

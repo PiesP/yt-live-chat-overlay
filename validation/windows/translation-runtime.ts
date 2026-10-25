@@ -24,6 +24,24 @@ const LIFETIME_TEXT = {
   paid: 'lifetime-paid 후원 カード 🌙',
   released: 'lifetime-released temporary card',
 } as const;
+
+/** Poll resolved browser observations; Playwright waitForFunction treats Promise objects as truthy. */
+export async function pollObservedValue<T>(
+  sample: () => Promise<T | null>,
+  timeoutMs: number,
+  errorMessage: string,
+  intervalMs = 250
+): Promise<T> {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    const value = await sample();
+    if (value !== null) return value;
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) throw new Error(errorMessage);
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)));
+  }
+}
+
 type AbortMode = 'supported' | 'ignored';
 type RendererMode = 'natural' | 'forced-main';
 type FixtureOptions = {
@@ -1196,14 +1214,17 @@ async function runLifetimeRoute({
       { timeout: 15_000 }
     );
     if (renderer === 'natural-worker') {
-      await page.waitForFunction(
-        async (seenAtMs) => {
-          if (performance.now() < seenAtMs + 15_500) return false;
-          const snapshot = await window.__ytAcceptanceSnapshotWorker?.().catch(() => null);
-          return snapshot && snapshot.activeIds.length === 0 && snapshot.pendingIds.length === 0;
-        },
-        priorSeenAtMs,
-        { timeout: 22_000, polling: 250 }
+      await pollObservedValue(
+        () =>
+          page.evaluate(async (seenAtMs) => {
+            if (performance.now() < seenAtMs + 15_500) return null;
+            const snapshot = await window.__ytAcceptanceSnapshotWorker?.().catch(() => null);
+            return snapshot && snapshot.activeIds.length === 0 && snapshot.pendingIds.length === 0
+              ? true
+              : null;
+          }, priorSeenAtMs),
+        22_000,
+        'Prior Worker rows did not leave before the paid translation card'
       );
     }
     await page.evaluate((text) => window.__ytTranslationFixture?.hold(text), LIFETIME_TEXT.paid);
@@ -1276,28 +1297,27 @@ async function runLifetimeRoute({
     let workerMotion: WorkerMotion | null = null;
     if (renderer === 'natural-worker') {
       assert(baselineWorkerMotion !== null);
-      const handle = await page.waitForFunction(
-        async (baseline) => {
-          const record = window.__ytAcceptanceWorkers?.at(-1);
-          const snapshot = await window.__ytAcceptanceSnapshotWorker?.().catch(() => null);
-          const motion = snapshot?.activeMotions.find((entry) => entry.id === 'lifetime-paid');
-          const update = record?.translationUpdates.findLast(
-            (entry) => entry.id === 'lifetime-paid' && entry.arabicMarker
-          );
-          return motion &&
-            update &&
-            motion.height > baseline.height + 2 &&
-            motion.width === update.width &&
-            motion.height === update.height &&
-            update.translationHeight > 0
-            ? motion
-            : null;
-        },
-        baselineWorkerMotion,
-        { timeout: 15_000, polling: 250 }
+      workerMotion = await pollObservedValue(
+        () =>
+          page.evaluate(async (baseline) => {
+            const record = window.__ytAcceptanceWorkers?.at(-1);
+            const snapshot = await window.__ytAcceptanceSnapshotWorker?.().catch(() => null);
+            const motion = snapshot?.activeMotions.find((entry) => entry.id === 'lifetime-paid');
+            const update = record?.translationUpdates.findLast(
+              (entry) => entry.id === 'lifetime-paid' && entry.arabicMarker
+            );
+            return motion &&
+              update &&
+              motion.height > baseline.height + 2 &&
+              motion.width === update.width &&
+              motion.height === update.height &&
+              update.translationHeight > 0
+              ? motion
+              : null;
+          }, baselineWorkerMotion),
+        15_000,
+        'Worker did not adopt the paid translation geometry'
       );
-      workerMotion = (await handle.jsonValue()) as WorkerMotion;
-      await handle.dispose();
       await page.evaluate(
         () =>
           new Promise<void>((resolve) =>
