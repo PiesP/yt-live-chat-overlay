@@ -23,6 +23,7 @@ type Action =
   | 'same-object-translate'
   | 'destroy-pending';
 type Settlement = 'fulfilled' | 'rejected' | 'unknown';
+export type NativeProbeSelection = 'normal' | 'preaborted-create';
 export type CaseResult = {
   action: Action;
   settlement: Settlement;
@@ -33,6 +34,7 @@ export type CaseResult = {
   userActivationAtClick?: boolean | null;
   abortRequestedMs?: number | null;
   destroyCalledMs?: number | null;
+  unsettledAtDestroy?: boolean | null;
   postdestroy?: {
     settlement: Settlement;
     errorName: string | null;
@@ -72,28 +74,50 @@ export function classifyNativeCase(
     if (
       result.destroyCalledMs === null ||
       result.destroyCalledMs === undefined ||
-      result.destroyCalledMs >= result.elapsedMs
+      result.destroyCalledMs >= result.elapsedMs ||
+      result.unsettledAtDestroy !== true
     )
       return 'inconclusive';
     if (result.settlement === 'fulfilled' || result.postdestroy?.settlement === 'fulfilled')
       return 'ignored';
-    return result.settlement === 'rejected' && result.postdestroy?.settlement === 'rejected'
+    return result.settlement === 'rejected' &&
+      result.errorName === 'AbortError' &&
+      result.postdestroy?.settlement === 'rejected' &&
+      result.postdestroy.errorName === 'AbortError'
+      ? 'expected-js-settlement'
+      : 'inconclusive';
+  }
+  if (result.action === 'same-object-translate') {
+    return result.settlement === 'fulfilled' &&
+      (result.output?.codepoints ?? 0) > 0 &&
+      /^[a-f0-9]{64}$/u.test(result.output?.sha256 ?? '')
       ? 'expected-js-settlement'
       : 'inconclusive';
   }
   return result.settlement === 'fulfilled' ? 'expected-js-settlement' : 'inconclusive';
 }
 
-export async function readTranslatorNativeSelector(root: string): Promise<boolean> {
+export function parseTranslatorNativeSelector(input: unknown): NativeProbeSelection {
+  if (JSON.stringify(input) === JSON.stringify({ scenario: 'translator-native-cancellation' }))
+    return 'normal';
+  assert.deepEqual(input, {
+    scenario: 'translator-native-cancellation',
+    case: 'preaborted-create',
+  });
+  return 'preaborted-create';
+}
+
+export async function readTranslatorNativeSelector(
+  root: string
+): Promise<NativeProbeSelection | null> {
   let raw: string;
   try {
     raw = await readFile(join(root, SELECTOR), 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
-  assert.deepEqual(JSON.parse(raw), { scenario: 'translator-native-cancellation' });
-  return true;
+  return parseTranslatorNativeSelector(JSON.parse(raw) as unknown);
 }
 
 export function installIsolatedProbe({
@@ -222,6 +246,7 @@ export function installIsolatedProbe({
       }
       let abortRequestedMs: number | null = null;
       let destroyCalledMs: number | null = null;
+      let unsettledAtDestroy: boolean | null = null;
       if (action === 'mid-translate-abort') {
         setTimeout(() => {
           abortRequestedMs = performance.now() - started;
@@ -229,8 +254,21 @@ export function installIsolatedProbe({
         }, 1);
       }
       if (action === 'destroy-pending') {
-        destroyCalledMs = performance.now() - started;
-        state.translator?.destroy();
+        let settled = false;
+        void promise.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          }
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        unsettledAtDestroy = !settled;
+        if (unsettledAtDestroy) {
+          destroyCalledMs = performance.now() - started;
+          state.translator?.destroy();
+        }
       }
       const observation = await observe(
         promise,
@@ -250,7 +288,11 @@ export function installIsolatedProbe({
             output: { codepoints: number; sha256: string } | null;
           }
         | undefined;
-      if (action === 'destroy-pending' && observation.settlement !== 'unknown') {
+      if (
+        action === 'destroy-pending' &&
+        destroyCalledMs !== null &&
+        observation.settlement !== 'unknown'
+      ) {
         const postdestroyInput = 'Hello after destroy.';
         const postdestroyInputSummary = await digest(postdestroyInput);
         try {
@@ -284,6 +326,7 @@ export function installIsolatedProbe({
         input: inputSummary,
         abortRequestedMs,
         destroyCalledMs,
+        unsettledAtDestroy,
         userActivationAtClick,
         ...(postdestroy ? { postdestroy } : {}),
       };
@@ -321,10 +364,12 @@ export async function runTranslatorNativeCancellation({
   context,
   extensionId,
   browserVersion,
+  selection,
 }: {
   context: BrowserContext;
   extensionId: string;
   browserVersion: string;
+  selection: NativeProbeSelection;
 }) {
   assert.match(extensionId, /^[a-p]{32}$/u);
   const page = await context.newPage();
@@ -332,6 +377,7 @@ export async function runTranslatorNativeCancellation({
     source: string;
     browserVersion: string;
     installedExtensionId: string;
+    selection: NativeProbeSelection;
     url: string;
     mainPageContext: unknown;
     capability: unknown;
@@ -345,6 +391,7 @@ export async function runTranslatorNativeCancellation({
     source: 'installed-extension-owned-secure-origin-isolated-content-script-realm',
     browserVersion,
     installedExtensionId: extensionId,
+    selection,
     url: TRANSLATOR_NATIVE_URL,
     mainPageContext: null,
     capability: null,
@@ -454,14 +501,17 @@ export async function runTranslatorNativeCancellation({
       receipt.reason = 'language-pair-unavailable';
       return receipt;
     }
-    for (const action of [
-      'preaborted-create',
-      'create',
-      'preaborted-translate',
-      'mid-translate-abort',
-      'same-object-translate',
-      'destroy-pending',
-    ] as const) {
+    const actions: Action[] =
+      selection === 'preaborted-create'
+        ? ['preaborted-create']
+        : [
+            'create',
+            'preaborted-translate',
+            'mid-translate-abort',
+            'same-object-translate',
+            'destroy-pending',
+          ];
+    for (const action of actions) {
       const result = (await runAction(action)) as CaseResult;
       receipt.cases.push(result);
       receipt.caseVerdicts.push({ action, verdict: classifyNativeCase(result) });

@@ -9,6 +9,7 @@ import {
   canContinueNativeProbe,
   classifyNativeCase,
   installIsolatedProbe,
+  parseTranslatorNativeSelector,
   type CaseResult,
 } from './translator-native-cancellation.ts';
 
@@ -18,6 +19,26 @@ test('isolated-world injection function is self-contained JavaScript', () => {
   assert.match(source, /document\.querySelector/u);
   assert.match(source, /Translator/u);
   assert.match(source, /runtime\?\.id/u);
+});
+
+test('preaborted creation requires its own exact focused selector', () => {
+  assert.equal(
+    parseTranslatorNativeSelector({ scenario: 'translator-native-cancellation' }),
+    'normal'
+  );
+  assert.equal(
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      case: 'preaborted-create',
+    }),
+    'preaborted-create'
+  );
+  assert.throws(() =>
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      case: 'create',
+    })
+  );
 });
 
 function result(action: CaseResult['action'], changes: Partial<CaseResult>): CaseResult {
@@ -77,7 +98,8 @@ test('destroy requires a pending call and a rejected call after destruction', ()
     classifyNativeCase(
       result('destroy-pending', {
         destroyCalledMs: 1,
-        postdestroy: { settlement: 'rejected', errorName: 'InvalidStateError' },
+        unsettledAtDestroy: true,
+        postdestroy: { settlement: 'rejected', errorName: 'AbortError' },
       })
     ),
     'expected-js-settlement'
@@ -86,6 +108,7 @@ test('destroy requires a pending call and a rejected call after destruction', ()
     classifyNativeCase(
       result('destroy-pending', {
         destroyCalledMs: 1,
+        unsettledAtDestroy: true,
         postdestroy: { settlement: 'fulfilled', errorName: null },
       })
     ),
@@ -94,8 +117,63 @@ test('destroy requires a pending call and a rejected call after destruction', ()
   assert.equal(
     classifyNativeCase(
       result('destroy-pending', {
-        destroyCalledMs: 20,
+        destroyCalledMs: null,
+        unsettledAtDestroy: false,
+        postdestroy: { settlement: 'rejected', errorName: 'AbortError' },
+      })
+    ),
+    'inconclusive'
+  );
+  assert.equal(
+    classifyNativeCase(
+      result('destroy-pending', {
+        destroyCalledMs: 1,
+        unsettledAtDestroy: true,
+        errorName: 'QuotaExceededError',
+        postdestroy: { settlement: 'rejected', errorName: 'Error' },
+      })
+    ),
+    'inconclusive'
+  );
+  assert.equal(
+    classifyNativeCase(
+      result('destroy-pending', {
+        destroyCalledMs: 1,
+        unsettledAtDestroy: true,
         postdestroy: { settlement: 'rejected', errorName: 'InvalidStateError' },
+      })
+    ),
+    'inconclusive'
+  );
+});
+
+test('same-object call needs a nonempty hashed output', () => {
+  assert.equal(
+    classifyNativeCase(
+      result('same-object-translate', {
+        settlement: 'fulfilled',
+        errorName: null,
+        output: { codepoints: 2, sha256: 'a'.repeat(64) },
+      })
+    ),
+    'expected-js-settlement'
+  );
+  assert.equal(
+    classifyNativeCase(
+      result('same-object-translate', {
+        settlement: 'fulfilled',
+        errorName: null,
+        output: { codepoints: 0, sha256: 'a'.repeat(64) },
+      })
+    ),
+    'inconclusive'
+  );
+  assert.equal(
+    classifyNativeCase(
+      result('same-object-translate', {
+        settlement: 'fulfilled',
+        errorName: null,
+        output: null,
       })
     ),
     'inconclusive'

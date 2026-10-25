@@ -11,14 +11,25 @@ isolated content-script realm; a trusted button click starts each real browser
 Translator API case. It never substitutes a Translator
 mock or sends chat content to a provider page.
 
+Use a separate fresh installed-browser attempt for preaborted creation by
+replacing the selector content with exactly
+`{"scenario":"translator-native-cancellation","case":"preaborted-create"}`.
+That attempt observes availability and preaborted creation only, then closes
+the owned browser. Do not continue with normal creation in that attempt,
+including when the aborted creation's JavaScript promise has settled. Keep
+each attempt's own source-bound receipt and cleanup result.
+
 The receipt records the browser version, secure origin, exposed API methods,
 language-pair availability, setup time and each native promise's observed
 settlement. Fixed English text with Japanese and Korean words is used for short
 and long requests. Only input/output codepoint lengths and SHA-256 hashes are
-retained. The cases cover preaborted creation, preaborted translation, abort
-during translation, another call on the same object, destruction during a
-pending call and a call after destruction. Operation observation ends after
-15 seconds; model setup can take 120 seconds. An unknown native settlement
+retained. The normal attempt covers creation, preaborted translation, abort
+during translation, another call on the same object, destruction while its
+promise is still unsettled, and a call after destruction. An already-settled
+translation cannot qualify the destroy case. Both the pending call and the
+post-destroy call must reject with `AbortError`; other errors remain
+inconclusive. Operation observation ends after 15 seconds; model setup can
+take 120 seconds. An unknown native settlement
 stops the sequence and closes the owned browser during normal profile cleanup.
 An observed JavaScript rejection does not establish that native model work
 stopped. Unsupported, ignored aborts and inconclusive cases remain visible in

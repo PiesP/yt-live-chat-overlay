@@ -2429,6 +2429,7 @@ export async function runChromeInstallation({
         context,
         extensionId,
         browserVersion: result.browserVersion,
+        selection: translatorNativeSelected,
       });
       assert.equal(
         result.translatorNativeCancellation.status,
