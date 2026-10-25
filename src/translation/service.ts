@@ -20,7 +20,6 @@ import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('TranslationService');
-const TRANSLATION_CANCELLED = Symbol('translation-cancelled');
 
 // ── Type declarations for Chrome Translator API ───────────────────────────
 // Types are defined in @platform/translation-adapter and re-exported for
@@ -31,15 +30,65 @@ import {
   isTranslationSupported,
   type TranslatorDownloadEvent,
   type TranslatorInstance,
+  type TranslatorStatic,
 } from '@platform/translation-adapter';
+
+// A renderer can be replaced while its previous native Promise is still
+// unsettled. Key the lease by the actual API object so a new service cannot
+// overlap that work; test stubs with separate API objects remain independent.
+const nativeLeases = new WeakMap<TranslatorStatic, { owner: Promise<void> | null }>();
+
+async function claimNativeLease(
+  api: TranslatorStatic,
+  timeoutMs: number
+): Promise<(() => void) | null> {
+  let lease = nativeLeases.get(api);
+  if (!lease) {
+    lease = { owner: null };
+    nativeLeases.set(api, lease);
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (lease.owner) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = await Promise.race([
+      lease.owner.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), remaining);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!settled) return null;
+  }
+  let releaseOwner!: () => void;
+  const owner = new Promise<void>((resolve) => {
+    releaseOwner = resolve;
+  });
+  lease.owner = owner;
+  return () => {
+    if (lease.owner === owner) lease.owner = null;
+    releaseOwner();
+  };
+}
 
 type TranslateQueueEntry = {
   text: string;
   cacheKey: string;
   generation: number;
+  priority: number;
+  accountedBytes: number;
+  signal?: AbortSignal | undefined;
+  onAbort?: (() => void) | undefined;
   resolve: (result: string | null) => void;
   settled: boolean;
 };
+
+export interface TranslateRequestOptions {
+  signal?: AbortSignal;
+  /** Paid messages take precedence in recent turns; every third turn remains oldest-first. */
+  priority?: number;
+}
 
 type ConfigurationCancellation = {
   promise: Promise<void>;
@@ -113,12 +162,19 @@ export class TranslationService {
   private configuringGeneration: number | null = null;
   /** Cancels availability/create for the superseded configuration generation. */
   private configurationCancellation: ConfigurationCancellation | null = null;
-  /** FIFO translation queue. */
+  /** Owner-cancellable queue; the oldest surviving caller receives every third backlog turn. */
   private translateQueue: TranslateQueueEntry[] = [];
+  private queuedBytes = 0;
+  private recentTurns = 0;
   /** Entry currently awaited by the drain loop, if any. */
   private activeEntry: TranslateQueueEntry | null = null;
-  /** Cancels the translator promise currently awaited by the drain loop. */
-  private activeCancellation: (() => void) | null = null;
+  /** Native work remains owned until its actual Promise settles, even after local cancellation. */
+  private nativeWork: Promise<void> | null = null;
+  private nativeAbortController: AbortController | null = null;
+  private nativeStallTimer: ReturnType<typeof setTimeout> | null = null;
+  private nativeStalled = false;
+  /** An unresolved create() blocks replacement creation; only its own result can release it. */
+  private pendingCreation: Promise<void> | null = null;
   /** Whether the drain loop is currently running. */
   private drainActive = false;
   /** Requests a new drain after the current drain owns its finally block. */
@@ -141,10 +197,11 @@ export class TranslationService {
     50_000, // ~50KB (equivalent to ~2500 average chat messages)
     (text) => text.length * 2 // UTF-16 byte estimate
   );
-  /** Maximum number of entries allowed in the translate queue.
-   * When exceeded, oldest entries are dropped to prevent
-   * unbounded growth during sustained chat bursts. */
-  private static readonly MAX_TRANSLATE_QUEUE_SIZE = 1000;
+  private static readonly MAX_TRANSLATE_QUEUE_SIZE = 256;
+  private static readonly MAX_TRANSLATE_QUEUE_BYTES = 64 * 1024;
+  private static readonly MAX_TRANSLATE_TEXT_BYTES = 8 * 1024;
+  private static readonly NATIVE_STALL_MS = 15_000;
+  private static readonly OWNERSHIP_WAIT_MS = 1_500;
 
   getStatus(): TranslationRuntimeStatus {
     return this.runtimeStatus;
@@ -306,7 +363,8 @@ export class TranslationService {
       sourceLanguage === this.currentSource &&
       targetLanguage === this.currentTarget &&
       this.translator !== null &&
-      this.translatorGeneration === this.configurationGeneration
+      this.translatorGeneration === this.configurationGeneration &&
+      !this.nativeStalled
     ) {
       return null;
     }
@@ -359,8 +417,7 @@ export class TranslationService {
 
   private async raceConfiguration<T>(
     operation: Promise<T> | undefined,
-    cancellation: ConfigurationCancellation,
-    onCancelledValue?: (value: Awaited<T> | undefined) => void
+    cancellation: ConfigurationCancellation
   ): Promise<ConfigurationRaceResult<Awaited<T> | undefined>> {
     const operationPromise = Promise.resolve(operation);
     const result = await Promise.race([
@@ -372,9 +429,6 @@ export class TranslationService {
     ]);
 
     if (result.cancelled || cancellation.cancelled) {
-      if (onCancelledValue) {
-        void operationPromise.then(onCancelledValue, () => undefined);
-      }
       return { cancelled: true };
     }
     return result;
@@ -383,29 +437,74 @@ export class TranslationService {
   private resolveQueueEntry(entry: TranslateQueueEntry, result: string | null): void {
     if (entry.settled) return;
     entry.settled = true;
+    if (entry.signal && entry.onAbort) {
+      entry.signal.removeEventListener('abort', entry.onAbort);
+    }
     entry.resolve(result);
   }
 
   private cancelActiveTranslation(): void {
-    const cancellation = this.activeCancellation;
-    this.activeCancellation = null;
-    cancellation?.();
+    this.nativeAbortController?.abort();
     const activeEntry = this.activeEntry;
     if (activeEntry) {
       this.resolveQueueEntry(activeEntry, null);
     }
   }
 
+  private takeQueuedEntry(index: number): TranslateQueueEntry | undefined {
+    const [entry] = this.translateQueue.splice(index, 1);
+    if (entry) this.queuedBytes -= entry.accountedBytes;
+    return entry;
+  }
+
+  private withdrawQueuedEntry(entry: TranslateQueueEntry): void {
+    const index = this.translateQueue.indexOf(entry);
+    if (index < 0) return;
+    this.takeQueuedEntry(index);
+    this.resolveQueueEntry(entry, null);
+  }
+
+  private takeNextEntry(): TranslateQueueEntry | undefined {
+    if (this.translateQueue.length <= 1) return this.takeQueuedEntry(0);
+    if (this.recentTurns >= 2) {
+      this.recentTurns = 0;
+      return this.takeQueuedEntry(0);
+    }
+    this.recentTurns++;
+    let selected = this.translateQueue.length - 1;
+    for (let i = selected - 1; i >= 0; i--) {
+      const candidate = this.translateQueue[i];
+      const current = this.translateQueue[selected];
+      if (candidate && current && candidate.priority > current.priority) selected = i;
+    }
+    return this.takeQueuedEntry(selected);
+  }
+
+  private async waitForOwnership(owner: Promise<void> | null): Promise<boolean> {
+    if (!owner) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), TranslationService.OWNERSHIP_WAIT_MS);
+    });
+    try {
+      return await Promise.race([owner.then(() => true), timedOut]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private clearNativeStallTimer(): void {
+    if (this.nativeStallTimer !== null) clearTimeout(this.nativeStallTimer);
+    this.nativeStallTimer = null;
+  }
+
   private resolveStaleQueueEntries(generation: number): void {
-    const currentEntries: TranslateQueueEntry[] = [];
-    for (const entry of this.translateQueue) {
-      if (entry.generation === generation) {
-        currentEntries.push(entry);
-      } else {
-        this.resolveQueueEntry(entry, null);
+    for (let index = this.translateQueue.length - 1; index >= 0; index--) {
+      if (this.translateQueue[index]?.generation !== generation) {
+        const entry = this.takeQueuedEntry(index);
+        if (entry) this.resolveQueueEntry(entry, null);
       }
     }
-    this.translateQueue = currentEntries;
   }
 
   private disableTranslation(): void {
@@ -421,10 +520,10 @@ export class TranslationService {
     this.pendingSource = null;
     this.pendingTarget = null;
     this.enabled = false;
-    for (const entry of this.translateQueue) {
+    for (const entry of this.translateQueue.splice(0)) {
       this.resolveQueueEntry(entry, null);
     }
-    this.translateQueue = [];
+    this.queuedBytes = 0;
   }
 
   private startDrainIfNeeded(): void {
@@ -438,15 +537,14 @@ export class TranslationService {
   }
 
   private resolveQueueEntriesForGeneration(generation: number): void {
-    const remainingEntries: TranslateQueueEntry[] = [];
-    for (const entry of this.translateQueue) {
-      if (entry.generation === generation) {
-        this.resolveQueueEntry(entry, null);
-      } else {
-        remainingEntries.push(entry);
+    for (let index = this.translateQueue.length - 1; index >= 0; index--) {
+      if (this.translateQueue[index]?.generation === generation) {
+        const entry = this.takeQueuedEntry(index);
+        if (entry) {
+          this.resolveQueueEntry(entry, null);
+        }
       }
     }
-    this.translateQueue = remainingEntries;
   }
 
   private isGenerationReady(generation: number): boolean {
@@ -468,7 +566,7 @@ export class TranslationService {
       this.pendingTarget = null;
     }
     while (this.translateQueue.length > 0) {
-      const next = this.translateQueue.shift();
+      const next = this.takeQueuedEntry(0);
       if (next) this.resolveQueueEntry(next, null);
     }
   }
@@ -509,9 +607,40 @@ export class TranslationService {
     this.pendingSource = sourceLanguage;
     this.pendingTarget = targetLanguage;
 
+    let releaseLease: (() => void) | null = null;
+    let creationOwnsLease = false;
     try {
+      // A locally cancelled caller is not evidence that its native operation
+      // stopped. Neither a replacement translator nor another create() may
+      // start while the previous operation still owns its browser slot.
+      const nativeOwned = await this.waitForOwnership(this.nativeWork);
+      const creationOwned = nativeOwned && (await this.waitForOwnership(this.pendingCreation));
+      if (!nativeOwned || !creationOwned) {
+        if (generation === this.configurationGeneration && this.enabled) {
+          this.configuringGeneration = null;
+          this.resolveQueueEntriesForGeneration(generation);
+          this.publishStatus('failed', nativeOwned ? 'create-failed' : 'translator-failed');
+        }
+        return;
+      }
+      this.nativeStalled = false;
+      if (generation !== this.configurationGeneration || !this.enabled) return;
+
+      const api = getTranslator();
+      if (!api) return;
+      releaseLease = await claimNativeLease(api, TranslationService.OWNERSHIP_WAIT_MS);
+      if (!releaseLease) {
+        if (generation === this.configurationGeneration && this.enabled) {
+          this.configuringGeneration = null;
+          this.resolveQueueEntriesForGeneration(generation);
+          this.publishStatus('failed', 'translator-failed');
+        }
+        return;
+      }
+      if (generation !== this.configurationGeneration || !this.enabled) return;
+
       const availabilityResult = await this.raceConfiguration(
-        getTranslator()?.availability({
+        api.availability({
           sourceLanguage,
           targetLanguage,
         }),
@@ -543,8 +672,8 @@ export class TranslationService {
       if (availability === 'downloadable' || availability === 'downloading') {
         this.publishStatus('preparing', 'model-pending');
       }
-      const createResult = await this.raceConfiguration(
-        getTranslator()?.create({
+      const creation = Promise.resolve(
+        api.create({
           sourceLanguage,
           targetLanguage,
           monitor: (monitor: EventTarget) => {
@@ -568,12 +697,24 @@ export class TranslationService {
               this.publishStatus('downloading', null, percent);
             });
           },
-        }),
-        cancellation,
-        (createdTranslator) => {
-          if (createdTranslator) this.disposeTranslator(createdTranslator);
-        }
+        })
       );
+      const creationSettled = creation.then(
+        (createdTranslator) => {
+          if (cancellation.cancelled) {
+            if (createdTranslator) this.disposeTranslator(createdTranslator);
+          }
+        },
+        () => undefined
+      );
+      this.pendingCreation = creationSettled;
+      creationOwnsLease = true;
+      const releaseAfterCreation = releaseLease;
+      void creationSettled.finally(() => releaseAfterCreation?.());
+      void creationSettled.finally(() => {
+        if (this.pendingCreation === creationSettled) this.pendingCreation = null;
+      });
+      const createResult = await this.raceConfiguration(creation, cancellation);
       if (createResult.cancelled) return;
       const newTranslator = createResult.value ?? null;
 
@@ -637,6 +778,8 @@ export class TranslationService {
         err instanceof Error && err.name === 'NotAllowedError' ? 'blocked' : 'create-failed'
       );
       // pendingSource/pendingTarget stay set so onUserActivation() can retry.
+    } finally {
+      if (!creationOwnsLease) releaseLease?.();
     }
   }
 
@@ -659,7 +802,8 @@ export class TranslationService {
   /**
    * Translate text. Returns the translation or null on failure.
    *
-   * Translations are processed via a FIFO queue. Only one translation
+   * Translations are processed one at a time. Two recent/high-priority
+   * entries are followed by the oldest surviving entry. Only one translation
    * is in-flight at a time to prevent concurrent failures from instantly
    * hitting the MAX_CONSECUTIVE_FAILURES threshold and destroying the
    * translator.
@@ -670,14 +814,16 @@ export class TranslationService {
    *
    * @param text The text to translate.
    */
-  async translate(text: string): Promise<string | null> {
+  async translate(text: string, options: TranslateRequestOptions = {}): Promise<string | null> {
     // ── Lock-free fast path: empty text and cache hits ─────────────────
     if (!text.trim()) {
       return text;
     }
-    if (!this.enabled) {
+    if (!this.enabled || options.signal?.aborted || this.nativeStalled) {
       return null;
     }
+    const accountedBytes = text.length * 2;
+    if (accountedBytes > TranslationService.MAX_TRANSLATE_TEXT_BYTES) return null;
 
     // Include language pair in cache key so stale translations from a
     // previous target language aren't returned after settings change.
@@ -689,23 +835,46 @@ export class TranslationService {
       return cached;
     }
 
-    // ── Enqueue (FIFO) ────────────────────────────────────────────────
+    // ── Enqueue within the count and byte budgets ─────────────────────
     return new Promise<string | null>((resolve) => {
-      // Drop oldest entry if the queue is at capacity.
-      if (this.translateQueue.length >= TranslationService.MAX_TRANSLATE_QUEUE_SIZE) {
-        const dropped = this.translateQueue.shift();
-        if (dropped) this.resolveQueueEntry(dropped, null);
-        log.debug(
-          `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest entry`
-        );
+      while (
+        this.translateQueue.length >= TranslationService.MAX_TRANSLATE_QUEUE_SIZE ||
+        this.queuedBytes + accountedBytes > TranslationService.MAX_TRANSLATE_QUEUE_BYTES
+      ) {
+        const dropped = this.takeQueuedEntry(0);
+        if (!dropped) {
+          this.queuedBytes = 0;
+          break;
+        }
+        this.resolveQueueEntry(dropped, null);
       }
-      this.translateQueue.push({
+      const entry: TranslateQueueEntry = {
         text,
         cacheKey,
         generation: this.configurationGeneration,
+        priority: options.priority ?? 0,
+        accountedBytes,
+        signal: options.signal,
         resolve,
         settled: false,
-      });
+      };
+      if (options.signal) {
+        entry.onAbort = () => {
+          if (this.activeEntry === entry) {
+            this.nativeAbortController?.abort();
+            this.resolveQueueEntry(entry, null);
+          } else {
+            this.withdrawQueuedEntry(entry);
+          }
+        };
+        options.signal.addEventListener('abort', entry.onAbort, { once: true });
+        if (options.signal.aborted) {
+          this.resolveQueueEntry(entry, null);
+          return;
+        }
+      }
+      this.translateQueue.push(entry);
+      this.queuedBytes += accountedBytes;
       this.startDrainIfNeeded();
     });
   }
@@ -721,7 +890,7 @@ export class TranslationService {
         if (!queuedEntry) break;
 
         if (queuedEntry.generation !== this.configurationGeneration) {
-          const staleEntry = this.translateQueue.shift();
+          const staleEntry = this.takeQueuedEntry(0);
           if (staleEntry) this.resolveQueueEntry(staleEntry, null);
           continue;
         }
@@ -751,7 +920,7 @@ export class TranslationService {
           break;
         }
 
-        const entry = this.translateQueue.shift();
+        const entry = this.takeNextEntry();
         if (!entry) break;
 
         this.activeEntry = entry;
@@ -769,17 +938,81 @@ export class TranslationService {
             continue;
           }
 
-          // ── Execute translation ───────────────────────────────────────────
+          const api = getTranslator();
+          if (!api) {
+            this.resolveQueueEntry(entry, null);
+            continue;
+          }
+          const releaseLease = await claimNativeLease(api, TranslationService.OWNERSHIP_WAIT_MS);
+          if (!releaseLease) {
+            this.resolveQueueEntry(entry, null);
+            this.resolveQueueEntriesForGeneration(entry.generation);
+            if (this.translator === translator && this.enabled) {
+              this.publishStatus('failed', 'translator-failed');
+            }
+            break;
+          }
+          if (entry.settled || !this.isGenerationReady(entry.generation)) {
+            releaseLease();
+            this.resolveQueueEntry(entry, null);
+            continue;
+          }
 
-          let cancel: (() => void) | null = null;
-          const cancellation = new Promise<typeof TRANSLATION_CANCELLED>((resolve) => {
-            cancel = () => resolve(TRANSLATION_CANCELLED);
-            this.activeCancellation = cancel;
+          // The native call keeps ownership until its own Promise settles.
+          // Abort releases the UI caller immediately but cannot prove that
+          // Chromium has stopped the underlying translation.
+          const controller = new AbortController();
+          this.nativeAbortController = controller;
+          let stall!: () => void;
+          const stalled = new Promise<null>((resolve) => {
+            stall = () => resolve(null);
           });
+          let native: Promise<string>;
           try {
-            const result = await Promise.race([translator.translate(entry.text), cancellation]);
-            if (result === TRANSLATION_CANCELLED) {
+            native = Promise.resolve(
+              translator.translate(entry.text, { signal: controller.signal })
+            );
+          } catch (error) {
+            native = Promise.reject(error);
+          }
+          const ownership = native.then(
+            () => undefined,
+            () => undefined
+          );
+          this.nativeWork = ownership;
+          void ownership.finally(releaseLease);
+          void ownership.finally(() => {
+            if (this.nativeWork !== ownership) return;
+            this.nativeWork = null;
+            // A stall only ends local waiting. Once the real browser Promise
+            // settles, the existing translator can serve the next request.
+            if (
+              this.nativeStalled &&
+              this.enabled &&
+              this.translator === translator &&
+              this.translatorGeneration === entry.generation &&
+              this.configurationGeneration === entry.generation
+            ) {
+              this.nativeStalled = false;
+              this.publishStatus('active');
+              this.startDrainIfNeeded();
+            }
+          });
+          this.nativeStallTimer = setTimeout(() => {
+            this.nativeStalled = true;
+            controller.abort();
+            this.resolveQueueEntry(entry, null);
+            this.resolveQueueEntriesForGeneration(entry.generation);
+            if (this.translator === translator && this.enabled) {
+              this.publishStatus('failed', 'translator-failed');
+            }
+            stall();
+          }, TranslationService.NATIVE_STALL_MS);
+          try {
+            const result = await Promise.race([native, stalled]);
+            if (result === null || entry.settled) {
               this.resolveQueueEntry(entry, null);
+              if (this.nativeStalled) break;
               continue;
             }
             if (
@@ -795,6 +1028,7 @@ export class TranslationService {
             this.translationCache.set(entry.cacheKey, result);
             this.resolveQueueEntry(entry, result);
           } catch (err: unknown) {
+            if (entry.settled || controller.signal.aborted) continue;
             if (
               entry.generation !== this.configurationGeneration ||
               this.translator !== translator ||
@@ -836,9 +1070,8 @@ export class TranslationService {
             }
             this.resolveQueueEntry(entry, null);
           } finally {
-            if (cancel && this.activeCancellation === cancel) {
-              this.activeCancellation = null;
-            }
+            this.clearNativeStallTimer();
+            if (this.nativeAbortController === controller) this.nativeAbortController = null;
           }
         } finally {
           if (this.activeEntry === entry) this.activeEntry = null;
@@ -852,7 +1085,7 @@ export class TranslationService {
       this.drainActive = false;
       const restartRequested = this.drainRestartRequested;
       this.drainRestartRequested = false;
-      if (restartRequested) this.startDrainIfNeeded();
+      if (restartRequested && !this.nativeStalled) this.startDrainIfNeeded();
     }
   }
 
@@ -883,6 +1116,7 @@ export class TranslationService {
       this.resolveQueueEntry(entry, null);
     }
     this.translateQueue = [];
+    this.queuedBytes = 0;
     this.translationCache.clear();
     this.publishStatus('off', 'disabled');
     this.runtimeStatusListeners.clear();

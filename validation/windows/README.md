@@ -1,5 +1,100 @@
 # Windows acceptance profile
 
+## Native Translator cancellation prerequisite (#338)
+
+Create the ignored `validation/windows/inputs/translator-native-cancellation.json`
+containing exactly `{"scenario":"translator-native-cancellation"}`. Run the
+installed extension profile with headed Chrome and no `--live-url` or duration
+option. This focused selector installs the maintained extension, then opens one
+owned HTTPS YouTube fixture. The installed extension injects the probe into its
+isolated content-script realm; a trusted button click starts each real browser
+Translator API case. It never substitutes a Translator
+mock or sends chat content to a provider page.
+
+The default selector is an ISOLATED-world prerequisite only. To qualify the
+product's MAIN-world Translator boundary, use exactly
+`{"scenario":"translator-native-cancellation","realm":"main"}` in a fresh
+installed-browser attempt. The installed extension background injects the same
+real native probe through `chrome.scripting.executeScript` with `world: 'MAIN'`
+into the owned top-level document. The receipt records the requested world,
+owned tab ID and URL, returned frame and document IDs, secure origin, and the
+absence of an extension runtime ID in MAIN. The MAIN run must complete its own
+creation, cancellation, same-object, and pending-destroy cases; an ISOLATED
+receipt cannot establish those MAIN settlements.
+
+Use a separate fresh installed-browser attempt for preaborted creation by
+replacing the selector content with exactly
+`{"scenario":"translator-native-cancellation","case":"preaborted-create"}`.
+That attempt observes availability and preaborted creation only, then closes
+the owned browser. Do not continue with normal creation in that attempt,
+including when the aborted creation's JavaScript promise has settled. Keep
+each attempt's own source-bound receipt and cleanup result.
+For the separate MAIN-world preaborted-creation attempt, use exactly
+`{"scenario":"translator-native-cancellation","case":"preaborted-create","realm":"main"}`.
+
+The receipt records the browser version, secure origin, exposed API methods,
+language-pair availability, setup time and each native promise's observed
+settlement. Fixed English text with Japanese and Korean words is used for short
+and long requests. Only input/output codepoint lengths and SHA-256 hashes are
+retained. The normal attempt covers creation, preaborted translation, abort
+during translation, another call on the same object, destruction while its
+promise is still unsettled, and a call after destruction. An already-settled
+translation cannot qualify the destroy case. Both the pending call and the
+post-destroy call must reject with `AbortError`; other errors remain
+inconclusive. Operation observation ends after 15 seconds; model setup can
+take 120 seconds. An unknown native settlement
+stops the sequence and closes the owned browser during normal profile cleanup.
+An observed JavaScript rejection does not establish that native model work
+stopped. Unsupported, ignored aborts and inconclusive cases remain visible in
+the receipt and fail the focused profile. Even an observed prerequisite alone
+does not qualify the full #338 behavior.
+
+## Controlled translation lifetime fixture (#338)
+
+Create the ignored `validation/windows/inputs/translation-runtime.json` with
+exactly `{"scenario":"translation-runtime"}` for a separate `yt-visual` run.
+This loads the built userscript on owned YouTube-shaped pages with a real
+decoded and progressing fixture video. Only the browser Translator boundary is
+controlled. The first phases cover unavailable API, preparation, failure,
+settings changes and late raw creation settlement: local cancellation of a
+pending create must not permit the next native creation until its Promise
+settles. The product does not pass an AbortSignal to `create()`.
+
+The userscript lifetime phase runs its Main renderer with deliberately ignored
+abort. It checks translated text through the default cached bitmap path into
+the overlay canvas, positive source alpha, changed target pixels, card reflow,
+and absence of stale-result bitmap draws. The userscript IIFE has no supported
+Worker URL, so this run reports Worker scope as not applicable.
+
+For the separate installed-extension Worker claim, create the ignored
+`validation/windows/inputs/translation-runtime-worker.json` with exactly
+`{"scenario":"translation-runtime-worker"}`. Remove the userscript selector and
+run the headed Chrome `yt-visual` installation profile with the fresh unpacked
+extension. The extension's normal MAIN-world bootstrap creates its packaged
+document-origin Worker. Only the page's Translator boundary is controlled.
+The Worker route requires the real bridge and ready signal, admitted paid-card
+ID, a Worker-owned motion snapshot with increased card height after the
+translation update, and newly visible glyph edges in that card's expanded
+canvas band. Pixel samples follow each Worker-owned card position before and
+after reflow. The edge sample is spatial evidence, not OCR; Arabic content is
+identified in the corresponding translation update. Outbound translation
+messages and generic canvas ink alone do not qualify. An unavailable Worker
+or pixel read fails this installed profile with a partial receipt.
+
+Canned CJK, RTL, emoji and paid-card messages exercise queued release under
+deliberately ignored abort in Main, same-ID replacement in both renderers,
+late old-result suppression and recovery after raw native settlement. The old
+held row is replaced before its lifetime expires; renderer state must show
+that prior messages have left before a fresh paid row carries Arabic in the
+translated result. Aria-live rows remain as history and are used only for
+ingress evidence. The signal-aware Worker route does not claim queued release
+because its native abort frees the lease first.
+A `showDebugOverlay` change verifies that a nonvisual setting leaves translation
+pending. The controlled boundary has both signal-aware and deliberately
+ignored-abort modes, and records raw settlement separately from local caller
+completion. These phases do not prove actual Chrome Translator cancellation or
+live YouTube behavior.
+
 This validation has four separate evidence tiers. None substitutes for another.
 
 1. **Artifact-only smoke (`yt-visual`):** injects the production userscript into

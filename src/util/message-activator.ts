@@ -26,11 +26,20 @@ export interface ActivationCallbacks {
 
 export class MessageActivator {
   private readonly messagePool: CanvasMessage[] = [];
+  private readonly translationOwners = new Map<CanvasMessage, AbortController>();
   private readonly translationService: TranslationService;
-  private readonly config: MessageActivatorConfig;
+  private config: MessageActivatorConfig;
 
-  constructor(translationService: TranslationService, config: MessageActivatorConfig) {
+  constructor(
+    translationService: TranslationService,
+    config: MessageActivatorConfig,
+    private readonly onReleased?: (message: CanvasMessage) => void
+  ) {
     this.translationService = translationService;
+    this.config = config;
+  }
+
+  updateConfig(config: MessageActivatorConfig): void {
     this.config = config;
   }
 
@@ -59,6 +68,8 @@ export class MessageActivator {
   }
 
   releaseMessage(msg: CanvasMessage): void {
+    this.cancelTranslation(msg);
+    this.onReleased?.(msg);
     // Clear reference-type fields to prevent stale data leaks.
     // These are overwritten by Object.assign on next acquire.
     msg.message = EMPTY_CHAT_MESSAGE;
@@ -70,6 +81,16 @@ export class MessageActivator {
     delete msg.desaturatedUserColor;
     // Keep numeric fields — they'll be overwritten by Object.assign
     this.messagePool.push(msg);
+  }
+
+  cancelTranslation(msg: CanvasMessage): void {
+    this.translationOwners.get(msg)?.abort();
+    this.translationOwners.delete(msg);
+  }
+
+  cancelAllTranslations(): void {
+    for (const owner of this.translationOwners.values()) owner.abort();
+    this.translationOwners.clear();
   }
 
   /**
@@ -127,22 +148,30 @@ export class MessageActivator {
     // will recreate it.
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
+      const owner = new AbortController();
+      this.translationOwners.set(cm, owner);
       // Capture the immutable ingress object, not only its ID. A replacement
       // action deliberately reuses the same ID, so an ID-only guard would let
       // the original message's late translation overwrite replacement text.
       const capturedMessage = message;
       this.translationService
-        .translate(translatableText)
+        .translate(translatableText, {
+          signal: owner.signal,
+          priority: message.kind === 'superchat' ? 2 : message.kind === 'membership' ? 1 : 0,
+        })
         .then((translated) => {
           // Guard: only apply translation if the CanvasMessage hasn't been
           // recycled, repurposed, or updated by a replacement action.
-          if (cm.message === capturedMessage) {
+          if (!owner.signal.aborted && cm.message === capturedMessage) {
             callbacks.onTranslationResult(cm, translated);
           }
         })
         .catch(() => {
           // Silently ignore individual translation failures.
           // translate() already logs at debug level.
+        })
+        .finally(() => {
+          if (this.translationOwners.get(cm) === owner) this.translationOwners.delete(cm);
         });
     }
   }

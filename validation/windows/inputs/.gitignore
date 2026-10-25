@@ -1,5 +1,6 @@
 settings-persistence.json
 reload-feedback.json
 translation-runtime.json
+translation-runtime-worker.json
 viewing-experience.json
 viewing-experience-ime.json
