@@ -4,9 +4,13 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -78,6 +82,19 @@ export function sha256(data: Uint8Array): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
+function readRegularFile(path: string, description: string): Buffer {
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW
+  );
+  try {
+    if (!fstatSync(descriptor).isFile()) throw new Error(description);
+    return readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function measuredFiles(): MeasuredFile[] {
   const files: MeasuredFile[] = [];
   function visit(directory: string): void {
@@ -86,7 +103,7 @@ export function measuredFiles(): MeasuredFile[] {
       const stats = lstatSync(path);
       if (stats.isDirectory()) visit(path);
       else if (stats.isFile()) {
-        const data = readFileSync(path);
+        const data = readRegularFile(path, `Non-file distribution entry: ${relative(root, path)}`);
         files.push({
           path: relative(root, path).replaceAll('\\', '/'),
           bytes: data.length,
@@ -113,7 +130,11 @@ function configSha256(): string {
     if (stats.isDirectory()) {
       for (const child of readdirSync(absolute).sort()) visit(`${path}/${child}`);
     } else if (stats.isFile()) {
-      hash.update(path).update('\0').update(readFileSync(absolute)).update('\0');
+      hash
+        .update(path)
+        .update('\0')
+        .update(readRegularFile(absolute, `Non-file build configuration entry: ${path}`))
+        .update('\0');
     } else {
       throw new Error(`Non-file build configuration entry: ${path}`);
     }

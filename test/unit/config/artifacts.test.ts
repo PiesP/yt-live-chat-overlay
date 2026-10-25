@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
@@ -56,5 +56,13 @@ describe('packaged worker artifact contract', () => {
     const file = workerFile('ready');
     writeFileSync(file, Buffer.from([0xff]));
     expect(() => assertPackagedWorkerSource(file)).toThrow();
+  });
+
+  it('rejects a directory or linked source', () => {
+    const file = workerFile('ready');
+    expect(() => assertPackagedWorkerSource(dirname(file))).toThrow('not a regular file');
+    const linked = join(dirname(file), 'linked-renderer.js');
+    symlinkSync(file, linked);
+    expect(() => assertPackagedWorkerSource(linked)).toThrow();
   });
 });

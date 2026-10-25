@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit.ts';
@@ -52,8 +60,25 @@ function assertBidiLicense(relativePath: string): void {
 }
 
 export function assertPackagedWorkerSource(file: string): number {
-  if (!existsSync(file)) throw new Error(`Missing packaged worker source: ${file}`);
-  const size = statSync(file).size;
+  let descriptor: number;
+  try {
+    descriptor = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Missing packaged worker source: ${file}`);
+    }
+    throw error;
+  }
+  let source: Buffer;
+  try {
+    if (!fstatSync(descriptor).isFile()) {
+      throw new Error(`Packaged worker source is not a regular file: ${file}`);
+    }
+    source = readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  const size = source.length;
   if (size === 0) throw new Error(`Packaged worker source is empty: ${file}`);
   if (size > MAX_PACKAGED_WORKER_BYTES) {
     throw new Error(
@@ -61,7 +86,7 @@ export function assertPackagedWorkerSource(file: string): number {
     );
   }
   // The runtime measures the decoded source when creating its Blob.
-  new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file));
+  new TextDecoder('utf-8', { fatal: true }).decode(source);
   return size;
 }
 
