@@ -33,6 +33,7 @@ export interface FootprintReceipt {
   pnpmVersion: string;
   nodeVersion: string;
   viteVersion: string;
+  vitePlusVersion: string;
   buildVersion: string;
   mode: 'production';
   command: 'pnpm build:targets:ci';
@@ -95,6 +96,11 @@ export function recordFootprint(workerLimitBytes: number): string {
     nodeVersion: process.versions.node,
     viteVersion: (
       JSON.parse(readFileSync(join(root, 'node_modules', 'vite', 'package.json'), 'utf8')) as {
+        version: string;
+      }
+    ).version,
+    vitePlusVersion: (
+      JSON.parse(readFileSync(join(root, 'node_modules', 'vite-plus', 'package.json'), 'utf8')) as {
         version: string;
       }
     ).version,

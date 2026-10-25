@@ -43,6 +43,11 @@ function createReleaseFixture(): string {
   writeFileSync(join(fixtureRoot, 'pnpm-lock.yaml'), 'lockfileVersion: test\n');
   mkdirSync(join(fixtureRoot, 'node_modules', 'vite'), { recursive: true });
   writeFileSync(join(fixtureRoot, 'node_modules', 'vite', 'package.json'), '{"version":"1.2.3"}\n');
+  mkdirSync(join(fixtureRoot, 'node_modules', 'vite-plus'), { recursive: true });
+  writeFileSync(
+    join(fixtureRoot, 'node_modules', 'vite-plus', 'package.json'),
+    '{"version":"1.2.3"}\n'
+  );
   writeFileSync(
     join(fixtureRoot, 'CHANGELOG.md'),
     '# Changelog\n\n## [1.2.3] - 2026-09-26\n\n- Test release.\n'
