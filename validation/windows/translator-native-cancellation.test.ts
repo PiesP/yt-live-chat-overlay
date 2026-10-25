@@ -42,9 +42,24 @@ test('native selectors require an exact case and realm, defaulting to isolated',
   );
   assert.deepEqual(
     parseTranslatorNativeSelector({
+      realm: 'main',
+      scenario: 'translator-native-cancellation',
+    }),
+    { case: 'normal', realm: 'main' }
+  );
+  assert.deepEqual(
+    parseTranslatorNativeSelector({
       scenario: 'translator-native-cancellation',
       case: 'preaborted-create',
       realm: 'main',
+    }),
+    { case: 'preaborted-create', realm: 'main' }
+  );
+  assert.deepEqual(
+    parseTranslatorNativeSelector({
+      realm: 'main',
+      scenario: 'translator-native-cancellation',
+      case: 'preaborted-create',
     }),
     { case: 'preaborted-create', realm: 'main' }
   );
@@ -64,6 +79,14 @@ test('native selectors require an exact case and realm, defaulting to isolated',
     parseTranslatorNativeSelector({
       scenario: 'translator-native-cancellation',
       realm: 'isolated',
+    })
+  );
+  assert.throws(() =>
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      realm: 'main',
+      case: 'preaborted-create',
+      extra: true,
     })
   );
 });

@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 import type { BrowserContext } from '@playwright/test';
 
@@ -108,7 +109,7 @@ export function parseTranslatorNativeSelector(input: unknown): NativeProbeSelect
         ...(probeCase === 'preaborted-create' ? { case: probeCase } : {}),
         ...(realm === 'main' ? { realm } : {}),
       };
-      if (JSON.stringify(input) === JSON.stringify(expected)) return { case: probeCase, realm };
+      if (isDeepStrictEqual(input, expected)) return { case: probeCase, realm };
     }
   }
   assert.fail('Native Translator selector must match an exact supported case and realm');
