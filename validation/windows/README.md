@@ -47,28 +47,35 @@ settings changes and late raw creation settlement: local cancellation of a
 pending create must not permit the next native creation until its Promise
 settles. The product does not pass an AbortSignal to `create()`.
 
-The added lifetime phases run a controlled Main fallback and a natural Worker
-route in fresh contexts. The Main fallback disables canvas transfer before
-application startup, then checks translated text through its default cached
-bitmap path into the overlay canvas, positive source alpha, changed target
-pixels, card reflow, and absence of stale-result bitmap draws.
-The Worker route requires its actual ready signal, admitted paid-card ID, a
-Worker-owned motion snapshot with increased card height after the translation
-update, and newly visible glyph edges in that card's expanded canvas band. The
-pixel samples follow each Worker-owned card position before and after reflow.
-The edge sample is spatial evidence, not OCR; Arabic content is identified in
-the corresponding translation update.
-Outbound translation messages and generic canvas ink alone do not qualify.
-If Worker startup or pixel read is unavailable, the focused profile fails with
-a partial receipt; the existing deterministic Worker fixture is a separate
-claim. Canned CJK, RTL, emoji and paid-card messages exercise queued release
-under deliberately ignored abort, same-ID replacement in both modes, late
-old-result suppression and recovery after raw native settlement. The old held
-row is replaced before its lifetime expires; renderer state must show that the
-prior messages have left before a fresh paid row carries Arabic in the
+The userscript lifetime phase runs its Main renderer with deliberately ignored
+abort. It checks translated text through the default cached bitmap path into
+the overlay canvas, positive source alpha, changed target pixels, card reflow,
+and absence of stale-result bitmap draws. The userscript IIFE has no supported
+Worker URL, so this run reports Worker scope as not applicable.
+
+For the separate installed-extension Worker claim, create the ignored
+`validation/windows/inputs/translation-runtime-worker.json` with exactly
+`{"scenario":"translation-runtime-worker"}`. Remove the userscript selector and
+run the headed Chrome `yt-visual` installation profile with the fresh unpacked
+extension. The extension's normal MAIN-world bootstrap creates its packaged
+document-origin Worker. Only the page's Translator boundary is controlled.
+The Worker route requires the real bridge and ready signal, admitted paid-card
+ID, a Worker-owned motion snapshot with increased card height after the
+translation update, and newly visible glyph edges in that card's expanded
+canvas band. Pixel samples follow each Worker-owned card position before and
+after reflow. The edge sample is spatial evidence, not OCR; Arabic content is
+identified in the corresponding translation update. Outbound translation
+messages and generic canvas ink alone do not qualify. An unavailable Worker
+or pixel read fails this installed profile with a partial receipt.
+
+Canned CJK, RTL, emoji and paid-card messages exercise queued release under
+deliberately ignored abort in Main, same-ID replacement in both renderers,
+late old-result suppression and recovery after raw native settlement. The old
+held row is replaced before its lifetime expires; renderer state must show
+that prior messages have left before a fresh paid row carries Arabic in the
 translated result. Aria-live rows remain as history and are used only for
-ingress evidence. The signal-aware route does not claim queued release because
-its native abort frees the lease first.
+ingress evidence. The signal-aware Worker route does not claim queued release
+because its native abort frees the lease first.
 A `showDebugOverlay` change verifies that a nonvisual setting leaves translation
 pending. The controlled boundary has both signal-aware and deliberately
 ignored-abort modes, and records raw settlement separately from local caller

@@ -652,7 +652,7 @@ function messageAction(id: string, author: string, runs: unknown[]): ChatAction 
   };
 }
 
-function createMockWatchHtml(previewHtml: string) {
+export function createMockWatchHtml(previewHtml: string) {
   const withVideo = previewHtml.replace(
     '<div class="player-inner">Video Player Placeholder</div>',
     '<video aria-label="Acceptance fixture video" style="width:100%;height:100%"></video>'
@@ -1740,7 +1740,6 @@ export async function run({
         output,
         userscript,
         watchHtml: createMockWatchHtml(previewHtml),
-        installWorkerProbe: installFixtureWorkerProbe,
       });
     }
     if (selectedScenario === 'viewing-experience' || selectedScenario === 'japanese-ime') {

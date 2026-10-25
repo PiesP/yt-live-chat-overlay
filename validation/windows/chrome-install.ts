@@ -58,7 +58,12 @@ import { runMainImageRecoveryFixture } from './main-image-recovery.ts';
 import { runNativePlayerBoundaries } from './native-player-boundaries.ts';
 import { runNativeWorkerRetirementFixture } from './native-worker-retirement.ts';
 import { runPlacementTimingFixture } from './placement-timing.ts';
-import { run as runFixture } from './profile.ts';
+import {
+  createMockWatchHtml,
+  installFixtureWorkerProbe,
+  readFocusedScenario,
+  run as runFixture,
+} from './profile.ts';
 import { runRecoveryContinuityFixture } from './recovery-continuity.ts';
 import {
   extensionUpgradeTransition,
@@ -70,6 +75,10 @@ import {
   readUserscriptMetadata,
   runManagerUpgrade,
 } from './release-upgrade/upgrade.ts';
+import {
+  readInstalledTranslationWorkerSelector,
+  runInstalledTranslationWorkerFixture,
+} from './translation-runtime.ts';
 import {
   readTranslatorNativeSelector,
   runTranslatorNativeCancellation,
@@ -217,6 +226,9 @@ type ChromeResult<Live = LiveObservation> = {
   liveObservation?: { mode: 'duration'; duration_seconds: 1200 } | null;
   installedViewingTasks?: InstalledViewingTasks | null;
   translatorNativeCancellation?: Awaited<ReturnType<typeof runTranslatorNativeCancellation>> | null;
+  installedTranslationWorker?: Awaited<
+    ReturnType<typeof runInstalledTranslationWorkerFixture>
+  > | null;
   cleanup: Record<string, unknown>;
   browserVersion?: string;
   installationMethod?: string;
@@ -2247,6 +2259,30 @@ export async function runChromeInstallation({
   );
   const installedViewingSelected = await readInstalledViewingTaskSelector(root);
   const translatorNativeSelected = await readTranslatorNativeSelector(root);
+  const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
+  assert(
+    Number(installedViewingSelected) +
+      Number(Boolean(translatorNativeSelected)) +
+      Number(translationWorkerSelected) <=
+      1,
+    'Focused installation selectors cannot be combined'
+  );
+  if (translationWorkerSelected) {
+    assert.equal(
+      await readFocusedScenario(root),
+      null,
+      'Installed Worker selector cannot be combined with userscript selectors'
+    );
+    assert.equal(
+      liveObservation,
+      null,
+      'Installed translation Worker cannot use duration observation'
+    );
+    assert.equal(browserName, 'chrome', 'Installed translation Worker requires Chrome');
+    assert.equal(headless, false, 'Installed translation Worker requires headed Chrome');
+    assert.equal(installation, 'extension', 'Installed translation Worker requires the extension');
+    assert.deepEqual(liveUrls, [], 'Installed translation Worker cannot use public live URLs');
+  }
   if (translatorNativeSelected) {
     assert.equal(
       installedViewingSelected,
@@ -2314,11 +2350,11 @@ export async function runChromeInstallation({
   try {
     const extensionUpgradeInput =
       installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
-    if (translatorNativeSelected) {
+    if (translatorNativeSelected || translationWorkerSelected) {
       assert.equal(
         extensionUpgradeInput,
         null,
-        'Native Translator probe requires a fresh installed extension without upgrade inputs'
+        'Focused translation probes require a fresh installed extension without upgrade inputs'
       );
     }
     if (installation === 'extension') {
@@ -2436,6 +2472,20 @@ export async function runChromeInstallation({
         'observed',
         'Native Translator prerequisite did not produce all expected JavaScript settlements'
       );
+      return result;
+    }
+    if (translationWorkerSelected) {
+      assert(extensionId, 'Installed translation Worker requires an extension ID');
+      const previewHtml = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
+      result.installedTranslationWorker = await runInstalledTranslationWorkerFixture({
+        browser,
+        context,
+        root,
+        output,
+        watchHtml: createMockWatchHtml(previewHtml),
+        installWorkerProbe: installFixtureWorkerProbe,
+      });
+      assert.equal(result.installedTranslationWorker.status, 'observed');
       return result;
     }
     result.fixture = await runFixture({

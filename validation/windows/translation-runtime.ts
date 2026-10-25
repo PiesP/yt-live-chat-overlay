@@ -31,6 +31,7 @@ type FixtureOptions = {
   rendererMode?: RendererMode;
   installWorkerProbe?: (expectedIds: string[]) => void;
   expectedIds?: string[];
+  installedContext?: BrowserContext;
 };
 
 export function fixtureChatAction(requestId: string): Record<string, unknown> {
@@ -128,10 +129,12 @@ async function makeContext(
   servedChatIds: string[],
   options: FixtureOptions = {}
 ): Promise<BrowserContext> {
-  const context = await browser.newContext({
-    locale: 'en-US',
-    viewport: { width: 1280, height: 720 },
-  });
+  const context =
+    options.installedContext ??
+    (await browser.newContext({
+      locale: 'en-US',
+      viewport: { width: 1280, height: 720 },
+    }));
   await context.route(/^https?:\/\//u, async (route) => {
     const url = new URL(route.request().url());
     if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
@@ -594,7 +597,7 @@ async function makeContext(
   if (options.installWorkerProbe) {
     await context.addInitScript(options.installWorkerProbe, options.expectedIds ?? []);
   }
-  await context.addInitScript({ content: userscript });
+  if (!options.installedContext) await context.addInitScript({ content: userscript });
   return context;
 }
 
@@ -867,6 +870,13 @@ type LifetimeRoute = {
   renderer: 'forced-main' | 'natural-worker';
   abortMode: AbortMode;
   status: 'observed' | 'worker-unavailable';
+  extensionBridge: {
+    workerSupported: boolean;
+    storageType: string | null;
+    workerUrlUsesDocumentOrigin: boolean;
+    probeUrlMatchesBridge: boolean;
+    workerRecords: Array<{ ready: boolean; terminated: boolean; error: string | null }>;
+  } | null;
   nativeCallsBeforeRawSettlement: number;
   nativeCallsAfterRawSettlement: number;
   abortedHeld: boolean;
@@ -930,6 +940,7 @@ async function runLifetimeRoute({
   renderer,
   abortMode,
   installWorkerProbe,
+  installedContext,
   output,
 }: {
   browser: Browser;
@@ -941,6 +952,7 @@ async function runLifetimeRoute({
   renderer: LifetimeRoute['renderer'];
   abortMode: AbortMode;
   installWorkerProbe?: (expectedIds: string[]) => void;
+  installedContext?: BrowserContext;
   output: string;
 }): Promise<LifetimeRoute> {
   const ids = ['lifetime-held', 'lifetime-queued', 'lifetime-released', 'lifetime-paid'];
@@ -957,6 +969,7 @@ async function runLifetimeRoute({
       rendererMode: renderer === 'forced-main' ? 'forced-main' : 'natural',
       ...(installWorkerProbe ? { installWorkerProbe } : {}),
       expectedIds: ids,
+      ...(installedContext ? { installedContext } : {}),
     }
   );
   const page = await context.newPage();
@@ -965,6 +978,19 @@ async function runLifetimeRoute({
   try {
     await openSettings(page);
     const player = await prepareVideo(page);
+    if (installedContext) {
+      await page.evaluate(() => {
+        const app = window.__ytChatOverlay;
+        if (!app) throw new Error('Installed extension app handle is missing');
+        app.applySettings({
+          language: 'en',
+          translationEnabled: true,
+          translationService: 'auto',
+          translationSource: 'en',
+          translationTarget: 'es',
+        });
+      });
+    }
     await waitPhase(page, 'active', /en → es/u);
     await page.evaluate(async () => {
       const app = window.__ytChatOverlay;
@@ -975,18 +1001,42 @@ async function runLifetimeRoute({
         showDebugOverlay: false,
       });
     });
+    const readExtensionBridge = () =>
+      page.evaluate(() => {
+        const bridge = window.__ytExtensionBridge;
+        const record = window.__ytAcceptanceWorkers?.at(-1);
+        return {
+          workerSupported: bridge?.workerSupported === true,
+          storageType: bridge?.storageType ?? null,
+          workerUrlUsesDocumentOrigin:
+            typeof bridge?.workerUrl === 'string' &&
+            bridge.workerUrl.startsWith(`blob:${location.origin}/`),
+          probeUrlMatchesBridge: Boolean(record && record.url === bridge?.workerUrl),
+          workerRecords: (window.__ytAcceptanceWorkers ?? []).map((entry) => ({
+            ready: entry.ready,
+            terminated: entry.terminated,
+            error: entry.error ?? null,
+          })),
+        };
+      });
+    let extensionBridge: LifetimeRoute['extensionBridge'] = null;
     if (renderer === 'natural-worker') {
       try {
         await page.waitForFunction(
-          () => window.__ytAcceptanceWorkers?.some((record) => record.ready),
+          () => {
+            const record = window.__ytAcceptanceWorkers?.at(-1);
+            return record?.ready === true && !record.terminated;
+          },
           null,
           { timeout: 10_000 }
         );
       } catch {
+        if (installedContext) extensionBridge = await readExtensionBridge();
         return {
           renderer,
           abortMode,
           status: 'worker-unavailable',
+          extensionBridge,
           nativeCallsBeforeRawSettlement: 0,
           nativeCallsAfterRawSettlement: 0,
           abortedHeld: false,
@@ -1006,6 +1056,14 @@ async function runLifetimeRoute({
           video: { before: player.resumed.time, after: player.resumed.time, sameSource: true },
         };
       }
+      if (installedContext) extensionBridge = await readExtensionBridge();
+      assert(
+        extensionBridge?.workerSupported &&
+          extensionBridge.storageType === 'chrome.storage.local' &&
+          extensionBridge.workerUrlUsesDocumentOrigin &&
+          extensionBridge.probeUrlMatchesBridge,
+        'Installed extension Worker did not use its packaged document-origin bridge'
+      );
     }
     await page.evaluate((text) => {
       const fixture = window.__ytTranslationFixture;
@@ -1403,6 +1461,7 @@ async function runLifetimeRoute({
       renderer,
       abortMode,
       status: 'observed',
+      extensionBridge,
       nativeCallsBeforeRawSettlement: before,
       nativeCallsAfterRawSettlement: native.calls.length,
       abortedHeld: native.aborts.some((entry) => entry === `${heldToken}:${LIFETIME_TEXT.held}`),
@@ -1459,7 +1518,8 @@ async function runLifetimeRoute({
     );
     throw error;
   } finally {
-    await context.close();
+    if (installedContext) await page.close();
+    else await context.close();
   }
 }
 
@@ -1470,14 +1530,12 @@ export async function runTranslationRuntimeFixture({
   output,
   userscript,
   watchHtml,
-  installWorkerProbe,
 }: {
   browser: Browser;
   root: string;
   output: string;
   userscript: string;
   watchHtml: string;
-  installWorkerProbe?: (expectedIds: string[]) => void;
 }) {
   const observations: {
     case: string;
@@ -1692,11 +1750,8 @@ export async function runTranslationRuntimeFixture({
     assert.deepEqual(errors, [], `Page errors: ${errors.join(' | ')}`);
     assert(observations.every((entry) => !entry.chat || servedChatIds.includes(entry.chat.id)));
     await page.screenshot({ path: join(output, 'translation-final-original-chat.png') });
-    for (const route of [
-      { renderer: 'forced-main' as const, abortMode: 'ignored' as const },
-      { renderer: 'natural-worker' as const, abortMode: 'supported' as const },
-    ]) {
-      const observed = await runLifetimeRoute({
+    lifetimeRoutes.push(
+      await runLifetimeRoute({
         browser,
         userscript,
         watchHtml,
@@ -1704,15 +1759,11 @@ export async function runTranslationRuntimeFixture({
         mediaRequests,
         servedChatIds,
         output,
-        ...route,
-        ...(installWorkerProbe ? { installWorkerProbe } : {}),
-      });
-      lifetimeRoutes.push(observed);
-    }
-    assert(
-      lifetimeRoutes.every((route) => route.status === 'observed'),
-      'Worker translation runtime was unavailable; run existing deterministic Worker fixture separately'
+        renderer: 'forced-main',
+        abortMode: 'ignored',
+      })
     );
+    assert.equal(lifetimeRoutes[0]?.status, 'observed');
     return {
       checks: {
         installedApplicationDelivery: false,
@@ -1725,7 +1776,7 @@ export async function runTranslationRuntimeFixture({
         staleModelProgressDiscarded: true,
         pendingDisableDiscarded: true,
         lifetimeMainObserved: lifetimeRoutes[0]?.status === 'observed',
-        lifetimeWorkerObserved: lifetimeRoutes[1]?.status === 'observed',
+        lifetimeWorkerScope: 'not-applicable-userscript-IIFE' as const,
         pageErrors: errors.length,
       },
       observations: {
@@ -1739,7 +1790,7 @@ export async function runTranslationRuntimeFixture({
         pageErrors: errors,
         browserVersion: browser.version(),
         scope:
-          'built userscript with controlled Translator API; no real model download or live YouTube',
+          'built userscript Main renderer with controlled Translator API; Worker requires installed extension; no real model download or live YouTube',
       },
     };
   } catch (error) {
@@ -1770,4 +1821,80 @@ export async function runTranslationRuntimeFixture({
     await noApi?.close();
     await supported?.close();
   }
+}
+
+/** Select the separately installed extension Worker lifetime fixture. */
+export async function readInstalledTranslationWorkerSelector(root: string): Promise<boolean> {
+  const path = join(root, 'validation/windows/inputs/translation-runtime-worker.json');
+  let contents: string;
+  try {
+    contents = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(JSON.parse(contents), { scenario: 'translation-runtime-worker' });
+  return true;
+}
+
+/** Exercise the packaged Worker through the normal installed Chrome extension bridge. */
+export async function runInstalledTranslationWorkerFixture({
+  browser,
+  context,
+  root,
+  output,
+  watchHtml,
+  installWorkerProbe,
+}: {
+  browser: Browser;
+  context: BrowserContext;
+  root: string;
+  output: string;
+  watchHtml: string;
+  installWorkerProbe: (expectedIds: string[]) => void;
+}) {
+  const video = await readFile(join(root, VIDEO_PATH));
+  assert.equal(createHash('sha256').update(video).digest('hex'), VIDEO_SHA256);
+  const mediaRequests: MediaRequest[] = [];
+  const servedChatIds: string[] = [];
+  const route = await runLifetimeRoute({
+    browser,
+    userscript: '',
+    watchHtml,
+    video,
+    mediaRequests,
+    servedChatIds,
+    renderer: 'natural-worker',
+    abortMode: 'supported',
+    installWorkerProbe,
+    installedContext: context,
+    output,
+  });
+  if (route.status !== 'observed') {
+    await writeFile(
+      join(output, 'translation-installed-worker-partial.json'),
+      JSON.stringify({ route, mediaRequests, servedChatIds }, null, 2)
+    );
+  }
+  assert.equal(route.status, 'observed', 'Installed extension Worker lifetime was unavailable');
+  assert(route.extensionBridge?.workerSupported && route.extensionBridge.probeUrlMatchesBridge);
+  return {
+    status: 'observed' as const,
+    checks: {
+      installedExtensionWorker: true,
+      packagedWorkerBridge: true,
+      controlledTranslatorBoundary: true,
+      paidArabicTranslationReflow: true,
+      nativeVideoPreserved: true,
+    },
+    observations: {
+      route,
+      mediaRequests,
+      servedChatIds,
+      videoSha256: VIDEO_SHA256,
+      browserVersion: browser.version(),
+      scope:
+        'installed Chrome extension with packaged Worker and controlled Translator API on an owned fixture; no real model download or live YouTube',
+    },
+  };
 }

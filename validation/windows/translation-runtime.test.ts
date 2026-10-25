@@ -2,9 +2,31 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { fixtureChatAction, qualifiesWorkerTranslationProof } from './translation-runtime.ts';
+import {
+  fixtureChatAction,
+  qualifiesWorkerTranslationProof,
+  readInstalledTranslationWorkerSelector,
+} from './translation-runtime.ts';
+
+test('installed Worker translation requires its own exact selector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'yt-translation-worker-selector-'));
+  const input = join(root, 'validation/windows/inputs/translation-runtime-worker.json');
+  try {
+    await mkdir(join(root, 'validation/windows/inputs'), { recursive: true });
+    assert.equal(await readInstalledTranslationWorkerSelector(root), false);
+    await writeFile(input, '{"scenario":"translation-runtime-worker"}');
+    assert.equal(await readInstalledTranslationWorkerSelector(root), true);
+    await writeFile(input, '{"scenario":"translation-runtime"}');
+    await assert.rejects(readInstalledTranslationWorkerSelector(root), { code: 'ERR_ASSERTION' });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('lifetime fixture uses parser-supported paid cards and same-ID replacement actions', () => {
   const held = fixtureChatAction('lifetime-held');
