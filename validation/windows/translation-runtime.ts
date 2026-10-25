@@ -779,41 +779,50 @@ async function sampleCanvasInk(
 
 async function sampleWorkerTranslationBand(
   page: Page,
-  motion: { startX: number; y: number; width: number; height: number },
-  originalHeight: number
+  baselineMotion: WorkerMotion,
+  adoptedMotion: WorkerMotion
 ): Promise<{ status: 'sampled' | 'unavailable'; addedAlphaPixels: number; glyphEdges: number }> {
   return page.evaluate(
-    async ({ position, baselineHeight }) => {
+    async ({ original, translated }) => {
       const canvas = document.querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas');
       const baseline = window.__ytTranslationBaselineBitmap;
       if (!canvas || !baseline)
         return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
       const after = await createImageBitmap(canvas);
       try {
+        if (baseline.width !== after.width || baseline.height !== after.height)
+          return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
         const bounds = canvas.getBoundingClientRect();
         const scaleX = after.width / bounds.width;
         const scaleY = after.height / bounds.height;
-        const left = Math.max(0, Math.floor((position.startX + 12) * scaleX));
-        const top = Math.max(0, Math.floor((position.y + baselineHeight + 2) * scaleY));
-        const right = Math.min(
-          after.width,
-          Math.ceil((position.startX + position.width - 12) * scaleX)
-        );
-        const bottom = Math.min(
-          after.height,
-          Math.ceil((position.y + position.height - 5) * scaleY)
-        );
-        const width = right - left;
-        const height = bottom - top;
-        if (width < 16 || height < 8)
+        const bandTop = original.height + 2;
+        const bandBottom = translated.height - 5;
+        const width = Math.floor((Math.min(original.width, translated.width) - 24) * scaleX);
+        const height = Math.floor((bandBottom - bandTop) * scaleY);
+        const beforeLeft = Math.floor((original.startX + 12) * scaleX);
+        const beforeTop = Math.floor((original.y + bandTop) * scaleY);
+        const afterLeft = Math.floor((translated.startX + 12) * scaleX);
+        const afterTop = Math.floor((translated.y + bandTop) * scaleY);
+        if (
+          width < 16 ||
+          height < 8 ||
+          beforeLeft < 0 ||
+          beforeTop < 0 ||
+          afterLeft < 0 ||
+          afterTop < 0 ||
+          beforeLeft + width > baseline.width ||
+          beforeTop + height > baseline.height ||
+          afterLeft + width > after.width ||
+          afterTop + height > after.height
+        )
           return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
         const scratch = new OffscreenCanvas(width, height);
         const context = scratch.getContext('2d', { willReadFrequently: true });
         if (!context) return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
-        context.drawImage(baseline, left, top, width, height, 0, 0, width, height);
+        context.drawImage(baseline, beforeLeft, beforeTop, width, height, 0, 0, width, height);
         const beforePixels = context.getImageData(0, 0, width, height).data;
         context.clearRect(0, 0, width, height);
-        context.drawImage(after, left, top, width, height, 0, 0, width, height);
+        context.drawImage(after, afterLeft, afterTop, width, height, 0, 0, width, height);
         const afterPixels = context.getImageData(0, 0, width, height).data;
         let addedAlphaPixels = 0;
         let glyphEdges = 0;
@@ -850,7 +859,7 @@ async function sampleWorkerTranslationBand(
         delete window.__ytTranslationBaselineBitmap;
       }
     },
-    { position: motion, baselineHeight: originalHeight }
+    { original: baselineMotion, translated: adoptedMotion }
   );
 }
 
@@ -905,8 +914,6 @@ export function qualifiesWorkerTranslationProof(
     actual.width === update.width &&
     actual.height === update.height &&
     actual.height > baseline.height + 2 &&
-    Math.abs(actual.startX - baseline.startX) <= 1 &&
-    Math.abs(actual.y - baseline.y) <= 1 &&
     band.status === 'sampled' &&
     band.addedAlphaPixels > 30 &&
     band.glyphEdges > 20
@@ -1075,17 +1082,25 @@ async function runLifetimeRoute({
       LIFETIME_TEXT.held,
       { timeout: 15_000 }
     );
+    const priorSeenAtMs = await page.evaluate(() => performance.now());
     if (abortMode === 'ignored') {
-      // The old owner is already replaced. Its raw native Promise remains
-      // pending while the unrelated queued row leaves by its own lifetime.
+      // The old owner is already replaced. The renderer's active/queue state
+      // reaches zero while the unrelated queued row leaves by its own lifetime.
+      // Aria-live rows are historical and cannot establish message expiry.
       await page.waitForFunction(
-        () =>
-          !Array.from(
-            document.querySelectorAll<HTMLElement>(
-              '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
-            )
-          ).some((row) => row.dataset.messageId === 'lifetime-released'),
-        null,
+        (seenAtMs) => {
+          const lines = Array.from(
+            document.querySelectorAll('#yt-chat-overlay-debug > div'),
+            (element) => element.textContent ?? ''
+          );
+          return (
+            performance.now() >= seenAtMs + 15_500 &&
+            lines.some((line) => /^Active: 0 \|/u.test(line)) &&
+            lines.some((line) => /^Queue: 0 \|/u.test(line)) &&
+            window.__ytTranslationMainDraws?.cardRects.length === 0
+          );
+        },
+        priorSeenAtMs,
         { timeout: 22_000 }
       );
     }
@@ -1122,6 +1137,17 @@ async function runLifetimeRoute({
       rawHeldSettlement,
       { timeout: 15_000 }
     );
+    if (renderer === 'natural-worker') {
+      await page.waitForFunction(
+        async (seenAtMs) => {
+          if (performance.now() < seenAtMs + 15_500) return false;
+          const snapshot = await window.__ytAcceptanceSnapshotWorker?.().catch(() => null);
+          return snapshot && snapshot.activeIds.length === 0 && snapshot.pendingIds.length === 0;
+        },
+        priorSeenAtMs,
+        { timeout: 22_000, polling: 250 }
+      );
+    }
     await page.evaluate((text) => window.__ytTranslationFixture?.hold(text), LIFETIME_TEXT.paid);
     await requestFixtureChat(page, 'lifetime-paid');
     await waitForChatRow(page, 'lifetime-paid', LIFETIME_TEXT.paid);
@@ -1205,8 +1231,6 @@ async function runLifetimeRoute({
             motion.height > baseline.height + 2 &&
             motion.width === update.width &&
             motion.height === update.height &&
-            Math.abs(motion.startX - baseline.startX) <= 1 &&
-            Math.abs(motion.y - baseline.y) <= 1 &&
             update.translationHeight > 0
             ? motion
             : null;
@@ -1281,8 +1305,8 @@ async function runLifetimeRoute({
       const geometryReflows = workerMotion.height - baselineWorkerMotion.height;
       const translationBand = await sampleWorkerTranslationBand(
         page,
-        workerMotion,
-        baselineWorkerMotion.height
+        baselineWorkerMotion,
+        workerMotion
       );
       assert(
         addedIds.includes('lifetime-held') && addedIds.includes('lifetime-paid'),

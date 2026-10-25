@@ -62,6 +62,8 @@ type AcceptanceWorkerMotion = {
 };
 type AcceptanceWorkerSnapshot = {
   activeMotions: AcceptanceWorkerMotion[];
+  activeIds: string[];
+  pendingIds: string[];
   processedBatchSequence: number;
 };
 type AcceptanceReadiness = {
@@ -440,6 +442,8 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
           type?: string;
           requestId?: number;
           processedBatchSequence?: number;
+          activeMessageIds?: unknown;
+          pendingMessageIds?: unknown;
           motionSnapshot?: { activeMotions?: AcceptanceWorkerMotion[] };
         };
         if (data?.type !== 'messageSnapshot' || data.requestId !== requestId) return;
@@ -458,6 +462,8 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
                 (value) => typeof value === 'number' && Number.isFinite(value)
               )
           ),
+          activeIds: declaredIds(data.activeMessageIds),
+          pendingIds: declaredIds(data.pendingMessageIds),
           processedBatchSequence: data.processedBatchSequence,
         });
       };

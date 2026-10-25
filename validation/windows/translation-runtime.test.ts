@@ -53,7 +53,7 @@ test('Worker proof requires adopted geometry and translated-band pixels, not out
   );
   assert.equal(
     qualifiesWorkerTranslationProof(baseline, { ...baseline, height: 120, y: 60 }, update, visible),
-    false
+    true
   );
   assert.equal(
     qualifiesWorkerTranslationProof(baseline, { ...baseline, height: 120 }, update, visible),

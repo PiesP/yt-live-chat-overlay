@@ -54,16 +54,21 @@ bitmap path into the overlay canvas, positive source alpha, changed target
 pixels, card reflow, and absence of stale-result bitmap draws.
 The Worker route requires its actual ready signal, admitted paid-card ID, a
 Worker-owned motion snapshot with increased card height after the translation
-update, and newly visible glyph edges in that card's expanded canvas band.
+update, and newly visible glyph edges in that card's expanded canvas band. The
+pixel samples follow each Worker-owned card position before and after reflow.
+The edge sample is spatial evidence, not OCR; Arabic content is identified in
+the corresponding translation update.
 Outbound translation messages and generic canvas ink alone do not qualify.
 If Worker startup or pixel read is unavailable, the focused profile fails with
 a partial receipt; the existing deterministic Worker fixture is a separate
 claim. Canned CJK, RTL, emoji and paid-card messages exercise queued release
 under deliberately ignored abort, same-ID replacement in both modes, late
 old-result suppression and recovery after raw native settlement. The old held
-row is replaced before its lifetime expires; a fresh paid row carries Arabic
-in the translated result after the raw lease settles. The signal-aware route
-does not claim queued release because its native abort frees the lease first.
+row is replaced before its lifetime expires; renderer state must show that the
+prior messages have left before a fresh paid row carries Arabic in the
+translated result. Aria-live rows remain as history and are used only for
+ingress evidence. The signal-aware route does not claim queued release because
+its native abort frees the lease first.
 A `showDebugOverlay` change verifies that a nonvisual setting leaves translation
 pending. The controlled boundary has both signal-aware and deliberately
 ignored-abort modes, and records raw settlement separately from local caller
