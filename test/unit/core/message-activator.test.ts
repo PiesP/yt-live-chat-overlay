@@ -312,6 +312,24 @@ describe('MessageActivator', () => {
       expect(callbacks1.onTranslationResult).not.toHaveBeenCalled();
     });
 
+    it('aborts translation when a message is released or all owners are cleared', () => {
+      const svc = makeMockTranslationService(true);
+      svc.translate.mockImplementation(() => new Promise(() => undefined));
+      const act = new MessageActivator(svc, makeConfig());
+      const callbacks = makeCallbacks();
+      act.activate(makeChatMessage({ id: 'first' }), 0, 200, 30, 400, callbacks);
+      const first = (callbacks.onActivated as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      const firstSignal = svc.translate.mock.calls[0]![1].signal as AbortSignal;
+      expect(firstSignal.aborted).toBe(false);
+      act.releaseMessage(first);
+      expect(firstSignal.aborted).toBe(true);
+
+      act.activate(makeChatMessage({ id: 'second' }), 0, 200, 30, 400, callbacks);
+      const secondSignal = svc.translate.mock.calls[1]![1].signal as AbortSignal;
+      act.cancelAllTranslations();
+      expect(secondSignal.aborted).toBe(true);
+    });
+
     it('rejects a stale translation after a same-ID replacement', async () => {
       const svc = makeMockTranslationService(true);
       svc.translate.mockResolvedValue('stale translation');

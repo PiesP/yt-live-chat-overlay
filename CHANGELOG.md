@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chat translation lifetime** — Cancel requests when their Main or Worker messages leave the renderer, bound the pending text queue, and let recent and paid messages progress during bursts while retaining oldest-message turns. Keep browser translation work serialized across renderer replacement until its native Promise settles; original comments remain visible if translation stalls.
+
 ## [0.45.8] - 2026-10-21
 
 ### Fixed

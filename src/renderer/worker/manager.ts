@@ -89,6 +89,7 @@ interface WorkerManagerDeps {
   getMessagePriority: (msg: ChatMessage) => number;
   getEffectiveSpeedPxPerSec: () => number;
   onMessageDispatched?: (message: ChatMessage, id: string) => void;
+  onMessageReleased?: (message: ChatMessage, id: string) => void;
   onStats?: (stats: WorkerStatsMessage) => void;
 }
 
@@ -774,6 +775,10 @@ export class RenderWorkerManager {
     if (!this.pendingBatchPreviousStates.has(id)) {
       this.pendingBatchPreviousStates.set(id, this.sentMessages.get(id) ?? null);
     }
+    const previous = this.sentMessages.get(id);
+    if (previous && previous.message !== message) {
+      this.deps.onMessageReleased?.(previous.message, id);
+    }
     this.sentMessages.set(id, {
       message,
       batchSequence: this.pendingBatchSequence,
@@ -988,7 +993,11 @@ export class RenderWorkerManager {
     const failedBatchSequence = batch[0]?.batchSequence;
     if (failedBatchSequence !== undefined) {
       for (const [id, previous] of previousStates) {
-        if (this.sentMessages.get(id)?.batchSequence !== failedBatchSequence) continue;
+        const current = this.sentMessages.get(id);
+        if (current?.batchSequence !== failedBatchSequence) continue;
+        if (current && current.message !== previous?.message) {
+          this.deps.onMessageReleased?.(current.message, id);
+        }
         if (previous) {
           this.sentMessages.set(id, previous);
         } else {
@@ -1125,6 +1134,7 @@ export class RenderWorkerManager {
     this.batchFlushScheduled = false;
     if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch, previousStates);
     this.deferredIngress.length = 0;
+    this.releaseAllSentMessages();
     this.translatedMessages.clear();
     this.currentEpoch = Math.min(Number.MAX_SAFE_INTEGER, this.currentEpoch + 1);
     sendClearStateToWorker({ worker: this.worker }, this.currentEpoch);
@@ -1194,6 +1204,13 @@ export class RenderWorkerManager {
   }
 
   /** Destroy the render worker. */
+  private releaseAllSentMessages(): void {
+    for (const [id, retained] of this.sentMessages) {
+      this.deps.onMessageReleased?.(retained.message, id);
+    }
+    this.sentMessages.clear();
+  }
+
   destroy(): void {
     this.active = false;
     this._contextLost = false;
@@ -1220,7 +1237,7 @@ export class RenderWorkerManager {
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
     if (!this.worker) {
-      this.sentMessages.clear();
+      this.releaseAllSentMessages();
       this.translatedMessages.clear();
       this.nextBatchSequence = 0;
       this.pendingBatchSequence = 0;
@@ -1260,7 +1277,7 @@ export class RenderWorkerManager {
     // Safety timeout: if the ack never arrives, force-terminate after 500ms.
     terminationTimeout = setTimeout(finalizeWorkerTermination, 500);
 
-    this.sentMessages.clear();
+    this.releaseAllSentMessages();
     this.translatedMessages.clear();
     this.nextBatchSequence = 0;
     this.pendingBatchSequence = 0;
@@ -1378,6 +1395,7 @@ export class RenderWorkerManager {
     for (const [id, retained] of this.sentMessages) {
       if (retained.epoch < epoch) {
         this.sentMessages.delete(id);
+        this.deps.onMessageReleased?.(retained.message, id);
         this.translatedMessages.delete(id);
       }
     }
@@ -1413,6 +1431,7 @@ export class RenderWorkerManager {
     for (const [id, retained] of this.sentMessages) {
       if (retained.batchSequence <= processedBatchSequence && !currentIds.has(id)) {
         this.sentMessages.delete(id);
+        this.deps.onMessageReleased?.(retained.message, id);
         this.translatedMessages.delete(id);
       }
     }
@@ -1472,6 +1491,7 @@ export class RenderWorkerManager {
       }
       if (this.sentMessages.get(id) === retained) {
         this.sentMessages.delete(id);
+        this.deps.onMessageReleased?.(retained.message, id);
       }
     }
     return messages;
@@ -1498,6 +1518,7 @@ export class RenderWorkerManager {
       const isUnacknowledged = retained.batchSequence > this.lastWorkerProcessedBatchSequence;
       if (!wasActive && !wasPending && !isUnacknowledged) {
         this.sentMessages.delete(id);
+        this.deps.onMessageReleased?.(retained.message, id);
         continue;
       }
       messages.push({
@@ -1507,6 +1528,7 @@ export class RenderWorkerManager {
         trackDrops: retained.trackDrops && !wasActive && (wasPending || isUnacknowledged),
       });
       this.sentMessages.delete(id);
+      this.deps.onMessageReleased?.(retained.message, id);
     }
     return messages;
   }

@@ -18,7 +18,7 @@ export interface TranslatorDownloadEvent extends Event {
 }
 
 export interface TranslatorInstance {
-  translate(text: string): Promise<string>;
+  translate(text: string, options?: { signal?: AbortSignal }): Promise<string>;
   destroy(): void;
 }
 

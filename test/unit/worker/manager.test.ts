@@ -65,6 +65,32 @@ describe('RenderWorkerManager', () => {
     manager.destroy();
   });
 
+  it('releases retained translation owners on replacement and state clear', () => {
+    const released = vi.fn();
+    (deps as any).onMessageReleased = released;
+    (manager as any).worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    manager.setActive(true);
+    const original = {
+      id: 'same',
+      timestamp: Date.now(),
+      text: 'original',
+      content: [{ type: 'text' as const, content: 'original' }],
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+    };
+    const replacement = { ...original, actionType: 'replace' as const, text: 'new' };
+    expect(manager.sendToWorker(original, original.id)).toBe(true);
+    expect(manager.sendToWorker(replacement, replacement.id)).toBe(true);
+    expect(released).toHaveBeenCalledWith(original, original.id);
+    manager.clearState();
+    expect(released).toHaveBeenCalledWith(replacement, replacement.id);
+  });
+
   describe('worker configuration', () => {
     it('copies every selected setting and derives the initial wire fields', () => {
       const settings = {

@@ -230,6 +230,11 @@ export class CanvasRenderer extends RendererBase {
   private pendingTranslationReadIdx = 0;
   /** Invalidates in-flight translation callbacks when their configuration changes. */
   private translationConfigurationGeneration = 0;
+  private readonly replacementTranslationOwners = new Map<CanvasMessage, AbortController>();
+  private readonly workerTranslationOwners = new Map<
+    string,
+    { message: ChatMessage; controller: AbortController }
+  >();
 
   /**
    * Scratch array for cleanupExpiredMessages — hoisted to avoid per-frame allocation.
@@ -375,10 +380,14 @@ export class CanvasRenderer extends RendererBase {
           error: String(err),
         });
       });
-    this.messageActivator = new MessageActivator(this.translationService, {
-      topBottomDurationMs: settings.topBottomDurationMs,
-      depthLayersEnabled: settings.depthLayersEnabled,
-    });
+    this.messageActivator = new MessageActivator(
+      this.translationService,
+      {
+        topBottomDurationMs: settings.topBottomDurationMs,
+        depthLayersEnabled: settings.depthLayersEnabled,
+      },
+      (message) => this.cancelReplacementTranslation(message)
+    );
 
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
@@ -454,6 +463,7 @@ export class CanvasRenderer extends RendererBase {
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
       onMessageDispatched: (message, id) => this.prefetchAndTranslateForWorker(message, id),
+      onMessageReleased: (message, id) => this.cancelWorkerTranslation(id, message),
       onStats: (stats) => {
         // The main-thread rAF intentionally idles while the Worker owns the
         // canvas. Reconcile timer-driven burst changes and UI density here.
@@ -851,6 +861,8 @@ export class CanvasRenderer extends RendererBase {
       .filter((entry) => entry.msg !== active);
     this.pendingTranslationReadIdx = 0;
 
+    this.messageActivator.cancelTranslation(active);
+    this.cancelReplacementTranslation(active);
     active.message = message;
     active.renderMessage = message;
     active.ghostText = getDisplayText(message.content);
@@ -891,17 +903,47 @@ export class CanvasRenderer extends RendererBase {
   private requestReplacementTranslation(active: CanvasMessage, message: ChatMessage): void {
     const translatableText = getTranslatableText(message);
     if (!this.translationService.isEnabled || !translatableText) return;
+    const owner = new AbortController();
+    this.replacementTranslationOwners.set(active, owner);
     const generation = this.translationConfigurationGeneration;
     this.translationService
-      .translate(translatableText)
+      .translate(translatableText, {
+        signal: owner.signal,
+        priority: message.kind === 'superchat' ? 2 : message.kind === 'membership' ? 1 : 0,
+      })
       .then((translated) => {
-        if (active.message === message) {
+        if (!owner.signal.aborted && active.message === message) {
           this.queueTranslationResult(active, translated, generation);
         }
       })
       .catch(() => {
         // Silently ignore individual translation failures.
+      })
+      .finally(() => {
+        if (this.replacementTranslationOwners.get(active) === owner) {
+          this.replacementTranslationOwners.delete(active);
+        }
       });
+  }
+
+  private cancelReplacementTranslation(active: CanvasMessage): void {
+    this.replacementTranslationOwners.get(active)?.abort();
+    this.replacementTranslationOwners.delete(active);
+  }
+
+  private cancelWorkerTranslation(id: string, message: ChatMessage): void {
+    const owner = this.workerTranslationOwners.get(id);
+    if (owner?.message !== message) return;
+    owner.controller.abort();
+    this.workerTranslationOwners.delete(id);
+  }
+
+  private cancelAllTranslationOwners(): void {
+    this.messageActivator.cancelAllTranslations();
+    for (const owner of this.replacementTranslationOwners.values()) owner.abort();
+    this.replacementTranslationOwners.clear();
+    for (const owner of this.workerTranslationOwners.values()) owner.controller.abort();
+    this.workerTranslationOwners.clear();
   }
 
   /**
@@ -2060,10 +2102,18 @@ export class CanvasRenderer extends RendererBase {
     this.collectSourceLanguageSample(message);
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
+      const previous = this.workerTranslationOwners.get(msgId);
+      previous?.controller.abort();
+      const owner = new AbortController();
+      this.workerTranslationOwners.set(msgId, { message, controller: owner });
       const generation = this.translationConfigurationGeneration;
       this.translationService
-        .translate(translatableText)
+        .translate(translatableText, {
+          signal: owner.signal,
+          priority: message.kind === 'superchat' ? 2 : message.kind === 'membership' ? 1 : 0,
+        })
         .then((translated) => {
+          if (owner.signal.aborted) return;
           if (generation !== this.translationConfigurationGeneration) return;
           if (!this.workerManager.isCurrentMessage(msgId, message)) return;
           if (translated !== null && !this.isTranslationWithinResourceBudget(message, translated)) {
@@ -2074,6 +2124,11 @@ export class CanvasRenderer extends RendererBase {
         })
         .catch(() => {
           // Silently ignore individual translation failures
+        })
+        .finally(() => {
+          if (this.workerTranslationOwners.get(msgId)?.controller === owner) {
+            this.workerTranslationOwners.delete(msgId);
+          }
         });
     }
   }
@@ -2269,10 +2324,15 @@ export class CanvasRenderer extends RendererBase {
         });
       });
 
-    this.messageActivator = new MessageActivator(this.translationService, {
-      topBottomDurationMs: settings.topBottomDurationMs,
-      depthLayersEnabled: settings.depthLayersEnabled,
-    });
+    this.cancelAllTranslationOwners();
+    this.messageActivator = new MessageActivator(
+      this.translationService,
+      {
+        topBottomDurationMs: settings.topBottomDurationMs,
+        depthLayersEnabled: settings.depthLayersEnabled,
+      },
+      (message) => this.cancelReplacementTranslation(message)
+    );
     this.buildOpacityConfig();
   }
 
@@ -2338,6 +2398,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected resetState(): void {
+    this.cancelAllTranslationOwners();
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -2435,6 +2496,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected onDestroy(): void {
+    this.cancelAllTranslationOwners();
     this._destroyed = true;
     this.stopRenderLoop();
     this.workerManager.destroy();
