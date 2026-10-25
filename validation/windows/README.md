@@ -1,5 +1,30 @@
 # Windows acceptance profile
 
+## Native Translator cancellation prerequisite (#338)
+
+Create the ignored `validation/windows/inputs/translator-native-cancellation.json`
+containing exactly `{"scenario":"translator-native-cancellation"}`. Run the
+installed extension profile with headed Chrome and no `--live-url` or duration
+option. This focused selector installs the maintained extension, then opens one
+owned HTTPS YouTube fixture. The installed extension injects the probe into its
+isolated content-script realm; a trusted button click starts each real browser
+Translator API case. It never substitutes a Translator
+mock or sends chat content to a provider page.
+
+The receipt records the browser version, secure origin, exposed API methods,
+language-pair availability, setup time and each native promise's observed
+settlement. Fixed English text with Japanese and Korean words is used for short
+and long requests. Only input/output codepoint lengths and SHA-256 hashes are
+retained. The cases cover preaborted creation, preaborted translation, abort
+during translation, another call on the same object, destruction during a
+pending call and a call after destruction. Operation observation ends after
+15 seconds; model setup can take 120 seconds. An unknown native settlement
+stops the sequence and closes the owned browser during normal profile cleanup.
+An observed JavaScript rejection does not establish that native model work
+stopped. Unsupported, ignored aborts and inconclusive cases remain visible in
+the receipt and fail the focused profile. Even an observed prerequisite alone
+does not qualify the full #338 behavior.
+
 This validation has four separate evidence tiers. None substitutes for another.
 
 1. **Artifact-only smoke (`yt-visual`):** injects the production userscript into

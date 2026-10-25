@@ -70,6 +70,10 @@ import {
   readUserscriptMetadata,
   runManagerUpgrade,
 } from './release-upgrade/upgrade.ts';
+import {
+  readTranslatorNativeSelector,
+  runTranslatorNativeCancellation,
+} from './translator-native-cancellation.ts';
 import { runVideoPiPFixture } from './video-pip.ts';
 
 export { selectPublicSeekTarget };
@@ -212,6 +216,7 @@ type ChromeResult<Live = LiveObservation> = {
   } | null;
   liveObservation?: { mode: 'duration'; duration_seconds: 1200 } | null;
   installedViewingTasks?: InstalledViewingTasks | null;
+  translatorNativeCancellation?: Awaited<ReturnType<typeof runTranslatorNativeCancellation>> | null;
   cleanup: Record<string, unknown>;
   browserVersion?: string;
   installationMethod?: string;
@@ -2241,6 +2246,18 @@ export async function runChromeInstallation({
     'At most three live URLs can run within the guest deadline'
   );
   const installedViewingSelected = await readInstalledViewingTaskSelector(root);
+  const translatorNativeSelected = await readTranslatorNativeSelector(root);
+  if (translatorNativeSelected) {
+    assert.equal(
+      installedViewingSelected,
+      false,
+      'Focused installation selectors cannot be combined'
+    );
+    assert.equal(liveObservation, null, 'Native Translator probe cannot use the duration profile');
+    assert.equal(browserName, 'chrome', 'Native Translator probe requires installed Chrome');
+    assert.equal(installation, 'extension', 'Native Translator probe requires the extension');
+    assert.deepEqual(liveUrls, [], 'Native Translator probe cannot use public live URLs');
+  }
   if (installedViewingSelected) {
     assert.equal(liveObservation, null, 'Installed viewing tasks cannot use the duration profile');
     assert.equal(browserName, 'chrome', 'Installed viewing tasks require Chrome');
@@ -2297,6 +2314,13 @@ export async function runChromeInstallation({
   try {
     const extensionUpgradeInput =
       installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
+    if (translatorNativeSelected) {
+      assert.equal(
+        extensionUpgradeInput,
+        null,
+        'Native Translator probe requires a fresh installed extension without upgrade inputs'
+      );
+    }
     if (installation === 'extension') {
       result.extensionUpgrade = extensionUpgradeInput
         ? {
@@ -2397,6 +2421,21 @@ export async function runChromeInstallation({
         result.userscriptManager = await installUserscript(context, extensionId, root, output);
         result.installationMethod = 'real-manager-ui-import';
       }
+    }
+    if (translatorNativeSelected) {
+      assert(extensionId, 'Native Translator probe requires an installed extension ID');
+      assert(result.browserVersion, 'Native Translator probe requires the browser version');
+      result.translatorNativeCancellation = await runTranslatorNativeCancellation({
+        context,
+        extensionId,
+        browserVersion: result.browserVersion,
+      });
+      assert.equal(
+        result.translatorNativeCancellation.status,
+        'observed',
+        'Native Translator prerequisite did not produce all expected JavaScript settlements'
+      );
+      return result;
     }
     result.fixture = await runFixture({
       browser,
