@@ -36,6 +36,32 @@ stopped. Unsupported, ignored aborts and inconclusive cases remain visible in
 the receipt and fail the focused profile. Even an observed prerequisite alone
 does not qualify the full #338 behavior.
 
+## Controlled translation lifetime fixture (#338)
+
+Create the ignored `validation/windows/inputs/translation-runtime.json` with
+exactly `{"scenario":"translation-runtime"}` for a separate `yt-visual` run.
+This loads the built userscript on owned YouTube-shaped pages with a real
+decoded and progressing fixture video. Only the browser Translator boundary is
+controlled. The first phases cover unavailable API, preparation, failure,
+settings changes and late raw creation settlement: local cancellation of a
+pending create must not permit the next native creation until its Promise
+settles. The product does not pass an AbortSignal to `create()`.
+
+The added lifetime phases run a controlled Main fallback and a natural Worker
+route in fresh contexts. The Main fallback deliberately disables canvas
+transfer before application startup. The Worker route requires its actual
+ready signal, admitted fixture IDs, active paid card, translation protocol
+update with changed geometry and positive canvas ink. If Worker startup or
+pixel read is unavailable, the focused profile fails with a partial receipt;
+the existing deterministic Worker fixture is a separate claim. Canned CJK,
+RTL, emoji and paid-card messages exercise queued release, same-ID replacement,
+late old-result suppression and recovery after raw native settlement. A
+`showDebugOverlay` change verifies that a nonvisual setting leaves translation
+pending. The controlled boundary has both signal-aware and deliberately
+ignored-abort modes, and records raw settlement separately from local caller
+completion. These phases do not prove actual Chrome Translator cancellation or
+live YouTube behavior.
+
 This validation has four separate evidence tiers. None substitutes for another.
 
 1. **Artifact-only smoke (`yt-visual`):** injects the production userscript into

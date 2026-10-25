@@ -36,6 +36,17 @@ type AcceptanceWorkerRecord = {
   readyAtMs: number | null;
   acknowledgements: number;
   addedMessageIds: string[][];
+  geometrySequence: number;
+  sentGeometries: Array<{ id: string; width: number; height: number; sequence: number }>;
+  translationUpdates: Array<{
+    id: string;
+    textLength: number;
+    width: number;
+    height: number;
+    translationHeight: number;
+    staleMarker: boolean;
+    sequence: number;
+  }>;
   recentReceipts: Record<string, unknown>[];
   recentStats: Record<string, unknown>[];
   terminated: boolean;
@@ -409,6 +420,9 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
         readyAtMs: null,
         acknowledgements: 0,
         addedMessageIds: [],
+        geometrySequence: 0,
+        sentGeometries: [],
+        translationUpdates: [],
         recentReceipts: [],
         recentStats: [],
         terminated: false,
@@ -463,7 +477,10 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
         worker.postMessage = (message: unknown, transfer?: Transferable[]) => {
           const payload =
             message && typeof message === 'object'
-              ? (message as { type?: string; messages?: { id?: string }[] })
+              ? (message as {
+                  type?: string;
+                  messages?: Array<{ id?: string; width?: number; height?: number }>;
+                })
               : null;
           if (payload?.type === 'addMessages' && Array.isArray(payload.messages)) {
             record.addedMessageIds.push(
@@ -471,6 +488,52 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
                 .map((entry) => entry?.id)
                 .filter((id): id is string => typeof id === 'string')
             );
+            for (const entry of payload.messages) {
+              if (
+                typeof entry?.id === 'string' &&
+                expected.has(entry.id) &&
+                typeof entry.width === 'number' &&
+                typeof entry.height === 'number' &&
+                record.sentGeometries.length < 32
+              ) {
+                record.sentGeometries.push({
+                  id: entry.id,
+                  width: entry.width,
+                  height: entry.height,
+                  sequence: ++record.geometrySequence,
+                });
+              }
+            }
+          }
+          if (
+            payload?.type === 'updateTranslation' &&
+            typeof (payload as { id?: unknown }).id === 'string'
+          ) {
+            const update = payload as {
+              id: string;
+              translatedText?: unknown;
+              width?: unknown;
+              height?: unknown;
+              translationHeight?: unknown;
+            };
+            if (
+              expected.has(update.id) &&
+              typeof update.translatedText === 'string' &&
+              typeof update.width === 'number' &&
+              typeof update.height === 'number' &&
+              typeof update.translationHeight === 'number' &&
+              record.translationUpdates.length < 32
+            ) {
+              record.translationUpdates.push({
+                id: update.id,
+                textLength: Array.from(update.translatedText).length,
+                width: update.width,
+                height: update.height,
+                translationHeight: update.translationHeight,
+                staleMarker: update.translatedText.includes('STALE'),
+                sequence: ++record.geometrySequence,
+              });
+            }
           }
           if (transfer === undefined) nativePostMessage(message);
           else nativePostMessage(message, transfer);
@@ -1609,6 +1672,7 @@ export async function run({
         output,
         userscript,
         watchHtml: createMockWatchHtml(previewHtml),
+        installWorkerProbe: installFixtureWorkerProbe,
       });
     }
     if (selectedScenario === 'viewing-experience' || selectedScenario === 'japanese-ime') {

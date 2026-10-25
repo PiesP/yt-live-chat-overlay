@@ -18,7 +18,11 @@ import {
 import { getRowSlotCount } from '@renderer/layout/row-geometry';
 import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
 import type { WorkerStatsMessage } from '@renderer/worker/types';
-import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
+import {
+  applySettingsPatch,
+  normalizeStoredSettings,
+  shouldResetRendererForSettingsChange,
+} from '@settings/schema';
 import { LanguageDetectorService } from '@translation/language-detector';
 import type { MessageActivator } from '@util/message-activator';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -1069,7 +1073,9 @@ describe('CanvasRenderer', () => {
       onTranslationResult,
     });
     const signal = internals.translationService.translate.mock.calls[0]?.[1].signal as AbortSignal;
-    renderer.updateSettings({ ...settings, opacity: 0.7 });
+    const next = { ...settings, showDebugOverlay: !settings.showDebugOverlay };
+    expect(shouldResetRendererForSettingsChange(settings, next)).toBe(false);
+    renderer.updateSettings(next);
     expect(internals.messageActivator).toBe(activator);
     expect(signal.aborted).toBe(false);
     resolveTranslation?.('translated');
@@ -1109,7 +1115,9 @@ describe('CanvasRenderer', () => {
     }));
     internals.prefetchAndTranslateForWorker(message, message.id!);
     const signal = internals.translationService.translate.mock.calls[0]?.[1].signal as AbortSignal;
-    renderer.updateSettings({ ...settings, opacity: 0.7 });
+    const next = { ...settings, showDebugOverlay: !settings.showDebugOverlay };
+    expect(shouldResetRendererForSettingsChange(settings, next)).toBe(false);
+    renderer.updateSettings(next);
     expect(signal.aborted).toBe(false);
     resolveTranslation?.('translated');
     await Promise.resolve();
