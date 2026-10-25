@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
+
+import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit.ts';
 
 interface ExtensionManifest {
   browser_specific_settings?: { gecko?: { id?: string; strict_min_version?: string } };
@@ -47,6 +57,37 @@ function assertBidiLicense(relativePath: string): void {
       throw new Error(`${relativePath} is missing the bundled bidi-js MIT license notice.`);
     }
   }
+}
+
+export function assertPackagedWorkerSource(file: string): number {
+  let descriptor: number;
+  try {
+    descriptor = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Missing packaged worker source: ${file}`);
+    }
+    throw error;
+  }
+  let source: Buffer;
+  try {
+    if (!fstatSync(descriptor).isFile()) {
+      throw new Error(`Packaged worker source is not a regular file: ${file}`);
+    }
+    source = readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  const size = source.length;
+  if (size === 0) throw new Error(`Packaged worker source is empty: ${file}`);
+  if (size > MAX_PACKAGED_WORKER_BYTES) {
+    throw new Error(
+      `Packaged worker source exceeds ${MAX_PACKAGED_WORKER_BYTES} UTF-8 bytes: ${file} (${size})`
+    );
+  }
+  // The runtime measures the decoded source when creating its Blob.
+  new TextDecoder('utf-8', { fatal: true }).decode(source);
+  return size;
 }
 
 function stripExpectedBidiBanner(source: string, relativePath: string): string {
@@ -129,6 +170,13 @@ function checkFirefoxContract(): void {
 }
 
 export function checkArtifacts(args: readonly string[] = process.argv): void {
+  for (const option of args.slice(2)) {
+    if (option !== '--e2e') {
+      throw new Error(
+        `Unsupported artifact-check option: ${option}; use the all-target build to record a footprint`
+      );
+    }
+  }
   if (args.includes('--e2e')) {
     assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
   } else {
@@ -150,6 +198,9 @@ export function checkArtifacts(args: readonly string[] = process.argv): void {
     'dist-extension-firefox/workers/renderer.js',
   ]) {
     assertBidiLicense(artifact);
+  }
+  for (const directory of ['dist-extension', 'dist-extension-firefox']) {
+    assertPackagedWorkerSource(join(root, directory, 'workers/renderer.js'));
   }
   console.log('Build artifact references are valid.');
 }

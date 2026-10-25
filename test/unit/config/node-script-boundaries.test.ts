@@ -21,12 +21,14 @@ const nodeBinary = process.env.NODE_SCRIPT_TEST_BINARY ?? process.execPath;
 const fixtureRoots: string[] = [];
 const nodeScripts = [
   'scripts/build/clean.ts',
+  'scripts/build/targets.ts',
   'scripts/check/artifacts.ts',
   'scripts/check/i18n.ts',
   'scripts/ci/classify-workflow-changes.ts',
   'scripts/ci/dependabot-apply.ts',
   'scripts/ci/update-browser-core.ts',
   'scripts/release/prepare.ts',
+  'scripts/release/footprint.ts',
   'scripts/release/version.ts',
   'scripts/release/verify-publication.ts',
   'scripts/release/verify-source.ts',
@@ -278,6 +280,16 @@ describe('Node script boundaries', () => {
       join(root, 'scripts/check/artifacts.ts'),
       join(directory, 'scripts/check/artifacts.ts')
     );
+    mkdirSync(join(directory, 'scripts/release'), { recursive: true });
+    mkdirSync(join(directory, 'extension'), { recursive: true });
+    copyFileSync(
+      join(root, 'scripts/release/footprint.ts'),
+      join(directory, 'scripts/release/footprint.ts')
+    );
+    copyFileSync(
+      join(root, 'extension/worker-source-limit.ts'),
+      join(directory, 'extension/worker-source-limit.ts')
+    );
     const artifacts = runCli(join(directory, 'scripts/check/artifacts.ts'), ['--e2e'], directory);
     expect(artifacts.status).not.toBe(0);
     expect(artifacts.stderr).toContain('Missing artifact:');
@@ -290,6 +302,10 @@ describe('Node script boundaries', () => {
     copyFileSync(
       join(root, 'scripts/release/prepare.ts'),
       join(directory, 'scripts/release/prepare.ts')
+    );
+    copyFileSync(
+      join(root, 'scripts/release/footprint.ts'),
+      join(directory, 'scripts/release/footprint.ts')
     );
     const result = runCli(join(directory, 'scripts/release/prepare.ts'), [], directory, {
       ...process.env,

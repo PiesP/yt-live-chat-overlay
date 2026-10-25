@@ -30,6 +30,8 @@ function createVerificationFixture(): {
   mkdirSync(join(directory, 'outputs'));
   const fixtureScripts = {
     ...scripts,
+    'build:targets:ci':
+      'pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts',
     quality: 'sh ./record.sh quality',
     'check:versions': 'sh ./record.sh check:versions',
     'check:artifacts': 'sh ./record.sh check:artifacts',
@@ -133,6 +135,9 @@ describe('Verification configuration', () => {
       );
       expect(scripts.verify).toBe(
         'pnpm -s quality && pnpm -s check:versions && pnpm -s build:targets:ci'
+      );
+      expect(scripts['build:targets:ci']).toBe(
+        'node --experimental-strip-types scripts/build/targets.ts'
       );
       const calls: string[][] = [];
       for (const stage of [
@@ -439,13 +444,9 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         ],
         ['pnpm', '-s', 'quality'],
       ]);
-      const targets = [
-        'build:ci',
-        'build:extension:ci',
-        'build:extension:firefox:ci',
-        'check:artifacts',
-      ];
-      expect(run('build:targets:ci').calls.map((call) => call.at(-1))).toEqual(targets);
+      expect(scripts['build:targets:ci']).toBe(
+        'node --experimental-strip-types scripts/build/targets.ts'
+      );
       expect(run('verify').calls.map((call) => call.at(-1))).toEqual([
         'quality',
         'check:versions',

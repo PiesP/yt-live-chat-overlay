@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-/** The packaged worker is currently under 100 KiB; leave bounded build headroom. */
-export const MAX_PACKAGED_WORKER_BYTES = 512 * 1024;
+import { MAX_PACKAGED_WORKER_BYTES } from './worker-source-limit';
+
 const WORKER_SOURCE_TIMEOUT_MS = 5000;
 
 interface WorkerSourceLoadOptions {
