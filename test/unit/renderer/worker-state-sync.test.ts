@@ -1542,7 +1542,7 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
-  it('ignores pre-clear receipts and resets ownership only after the matching fence ack', async () => {
+  it('releases ownership immediately and resets queue accounting after the matching clear fence ack', async () => {
     const settings = { ...DEFAULT_SETTINGS, queueMaxSize: 50 };
     const { manager, worker } = initializedManager(settings);
     const message: ChatMessage = {
@@ -1563,18 +1563,22 @@ describe('Worker renderer state synchronization', () => {
       admittedMessages: 1,
       minimumPendingPriority: 0,
     });
+    expect(manager.isCurrentMessage(message.id!, message)).toBe(true);
     manager.clearState();
+    expect(manager.isCurrentMessage(message.id!, message)).toBe(false);
     worker.emitMessage({
       type: 'batchReceipt',
       epoch: 0,
       batchSequence: 1,
-      pendingQueueDepth: 50,
+      pendingQueueDepth: 7,
       admittedMessages: 1,
       minimumPendingPriority: 0,
     });
 
     expect(manager.queueDepth).toBe(50);
-    expect(manager.isCurrentMessage(message.id!, message)).toBe(true);
+    worker.emitMessage({ type: 'clearStateAck', epoch: 0 });
+    expect(manager.queueDepth).toBe(50);
+    expect(manager.isCurrentMessage(message.id!, message)).toBe(false);
     worker.emitMessage({ type: 'clearStateAck', epoch: 1 });
     expect(manager.queueDepth).toBe(0);
     expect(manager.isCurrentMessage(message.id!, message)).toBe(false);
