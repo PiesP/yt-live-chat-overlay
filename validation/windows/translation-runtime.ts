@@ -110,6 +110,7 @@ declare global {
       cachedBitmapAlphaPixels: number;
       overlayChangedPixels: number;
       staleTextDraws: number;
+      staleCachedDraws: number;
       cardRects: Array<{ width: number; height: number }>;
       maxCardHeight: number;
     };
@@ -180,21 +181,31 @@ async function makeContext(
           cachedBitmapAlphaPixels: 0,
           overlayChangedPixels: 0,
           staleTextDraws: 0,
+          staleCachedDraws: 0,
           cardRects: [],
           maxCardHeight: 0,
         };
         window.__ytTranslationMainDraws = proof;
-        const taggedBitmaps = new WeakMap<object, { translated: boolean; arabic: boolean }>();
+        const taggedBitmaps = new WeakMap<
+          object,
+          { translated: boolean; arabic: boolean; stale: boolean }
+        >();
         const bitmapAlpha = new WeakMap<object, number>();
         if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
           const nativeBitmapFillText = OffscreenCanvasRenderingContext2D.prototype.fillText;
           OffscreenCanvasRenderingContext2D.prototype.fillText = function (...args) {
             const value = args[0];
             if (typeof value === 'string') {
-              const tagged = taggedBitmaps.get(this.canvas) ?? { translated: false, arabic: false };
+              const tagged = taggedBitmaps.get(this.canvas) ?? {
+                translated: false,
+                arabic: false,
+                stale: false,
+              };
               tagged.translated ||= value.includes('translated:lifetime-paid');
               tagged.arabic ||= value.includes('مرحبا');
-              if (tagged.translated || tagged.arabic) taggedBitmaps.set(this.canvas, tagged);
+              tagged.stale ||= value.includes('STALE');
+              if (tagged.translated || tagged.arabic || tagged.stale)
+                taggedBitmaps.set(this.canvas, tagged);
             }
             return Reflect.apply(nativeBitmapFillText, this, args);
           };
@@ -231,7 +242,14 @@ async function makeContext(
             proof.translatedTextDraws++;
           }
           if (typeof args[0] === 'string' && args[0].includes('مرحبا')) proof.arabicTextDraws++;
-          if (typeof args[0] === 'string' && args[0].includes('STALE')) proof.staleTextDraws++;
+          if (
+            typeof args[0] === 'string' &&
+            args[0].includes('STALE') &&
+            this.canvas instanceof HTMLCanvasElement &&
+            this.canvas.closest('#yt-live-chat-overlay') &&
+            this.globalAlpha > 0
+          )
+            proof.staleTextDraws++;
           return Reflect.apply(original, this, args);
         };
         const nativeDrawImage = CanvasRenderingContext2D.prototype.drawImage;
@@ -241,7 +259,7 @@ async function makeContext(
           ...dimensions: number[]
         ) {
           const args = [source, ...dimensions];
-          let tagged: { translated: boolean; arabic: boolean } | undefined;
+          let tagged: { translated: boolean; arabic: boolean; stale: boolean } | undefined;
           let sourceAlpha = 0;
           if (
             this.canvas instanceof HTMLCanvasElement &&
@@ -302,7 +320,7 @@ async function makeContext(
             return this.getImageData(left, top, right - left, bottom - top).data;
           };
           let before: Uint8ClampedArray | null = null;
-          if (tagged && sourceAlpha > 0 && proof.overlayChangedPixels === 0) {
+          if (tagged && sourceAlpha > 0 && (proof.overlayChangedPixels === 0 || tagged.stale)) {
             try {
               before = readTarget();
             } catch {
@@ -319,6 +337,7 @@ async function makeContext(
               try {
                 const after = readTarget();
                 if (after) {
+                  let targetChangedPixels = 0;
                   for (let index = 0; index < before.length; index += 4) {
                     if (
                       Math.abs((after[index] ?? 0) - (before[index] ?? 0)) +
@@ -327,7 +346,13 @@ async function makeContext(
                         Math.abs((after[index + 3] ?? 0) - (before[index + 3] ?? 0)) >
                       24
                     )
-                      proof.overlayChangedPixels++;
+                      targetChangedPixels++;
+                  }
+                  if (tagged.stale && targetChangedPixels > 0) {
+                    proof.staleCachedDraws++;
+                    proof.staleTextDraws++;
+                  } else if (!tagged.stale) {
+                    proof.overlayChangedPixels += targetChangedPixels;
                   }
                 }
               } catch {
@@ -855,6 +880,7 @@ type LifetimeRoute = {
   mainCachedBitmapDraws: number | null;
   mainBitmapAlphaPixels: number | null;
   mainOverlayChangedPixels: number | null;
+  mainStaleCachedDraws: number | null;
   mainGeometryReflow: number | null;
   ink: { status: 'sampled' | 'unavailable'; alphaPixels: number };
   video: { before: number; after: number; sameSource: boolean };
@@ -967,6 +993,7 @@ async function runLifetimeRoute({
           mainCachedBitmapDraws: null,
           mainBitmapAlphaPixels: null,
           mainOverlayChangedPixels: null,
+          mainStaleCachedDraws: null,
           mainGeometryReflow: null,
           ink: { status: 'unavailable', alphaPixels: 0 },
           video: { before: player.resumed.time, after: player.resumed.time, sameSource: true },
@@ -1237,6 +1264,7 @@ async function runLifetimeRoute({
     let mainCachedBitmapDraws: number | null = null;
     let mainBitmapAlphaPixels: number | null = null;
     let mainOverlayChangedPixels: number | null = null;
+    let mainStaleCachedDraws: number | null = null;
     let mainGeometryReflow: number | null = null;
     let staleTranslationDrawn = false;
     if (renderer === 'natural-worker') {
@@ -1293,6 +1321,7 @@ async function runLifetimeRoute({
       mainCachedBitmapDraws = renderProof.main?.cachedBitmapDraws ?? null;
       mainBitmapAlphaPixels = renderProof.main?.cachedBitmapAlphaPixels ?? null;
       mainOverlayChangedPixels = renderProof.main?.overlayChangedPixels ?? null;
+      mainStaleCachedDraws = renderProof.main?.staleCachedDraws ?? null;
       assert(
         mainTranslatedDraws && mainTranslatedDraws > 0,
         'Main-thread renderer did not draw controlled translated text'
@@ -1364,6 +1393,7 @@ async function runLifetimeRoute({
       mainCachedBitmapDraws,
       mainBitmapAlphaPixels,
       mainOverlayChangedPixels,
+      mainStaleCachedDraws,
       mainGeometryReflow,
       ink,
       video: {

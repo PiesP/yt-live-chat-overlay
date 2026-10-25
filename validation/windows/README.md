@@ -51,7 +51,7 @@ The added lifetime phases run a controlled Main fallback and a natural Worker
 route in fresh contexts. The Main fallback disables canvas transfer before
 application startup, then checks translated text through its default cached
 bitmap path into the overlay canvas, positive source alpha, changed target
-pixels, and card reflow.
+pixels, card reflow, and absence of stale-result bitmap draws.
 The Worker route requires its actual ready signal, admitted paid-card ID, a
 Worker-owned motion snapshot with increased card height after the translation
 update, and newly visible glyph edges in that card's expanded canvas band.
