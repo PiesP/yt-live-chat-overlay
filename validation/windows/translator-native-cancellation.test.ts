@@ -8,35 +8,62 @@ import { Script } from 'node:vm';
 import {
   canContinueNativeProbe,
   classifyNativeCase,
-  installIsolatedProbe,
+  installNativeProbe,
   parseTranslatorNativeSelector,
   type CaseResult,
 } from './translator-native-cancellation.ts';
 
-test('isolated-world injection function is self-contained JavaScript', () => {
-  const source = installIsolatedProbe.toString();
+test('both injection worlds use the same self-contained native probe', () => {
+  const source = installNativeProbe.toString();
   assert.doesNotThrow(() => new Script(`(${source})`));
   assert.match(source, /document\.querySelector/u);
   assert.match(source, /Translator/u);
   assert.match(source, /runtime\?\.id/u);
 });
 
-test('preaborted creation requires its own exact focused selector', () => {
-  assert.equal(
-    parseTranslatorNativeSelector({ scenario: 'translator-native-cancellation' }),
-    'normal'
-  );
-  assert.equal(
+test('native selectors require an exact case and realm, defaulting to isolated', () => {
+  assert.deepEqual(parseTranslatorNativeSelector({ scenario: 'translator-native-cancellation' }), {
+    case: 'normal',
+    realm: 'isolated',
+  });
+  assert.deepEqual(
     parseTranslatorNativeSelector({
       scenario: 'translator-native-cancellation',
       case: 'preaborted-create',
     }),
-    'preaborted-create'
+    { case: 'preaborted-create', realm: 'isolated' }
+  );
+  assert.deepEqual(
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      realm: 'main',
+    }),
+    { case: 'normal', realm: 'main' }
+  );
+  assert.deepEqual(
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      case: 'preaborted-create',
+      realm: 'main',
+    }),
+    { case: 'preaborted-create', realm: 'main' }
   );
   assert.throws(() =>
     parseTranslatorNativeSelector({
       scenario: 'translator-native-cancellation',
       case: 'create',
+    })
+  );
+  assert.throws(() =>
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      realm: 'MAIN',
+    })
+  );
+  assert.throws(() =>
+    parseTranslatorNativeSelector({
+      scenario: 'translator-native-cancellation',
+      realm: 'isolated',
     })
   );
 });

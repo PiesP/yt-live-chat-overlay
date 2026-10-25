@@ -11,6 +11,17 @@ isolated content-script realm; a trusted button click starts each real browser
 Translator API case. It never substitutes a Translator
 mock or sends chat content to a provider page.
 
+The default selector is an ISOLATED-world prerequisite only. To qualify the
+product's MAIN-world Translator boundary, use exactly
+`{"scenario":"translator-native-cancellation","realm":"main"}` in a fresh
+installed-browser attempt. The installed extension background injects the same
+real native probe through `chrome.scripting.executeScript` with `world: 'MAIN'`
+into the owned top-level document. The receipt records the requested world,
+owned tab ID and URL, returned frame and document IDs, secure origin, and the
+absence of an extension runtime ID in MAIN. The MAIN run must complete its own
+creation, cancellation, same-object, and pending-destroy cases; an ISOLATED
+receipt cannot establish those MAIN settlements.
+
 Use a separate fresh installed-browser attempt for preaborted creation by
 replacing the selector content with exactly
 `{"scenario":"translator-native-cancellation","case":"preaborted-create"}`.
@@ -18,6 +29,8 @@ That attempt observes availability and preaborted creation only, then closes
 the owned browser. Do not continue with normal creation in that attempt,
 including when the aborted creation's JavaScript promise has settled. Keep
 each attempt's own source-bound receipt and cleanup result.
+For the separate MAIN-world preaborted-creation attempt, use exactly
+`{"scenario":"translator-native-cancellation","case":"preaborted-create","realm":"main"}`.
 
 The receipt records the browser version, secure origin, exposed API methods,
 language-pair availability, setup time and each native promise's observed

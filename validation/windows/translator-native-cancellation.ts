@@ -23,7 +23,10 @@ type Action =
   | 'same-object-translate'
   | 'destroy-pending';
 type Settlement = 'fulfilled' | 'rejected' | 'unknown';
-export type NativeProbeSelection = 'normal' | 'preaborted-create';
+export type NativeProbeSelection = {
+  case: 'normal' | 'preaborted-create';
+  realm: 'isolated' | 'main';
+};
 export type CaseResult = {
   action: Action;
   settlement: Settlement;
@@ -98,13 +101,17 @@ export function classifyNativeCase(
 }
 
 export function parseTranslatorNativeSelector(input: unknown): NativeProbeSelection {
-  if (JSON.stringify(input) === JSON.stringify({ scenario: 'translator-native-cancellation' }))
-    return 'normal';
-  assert.deepEqual(input, {
-    scenario: 'translator-native-cancellation',
-    case: 'preaborted-create',
-  });
-  return 'preaborted-create';
+  for (const realm of ['isolated', 'main'] as const) {
+    for (const probeCase of ['normal', 'preaborted-create'] as const) {
+      const expected = {
+        scenario: 'translator-native-cancellation',
+        ...(probeCase === 'preaborted-create' ? { case: probeCase } : {}),
+        ...(realm === 'main' ? { realm } : {}),
+      };
+      if (JSON.stringify(input) === JSON.stringify(expected)) return { case: probeCase, realm };
+    }
+  }
+  assert.fail('Native Translator selector must match an exact supported case and realm');
 }
 
 export async function readTranslatorNativeSelector(
@@ -120,7 +127,7 @@ export async function readTranslatorNativeSelector(
   return parseTranslatorNativeSelector(JSON.parse(raw) as unknown);
 }
 
-export function installIsolatedProbe({
+export function installNativeProbe({
   longText,
   operationDeadlineMs,
   setupDeadlineMs,
@@ -343,16 +350,17 @@ export function installIsolatedProbe({
       }
     );
   });
+  const extensionRuntimeId =
+    (globalThis as unknown as { chrome?: { runtime?: { id?: string } } }).chrome?.runtime?.id ??
+    null;
   return {
     secureContext: isSecureContext,
     origin: location.origin,
     href: location.href,
     topLevel: window.top === window,
     userAgent: navigator.userAgent,
-    realm: 'extension-isolated-content-script',
-    extensionId:
-      (globalThis as unknown as { chrome?: { runtime?: { id?: string } } }).chrome?.runtime?.id ??
-      null,
+    realm: extensionRuntimeId === null ? 'main-page' : 'extension-isolated-content-script',
+    extensionId: extensionRuntimeId,
     apiType: typeof api,
     availabilityType: typeof api?.availability,
     createType: typeof api?.create,
@@ -380,6 +388,13 @@ export async function runTranslatorNativeCancellation({
     selection: NativeProbeSelection;
     url: string;
     mainPageContext: unknown;
+    injection: {
+      requestedWorld: 'ISOLATED' | 'MAIN';
+      tabId: number;
+      tabUrl: string;
+      frameId: number;
+      documentId: string;
+    } | null;
     capability: unknown;
     availability: unknown;
     cases: CaseResult[];
@@ -388,12 +403,16 @@ export async function runTranslatorNativeCancellation({
     reason: string;
     pageClosed: boolean;
   } = {
-    source: 'installed-extension-owned-secure-origin-isolated-content-script-realm',
+    source:
+      selection.realm === 'main'
+        ? 'installed-extension-owned-secure-origin-main-page-realm'
+        : 'installed-extension-owned-secure-origin-isolated-content-script-realm',
     browserVersion,
     installedExtensionId: extensionId,
     selection,
     url: TRANSLATOR_NATIVE_URL,
     mainPageContext: null,
+    injection: null,
     capability: null,
     availability: null,
     cases: [],
@@ -436,22 +455,42 @@ export async function runTranslatorNativeCancellation({
         predicate: (entry) => entry.url() === expectedWorkerUrl,
         timeout: 10_000,
       }));
-    const tabs = await worker.evaluate<Array<{ id?: number }>>(
+    const tabs = await worker.evaluate<Array<{ id?: number; url?: string }>>(
       `chrome.tabs.query({ url: ${JSON.stringify(TRANSLATOR_NATIVE_URL)} })`
     );
     assert.equal(tabs.length, 1, 'Owned fixture tab was not found by installed extension');
     const tabId = tabs[0]?.id;
-    assert(Number.isSafeInteger(tabId), 'Owned fixture tab ID is unavailable');
-    const injected = await worker.evaluate<Array<{ result: unknown }>>(
+    const tabUrl = tabs[0]?.url;
+    assert(
+      typeof tabId === 'number' && Number.isSafeInteger(tabId),
+      'Owned fixture tab ID is unavailable'
+    );
+    assert(tabUrl === TRANSLATOR_NATIVE_URL, 'Owned fixture tab URL changed');
+    assert.equal(page.url(), TRANSLATOR_NATIVE_URL, 'Owned fixture page URL changed');
+    const requestedWorld = selection.realm === 'main' ? 'MAIN' : 'ISOLATED';
+    const injected = await worker.evaluate<
+      Array<{ result: unknown; frameId: number; documentId?: string }>
+    >(
       `chrome.scripting.executeScript({
         target: { tabId: ${tabId} },
-        world: 'ISOLATED',
-        func: ${installIsolatedProbe.toString()},
+        world: '${requestedWorld}',
+        func: ${installNativeProbe.toString()},
         args: [${JSON.stringify({ longText: LONG_TEXT, operationDeadlineMs: OPERATION_DEADLINE_MS, setupDeadlineMs: SETUP_DEADLINE_MS })}],
       })`
     );
     assert.equal(injected.length, 1, 'Native probe injection must target one document');
-    receipt.capability = injected[0]?.result ?? null;
+    const injection = injected[0];
+    assert(injection, 'Native probe injection result is missing');
+    assert.equal(injection.frameId, 0, 'Native probe injection missed the top frame');
+    assert(injection.documentId, 'Native probe injection document ID is missing');
+    receipt.injection = {
+      requestedWorld,
+      tabId,
+      tabUrl,
+      frameId: injection.frameId,
+      documentId: injection.documentId,
+    };
+    receipt.capability = injection.result ?? null;
     const runAction = async (action: Action | 'availability') => {
       stage = action;
       await page.locator('#probe').evaluate((button, next) => {
@@ -472,13 +511,27 @@ export async function runTranslatorNativeCancellation({
       return JSON.parse(raw) as unknown;
     };
     const capability = receipt.capability as {
+      realm: string;
       createType: string;
       availabilityType: string;
       extensionId: string | null;
       href: string;
+      origin: string;
+      secureContext: boolean;
+      topLevel: boolean;
     };
-    if (capability.extensionId !== extensionId || capability.href !== TRANSLATOR_NATIVE_URL) {
-      receipt.reason = 'extension-isolated-realm-or-document-mismatch';
+    const expectedRealm =
+      selection.realm === 'main' ? 'main-page' : 'extension-isolated-content-script';
+    const expectedRuntimeId = selection.realm === 'main' ? null : extensionId;
+    if (
+      capability.realm !== expectedRealm ||
+      capability.extensionId !== expectedRuntimeId ||
+      capability.href !== TRANSLATOR_NATIVE_URL ||
+      capability.origin !== 'https://www.youtube.com' ||
+      capability.secureContext !== true ||
+      capability.topLevel !== true
+    ) {
+      receipt.reason = `extension-${selection.realm}-realm-or-document-mismatch`;
       return receipt;
     }
     if (capability.createType !== 'function' || capability.availabilityType !== 'function') {
@@ -502,7 +555,7 @@ export async function runTranslatorNativeCancellation({
       return receipt;
     }
     const actions: Action[] =
-      selection === 'preaborted-create'
+      selection.case === 'preaborted-create'
         ? ['preaborted-create']
         : [
             'create',
