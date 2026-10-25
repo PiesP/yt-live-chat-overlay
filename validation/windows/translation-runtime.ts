@@ -105,10 +105,15 @@ declare global {
     };
     __ytTranslationMainDraws?: {
       translatedTextDraws: number;
+      arabicTextDraws: number;
+      cachedBitmapDraws: number;
+      cachedBitmapAlphaPixels: number;
+      overlayChangedPixels: number;
       staleTextDraws: number;
       cardRects: Array<{ width: number; height: number }>;
       maxCardHeight: number;
     };
+    __ytTranslationBaselineBitmap?: ImageBitmap;
   }
 }
 
@@ -170,11 +175,30 @@ async function makeContext(
         });
         const proof: NonNullable<Window['__ytTranslationMainDraws']> = {
           translatedTextDraws: 0,
+          arabicTextDraws: 0,
+          cachedBitmapDraws: 0,
+          cachedBitmapAlphaPixels: 0,
+          overlayChangedPixels: 0,
           staleTextDraws: 0,
           cardRects: [],
           maxCardHeight: 0,
         };
         window.__ytTranslationMainDraws = proof;
+        const taggedBitmaps = new WeakMap<object, { translated: boolean; arabic: boolean }>();
+        const bitmapAlpha = new WeakMap<object, number>();
+        if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
+          const nativeBitmapFillText = OffscreenCanvasRenderingContext2D.prototype.fillText;
+          OffscreenCanvasRenderingContext2D.prototype.fillText = function (...args) {
+            const value = args[0];
+            if (typeof value === 'string') {
+              const tagged = taggedBitmaps.get(this.canvas) ?? { translated: false, arabic: false };
+              tagged.translated ||= value.includes('translated:lifetime-paid');
+              tagged.arabic ||= value.includes('مرحبا');
+              if (tagged.translated || tagged.arabic) taggedBitmaps.set(this.canvas, tagged);
+            }
+            return Reflect.apply(nativeBitmapFillText, this, args);
+          };
+        }
         const nativeClearRect = CanvasRenderingContext2D.prototype.clearRect;
         CanvasRenderingContext2D.prototype.clearRect = function (x, y, width, height) {
           if (
@@ -203,12 +227,116 @@ async function makeContext(
         };
         const original = CanvasRenderingContext2D.prototype.fillText;
         CanvasRenderingContext2D.prototype.fillText = function (...args) {
-          if (typeof args[0] === 'string' && args[0].includes('translated:lifetime-')) {
+          if (typeof args[0] === 'string' && args[0].includes('translated:lifetime-paid')) {
             proof.translatedTextDraws++;
           }
+          if (typeof args[0] === 'string' && args[0].includes('مرحبا')) proof.arabicTextDraws++;
           if (typeof args[0] === 'string' && args[0].includes('STALE')) proof.staleTextDraws++;
           return Reflect.apply(original, this, args);
         };
+        const nativeDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+        CanvasRenderingContext2D.prototype.drawImage = function (
+          this: CanvasRenderingContext2D,
+          source: CanvasImageSource,
+          ...dimensions: number[]
+        ) {
+          const args = [source, ...dimensions];
+          let tagged: { translated: boolean; arabic: boolean } | undefined;
+          let sourceAlpha = 0;
+          if (
+            this.canvas instanceof HTMLCanvasElement &&
+            this.canvas.closest('#yt-live-chat-overlay') &&
+            typeof OffscreenCanvas !== 'undefined' &&
+            source instanceof OffscreenCanvas
+          ) {
+            tagged = taggedBitmaps.get(source);
+            if (tagged) {
+              let alpha = bitmapAlpha.get(source);
+              if (alpha === undefined) {
+                alpha = 0;
+                try {
+                  const pixels = source
+                    .getContext('2d', { willReadFrequently: true })
+                    ?.getImageData(0, 0, source.width, source.height).data;
+                  if (pixels)
+                    for (let index = 3; index < pixels.length; index += 4)
+                      if (pixels[index]) alpha++;
+                } catch {
+                  // The draw remains real; inaccessible source pixels do not qualify proof.
+                }
+                bitmapAlpha.set(source, alpha);
+              }
+              sourceAlpha = alpha;
+            }
+          }
+          const sourceCanvas =
+            typeof OffscreenCanvas !== 'undefined' && source instanceof OffscreenCanvas
+              ? source
+              : null;
+          const imageWidth = sourceCanvas?.width ?? 0;
+          const imageHeight = sourceCanvas?.height ?? 0;
+          const readTarget = () => {
+            const [dx, dy, dw, dh] = dimensions;
+            if (
+              dx === undefined ||
+              dy === undefined ||
+              dw === undefined ||
+              dh === undefined ||
+              imageWidth === 0 ||
+              imageHeight === 0
+            )
+              return null;
+            const transform = this.getTransform();
+            const left = Math.max(0, Math.floor(dx * transform.a + transform.e));
+            const top = Math.max(0, Math.floor(dy * transform.d + transform.f));
+            const right = Math.min(
+              this.canvas.width,
+              Math.ceil((dx + dw) * transform.a + transform.e)
+            );
+            const bottom = Math.min(
+              this.canvas.height,
+              Math.ceil((dy + dh) * transform.d + transform.f)
+            );
+            if (right <= left || bottom <= top || (right - left) * (bottom - top) > 200_000)
+              return null;
+            return this.getImageData(left, top, right - left, bottom - top).data;
+          };
+          let before: Uint8ClampedArray | null = null;
+          if (tagged && sourceAlpha > 0 && proof.overlayChangedPixels === 0) {
+            try {
+              before = readTarget();
+            } catch {
+              // Canvas readback may be unavailable; later pixel checks still apply.
+            }
+          }
+          const result = Reflect.apply(nativeDrawImage, this, args);
+          if (tagged && sourceAlpha > 0) {
+            proof.cachedBitmapDraws++;
+            proof.cachedBitmapAlphaPixels += sourceAlpha;
+            if (tagged.translated) proof.translatedTextDraws++;
+            if (tagged.arabic) proof.arabicTextDraws++;
+            if (before) {
+              try {
+                const after = readTarget();
+                if (after) {
+                  for (let index = 0; index < before.length; index += 4) {
+                    if (
+                      Math.abs((after[index] ?? 0) - (before[index] ?? 0)) +
+                        Math.abs((after[index + 1] ?? 0) - (before[index + 1] ?? 0)) +
+                        Math.abs((after[index + 2] ?? 0) - (before[index + 2] ?? 0)) +
+                        Math.abs((after[index + 3] ?? 0) - (before[index + 3] ?? 0)) >
+                      24
+                    )
+                      proof.overlayChangedPixels++;
+                  }
+                }
+              } catch {
+                // An unreadable target cannot qualify the draw as visible.
+              }
+            }
+          }
+          return result;
+        } as CanvasRenderingContext2D['drawImage'];
       }
       (window as Window & { unsafeWindow?: Window }).unsafeWindow = window;
       window.ytcfg = {
@@ -288,7 +416,7 @@ async function makeContext(
           if (!held.has(text)) {
             translateSettlements.push(`${token}:fulfilled`);
             const output = text.startsWith('lifetime-')
-              ? `translated:${text} ${'extended CJK RTL emoji card text '.repeat(5)}`
+              ? `translated:${text} ${'extended 한국어 日本語 مرحبا 🎉 card text '.repeat(5)}`
               : `translated:${text}`;
             return Promise.resolve(output);
           }
@@ -624,6 +752,83 @@ async function sampleCanvasInk(
   });
 }
 
+async function sampleWorkerTranslationBand(
+  page: Page,
+  motion: { startX: number; y: number; width: number; height: number },
+  originalHeight: number
+): Promise<{ status: 'sampled' | 'unavailable'; addedAlphaPixels: number; glyphEdges: number }> {
+  return page.evaluate(
+    async ({ position, baselineHeight }) => {
+      const canvas = document.querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas');
+      const baseline = window.__ytTranslationBaselineBitmap;
+      if (!canvas || !baseline)
+        return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
+      const after = await createImageBitmap(canvas);
+      try {
+        const bounds = canvas.getBoundingClientRect();
+        const scaleX = after.width / bounds.width;
+        const scaleY = after.height / bounds.height;
+        const left = Math.max(0, Math.floor((position.startX + 12) * scaleX));
+        const top = Math.max(0, Math.floor((position.y + baselineHeight + 2) * scaleY));
+        const right = Math.min(
+          after.width,
+          Math.ceil((position.startX + position.width - 12) * scaleX)
+        );
+        const bottom = Math.min(
+          after.height,
+          Math.ceil((position.y + position.height - 5) * scaleY)
+        );
+        const width = right - left;
+        const height = bottom - top;
+        if (width < 16 || height < 8)
+          return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
+        const scratch = new OffscreenCanvas(width, height);
+        const context = scratch.getContext('2d', { willReadFrequently: true });
+        if (!context) return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
+        context.drawImage(baseline, left, top, width, height, 0, 0, width, height);
+        const beforePixels = context.getImageData(0, 0, width, height).data;
+        context.clearRect(0, 0, width, height);
+        context.drawImage(after, left, top, width, height, 0, 0, width, height);
+        const afterPixels = context.getImageData(0, 0, width, height).data;
+        let addedAlphaPixels = 0;
+        let glyphEdges = 0;
+        for (let y = 1; y < height - 1; y++) {
+          for (let x = 1; x < width - 1; x++) {
+            const index = (y * width + x) * 4;
+            const alpha = afterPixels[index + 3] ?? 0;
+            if (alpha - (beforePixels[index + 3] ?? 0) > 40) addedAlphaPixels++;
+            const neighbor = index + 4;
+            const luminance =
+              ((afterPixels[index] ?? 0) +
+                (afterPixels[index + 1] ?? 0) +
+                (afterPixels[index + 2] ?? 0)) /
+              3;
+            const neighborLuminance =
+              ((afterPixels[neighbor] ?? 0) +
+                (afterPixels[neighbor + 1] ?? 0) +
+                (afterPixels[neighbor + 2] ?? 0)) /
+              3;
+            if (
+              alpha > 32 &&
+              (afterPixels[neighbor + 3] ?? 0) > 32 &&
+              Math.abs(luminance - neighborLuminance) > 45
+            )
+              glyphEdges++;
+          }
+        }
+        return { status: 'sampled', addedAlphaPixels, glyphEdges };
+      } catch {
+        return { status: 'unavailable', addedAlphaPixels: 0, glyphEdges: 0 };
+      } finally {
+        after.close();
+        baseline.close();
+        delete window.__ytTranslationBaselineBitmap;
+      }
+    },
+    { position: motion, baselineHeight: originalHeight }
+  );
+}
+
 type LifetimeRoute = {
   renderer: 'forced-main' | 'natural-worker';
   abortMode: AbortMode;
@@ -632,7 +837,7 @@ type LifetimeRoute = {
   nativeCallsAfterRawSettlement: number;
   abortedHeld: boolean;
   rawHeldSettlement: string;
-  releasedQueuedNeverStarted: boolean;
+  releasedQueuedNeverStarted: boolean | null;
   replacedQueuedNeverStarted: boolean;
   staleTranslationDrawn: boolean;
   worker: {
@@ -641,33 +846,45 @@ type LifetimeRoute = {
     activeIds: string[];
     translationUpdates: number;
     geometryReflows: number;
+    baselineMotion: WorkerMotion;
+    adoptedMotion: WorkerMotion;
+    translationBand: { addedAlphaPixels: number; glyphEdges: number };
   } | null;
   mainTranslatedDraws: number | null;
+  mainArabicDraws: number | null;
+  mainCachedBitmapDraws: number | null;
+  mainBitmapAlphaPixels: number | null;
+  mainOverlayChangedPixels: number | null;
   mainGeometryReflow: number | null;
   ink: { status: 'sampled' | 'unavailable'; alphaPixels: number };
   video: { before: number; after: number; sameSource: boolean };
 };
 
-export function countWorkerTranslationReflows(
-  sent: readonly { id: string; width: number; height: number; sequence: number }[],
-  updates: readonly {
-    id: string;
-    width: number;
-    height: number;
-    translationHeight: number;
-    sequence: number;
-  }[]
-): number {
-  return updates.filter((entry) => {
-    const base = sent
-      .filter((item) => item.id === entry.id && item.sequence < entry.sequence)
-      .at(-1);
-    return Boolean(
-      base &&
-      entry.translationHeight > 0 &&
-      (entry.width > base.width || entry.height > base.height)
-    );
-  }).length;
+type WorkerMotion = { startX: number; y: number; width: number; height: number };
+type TranslationBand = {
+  status: 'sampled' | 'unavailable';
+  addedAlphaPixels: number;
+  glyphEdges: number;
+};
+
+export function qualifiesWorkerTranslationProof(
+  baseline: WorkerMotion,
+  actual: WorkerMotion,
+  update: { width: number; height: number; translationHeight: number; arabicMarker: boolean },
+  band: TranslationBand
+): boolean {
+  return (
+    update.arabicMarker &&
+    update.translationHeight > 0 &&
+    actual.width === update.width &&
+    actual.height === update.height &&
+    actual.height > baseline.height + 2 &&
+    Math.abs(actual.startX - baseline.startX) <= 1 &&
+    Math.abs(actual.y - baseline.y) <= 1 &&
+    band.status === 'sampled' &&
+    band.addedAlphaPixels > 30 &&
+    band.glyphEdges > 20
+  );
 }
 
 async function runLifetimeRoute({
@@ -719,7 +936,11 @@ async function runLifetimeRoute({
     await page.evaluate(async () => {
       const app = window.__ytChatOverlay;
       if (!app) throw new Error('Product app handle is missing');
-      await app.applySettings({ topBottomDurationMs: 30_000, showDebugOverlay: false });
+      await app.applySettings({
+        danmakuMode: 'top',
+        topBottomDurationMs: 15_000,
+        showDebugOverlay: false,
+      });
     });
     if (renderer === 'natural-worker') {
       try {
@@ -737,11 +958,15 @@ async function runLifetimeRoute({
           nativeCallsAfterRawSettlement: 0,
           abortedHeld: false,
           rawHeldSettlement: 'not-run',
-          releasedQueuedNeverStarted: false,
+          releasedQueuedNeverStarted: null,
           replacedQueuedNeverStarted: false,
           staleTranslationDrawn: false,
           worker: null,
           mainTranslatedDraws: null,
+          mainArabicDraws: null,
+          mainCachedBitmapDraws: null,
+          mainBitmapAlphaPixels: null,
+          mainOverlayChangedPixels: null,
           mainGeometryReflow: null,
           ink: { status: 'unavailable', alphaPixels: 0 },
           video: { before: player.resumed.time, after: player.resumed.time, sameSource: true },
@@ -794,22 +1019,12 @@ async function runLifetimeRoute({
     );
     await requestFixtureChat(page, 'lifetime-queued');
     await waitForChatRow(page, 'lifetime-queued', LIFETIME_TEXT.queued);
-    await requestFixtureChat(page, 'lifetime-released');
-    await waitForChatRow(page, 'lifetime-released', LIFETIME_TEXT.released);
-    await requestFixtureChat(page, 'lifetime-paid');
-    await waitForChatRow(page, 'lifetime-paid', LIFETIME_TEXT.paid);
+    if (abortMode === 'ignored') {
+      await requestFixtureChat(page, 'lifetime-released');
+      await waitForChatRow(page, 'lifetime-released', LIFETIME_TEXT.released);
+    }
     await requestFixtureChat(page, 'lifetime-replace');
     await waitForChatRow(page, 'lifetime-queued', LIFETIME_TEXT.replacement);
-    await page.waitForFunction(
-      () =>
-        !Array.from(
-          document.querySelectorAll<HTMLElement>(
-            '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
-          )
-        ).some((row) => row.dataset.messageId === 'lifetime-released'),
-      null,
-      { timeout: 15_000 }
-    );
     const before = await page.evaluate(
       () => window.__ytTranslationFixture?.translateCalls.length ?? 0
     );
@@ -833,24 +1048,19 @@ async function runLifetimeRoute({
       LIFETIME_TEXT.held,
       { timeout: 15_000 }
     );
-    let baselineCardHeight: number | null = null;
-    if (renderer === 'forced-main') {
+    if (abortMode === 'ignored') {
+      // The old owner is already replaced. Its raw native Promise remains
+      // pending while the unrelated queued row leaves by its own lifetime.
       await page.waitForFunction(
-        () => (window.__ytTranslationMainDraws?.cardRects.length ?? 0) > 0,
+        () =>
+          !Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'
+            )
+          ).some((row) => row.dataset.messageId === 'lifetime-released'),
         null,
-        { timeout: 5_000 }
+        { timeout: 22_000 }
       );
-      baselineCardHeight = await page.evaluate(() =>
-        Math.max(
-          0,
-          ...(window.__ytTranslationMainDraws?.cardRects.map((rect) => rect.height) ?? [])
-        )
-      );
-      assert(baselineCardHeight > 0, 'Main paid-card baseline geometry is missing');
-      await page.evaluate((baseline) => {
-        if (window.__ytTranslationMainDraws)
-          window.__ytTranslationMainDraws.maxCardHeight = baseline;
-      }, baselineCardHeight);
     }
     let rawHeldSettlement: string;
     if (abortMode === 'ignored') {
@@ -885,38 +1095,111 @@ async function runLifetimeRoute({
       rawHeldSettlement,
       { timeout: 15_000 }
     );
-    await page.waitForFunction(
-      (text) => window.__ytTranslationFixture?.translateCalls.some((entry) => entry.text === text),
-      LIFETIME_TEXT.newHolder,
-      { timeout: 15_000 }
-    );
+    await page.evaluate((text) => window.__ytTranslationFixture?.hold(text), LIFETIME_TEXT.paid);
+    await requestFixtureChat(page, 'lifetime-paid');
+    await waitForChatRow(page, 'lifetime-paid', LIFETIME_TEXT.paid);
     await page.waitForFunction(
       (text) => window.__ytTranslationFixture?.translateCalls.some((entry) => entry.text === text),
       LIFETIME_TEXT.paid,
       { timeout: 15_000 }
     );
+    let baselineCardHeight: number | null = null;
+    let baselineWorkerMotion: WorkerMotion | null = null;
     if (renderer === 'natural-worker') {
       await page.waitForFunction(
-        () => {
-          const record = window.__ytAcceptanceWorkers?.at(-1);
-          return Boolean(
-            record?.ready &&
-            record.translationUpdates.some(
-              (entry) => entry.id === 'lifetime-paid' || entry.id === 'lifetime-held'
-            ) &&
-            record.recentStats.some(
+        () =>
+          window.__ytAcceptanceWorkers
+            ?.at(-1)
+            ?.recentStats.some(
               (entry) =>
                 Array.isArray(entry.activeDeclaredIds) &&
                 entry.activeDeclaredIds.includes('lifetime-paid')
-            )
-          );
-        },
+            ),
         null,
         { timeout: 15_000 }
       );
+      const snapshot = await page.evaluate(() => window.__ytAcceptanceSnapshotWorker?.());
+      baselineWorkerMotion =
+        snapshot?.activeMotions.find((motion) => motion.id === 'lifetime-paid') ?? null;
+      assert(
+        baselineWorkerMotion?.height && baselineWorkerMotion.height > 0,
+        'Worker paid-card baseline geometry is missing'
+      );
+      await page.evaluate(async () => {
+        const canvas = document.querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas');
+        if (!canvas) throw new Error('Worker overlay canvas is missing');
+        window.__ytTranslationBaselineBitmap = await createImageBitmap(canvas);
+      });
     } else {
       await page.waitForFunction(
-        () => (window.__ytTranslationMainDraws?.translatedTextDraws ?? 0) > 0,
+        () => (window.__ytTranslationMainDraws?.cardRects.length ?? 0) > 0,
+        null,
+        { timeout: 5_000 }
+      );
+      baselineCardHeight = await page.evaluate(() =>
+        Math.max(
+          0,
+          ...(window.__ytTranslationMainDraws?.cardRects.map((rect) => rect.height) ?? [])
+        )
+      );
+      assert(baselineCardHeight > 0, 'Main paid-card baseline geometry is missing');
+      await page.evaluate((baseline) => {
+        const proof = window.__ytTranslationMainDraws;
+        if (!proof) return;
+        proof.maxCardHeight = baseline;
+        proof.translatedTextDraws = 0;
+        proof.arabicTextDraws = 0;
+        proof.cachedBitmapDraws = 0;
+        proof.cachedBitmapAlphaPixels = 0;
+        proof.overlayChangedPixels = 0;
+      }, baselineCardHeight);
+    }
+    await page.evaluate(
+      (text) =>
+        window.__ytTranslationFixture?.settleTranslate(
+          text,
+          `translated:lifetime-paid مرحبا 한국어 日本語 🎉 ${'long Arabic CJK emoji paid translation مرحبا '.repeat(5)}`
+        ),
+      LIFETIME_TEXT.paid
+    );
+    let workerMotion: WorkerMotion | null = null;
+    if (renderer === 'natural-worker') {
+      assert(baselineWorkerMotion !== null);
+      const handle = await page.waitForFunction(
+        async (baseline) => {
+          const record = window.__ytAcceptanceWorkers?.at(-1);
+          const snapshot = await window.__ytAcceptanceSnapshotWorker?.().catch(() => null);
+          const motion = snapshot?.activeMotions.find((entry) => entry.id === 'lifetime-paid');
+          const update = record?.translationUpdates.findLast(
+            (entry) => entry.id === 'lifetime-paid' && entry.arabicMarker
+          );
+          return motion &&
+            update &&
+            motion.height > baseline.height + 2 &&
+            motion.width === update.width &&
+            motion.height === update.height &&
+            Math.abs(motion.startX - baseline.startX) <= 1 &&
+            Math.abs(motion.y - baseline.y) <= 1 &&
+            update.translationHeight > 0
+            ? motion
+            : null;
+        },
+        baselineWorkerMotion,
+        { timeout: 15_000, polling: 250 }
+      );
+      workerMotion = (await handle.jsonValue()) as WorkerMotion;
+      await handle.dispose();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      );
+    } else {
+      await page.waitForFunction(
+        () =>
+          (window.__ytTranslationMainDraws?.translatedTextDraws ?? 0) > 0 &&
+          (window.__ytTranslationMainDraws?.arabicTextDraws ?? 0) > 0,
         null,
         { timeout: 15_000 }
       );
@@ -934,10 +1217,11 @@ async function runLifetimeRoute({
       !native.calls.includes(LIFETIME_TEXT.queued),
       'Replaced queued work reached native translate'
     );
-    assert(
-      !native.calls.includes(LIFETIME_TEXT.released),
-      'Released queued work reached native translate'
-    );
+    if (abortMode === 'ignored')
+      assert(
+        !native.calls.includes(LIFETIME_TEXT.released),
+        'Released queued work reached native translate'
+      );
     const ink = await sampleCanvasInk(page);
     assert(
       ink.status === 'sampled' && ink.alphaPixels >= 8,
@@ -949,6 +1233,10 @@ async function runLifetimeRoute({
     }));
     let worker: LifetimeRoute['worker'] = null;
     let mainTranslatedDraws: number | null = null;
+    let mainArabicDraws: number | null = null;
+    let mainCachedBitmapDraws: number | null = null;
+    let mainBitmapAlphaPixels: number | null = null;
+    let mainOverlayChangedPixels: number | null = null;
     let mainGeometryReflow: number | null = null;
     let staleTranslationDrawn = false;
     if (renderer === 'natural-worker') {
@@ -959,20 +1247,32 @@ async function runLifetimeRoute({
         Array.isArray(entry.activeDeclaredIds) ? (entry.activeDeclaredIds as string[]) : []
       );
       const updates = record.translationUpdates.filter(
-        (entry) =>
-          (entry.id === 'lifetime-held' || entry.id === 'lifetime-paid') &&
-          entry.textLength > 0 &&
-          entry.width > 0 &&
-          entry.height > 0
+        (entry) => entry.id === 'lifetime-paid' && entry.arabicMarker && entry.textLength > 0
       );
-      const geometryReflows = countWorkerTranslationReflows(record.sentGeometries, updates);
+      assert(workerMotion && baselineWorkerMotion);
+      const geometryReflows = workerMotion.height - baselineWorkerMotion.height;
+      const translationBand = await sampleWorkerTranslationBand(
+        page,
+        workerMotion,
+        baselineWorkerMotion.height
+      );
       assert(
         addedIds.includes('lifetime-held') && addedIds.includes('lifetime-paid'),
         'Product Worker did not receive the paid-card fixture IDs'
       );
       assert(activeIds.includes('lifetime-paid'), 'Product Worker paid card was not active');
-      assert(updates.length > 0, 'Product Worker translation geometry update was not observed');
-      assert(geometryReflows > 0, 'Product Worker translated card did not reflow');
+      assert(updates.length > 0, 'Product Worker Arabic translation update was not observed');
+      assert(
+        updates.some((update) =>
+          qualifiesWorkerTranslationProof(
+            baselineWorkerMotion,
+            workerMotion,
+            update,
+            translationBand
+          )
+        ),
+        'Worker-owned reflow and visible Arabic translation band did not agree'
+      );
       staleTranslationDrawn = record.translationUpdates.some((entry) => entry.staleMarker);
       worker = {
         ready: true,
@@ -980,12 +1280,34 @@ async function runLifetimeRoute({
         activeIds: activeIds.filter((id) => ids.includes(id)).slice(-16),
         translationUpdates: updates.length,
         geometryReflows,
+        baselineMotion: baselineWorkerMotion,
+        adoptedMotion: workerMotion,
+        translationBand: {
+          addedAlphaPixels: translationBand.addedAlphaPixels,
+          glyphEdges: translationBand.glyphEdges,
+        },
       };
     } else {
       mainTranslatedDraws = renderProof.main?.translatedTextDraws ?? null;
+      mainArabicDraws = renderProof.main?.arabicTextDraws ?? null;
+      mainCachedBitmapDraws = renderProof.main?.cachedBitmapDraws ?? null;
+      mainBitmapAlphaPixels = renderProof.main?.cachedBitmapAlphaPixels ?? null;
+      mainOverlayChangedPixels = renderProof.main?.overlayChangedPixels ?? null;
       assert(
         mainTranslatedDraws && mainTranslatedDraws > 0,
         'Main-thread renderer did not draw controlled translated text'
+      );
+      assert(
+        renderProof.main?.arabicTextDraws && renderProof.main.arabicTextDraws > 0,
+        'Main-thread renderer did not draw Arabic translated text'
+      );
+      assert(
+        renderProof.main.cachedBitmapDraws > 0 && renderProof.main.cachedBitmapAlphaPixels > 0,
+        'Main-thread cached text bitmap was not drawn to the overlay with positive alpha'
+      );
+      assert(
+        mainOverlayChangedPixels && mainOverlayChangedPixels > 20,
+        'Main-thread translated bitmap did not change overlay pixels'
       );
       assert.equal(
         renderProof.worker?.ready ?? false,
@@ -1032,11 +1354,16 @@ async function runLifetimeRoute({
       nativeCallsAfterRawSettlement: native.calls.length,
       abortedHeld: native.aborts.some((entry) => entry === `${heldToken}:${LIFETIME_TEXT.held}`),
       rawHeldSettlement,
-      releasedQueuedNeverStarted: !native.calls.includes(LIFETIME_TEXT.released),
+      releasedQueuedNeverStarted:
+        abortMode === 'ignored' ? !native.calls.includes(LIFETIME_TEXT.released) : null,
       replacedQueuedNeverStarted: !native.calls.includes(LIFETIME_TEXT.queued),
       staleTranslationDrawn,
       worker,
       mainTranslatedDraws,
+      mainArabicDraws,
+      mainCachedBitmapDraws,
+      mainBitmapAlphaPixels,
+      mainOverlayChangedPixels,
       mainGeometryReflow,
       ink,
       video: {

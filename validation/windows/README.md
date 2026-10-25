@@ -48,15 +48,23 @@ pending create must not permit the next native creation until its Promise
 settles. The product does not pass an AbortSignal to `create()`.
 
 The added lifetime phases run a controlled Main fallback and a natural Worker
-route in fresh contexts. The Main fallback deliberately disables canvas
-transfer before application startup. The Worker route requires its actual
-ready signal, admitted fixture IDs, active paid card, translation protocol
-update with changed geometry and positive canvas ink. If Worker startup or
-pixel read is unavailable, the focused profile fails with a partial receipt;
-the existing deterministic Worker fixture is a separate claim. Canned CJK,
-RTL, emoji and paid-card messages exercise queued release, same-ID replacement,
-late old-result suppression and recovery after raw native settlement. A
-`showDebugOverlay` change verifies that a nonvisual setting leaves translation
+route in fresh contexts. The Main fallback disables canvas transfer before
+application startup, then checks translated text through its default cached
+bitmap path into the overlay canvas, positive source alpha, changed target
+pixels, and card reflow.
+The Worker route requires its actual ready signal, admitted paid-card ID, a
+Worker-owned motion snapshot with increased card height after the translation
+update, and newly visible glyph edges in that card's expanded canvas band.
+Outbound translation messages and generic canvas ink alone do not qualify.
+If Worker startup or pixel read is unavailable, the focused profile fails with
+a partial receipt; the existing deterministic Worker fixture is a separate
+claim. Canned CJK, RTL, emoji and paid-card messages exercise queued release
+under deliberately ignored abort, same-ID replacement in both modes, late
+old-result suppression and recovery after raw native settlement. The old held
+row is replaced before its lifetime expires; a fresh paid row carries Arabic
+in the translated result after the raw lease settles. The signal-aware route
+does not claim queued release because its native abort frees the lease first.
+A `showDebugOverlay` change verifies that a nonvisual setting leaves translation
 pending. The controlled boundary has both signal-aware and deliberately
 ignored-abort modes, and records raw settlement separately from local caller
 completion. These phases do not prove actual Chrome Translator cancellation or

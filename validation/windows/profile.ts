@@ -45,12 +45,24 @@ type AcceptanceWorkerRecord = {
     height: number;
     translationHeight: number;
     staleMarker: boolean;
+    arabicMarker: boolean;
     sequence: number;
   }>;
   recentReceipts: Record<string, unknown>[];
   recentStats: Record<string, unknown>[];
   terminated: boolean;
   error?: string;
+};
+type AcceptanceWorkerMotion = {
+  id: string;
+  startX: number;
+  y: number;
+  width: number;
+  height: number;
+};
+type AcceptanceWorkerSnapshot = {
+  activeMotions: AcceptanceWorkerMotion[];
+  processedBatchSequence: number;
 };
 type AcceptanceReadiness = {
   startedAtMs: number;
@@ -80,6 +92,7 @@ declare global {
   interface Window {
     __ytAcceptanceReadiness?: AcceptanceReadiness;
     __ytAcceptanceWorkers?: AcceptanceWorkerRecord[];
+    __ytAcceptanceSnapshotWorker?: () => Promise<AcceptanceWorkerSnapshot>;
     __ytAcceptanceSetPlaybackState?: (currentTime: number, paused: boolean) => void;
     __ytAcceptanceOldCanvas?: Element;
     __ytAcceptancePaidCardProbe?: { rects: PaidCardRect[]; cachedBitmapDraws: number };
@@ -397,6 +410,8 @@ async function readInstalledLifecycleWorlds(
 
 export function installFixtureWorkerProbe(expectedIds: string[]) {
   const workers: AcceptanceWorkerRecord[] = [];
+  const handles: Worker[] = [];
+  let nextSnapshotRequest = 1_000_000_000;
   const expected = new Set(expectedIds);
   const declaredIds = (value: unknown): string[] =>
     Array.isArray(value)
@@ -411,6 +426,51 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
     if (list.length > 16) list.shift();
   };
   window.__ytAcceptanceWorkers = workers;
+  window.__ytAcceptanceSnapshotWorker = () => {
+    const worker = handles.at(-1);
+    if (!worker) return Promise.reject(new Error('No fixture Worker exists'));
+    const requestId = ++nextSnapshotRequest;
+    return new Promise<AcceptanceWorkerSnapshot>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        worker.removeEventListener('message', onMessage);
+        reject(new Error('Fixture Worker snapshot timed out'));
+      }, 3000);
+      const onMessage = (event: MessageEvent) => {
+        const data = event.data as {
+          type?: string;
+          requestId?: number;
+          processedBatchSequence?: number;
+          motionSnapshot?: { activeMotions?: AcceptanceWorkerMotion[] };
+        };
+        if (data?.type !== 'messageSnapshot' || data.requestId !== requestId) return;
+        clearTimeout(timer);
+        worker.removeEventListener('message', onMessage);
+        const motions = data.motionSnapshot?.activeMotions;
+        if (!Array.isArray(motions) || typeof data.processedBatchSequence !== 'number') {
+          reject(new Error('Fixture Worker returned no motion snapshot'));
+          return;
+        }
+        resolve({
+          activeMotions: motions.filter(
+            (motion) =>
+              expected.has(motion.id) &&
+              [motion.startX, motion.y, motion.width, motion.height].every(
+                (value) => typeof value === 'number' && Number.isFinite(value)
+              )
+          ),
+          processedBatchSequence: data.processedBatchSequence,
+        });
+      };
+      worker.addEventListener('message', onMessage);
+      try {
+        worker.postMessage({ type: 'snapshotMessages', requestId });
+      } catch (error) {
+        clearTimeout(timer);
+        worker.removeEventListener('message', onMessage);
+        reject(error);
+      }
+    });
+  };
   const NativeWorker = window.Worker;
   window.Worker = new Proxy(NativeWorker, {
     construct(target, args) {
@@ -430,6 +490,7 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
       if (workers.length < 16) workers.push(record);
       try {
         const worker = Reflect.construct(target, args);
+        handles.push(worker);
         worker.addEventListener('message', (event: MessageEvent) => {
           const data = event.data;
           if (data?.type === 'ready') {
@@ -531,6 +592,7 @@ export function installFixtureWorkerProbe(expectedIds: string[]) {
                 height: update.height,
                 translationHeight: update.translationHeight,
                 staleMarker: update.translatedText.includes('STALE'),
+                arabicMarker: update.translatedText.includes('مرحبا'),
                 sequence: ++record.geometrySequence,
               });
             }

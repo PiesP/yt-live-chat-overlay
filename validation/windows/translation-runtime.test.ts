@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { countWorkerTranslationReflows, fixtureChatAction } from './translation-runtime.ts';
+import { fixtureChatAction, qualifiesWorkerTranslationProof } from './translation-runtime.ts';
 
 test('lifetime fixture uses parser-supported paid cards and same-ID replacement actions', () => {
   const held = fixtureChatAction('lifetime-held');
@@ -38,21 +38,25 @@ test('lifetime fixture uses parser-supported paid cards and same-ID replacement 
   assert.match(JSON.stringify(queuedItem), /مرحبا emoji 🎉/u);
 });
 
-test('Worker reflow compares the latest same-ID replacement geometry', () => {
-  const sent = [
-    { id: 'same', width: 100, height: 40, sequence: 1 },
-    { id: 'same', width: 100, height: 100, sequence: 2 },
-  ];
+test('Worker proof requires adopted geometry and translated-band pixels, not outbound update alone', () => {
+  const baseline = { startX: 200, y: 30, width: 100, height: 80 };
+  const update = { width: 100, height: 120, translationHeight: 40, arabicMarker: true };
+  const visible = { status: 'sampled' as const, addedAlphaPixels: 60, glyphEdges: 30 };
+  assert.equal(qualifiesWorkerTranslationProof(baseline, baseline, update, visible), false);
   assert.equal(
-    countWorkerTranslationReflows(sent, [
-      { id: 'same', width: 100, height: 80, translationHeight: 20, sequence: 3 },
-    ]),
-    0
+    qualifiesWorkerTranslationProof(baseline, { ...baseline, height: 120 }, update, {
+      status: 'unavailable',
+      addedAlphaPixels: 0,
+      glyphEdges: 0,
+    }),
+    false
   );
   assert.equal(
-    countWorkerTranslationReflows(sent, [
-      { id: 'same', width: 100, height: 120, translationHeight: 20, sequence: 3 },
-    ]),
-    1
+    qualifiesWorkerTranslationProof(baseline, { ...baseline, height: 120, y: 60 }, update, visible),
+    false
+  );
+  assert.equal(
+    qualifiesWorkerTranslationProof(baseline, { ...baseline, height: 120 }, update, visible),
+    true
   );
 });
