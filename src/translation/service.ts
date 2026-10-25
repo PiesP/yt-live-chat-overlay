@@ -363,7 +363,8 @@ export class TranslationService {
       sourceLanguage === this.currentSource &&
       targetLanguage === this.currentTarget &&
       this.translator !== null &&
-      this.translatorGeneration === this.configurationGeneration
+      this.translatorGeneration === this.configurationGeneration &&
+      !this.nativeStalled
     ) {
       return null;
     }
@@ -841,7 +842,11 @@ export class TranslationService {
         this.queuedBytes + accountedBytes > TranslationService.MAX_TRANSLATE_QUEUE_BYTES
       ) {
         const dropped = this.takeQueuedEntry(0);
-        if (dropped) this.resolveQueueEntry(dropped, null);
+        if (!dropped) {
+          this.queuedBytes = 0;
+          break;
+        }
+        this.resolveQueueEntry(dropped, null);
       }
       const entry: TranslateQueueEntry = {
         text,
@@ -977,7 +982,21 @@ export class TranslationService {
           this.nativeWork = ownership;
           void ownership.finally(releaseLease);
           void ownership.finally(() => {
-            if (this.nativeWork === ownership) this.nativeWork = null;
+            if (this.nativeWork !== ownership) return;
+            this.nativeWork = null;
+            // A stall only ends local waiting. Once the real browser Promise
+            // settles, the existing translator can serve the next request.
+            if (
+              this.nativeStalled &&
+              this.enabled &&
+              this.translator === translator &&
+              this.translatorGeneration === entry.generation &&
+              this.configurationGeneration === entry.generation
+            ) {
+              this.nativeStalled = false;
+              this.publishStatus('active');
+              this.startDrainIfNeeded();
+            }
           });
           this.nativeStallTimer = setTimeout(() => {
             this.nativeStalled = true;
@@ -1097,6 +1116,7 @@ export class TranslationService {
       this.resolveQueueEntry(entry, null);
     }
     this.translateQueue = [];
+    this.queuedBytes = 0;
     this.translationCache.clear();
     this.publishStatus('off', 'disabled');
     this.runtimeStatusListeners.clear();

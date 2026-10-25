@@ -151,6 +151,75 @@ describe('TranslationService runtime status', () => {
 });
 
 describe('TranslationService translator lifecycle', () => {
+  it('recovers the same translator after a stalled native call actually rejects', async () => {
+    const translator = makeTranslator('ready');
+    const native = deferred<string>();
+    translator.translate.mockImplementationOnce(() => native.promise);
+    const create = vi.fn().mockResolvedValue(translator);
+    stubTranslator(create, vi.fn().mockResolvedValue('available'));
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    vi.useFakeTimers();
+    try {
+      const stalled = service.translate('stalled');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(translator.translate).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(stalled).resolves.toBeNull();
+      expect(service.getStatus()).toMatchObject({ phase: 'failed', reason: 'translator-failed' });
+      await expect(service.translate('blocked')).resolves.toBeNull();
+      expect(translator.translate).toHaveBeenCalledTimes(1);
+      native.reject(new DOMException('aborted', 'AbortError'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(service.getStatus()).toMatchObject({ phase: 'active' });
+      await expect(service.translate('next')).resolves.toBe('ready:next');
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      service.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows a same-pair settings retry after stalled native work settles', async () => {
+    const oldTranslator = makeTranslator('old');
+    const native = deferred<string>();
+    oldTranslator.translate.mockImplementationOnce(() => native.promise);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockResolvedValueOnce(makeTranslator('new'));
+    stubTranslator(create, vi.fn().mockResolvedValue('available'));
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    vi.useFakeTimers();
+    try {
+      const stalled = service.translate('stalled');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(oldTranslator.translate).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(stalled).resolves.toBeNull();
+      const retryWhileOwned = service.configure({
+        enabled: true,
+        service: 'auto',
+        source: 'en',
+        target: 'ja',
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await retryWhileOwned;
+      expect(service.getStatus()).toMatchObject({ phase: 'failed' });
+      expect(create).toHaveBeenCalledTimes(1);
+      native.resolve('late');
+      await Promise.resolve();
+      await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+      await expect(service.translate('next')).resolves.toBe('new:next');
+      expect(create).toHaveBeenCalledTimes(2);
+    } finally {
+      service.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it('holds an unresolved create lease across service replacement', async () => {
     const staleCreation = deferred<TranslatorInstance>();
     const create = vi
@@ -280,6 +349,31 @@ describe('TranslationService translator lifecycle', () => {
     expect(results.slice(0, 2)).toEqual([null, null]);
     expect(results.slice(2)).toEqual(largeTexts.slice(2).map((text) => `ready:${text}`));
     expect(translator.translate).toHaveBeenCalledTimes(9);
+    service.destroy();
+  });
+
+  it('resets the byte ledger when destroyed with a full queue and reused', async () => {
+    const oldTranslator = makeTranslator('old');
+    const native = deferred<string>();
+    oldTranslator.translate.mockImplementationOnce(() => native.promise);
+    const newTranslator = makeTranslator('new');
+    stubTranslator(
+      vi.fn().mockResolvedValueOnce(oldTranslator).mockResolvedValueOnce(newTranslator),
+      vi.fn().mockResolvedValue('available')
+    );
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    const active = service.translate('blocker');
+    await vi.waitFor(() => expect(oldTranslator.translate).toHaveBeenCalledTimes(1));
+    const queued = Array.from({ length: 8 }, (_, index) =>
+      service.translate(`${index}`.padEnd(4096, 'x'))
+    );
+    service.destroy();
+    await expect(active).resolves.toBeNull();
+    await expect(Promise.all(queued)).resolves.toEqual(Array(8).fill(null));
+    native.resolve('late');
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    await expect(service.translate('x')).resolves.toBe('new:x');
     service.destroy();
   });
 

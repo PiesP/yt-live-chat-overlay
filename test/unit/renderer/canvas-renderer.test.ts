@@ -20,6 +20,7 @@ import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worke
 import type { WorkerStatsMessage } from '@renderer/worker/types';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 import { LanguageDetectorService } from '@translation/language-detector';
+import type { MessageActivator } from '@util/message-activator';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Mock OffscreenCanvas
@@ -1042,6 +1043,82 @@ describe('CanvasRenderer', () => {
     await Promise.resolve();
 
     expect(sendTranslation).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('keeps a Main message translation pending across an unrelated settings update', async () => {
+    const settings = makeSettings({ translationEnabled: true, translationSource: 'en' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate: ReturnType<typeof vi.fn> };
+      messageActivator: MessageActivator;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveTranslation = resolve;
+        })
+    );
+    const activator = internals.messageActivator;
+    const onTranslationResult = vi.fn();
+    activator.activate(makeMessage('main-settings', 'hello'), 0, 100, 20, 0, {
+      onActivated: vi.fn(),
+      onMessageRendered: vi.fn(),
+      onTranslationResult,
+    });
+    const signal = internals.translationService.translate.mock.calls[0]?.[1].signal as AbortSignal;
+    renderer.updateSettings({ ...settings, opacity: 0.7 });
+    expect(internals.messageActivator).toBe(activator);
+    expect(signal.aborted).toBe(false);
+    resolveTranslation?.('translated');
+    await Promise.resolve();
+    expect(onTranslationResult).toHaveBeenCalledWith(expect.any(Object), 'translated');
+    renderer.destroy();
+  });
+
+  it('keeps a Worker message translation pending across an unrelated settings update', async () => {
+    const settings = makeSettings({ translationEnabled: true, translationSource: 'en' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const message = makeMessage('worker-settings', 'hello');
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const sendTranslation = vi.fn();
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate: ReturnType<typeof vi.fn> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      estimateTranslatedDimensions: ReturnType<typeof vi.fn>;
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveTranslation = resolve;
+        })
+    );
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+    internals.estimateTranslatedDimensions = vi.fn(() => ({
+      width: 100,
+      height: 20,
+      translationHeight: 12,
+    }));
+    internals.prefetchAndTranslateForWorker(message, message.id!);
+    const signal = internals.translationService.translate.mock.calls[0]?.[1].signal as AbortSignal;
+    renderer.updateSettings({ ...settings, opacity: 0.7 });
+    expect(signal.aborted).toBe(false);
+    resolveTranslation?.('translated');
+    await Promise.resolve();
+    expect(sendTranslation).toHaveBeenCalledWith(
+      message.id,
+      'translated',
+      { width: 100, height: 20, translationHeight: 12 },
+      expect.any(Number)
+    );
     renderer.destroy();
   });
 

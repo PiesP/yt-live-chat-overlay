@@ -2311,28 +2311,26 @@ export class CanvasRenderer extends RendererBase {
       this.initializeSourceDetectionPipeline();
     }
 
-    void this.translationService
-      .configure({
-        enabled: settings.translationEnabled,
-        service: settings.translationService,
-        source: settings.translationSource,
-        target: settings.translationTarget,
-      })
-      .catch((err: unknown) => {
-        log.debug('renderer.translation.reconfigure-failed', {
-          error: String(err),
+    if (translationConfigurationChanged) {
+      void this.translationService
+        .configure({
+          enabled: settings.translationEnabled,
+          service: settings.translationService,
+          source: settings.translationSource,
+          target: settings.translationTarget,
+        })
+        .catch((err: unknown) => {
+          log.debug('renderer.translation.reconfigure-failed', {
+            error: String(err),
+          });
         });
-      });
+    }
 
-    this.cancelAllTranslationOwners();
-    this.messageActivator = new MessageActivator(
-      this.translationService,
-      {
-        topBottomDurationMs: settings.topBottomDurationMs,
-        depthLayersEnabled: settings.depthLayersEnabled,
-      },
-      (message) => this.cancelReplacementTranslation(message)
-    );
+    if (translationConfigurationChanged) this.cancelAllTranslationOwners();
+    this.messageActivator.updateConfig({
+      topBottomDurationMs: settings.topBottomDurationMs,
+      depthLayersEnabled: settings.depthLayersEnabled,
+    });
     this.buildOpacityConfig();
   }
 

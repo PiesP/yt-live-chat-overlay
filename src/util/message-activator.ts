@@ -28,7 +28,7 @@ export class MessageActivator {
   private readonly messagePool: CanvasMessage[] = [];
   private readonly translationOwners = new Map<CanvasMessage, AbortController>();
   private readonly translationService: TranslationService;
-  private readonly config: MessageActivatorConfig;
+  private config: MessageActivatorConfig;
 
   constructor(
     translationService: TranslationService,
@@ -36,6 +36,10 @@ export class MessageActivator {
     private readonly onReleased?: (message: CanvasMessage) => void
   ) {
     this.translationService = translationService;
+    this.config = config;
+  }
+
+  updateConfig(config: MessageActivatorConfig): void {
     this.config = config;
   }
 

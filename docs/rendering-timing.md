@@ -95,8 +95,9 @@ requests and 64 KiB of UTF-16 text estimates, with an 8 KiB per-request limit.
 Under backlog, two recent requests (favoring paid messages) precede one oldest
 surviving request. A native translation uses an AbortSignal, but its browser
 slot remains owned until the native Promise actually settles. A 15-second stall
-ends local waiting and reports failure; it does not free that slot. New service
-instances share ownership through the same Translator API object and wait up to
-1.5 seconds for old native work before reporting failure. A later settings
-action can retry after the old work settles. Original messages continue to
-render when translation is unavailable.
+ends local waiting and reports failure; it does not free that slot. If the same
+translator still owns the configuration when the call settles, requests resume.
+New service instances share ownership through the same Translator API object
+and wait up to 1.5 seconds for old native work before reporting failure. A
+later settings action can retry after the old work settles. Original messages
+continue to render when translation is unavailable.
