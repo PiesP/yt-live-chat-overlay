@@ -9,7 +9,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseDirectCtrlSpaceRoundTrip', 'JapaneseToggleProbe', 'JapaneseDuringComposition', 'NativeSpace')]
+    [ValidateSet('ComposeCurrent', 'ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseCurrent', 'JapaneseHiragana', 'JapaneseDirect', 'JapaneseObservedDirectCtrlSpaceRoundTrip', 'JapaneseToggleProbe', 'JapaneseDuringComposition', 'NativeSpace')]
     [string]$Sequence,
 
     [Parameter(Mandatory = $true)]
@@ -266,7 +266,7 @@ $receipt = [ordered]@{
     cleanup = [ordered]@{
         releasedKeys = $true
         restoreActionDispatched = $false
-        parityActionsBalanced = $(if ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseDirectCtrlSpaceRoundTrip')) { $false } else { 'not-applicable' })
+        parityActionsBalanced = $(if ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseObservedDirectCtrlSpaceRoundTrip')) { $false } else { 'not-applicable' })
         modeRestored = 'not-observed'
         hklRestored = 'not-checked'
     }
@@ -473,9 +473,8 @@ try {
             Start-Sleep -Milliseconds 100
             Invoke-JapaneseWord $false
         }
-        'JapaneseDirectCtrlSpaceRoundTrip' {
-            Invoke-Combo 0x10 0x14 'Japanese-Shift-CapsLock-Alphanumeric'
-            Start-Sleep -Milliseconds 100
+        'JapaneseObservedDirectCtrlSpaceRoundTrip' {
+            # Observe the current editable mode through this action's fresh native word.
             Invoke-JapaneseWord $false
             $pendingMarker = $receiptFile + '.pending'
             $gateAck = $receiptFile + '.ack'
@@ -585,7 +584,7 @@ try {
             }
         }
     }
-    if ($partialInput -and $Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseDirectCtrlSpaceRoundTrip')) {
+    if ($partialInput -and $Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseObservedDirectCtrlSpaceRoundTrip')) {
         $receipt.cleanup.parityActionsBalanced = $false
     }
     if ($null -ne $target -and $originalHkl -ne [IntPtr]::Zero) {
@@ -629,7 +628,7 @@ try {
     $receipt.cleanup.togglePending = $pendingToggle
     $receipt.cleanup.elapsedMs = $clock.ElapsedMilliseconds
     if ($receipt.errors.Count -gt 0 -or -not $receipt.cleanup.releasedKeys -or
-        ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseDirectCtrlSpaceRoundTrip') -and $receipt.cleanup.parityActionsBalanced -ne $true) -or
+        ($Sequence -in @('ComposeToggleRoundTrip', 'CtrlSpaceRoundTrip', 'JapaneseObservedDirectCtrlSpaceRoundTrip') -and $receipt.cleanup.parityActionsBalanced -ne $true) -or
         $receipt.cleanup.hklRestored -ne 'verified') {
         $receipt.status = 'aborted'
     }

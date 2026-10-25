@@ -615,6 +615,7 @@ test('actual Enter 08 direct input gates the same native shortcut boundary', () 
   });
   for (const invalid of [
     { ...state, editable: 'arbitrary' },
+    { ...state, editable: 'にほんご' },
     { ...state, focus: 'movie_player' },
     { ...state, traceOverflow: true },
     changed(3, { trusted: false }),
@@ -667,16 +668,19 @@ test('direct-control marker rejects forged requests and native ACK requires the 
   const native = readFileSync(new URL('./native-ime.ps1', import.meta.url), 'utf8');
   assert.match(native, /\$gate\.allow -cne \$true -or \$gate\.token -cne \$directToken/u);
   const direct = native.slice(
-    native.indexOf("'JapaneseDirectCtrlSpaceRoundTrip' {"),
+    native.indexOf("'JapaneseObservedDirectCtrlSpaceRoundTrip' {"),
     native.indexOf("'JapaneseToggleProbe' {")
   );
+  const word = direct.indexOf('Invoke-JapaneseWord $false');
+  const requested = direct.indexOf("label = 'direct-observation-requested'");
   const acknowledged = direct.indexOf("label = 'direct-observation-acknowledged'");
   const pause = direct.indexOf("Invoke-Combo 0x11 0x20 'Ctrl-Space-pause'");
-  assert(acknowledged >= 0 && pause > acknowledged);
+  assert(word >= 0 && requested > word && acknowledged > requested && pause > acknowledged);
   assert.doesNotMatch(
-    direct.slice(acknowledged, pause),
-    /Request-TargetLayout|Alphanumeric|Hiragana/u
+    direct,
+    /Request-TargetLayout|Japanese-Shift-CapsLock|Japanese-Ctrl-CapsLock|Japanese-Alt-Backquote/u
   );
+  assert.match(direct, /\$directToken = \[guid\]::NewGuid\(\)\.ToString\('N'\)/u);
 });
 
 test('fixture player Space requires one trusted event in the focused player', () => {

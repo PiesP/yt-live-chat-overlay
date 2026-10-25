@@ -85,7 +85,7 @@ type NativeImeSequence =
   | 'JapaneseCurrent'
   | 'JapaneseHiragana'
   | 'JapaneseDirect'
-  | 'JapaneseDirectCtrlSpaceRoundTrip'
+  | 'JapaneseObservedDirectCtrlSpaceRoundTrip'
   | 'JapaneseToggleProbe'
   | 'JapaneseDuringComposition'
   | 'NativeSpace';
@@ -542,7 +542,7 @@ async function runNativeImeAction({
   const sampleAction =
     sequence === 'CtrlSpaceRoundTrip' ||
     sequence === 'JapaneseDuringComposition' ||
-    sequence === 'JapaneseDirectCtrlSpaceRoundTrip';
+    sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip';
   let sampling = sampleAction;
   let samplingError: string | null = null;
   let compositionGate: CompositionGate | undefined;
@@ -557,7 +557,8 @@ async function runNativeImeAction({
     samplingError = String(cause);
   });
   const gate =
-    sequence === 'JapaneseDuringComposition' || sequence === 'JapaneseDirectCtrlSpaceRoundTrip'
+    sequence === 'JapaneseDuringComposition' ||
+    sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip'
       ? (async () => {
           const marker = `${receiptPath}.pending`;
           const acknowledgement = `${receiptPath}.ack`;
@@ -567,7 +568,7 @@ async function runNativeImeAction({
               const markerText = await readFile(marker, 'utf8');
               const observationDeadline = Math.min(deadline, Date.now() + 1_500);
               let token: string | undefined;
-              if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip') {
+              if (sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip') {
                 token = directControlGateToken(markerText);
                 do {
                   const observed = await page.evaluate(() => {
@@ -628,7 +629,7 @@ async function runNativeImeAction({
                 `${acknowledgement}.tmp`,
                 JSON.stringify({
                   allow:
-                    sequence === 'JapaneseDirectCtrlSpaceRoundTrip'
+                    sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip'
                       ? directGate?.observed === true
                       : compositionGate?.open === true,
                   ...(token ? { token } : {}),
@@ -655,7 +656,7 @@ async function runNativeImeAction({
   } finally {
     await gate;
     const directGateAtMs = directGate?.observed === true ? directGate.atMs : null;
-    if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip' && directGateAtMs !== null) {
+    if (sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip' && directGateAtMs !== null) {
       const until = Date.now() + 1_500;
       while (Date.now() < until && samplingError === null) {
         const postGate = samples.filter((sample) => sample.atMs >= directGateAtMs);
@@ -732,7 +733,7 @@ function assertNativeImeAction(
     receipt?.cleanup?.parityActionsBalanced,
     sequence === 'ComposeToggleRoundTrip' ||
       sequence === 'CtrlSpaceRoundTrip' ||
-      sequence === 'JapaneseDirectCtrlSpaceRoundTrip'
+      sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip'
       ? true
       : 'not-applicable'
   );
@@ -979,9 +980,8 @@ function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeIm
     assert.equal(labels[0], 'Japanese-Shift-CapsLock-Alphanumeric');
     assert(!labels.includes('japanese-conversion-candidate'));
   }
-  if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip') {
+  if (sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip') {
     assert.deepEqual(labels, [
-      'Japanese-Shift-CapsLock-Alphanumeric',
       ...[0x4e, 0x49, 0x48, 0x4f, 0x4e, 0x47, 0x4f].map(
         (key) => `japanese-word-vk-${key.toString(16).toUpperCase()}`
       ),
@@ -989,7 +989,7 @@ function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeIm
       'Ctrl-Space-pause',
       'Ctrl-Space-resume',
     ]);
-    assert.equal(receipt.sendCounts?.acceptedEvents, 28);
+    assert.equal(receipt.sendCounts?.acceptedEvents, 24);
     const gateLabels = receipt.actions
       ?.filter((entry) => entry.kind === 'direct-control-gate')
       .map((entry) => entry.label);
@@ -1005,7 +1005,7 @@ function assertJapaneseNativeReceipt(action: NativeImeAction, sequence: NativeIm
     const resume = actions.findIndex((entry) => entry.label === 'Ctrl-Space-resume');
     assert(
       acknowledged > 0 && pause === acknowledged + 1 && resume === pause + 1,
-      'Native direct mode changed between browser observation and Ctrl+Space actions'
+      'Native input changed between direct observation and Ctrl+Space actions'
     );
     const pauseAt = actions[pause]?.atMs;
     const resumeAt = actions[resume]?.atMs;
@@ -2442,7 +2442,7 @@ async function exerciseJapaneseIme(
     if (sequence === 'JapaneseDuringComposition') {
       assert.equal(action.compositionGate?.open, true, 'Composition was not open at shortcut gate');
     }
-    if (sequence === 'JapaneseDirectCtrlSpaceRoundTrip') {
+    if (sequence === 'JapaneseObservedDirectCtrlSpaceRoundTrip') {
       assert.equal(
         action.directGate?.observed,
         true,
@@ -2536,7 +2536,7 @@ async function exerciseJapaneseIme(
       try {
         await resetViewingImeTrace(page, true);
         const editable = await act(
-          'JapaneseDirectCtrlSpaceRoundTrip',
+          'JapaneseObservedDirectCtrlSpaceRoundTrip',
           'japanese-direct-editable-shortcut',
           'editable',
           true
