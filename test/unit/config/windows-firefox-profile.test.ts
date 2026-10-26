@@ -96,6 +96,11 @@ function createSession(
     seekRangeUnavailable?: boolean;
     secondChatMode?: 'live' | 'replay' | 'unknown';
     settingsPersisted?: boolean;
+    translatorSupported?: boolean;
+    misleadingTranslatorState?: boolean;
+    originalCommentLost?: boolean;
+    originalNaturallyEvicted?: boolean;
+    nextOriginalRowMissing?: boolean;
     postReloadPlaybackUnavailable?: boolean;
     adAtSeek?: boolean;
     missingContentIdentity?: boolean;
@@ -227,6 +232,42 @@ function createSession(
         return options.settingsPersisted === false
           ? { value: '32', effective: 32 }
           : { value: '36', effective: 36 };
+      if (
+        expression.includes(
+          "const rows = () => Array.from(document.querySelectorAll('#yt-live-chat-overlay"
+        )
+      ) {
+        expect(expression).toContain('tab.click()');
+        expect(expression).toContain('if (!apiExposed)');
+        expect(expression).toContain(
+          "enabled.dispatchEvent(new Event('change', { bubbles: true }))"
+        );
+        expect(expression).toContain("service.value = 'auto'");
+        expect(expression).toContain("!currentIds.has(row.getAttribute('data-message-id'))");
+        const apiExposed = options.translatorSupported ?? false;
+        const capabilitySupported = options.misleadingTranslatorState ? !apiExposed : apiExposed;
+        return {
+          apiExposed,
+          capabilitySupported: String(capabilitySupported),
+          capabilityText: capabilitySupported
+            ? 'This browser exposes the built-in Translator API.'
+            : 'This browser does not expose the built-in Translator API.',
+          runtimePhase: apiExposed ? 'off' : 'unavailable',
+          runtimeText: apiExposed
+            ? 'Translation is off.'
+            : 'Translation is inactive: this browser has no Translator API.',
+          preferenceEnabled: !apiExposed,
+          preferenceUnchanged: apiExposed,
+          service: 'auto',
+          originalOverlap: options.originalCommentLost || options.originalNaturallyEvicted ? 0 : 1,
+          originalMismatch: options.originalCommentLost ? 1 : 0,
+          replacementRows: options.originalNaturallyEvicted ? 30 : 0,
+          nextRowObserved: !options.nextOriginalRowMissing,
+          nextRowHasText: !options.nextOriginalRowMissing,
+          canvasPresent: true,
+          modalClosed: true,
+        };
+      }
       if (expression.includes('video.pause();')) return { status: 'passed', paused: true };
       if (expression.includes('try { await video.play(); }'))
         return { status: 'passed', paused: false };
@@ -1077,6 +1118,15 @@ describe('Windows Firefox installation profile', () => {
               playbackStarted: true,
             },
           },
+          translation: {
+            status: 'passed',
+            apiExposed: false,
+            capabilitySupported: 'false',
+            runtimePhase: 'unavailable',
+            originalOverlap: 1,
+            originalMismatch: 0,
+            nextRowObserved: true,
+          },
           pause: { status: 'passed' },
           resume: { status: 'passed' },
           seek: { status: 'passed' },
@@ -1098,6 +1148,7 @@ describe('Windows Firefox installation profile', () => {
             },
           },
           settings: { postReloadPlayback: { status: 'passed', playbackStarted: true } },
+          translation: { status: 'passed', nextRowObserved: true },
           navigation: {
             status: 'passed',
             kind: 'full-document-cross-watch',
@@ -1141,6 +1192,53 @@ describe('Windows Firefox installation profile', () => {
     expect(
       JSON.parse(await readFile(join(output, 'firefox-installation-result.json'), 'utf8'))
     ).toEqual(result);
+  });
+
+  it('reports Translator exposure without claiming a language pair or enabling translation', async () => {
+    const { output, root } = await createBundle();
+    const { session } = createSession({
+      translatorSupported: true,
+      originalNaturallyEvicted: true,
+    });
+    const result = await runFirefoxInstallation(
+      {
+        executablePath: '/test/firefox.exe',
+        liveUrls: [
+          'https://www.youtube.com/watch?v=public-live',
+          'https://www.youtube.com/watch?v=public-replay',
+        ],
+        output,
+        root,
+      },
+      { launch: async () => session }
+    );
+    expect(result.observations.live).toMatchObject([
+      {
+        workflow: {
+          translation: {
+            status: 'passed',
+            apiExposed: true,
+            capabilitySupported: 'true',
+            runtimePhase: 'off',
+            preferenceEnabled: false,
+            preferenceUnchanged: true,
+            originalOverlap: 0,
+            replacementRows: 30,
+            nextRowObserved: true,
+          },
+        },
+      },
+      {
+        workflow: {
+          translation: {
+            status: 'passed',
+            apiExposed: true,
+            capabilitySupported: 'true',
+            preferenceEnabled: false,
+          },
+        },
+      },
+    ]);
   });
 
   it('records and rethrows a falsy Firefox startup rejection', async () => {
@@ -1465,6 +1563,22 @@ describe('Windows Firefox installation profile', () => {
   it.each([
     [{ secondChatMode: 'unknown' as const }, 'startup', 'chat-mode-unknown'],
     [{ settingsPersisted: false }, 'settings', 'state-not-observed'],
+    [
+      { misleadingTranslatorState: true },
+      'translation',
+      'translator-disposition-or-original-chat-mismatch',
+    ],
+    [
+      { translatorSupported: true, misleadingTranslatorState: true },
+      'translation',
+      'translator-disposition-or-original-chat-mismatch',
+    ],
+    [
+      { originalCommentLost: true },
+      'translation',
+      'translator-disposition-or-original-chat-mismatch',
+    ],
+    [{ nextOriginalRowMissing: true }, 'translation', 'next-original-chat-render-not-observed'],
     [{ seekRangeUnavailable: true }, 'seek', 'seek-range-unavailable'],
   ])('does not pass incomplete public workflow evidence (%s)', async (options, stage, reason) => {
     const { output, root } = await createBundle();

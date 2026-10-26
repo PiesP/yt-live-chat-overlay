@@ -289,7 +289,7 @@ export function requireFirefoxPublicCoverage(observations: PublicObservation[]) 
       observations.every(
         (item) =>
           item.status === 'passed' &&
-          ['startup', 'settings', 'pause', 'resume', 'seek'].every(
+          ['startup', 'settings', 'translation', 'pause', 'resume', 'seek'].every(
             (stage) => item.workflow?.[stage]?.status === 'passed'
           )
       ),
@@ -709,11 +709,12 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
     let provider: Awaited<ReturnType<typeof readPublicPageState>> | undefined;
     let phase = 'navigation';
     const workflow: Record<
-      'startup' | 'settings' | 'pause' | 'resume' | 'seek' | 'navigation',
+      'startup' | 'settings' | 'translation' | 'pause' | 'resume' | 'seek' | 'navigation',
       WorkflowStep
     > = {
       startup: { status: 'not-run' },
       settings: { status: 'not-run' },
+      translation: { status: 'not-run' },
       pause: { status: 'not-run' },
       resume: { status: 'not-run' },
       seek: { status: 'not-run' },
@@ -990,6 +991,132 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         target: changed.target,
         persisted,
         postReloadPlayback,
+      };
+      phase = 'translation';
+      const translation = await evaluate<{
+        apiExposed: boolean;
+        capabilitySupported: string | null;
+        capabilityText: string | null;
+        runtimePhase: string | null;
+        runtimeText: string | null;
+        preferenceEnabled: boolean;
+        preferenceUnchanged: boolean;
+        service: string | null;
+        originalOverlap: number;
+        originalMismatch: number;
+        replacementRows: number;
+        nextRowObserved: boolean;
+        nextRowHasText: boolean;
+        canvasPresent: boolean;
+        modalClosed: boolean;
+      }>(
+        session,
+        `(async () => {
+        const rows = () => Array.from(document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p'));
+        const originals = new Map(rows().map((row) => [row.getAttribute('data-message-id'), row.textContent]));
+        const button = document.querySelector('#yt-chat-overlay-settings-button');
+        if (!(button instanceof HTMLButtonElement) || !Array.from(originals).some(([id, text]) => id && text)) {
+          throw new Error('Public original chat is unavailable before translation settings');
+        }
+        const apiExposed = typeof Translator !== 'undefined';
+        const settingsBefore = window.__ytChatOverlay?.getSettings();
+        button.click();
+        const modal = document.querySelector('#yt-chat-overlay-settings-backdrop');
+        const tab = modal?.querySelector('#tab-translation');
+        const enabled = modal?.querySelector('input[name="translationEnabled"]');
+        const service = modal?.querySelector('select[name="translationService"]');
+        const close = modal?.querySelector('button[data-action="close"]');
+        if (!(modal instanceof HTMLDialogElement) || !(tab instanceof HTMLButtonElement) ||
+            !(enabled instanceof HTMLInputElement) || !(service instanceof HTMLSelectElement) ||
+            !(close instanceof HTMLButtonElement) || !modal.open) {
+          throw new Error('Public translation settings are unavailable');
+        }
+        tab.click();
+        if (!apiExposed) {
+          enabled.checked = true;
+          enabled.dispatchEvent(new Event('change', { bubbles: true }));
+          service.value = 'auto';
+          service.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        close.click();
+        for (let attempt = 0; !apiExposed && attempt < 20 &&
+          (window.__ytChatOverlay?.getSettings()?.translationEnabled !== true ||
+            window.__ytChatOverlay?.getSettings()?.translationService !== 'auto'); attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        button.click();
+        const capability = modal.querySelector('.yt-chat-overlay-settings-capability');
+        const runtime = modal.querySelector('.yt-chat-overlay-settings-runtime-status');
+        const current = rows();
+        const originalOverlap = current.filter((row) => originals.has(row.getAttribute('data-message-id'))).length;
+        const originalMismatch = current.filter((row) => {
+          const id = row.getAttribute('data-message-id');
+          return originals.has(id) && originals.get(id) !== row.textContent;
+        }).length;
+        const replacementRows = current.filter((row) => !originals.has(row.getAttribute('data-message-id'))).length;
+        const currentIds = new Set(current.map((row) => row.getAttribute('data-message-id')));
+        const result = {
+          apiExposed,
+          capabilitySupported: capability?.getAttribute('data-supported') ?? null,
+          capabilityText: capability?.textContent ?? null,
+          runtimePhase: runtime?.getAttribute('data-phase') ?? null,
+          runtimeText: runtime?.textContent ?? null,
+          preferenceEnabled: window.__ytChatOverlay?.getSettings()?.translationEnabled === true,
+          preferenceUnchanged:
+            window.__ytChatOverlay?.getSettings()?.translationEnabled === settingsBefore?.translationEnabled &&
+            window.__ytChatOverlay?.getSettings()?.translationService === settingsBefore?.translationService,
+          service: window.__ytChatOverlay?.getSettings()?.translationService ?? null,
+          originalOverlap,
+          originalMismatch,
+          replacementRows,
+          nextRowObserved: false,
+          nextRowHasText: false,
+          canvasPresent: Boolean(document.querySelector('#${OVERLAY_ID} canvas')),
+          modalClosed: false
+        };
+        close.click();
+        result.modalClosed = !modal.open;
+        // A new accessible row is emitted only after another chat message is rendered.
+        // The region retains at most 30 rows, so do not require the old IDs to remain later.
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const next = rows().find((row) => !currentIds.has(row.getAttribute('data-message-id')));
+          if (next) {
+            result.nextRowObserved = true;
+            result.nextRowHasText = Boolean(next.getAttribute('data-message-id') && next.textContent);
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return result;
+      })()`
+      );
+      const capabilityPassed = translation.apiExposed
+        ? translation.capabilitySupported === 'true' &&
+          translation.capabilityText?.includes('exposes the built-in Translator API') &&
+          translation.preferenceUnchanged
+        : translation.capabilitySupported === 'false' &&
+          translation.capabilityText?.includes('does not expose the built-in Translator API') &&
+          translation.runtimePhase === 'unavailable' &&
+          translation.runtimeText ===
+            'Translation is inactive: this browser has no Translator API.' &&
+          translation.preferenceEnabled &&
+          translation.service === 'auto';
+      const translationPassed =
+        capabilityPassed &&
+        translation.originalMismatch === 0 &&
+        (translation.originalOverlap > 0 || translation.replacementRows >= 30) &&
+        translation.nextRowObserved &&
+        translation.nextRowHasText &&
+        translation.canvasPresent &&
+        translation.modalClosed;
+      workflow.translation = {
+        status: translationPassed ? 'passed' : 'unverified',
+        reason: translationPassed
+          ? null
+          : !translation.nextRowObserved
+            ? 'next-original-chat-render-not-observed'
+            : 'translator-disposition-or-original-chat-mismatch',
+        ...translation,
       };
       phase = 'capture';
       const marker = String(index + 1);
