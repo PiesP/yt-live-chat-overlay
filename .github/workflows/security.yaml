@@ -480,7 +480,7 @@ jobs:
       - name: ✅ Validate Semgrep SARIF
         id: semgrep-report
         if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && steps.semgrep-scan.outcome == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.semgrep == 'true')) }}
-        uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@a8172948afb80cbb030216ee6bd5f64bb062c489
+        uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@5fe4370c7e5972f5922e1d2cb06adef3b5dfd5e2
         with:
           sarif_path: semgrep.sarif
           category: ${{ steps.semgrep-scan.outputs.category }}
@@ -515,7 +515,7 @@ jobs:
         id: semgrep-fixture-report
         if: ${{ steps.node_trust.outcome == 'success' && (!cancelled() && github.event_name == 'workflow_dispatch' && steps.semgrep-fixture-scan.outcome == 'success') }}
         continue-on-error: true
-        uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@a8172948afb80cbb030216ee6bd5f64bb062c489
+        uses: PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@5fe4370c7e5972f5922e1d2cb06adef3b5dfd5e2
         with:
           sarif_path: ${{ steps.semgrep-fixture-scan.outputs.report-path }}
           category: semgrep/full
