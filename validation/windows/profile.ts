@@ -1823,7 +1823,7 @@ export async function run({
             ).catch(() => null)
           );
           if (lifecycleDiagnostic.consoleEvents.length > 32)
-            lifecycleDiagnostic.consoleEvents.shift();
+            void lifecycleDiagnostic.consoleEvents.shift();
         }
       }
     });

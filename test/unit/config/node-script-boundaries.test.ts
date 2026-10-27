@@ -73,44 +73,6 @@ describe('Node script boundaries', () => {
     }
   });
 
-  it('type-checks all direct Node scripts separately from the browser program', () => {
-    const scriptsConfig = JSON.parse(readFileSync(join(root, 'tsconfig.scripts.json'), 'utf8')) as {
-      compilerOptions: { module: string; erasableSyntaxOnly: boolean; lib: string[] };
-      include: string[];
-    };
-    const windowsConfig = JSON.parse(readFileSync(join(root, 'tsconfig.windows.json'), 'utf8')) as {
-      compilerOptions: {
-        module: string;
-        erasableSyntaxOnly: boolean;
-        strict: boolean;
-        allowImportingTsExtensions: boolean;
-      };
-      include: string[];
-    };
-    const browserConfig = readFileSync(join(root, 'tsconfig.json'), 'utf8');
-
-    expect(scriptsConfig.compilerOptions.module).toBe('NodeNext');
-    expect(scriptsConfig.compilerOptions.erasableSyntaxOnly).toBe(true);
-    expect(scriptsConfig.compilerOptions.lib).toEqual(['ES2022']);
-    expect(scriptsConfig.include).toContain('scripts/**/*.ts');
-    expect(scriptsConfig.include).not.toContain('test/unit/config/fixtures/devtools-endpoint.ts');
-    expect(windowsConfig.compilerOptions).toMatchObject({
-      module: 'NodeNext',
-      erasableSyntaxOnly: true,
-      strict: true,
-      allowImportingTsExtensions: true,
-    });
-    expect(windowsConfig.include).toEqual([
-      'validation/windows/**/*.ts',
-      'src/types/globals.d.ts',
-      'test/unit/config/fixtures/devtools-endpoint.ts',
-    ]);
-    expect(browserConfig.match(/"include":\s*\[([^\]]*)\]/)?.[1]).not.toContain(
-      '"scripts/**/*.ts"'
-    );
-    expect(browserConfig.match(/"exclude":\s*\[([^\]]*)\]/)?.[1]).toContain('"scripts/**/*.ts"');
-  });
-
   it.each(nodeScripts)('imports %s without CLI work, output, or writes', (relativePath) => {
     const directory = fixtureRoot();
     const sentinel = join(directory, 'dist', 'sentinel');

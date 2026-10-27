@@ -29,14 +29,13 @@ export default defineConfig({
           environment: 'node',
           setupFiles: ['./test/setup.ts'],
           include: ['test/unit/**/*.test.ts', 'test/consistency/**/*.test.ts'],
-          exclude: ['test/unit/**/*.browser.test.ts'],
         },
       },
       {
         test: {
           name: 'browser',
           setupFiles: ['./test/setup.ts'],
-          include: ['test/unit/**/*.browser.test.ts'],
+          include: ['test/browser/**/*.browser.test.ts'],
           browser: {
             enabled: true,
             provider: playwright(),

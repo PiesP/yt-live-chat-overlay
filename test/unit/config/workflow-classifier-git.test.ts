@@ -209,6 +209,7 @@ function expectDocs(scopes: Scopes): void {
 it.each([
   ['docs/audit-example.ts', 'pull_request'],
   ['test/unit/audit-example.ts', 'push'],
+  ['test/browser/audit-example.ts', 'push'],
   ['docs/audit-example.ts', 'merge_group'],
 ])('classifies both sides of a source move to %s for %s', (destination, event) => {
   fixture((cwd) => {
@@ -224,6 +225,7 @@ it.each([
 it.each([
   ['docs/audit-example.ts', 'src/audit-example.ts'],
   ['test/unit/audit-example.ts', 'src/audit-example.ts'],
+  ['test/browser/audit-example.ts', 'src/audit-example.ts'],
   ['src/old-name.ts', 'src/new-name.ts'],
 ])('classifies rename-only changes from %s to %s', (source, destination) => {
   fixture((cwd) => {

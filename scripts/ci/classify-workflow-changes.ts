@@ -79,8 +79,10 @@ export function classifyWorkflowChanges(
       mark('quality', 'e2e', 'semgrep', 'codeql_javascript');
     } else if (
       path.startsWith('test/unit/') ||
+      path.startsWith('test/browser/') ||
       path.startsWith('test/consistency/') ||
-      path === 'test/setup.ts'
+      path.startsWith('test/typecheck/') ||
+      ['test/setup.ts', 'test/owned-window-listeners.ts', 'test/raw-html.d.ts'].includes(path)
     ) {
       mark('quality', 'unit', 'semgrep', 'codeql_javascript');
     } else if (path.startsWith('test/visual/')) {

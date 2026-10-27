@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "**/*.ts",
+    "../src/types/bidi-js.d.ts",
+    "../src/types/globals.d.ts",
+    "../src/platform/chrome-types.d.ts",
+    "../src/platform/extension-bridge.d.ts"
+  ],
+  "exclude": ["../node_modules", "../dist*", "../.vscode"]
+}

@@ -205,7 +205,7 @@ export interface CardConfig {
   };
   padding: { horizontal: number; vertical: number };
   cardRadius: number;
-  textColor: string | 'auto';
+  textColor: string;
   resolveColor: (message: ChatMessage) => RgbColor;
   needsGradientCache: boolean;
   needsElapsed: boolean;

@@ -183,7 +183,10 @@ export async function verifyPublication(
   for (const name of names) {
     const asset = assets.get(name);
     if (!asset) throw new Error(`Existing release is missing ${name}`);
-    const content = bytes(await readApi(`/releases/assets/${asset.id}`, true, limits[name]), name);
+    const content = bytes(
+      await readApi(`/releases/assets/${Number(asset.id)}`, true, limits[name]),
+      name
+    );
     if (
       content.length !== asset.size ||
       (asset.digest !== undefined && asset.digest !== `sha256:${digest(content)}`)

@@ -31,12 +31,6 @@ describe('Vite+ verification ownership', () => {
     expect(scripts.quality).toBe('vp run quality-gate');
     expect(commands('quality-gate')).toEqual([
       "vp check src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
-      'vp run check',
-      'vp run check:extension',
-      'vp run check:test',
-      'vp run check:e2e',
-      'vp run check:scripts',
-      'vp run check:windows',
       'vp run test:ci',
       'vp run check:i18n',
     ]);
