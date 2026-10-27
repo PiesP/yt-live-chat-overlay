@@ -108,6 +108,42 @@ describe('Vite+ verification ownership', () => {
     ]);
   });
 
+  it('prepares the unit job and Chromium before either core or consumer browser tests', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
+    const unit = workflow.split('\n  unit:\n')[1]?.split('\n  e2e:\n')[0] ?? '';
+    const coreOrUnit =
+      "${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' || needs.changes.outputs.unit == 'true' }}";
+    const step = (name: string) => {
+      const start = unit.indexOf(`      - name: ${name}\n`);
+      expect(start).toBeGreaterThan(-1);
+      const end = unit.indexOf('\n      - name: ', start + 1);
+      return unit.slice(start, end < 0 ? undefined : end);
+    };
+
+    for (const name of [
+      '📥 Checkout code',
+      '📦 Set up project',
+      'Install Chromium for Browser Mode unit tests',
+    ]) {
+      expect(step(name)).toContain(`if: ${coreOrUnit}`);
+    }
+    expect(step('Install Chromium for Browser Mode unit tests')).toContain(
+      'run: vp exec playwright install --with-deps chromium'
+    );
+    expect(step('Verify the pinned browser-core contracts')).toContain(
+      "if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' }}"
+    );
+    const positions = [
+      '📥 Checkout code',
+      '📦 Set up project',
+      'Install Chromium for Browser Mode unit tests',
+      'Verify the pinned browser-core contracts',
+      '🧪 Run unit tests and coverage thresholds',
+    ].map((name) => unit.indexOf(`      - name: ${name}\n`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
   it('retains browser traces from the first failed attempt without changing retry verdicts', () => {
     const url = pathToFileURL(resolve(root, 'test/e2e/playwright.config.ts')).href;
     const result = spawnSync(
