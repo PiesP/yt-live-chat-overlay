@@ -5,7 +5,12 @@ import type { OverlaySettings } from '@app-types';
 import type { RuntimeRecoveryStatus } from '@app/runtime-manager';
 import { getActiveLanguage, t } from '@i18n/index';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
-import { normalizeStoredSettings, SETTINGS_VERSION } from '@settings/schema';
+import {
+  changedSettingsPatch,
+  cloneSettings,
+  normalizeStoredSettings,
+  SETTINGS_VERSION,
+} from '@settings/schema';
 import type { PersistenceState } from '@settings/store';
 import {
   type ActionType,
@@ -59,6 +64,7 @@ export class SettingsUi {
   /** Timer for the still-waiting message or neutral acknowledgement dismissal. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private modal: HTMLDialogElement | null = null;
+  private formBaseline: OverlaySettings | null = null;
   private previousFocus: HTMLElement | null = null;
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
@@ -98,7 +104,8 @@ export class SettingsUi {
    */
   syncForm(): void {
     if (!this.isDialogOpen()) return;
-    this.form.populateForm(this.getSettings());
+    this.formBaseline = cloneSettings(this.getSettings());
+    this.form.populateForm(this.formBaseline);
   }
 
   showTranslationStatus(status: TranslationRuntimeStatus | null): void {
@@ -154,11 +161,18 @@ export class SettingsUi {
     this.previewTimer = clearSafeTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
-      const preview = this.form.collectSettings();
+      const preview = this.formChanges();
       this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
     }, SettingsUi.PREVIEW_DEBOUNCE_MS);
+  }
+
+  private formChanges(): Partial<OverlaySettings> {
+    return changedSettingsPatch(
+      this.formBaseline ?? this.getSettings(),
+      this.form.collectSettings()
+    );
   }
 
   async attach(): Promise<void> {
@@ -213,7 +227,8 @@ export class SettingsUi {
     if (this.previewTimer !== null) {
       this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
-    this.persistForm(this.form.collectSettings());
+    this.persistForm(this.formChanges());
+    this.formBaseline = null;
 
     // The native close event may arrive in a later task. Its handler must not
     // persist the same form a second time after this method has returned.
@@ -674,7 +689,8 @@ export class SettingsUi {
       if (this.previewTimer !== null) {
         this.previewTimer = clearSafeTimeout(this.previewTimer);
       }
-      this.persistForm(this.form.collectSettings());
+      this.persistForm(this.formChanges());
+      this.formBaseline = null;
       this.restoreDocumentLangDir();
       if (this.previousFocus?.isConnected) {
         this.previousFocus.focus();
@@ -698,7 +714,8 @@ export class SettingsUi {
     const activeElement = document.activeElement;
     this.previousFocus = activeElement instanceof HTMLElement ? activeElement : null;
 
-    this.form.populateForm(this.getSettings());
+    this.formBaseline = cloneSettings(this.getSettings());
+    this.form.populateForm(this.formBaseline);
     this.switchTab(this.activeTab);
     // showModal() opens the dialog in the top layer with native backdrop,
     // automatic focus trap, scroll lock, and inert handling.

@@ -286,6 +286,53 @@ export function applySettingsPatch(
   return normalizeSettings(merged);
 }
 
+/** Keep only the fields deliberately changed in a full settings form. */
+export function changedSettingsPatch(
+  baseline: Readonly<OverlaySettings>,
+  current: Readonly<OverlaySettings>
+): Partial<OverlaySettings> {
+  const changed: Record<string, unknown> = {};
+  for (const key of Object.keys(current) as (keyof OverlaySettings)[]) {
+    const next = current[key];
+    const previous = baseline[key];
+    if (typeof next === 'object' && next !== null && !Array.isArray(next)) {
+      const nested: Record<string, unknown> = {};
+      const oldValues = previous as Record<string, unknown>;
+      for (const child of Object.keys(next)) {
+        const value = (next as Record<string, unknown>)[child];
+        if (value !== oldValues[child]) nested[child] = value;
+      }
+      if (Object.keys(nested).length > 0) changed[key] = nested;
+    } else if (next !== previous) {
+      changed[key] = next;
+    }
+  }
+  return changed as Partial<OverlaySettings>;
+}
+
+/** Combine explicit edits without replacing unrelated nested fields. */
+export function combineSettingsPatches(
+  previous: Partial<OverlaySettings>,
+  next: Partial<OverlaySettings>
+): Partial<OverlaySettings> {
+  const merged = { ...previous, ...next };
+  if (previous.showAuthor || next.showAuthor)
+    merged.showAuthor = {
+      ...previous.showAuthor,
+      ...next.showAuthor,
+    } as OverlaySettings['showAuthor'];
+  if (previous.colors || next.colors)
+    merged.colors = { ...previous.colors, ...next.colors } as OverlaySettings['colors'];
+  if (previous.backgroundColors || next.backgroundColors)
+    merged.backgroundColors = {
+      ...previous.backgroundColors,
+      ...next.backgroundColors,
+    } as OverlaySettings['backgroundColors'];
+  if (previous.outline || next.outline)
+    merged.outline = { ...previous.outline, ...next.outline } as OverlaySettings['outline'];
+  return merged;
+}
+
 export function normalizeStoredSettings(
   stored: Record<string, unknown> | null | undefined
 ): OverlaySettings {

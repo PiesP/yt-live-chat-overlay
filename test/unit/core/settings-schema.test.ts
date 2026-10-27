@@ -4,6 +4,7 @@
 import type { OverlaySettings } from '@app-types';
 import {
   applySettingsPatch,
+  changedSettingsPatch,
   cloneSettings,
   DEFAULT_SETTINGS,
   getOutlineDisplayScale,
@@ -30,6 +31,31 @@ describe('SETTINGS_VERSION', () => {
 describe('STORAGE_KEY', () => {
   it('is the expected string', () => {
     expect(STORAGE_KEY).toBe('yt-live-chat-overlay-settings');
+  });
+});
+
+describe('settings form intent', () => {
+  it('retains only changed scalar and nested values when a form starts from defaults', () => {
+    const form = applySettingsPatch(DEFAULT_SETTINGS, {
+      opacity: 0.5,
+      outline: { ...DEFAULT_SETTINGS.outline, enabled: !DEFAULT_SETTINGS.outline.enabled },
+    });
+    const patch = changedSettingsPatch(DEFAULT_SETTINGS, form);
+    expect(patch).toEqual({
+      opacity: 0.5,
+      outline: { enabled: !DEFAULT_SETTINGS.outline.enabled },
+    });
+    const durable = applySettingsPatch(DEFAULT_SETTINGS, {
+      fontSize: 48,
+      speedPxPerSec: 420,
+      outline: { ...DEFAULT_SETTINGS.outline, opacity: 0.8 },
+    });
+    expect(applySettingsPatch(durable, patch)).toMatchObject({
+      fontSize: 48,
+      speedPxPerSec: 420,
+      opacity: 0.5,
+      outline: { enabled: !DEFAULT_SETTINGS.outline.enabled, opacity: 0.8 },
+    });
   });
 });
 
