@@ -23,7 +23,7 @@
     "fmt": "vp fmt --check src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
     "fmt:fix": "vp fmt --write src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
     "fmt:check": "pnpm -s fmt",
-    "circular": "dpdm --tsconfig tsconfig.json --circular --no-tree --no-warning --exit-code circular:1 src/**/*.ts",
+    "circular": "dpdm --tsconfig tsconfig.json --circular --no-tree --no-warning --exit-code circular:1 \"src/**/*.ts\"",
     "check:test": "tsc -p tsconfig.test.json --noEmit",
     "check:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "quality": "vp check src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json' && pnpm -s lint:residual && pnpm -s check && pnpm -s check:extension && pnpm -s check:test && pnpm -s check:e2e && pnpm -s check:scripts && pnpm -s check:windows && pnpm -s test:ci && pnpm -s check:i18n && pnpm -s circular && pnpm -s knip",
