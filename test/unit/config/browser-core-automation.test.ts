@@ -10,6 +10,7 @@ const workflow = readFileSync(
 const manifest = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../../package.json'), 'utf8')
 ) as { scripts: Record<string, string> };
+const testConfig = readFileSync(resolve(import.meta.dirname, '../../../vitest.config.ts'), 'utf8');
 
 describe('browser-core workflow composition', () => {
   it('runs local policy from the trusted default branch after runtime setup', () => {
@@ -61,6 +62,8 @@ describe('browser-core workflow composition', () => {
     expect(workflow).toContain('PREFLIGHT: ${{ inputs.preflight }}');
     expect(workflow).not.toContain('AUTO_MERGE_TOKEN');
     expect(workflow).not.toContain('gh pr merge');
-    expect(manifest.scripts['test:ci']).toContain('scripts/ci/repository-authority.test.ts');
+    expect(manifest.scripts['test:ci']).toBe('vp test run --project=node-policy');
+    expect(testConfig).toContain("name: 'node-policy'");
+    expect(testConfig).toContain('scripts/ci/repository-authority.test.ts');
   });
 });

@@ -3,8 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { afterAll, test } from 'vite-plus/test';
 
 import { parseGate } from './dependabot-apply.ts';
 
@@ -14,7 +15,13 @@ const other = 'b'.repeat(40);
 const consumerBase = 'c'.repeat(40);
 const repository = 'PiesP/yt-live-chat-overlay';
 const temporaryFixtures: string[] = [];
-after(() => {
+
+test('policy tests run without a browser environment', () => {
+  assert.equal('window' in globalThis, false);
+  assert.equal('document' in globalThis, false);
+});
+
+afterAll(() => {
   for (const path of temporaryFixtures) rmSync(path, { recursive: true, force: true });
 });
 
