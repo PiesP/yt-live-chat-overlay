@@ -8,6 +8,12 @@ import { performance } from 'node:perf_hooks';
 
 import type { BrowserContext, ElementHandle, Page } from '@playwright/test';
 
+import { exercisePlayerPausePlay } from './live-duration-control.ts';
+import type { PublicPlayerBinding } from './live-duration-control.ts';
+import { readPublicDurationPageState, readFailurePlayerDomSnapshot } from './live-duration-page.ts';
+export { exercisePlayerPausePlay } from './live-duration-control.ts';
+export { observePublicVideo, readPublicDurationPageState } from './live-duration-page.ts';
+
 import {
   countUnexpectedLiveErrors,
   isTrustedTypesWorkerBlock,
@@ -101,12 +107,6 @@ type DurationResult = {
   failureState?: Awaited<ReturnType<typeof publicState>> | null;
   failurePlayerDom?: Awaited<ReturnType<typeof captureFailurePlayerDom>> | null;
 };
-
-declare global {
-  var __ytExtensionBridge:
-    | { workerSupported?: boolean; storageType?: string; workerUrl?: string }
-    | undefined;
-}
 
 const ACTIVE_MS = 300_000;
 const HIDDEN_MS = 600_000;
@@ -284,306 +284,13 @@ async function waitUntil(target: number) {
   }
 }
 
-async function waitForVideoState(
-  binding: PublicPlayerBinding,
-  predicate: (state: VideoState) => boolean,
-  timeoutMs: number,
-  delay: (ms: number) => Promise<void>
-) {
-  const deadline = performance.now() + timeoutMs;
-  let state: VideoState;
-  do {
-    state = (await evaluatePublicVideo(binding, 'read')).after;
-    if (predicate(state)) return state;
-    await delay(Math.min(100, Math.max(1, deadline - performance.now())));
-  } while (performance.now() < deadline);
-  throw new Error('Public player did not reach the requested bounded playback state');
-}
-
-type VideoState = {
-  currentTime: number | null;
-  errorCode: number | null;
-  muted: boolean;
-  paused: boolean;
-  readyState: number;
-};
-type PublicVideoAction = 'read' | 'pause' | 'play';
-type PublicPlayerBinding = {
-  player: ElementHandle<Element>;
-  video: ElementHandle<HTMLVideoElement>;
-};
-
-export function observePublicVideo(
-  video: HTMLVideoElement,
-  { player, action }: { player: unknown; action: PublicVideoAction }
-) {
-  const players = document.querySelectorAll('#movie_player');
-  const videos = player instanceof Element ? player.querySelectorAll('video') : null;
-  if (
-    !(video instanceof HTMLVideoElement) ||
-    !(player instanceof Element) ||
-    player.ownerDocument !== document ||
-    !player.isConnected ||
-    players.length !== 1 ||
-    players[0] !== player ||
-    video.ownerDocument !== document ||
-    !video.isConnected ||
-    videos?.length !== 1 ||
-    videos[0] !== video
-  ) {
-    throw new Error('Owned public player video is absent, ambiguous, or replaced');
-  }
-  const state = (): VideoState => ({
-    currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
-    errorCode: video.error?.code ?? null,
-    muted: video.muted,
-    paused: video.paused,
-    readyState: video.readyState,
-  });
-  const before = state();
-  if (action === 'pause') {
-    video.pause();
-  } else if (action === 'play') {
-    // Some public-player promises remain pending. Playback state is checked separately.
-    void video.play().catch(() => {});
-  }
-  return { action, before, after: state() };
-}
-
-function evaluatePublicVideo(binding: PublicPlayerBinding, action: PublicVideoAction) {
-  return binding.video.evaluate<
-    ReturnType<typeof observePublicVideo>,
-    { player: unknown; action: PublicVideoAction }
-  >(observePublicVideo, { player: binding.player, action });
-}
-
-async function actOnPublicVideo(binding: PublicPlayerBinding, action: 'pause' | 'play') {
-  return evaluatePublicVideo(binding, action);
-}
-
-export async function exercisePlayerPausePlay(
-  binding: PublicPlayerBinding,
-  {
-    timeoutMs = 5_000,
-    delay = sleep,
-  }: {
-    timeoutMs?: number;
-    delay?: (ms: number) => Promise<void>;
-  } = {}
-) {
-  const before = (await evaluatePublicVideo(binding, 'read')).after;
-  if (before.readyState < 2 || before.errorCode !== null || !before.muted || before.paused) {
-    throw new Error('Public player media is not ready for pause/play verification');
-  }
-  const pauseAction = await actOnPublicVideo(binding, 'pause');
-  const paused = await waitForVideoState(binding, (state) => state.paused, timeoutMs, delay);
-  const playAction = await actOnPublicVideo(binding, 'play');
-  const resumed = await waitForVideoState(
-    binding,
-    (state) => !state.paused && state.muted && state.readyState >= 2 && state.errorCode === null,
-    timeoutMs,
-    delay
-  );
-  return {
-    status: 'observed',
-    muted: resumed.muted,
-    before,
-    pauseAction,
-    playAction,
-    paused,
-    resumed,
-    beforeTime: before.currentTime,
-    pausedTime: paused.currentTime,
-    resumedTime: resumed.currentTime,
-  };
-}
-
-export function readPublicDurationPageState(owned?: { player: unknown; video: unknown }) {
-  const players = document.querySelectorAll('#movie_player');
-  const player = players.length === 1 ? players[0] : null;
-  const videos = player?.querySelectorAll('video');
-  const video = owned?.video ?? (videos?.length === 1 ? videos[0] : null);
-  if (
-    owned &&
-    (!(owned.player instanceof Element) ||
-      owned.player.ownerDocument !== document ||
-      !owned.player.isConnected ||
-      players.length !== 1 ||
-      player !== owned.player ||
-      !(owned.video instanceof HTMLVideoElement) ||
-      owned.video.ownerDocument !== document ||
-      !owned.video.isConnected ||
-      !player?.isConnected ||
-      videos?.length !== 1 ||
-      videos[0] !== owned.video)
-  ) {
-    throw new Error('Owned public player video is absent, ambiguous, or replaced');
-  }
-  if (players.length > 1 || (videos?.length ?? 0) > 1) {
-    throw new Error('Public player video is ambiguous');
-  }
-  const visibleError = [
-    {
-      marker: 'youtube-player-error-ui-visible',
-      selector: '.ytp-error, .ytp-error-content-wrap, .ytp-error-content',
-    },
-    {
-      marker: 'youtube-playability-error-ui-visible',
-      selector: '#player yt-playability-error-supported-renderers#error-screen',
-    },
-  ].find(({ selector }) =>
-    [...document.querySelectorAll(selector)].some((element) => {
-      const style = getComputedStyle(element);
-      return (
-        style.display !== 'none' &&
-        style.visibility !== 'hidden' &&
-        element.getClientRects().length > 0
-      );
-    })
-  );
-  const playerWithData = player as
-    | (Element & { getVideoData?: () => { video_id?: unknown } })
-    | null;
-  const playerData =
-    typeof playerWithData?.getVideoData === 'function' ? playerWithData.getVideoData() : null;
-  return {
-    visibility: document.visibilityState,
-    playerVideoId: typeof playerData?.video_id === 'string' ? playerData.video_id : null,
-    adShowing: player ? player.classList.contains('ad-showing') : null,
-    hud:
-      document.querySelector('#yt-chat-overlay-debug')?.textContent?.replace(/\s+/gu, ' ').trim() ??
-      null,
-    canvasAttached: document.querySelectorAll('#yt-live-chat-overlay canvas').length === 1,
-    accessibilityRenderedNodeCount: document.querySelectorAll(
-      '.yt-live-chat-overlay-live-region > p'
-    ).length,
-    installedBridgeReady: Boolean(
-      globalThis.__ytExtensionBridge?.workerSupported === true &&
-      globalThis.__ytExtensionBridge?.storageType === 'chrome.storage.local' &&
-      globalThis.__ytExtensionBridge?.workerUrl?.startsWith(`blob:${location.origin}/`)
-    ),
-    playerErrorUi: {
-      visible: Boolean(visibleError),
-      marker: visibleError?.marker ?? null,
-    },
-    video:
-      video instanceof HTMLVideoElement
-        ? {
-            currentTime: Number.isFinite(video.currentTime) ? video.currentTime : null,
-            errorCode: video.error?.code ?? null,
-            muted: video.muted,
-            paused: video.paused,
-            readyState: video.readyState,
-          }
-        : null,
-  };
-}
-
 async function publicState(page: Page, binding: PublicPlayerBinding) {
   return page.evaluate(readPublicDurationPageState, binding);
 }
 
 /** Capture bounded player-error structure without page, account, or chat content. */
 export async function captureFailurePlayerDom(page: Page, owned?: PublicPlayerBinding) {
-  const snapshot = await page.evaluate(
-    (binding: { player: unknown; video: unknown } | undefined) => {
-      const players = document.querySelectorAll('#movie_player');
-      const player = players.length === 1 ? players[0] : null;
-      const providerRoots = [
-        ...document.querySelectorAll(
-          'yt-playability-error-supported-renderers, ytd-player-error-message-renderer'
-        ),
-      ];
-      const elements = [
-        ...(player ? [player, ...player.querySelectorAll('*')] : []),
-        ...providerRoots.flatMap((root) => [root, ...root.querySelectorAll('*')]),
-      ];
-      const markerPattern = /error|unavailable|playability|message|alert|status/iu;
-      const textPattern =
-        /video unavailable|live stream recording is not available|an error occurred/iu;
-      const boundedAttribute = (value: string | null) =>
-        value?.replace(/[^a-z0-9_-]/giu, '_').slice(0, 64) ?? null;
-      const describe = (element: Element) => {
-        const style = getComputedStyle(element);
-        const rectangle = element.getBoundingClientRect();
-        const rectCount = element.getClientRects().length;
-        return {
-          tag: element.tagName.toLowerCase(),
-          id: boundedAttribute(element.id),
-          classes: [...element.classList].slice(0, 8).map((value) => boundedAttribute(value)),
-          role: boundedAttribute(element.getAttribute('role')),
-          ariaHidden: element.getAttribute('aria-hidden')?.slice(0, 8) ?? null,
-          hidden: element.hasAttribute('hidden'),
-          display: style.display.slice(0, 32),
-          visibility: style.visibility.slice(0, 32),
-          rectCount: Math.min(rectCount, 999),
-          width: Math.round(rectangle.width),
-          height: Math.round(rectangle.height),
-          visible: style.display !== 'none' && style.visibility !== 'hidden' && rectCount > 0,
-        };
-      };
-      const candidates = elements
-        .filter((element) => {
-          const structural = [
-            element.tagName,
-            element.id,
-            ...element.classList,
-            element.getAttribute('role') ?? '',
-          ].some((value) => markerPattern.test(value));
-          const leafText = element.children.length === 0 ? (element.textContent ?? '') : '';
-          return structural || textPattern.test(leafText);
-        })
-        .map((element) => {
-          const path = [];
-          for (let current: Element | null = element; current && path.length < 6;) {
-            path.push(describe(current));
-            current = current.parentElement;
-          }
-          const leafText = element.children.length === 0 ? (element.textContent ?? '') : '';
-          return {
-            path,
-            errorText: textPattern.test(leafText)
-              ? leafText.replace(/\s+/gu, ' ').trim().slice(0, 160)
-              : null,
-          };
-        })
-        .sort((first, second) => Number(second.path[0]?.visible) - Number(first.path[0]?.visible))
-        .slice(0, 24);
-      const response = (
-        globalThis as typeof globalThis & {
-          ytInitialPlayerResponse?: {
-            playabilityStatus?: { status?: unknown; reason?: unknown };
-          };
-        }
-      ).ytInitialPlayerResponse;
-      const status = response?.playabilityStatus?.status;
-      const reason = response?.playabilityStatus?.reason;
-      const playerVideos = player?.querySelectorAll('video');
-      const media =
-        binding &&
-        binding.player === player &&
-        binding.video instanceof HTMLVideoElement &&
-        binding.video.ownerDocument === document &&
-        binding.video.isConnected &&
-        player?.isConnected &&
-        playerVideos?.length === 1 &&
-        playerVideos[0] === binding.video
-          ? binding.video
-          : null;
-      return {
-        playerFound: Boolean(player),
-        playerAmbiguous: players.length > 1,
-        providerStatusSource: 'ytInitialPlayerResponse-initial',
-        mediaIdentity: media ? 'owned' : 'unavailable',
-        providerStatus: typeof status === 'string' ? boundedAttribute(status) : null,
-        providerReason: typeof reason === 'string' ? reason.slice(0, 160) : null,
-        mediaNetworkState: media instanceof HTMLVideoElement ? media.networkState : null,
-        mediaErrorCode: media instanceof HTMLVideoElement ? (media.error?.code ?? null) : null,
-        candidates,
-      };
-    },
-    owned
-  );
+  const snapshot = await page.evaluate(readFailurePlayerDomSnapshot, owned);
   return {
     ...snapshot,
     providerReason: snapshot.providerReason ? redactDiagnosticText(snapshot.providerReason) : null,

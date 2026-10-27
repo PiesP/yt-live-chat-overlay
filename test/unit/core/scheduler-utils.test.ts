@@ -1,8 +1,7 @@
 /**
  * Tests for the scheduler.postTask() wrapper.
  *
- * In jsdom, globalThis.scheduler is typically undefined, so tests exercise
- * the setTimeout fallback paths naturally.
+ * Tests exercise the setTimeout fallback when scheduler.postTask is absent.
  */
 
 import { scheduleOverlayTask } from '@util/scheduler-utils';

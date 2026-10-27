@@ -3,6 +3,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
+vi.hoisted(() => {
+  Object.defineProperty(globalThis, 'self', {
+    value: globalThis,
+    writable: true,
+    configurable: true,
+  });
+});
+
 // ── Mock browser APIs before module import ───────────────────────────────
 
 const mockCtx = {
@@ -2036,13 +2044,13 @@ describe('Worker message protocol', () => {
       await Promise.resolve();
       expect(fetchSpy).toHaveBeenCalledTimes(2);
 
-      while (fetchSpy.mock.calls.length < 7 || active > 0) {
+      for (let turn = 0; turn < 20 && (fetchSpy.mock.calls.length < 7 || active > 0); turn++) {
         const release = releases.shift();
         if (release) release();
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
+      expect(fetchSpy).toHaveBeenCalledTimes(7);
+      expect(active).toBe(0);
       await Promise.all(pending);
 
       expect(maxActive).toBe(2);

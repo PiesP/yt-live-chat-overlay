@@ -1,8 +1,7 @@
 /**
  * Vitest Global Setup — YT Live Chat Overlay
  *
- * Mocks the userscript environment (GM_* APIs) and provides
- * Canvas2D API support for renderer tests via the `canvas` package.
+ * Mocks the userscript and logging boundaries shared by Node and browser tests.
  */
 
 import { afterAll, beforeEach, vi } from 'vite-plus/test';
@@ -56,90 +55,6 @@ const gmStorage = new Map<string, unknown>();
     name: 'YT Live Chat Overlay',
   },
 };
-
-// ═══════════════════════════════════════════════════════════
-// Canvas2D API Support
-// ═══════════════════════════════════════════════════════════
-// jsdom provides HTMLCanvasElement, getContext('2d'), and basic
-// CanvasRenderingContext2D. For advanced features (measureText,
-// drawImage, createPattern), the `canvas` npm package provides
-// a Node.js-native implementation. Install it as needed for
-// renderer-specific tests.
-// ═══════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════
-// DOM API Polyfills (jsdom gaps)
-// ═══════════════════════════════════════════════════════════
-
-// requestAnimationFrame
-if (typeof globalThis.requestAnimationFrame !== 'function') {
-  (
-    globalThis as unknown as {
-      requestAnimationFrame: typeof requestAnimationFrame;
-    }
-  ).requestAnimationFrame = (cb: FrameRequestCallback) => {
-    return setTimeout(
-      () => cb(typeof performance !== 'undefined' ? performance.now() : Date.now()),
-      16
-    ) as unknown as number;
-  };
-}
-
-if (typeof globalThis.cancelAnimationFrame !== 'function') {
-  (
-    globalThis as unknown as {
-      cancelAnimationFrame: typeof cancelAnimationFrame;
-    }
-  ).cancelAnimationFrame = (id: number) => {
-    clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
-  };
-}
-
-// ResizeObserver
-if (typeof globalThis.ResizeObserver !== 'function') {
-  class ResizeObserverMock {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  (
-    globalThis as unknown as {
-      ResizeObserver: typeof ResizeObserverMock;
-    }
-  ).ResizeObserver = ResizeObserverMock;
-}
-
-// IntersectionObserver
-if (typeof globalThis.IntersectionObserver !== 'function') {
-  class IntersectionObserverMock {
-    // oxlint-disable-next-line no-useless-constructor -- Preserve the callback-taking browser constructor signature.
-    constructor(_cb: IntersectionObserverCallback) {}
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-    takeRecords(): IntersectionObserverEntry[] {
-      return [];
-    }
-  }
-  (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver =
-    IntersectionObserverMock as unknown as typeof IntersectionObserver;
-}
-
-// MatchMedia
-if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
-  window.matchMedia = (_query: string): MediaQueryList => {
-    return {
-      matches: false,
-      media: '',
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => true,
-    } as unknown as MediaQueryList;
-  };
-}
 
 // ═══════════════════════════════════════════════════════════
 // Mock Logger (suppress log noise in tests)

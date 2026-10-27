@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// @vitest-environment jsdom
 
 import { createChatPreflight } from '@app/chat-availability-preflight';
 import { describe, expect, it } from 'vite-plus/test';

@@ -340,10 +340,14 @@ const resolveClientContext = (ytcfg: JsonObject): JsonObject | null => {
  * Bootstraps a YouTube live chat session by resolving page configuration and
  * sending an initial request to the Innertube API.
  * @param signal - Optional AbortSignal to cancel the bootstrap process.
+ * @param currentUrl - Page URL captured at the bootstrap boundary.
  * @returns A promise resolving to the bootstrap result (ready, retryable, or unavailable).
  */
-export async function bootstrapChatSession(signal?: AbortSignal): Promise<ChatBootstrapResult> {
-  const videoId = getVideoIdFromUrl(location.href);
+export async function bootstrapChatSession(
+  signal?: AbortSignal,
+  currentUrl: string = location.href
+): Promise<ChatBootstrapResult> {
+  const videoId = getVideoIdFromUrl(currentUrl);
   if (!videoId) {
     return {
       status: 'unavailable',

@@ -31,7 +31,7 @@ interface HistoryPatchState {
 const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
 
 export class PageWatcher {
-  private currentUrl = location.href;
+  private currentUrl: string;
   private callbacks: Set<PageChangeCallback> = new Set();
   private restorePushState?: () => void;
   private restoreReplaceState?: () => void;
@@ -55,14 +55,15 @@ export class PageWatcher {
     log.debug('app.page-watcher.navigation-finished');
     // Always notify — yt-navigate-finish signals data-ready even when URL is unchanged
     // (e.g., VOD→live transitions where pushState already updated the URL).
-    const newUrl = location.href;
+    const newUrl = this.readUrl();
     if (newUrl !== this.currentUrl) {
       this.currentUrl = newUrl;
     }
     this.notifyCallbacks();
   };
 
-  constructor() {
+  constructor(private readonly readUrl: () => string = () => location.href) {
+    this.currentUrl = this.readUrl();
     this.restorePushState = this.patchHistoryMethod('pushState');
     this.restoreReplaceState = this.patchHistoryMethod('replaceState');
     window.addEventListener('popstate', this.handleUrlMutation);
@@ -130,7 +131,7 @@ export class PageWatcher {
   }
 
   private handlePotentialUrlChange(source: NavigationSignalSource): void {
-    const newUrl = location.href;
+    const newUrl = this.readUrl();
     if (newUrl === this.currentUrl) {
       return;
     }
@@ -170,7 +171,8 @@ export class PageWatcher {
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {
-    return isYouTubeWatch(location.href) || isYouTubeLive(location.href);
+    const url = this.readUrl();
+    return isYouTubeWatch(url) || isYouTubeLive(url);
   }
 
   /**

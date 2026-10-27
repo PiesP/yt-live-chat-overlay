@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: MIT
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+
+import { OwnedWindowListeners } from '../owned-window-listeners';
+
+function loadContentScript(): Promise<unknown> {
+  return import(
+    /* @vite-ignore */ `/extension/content-script.ts?browser-test=${crypto.randomUUID()}`
+  );
+}
+
+describe('extension storage bridge authentication', () => {
+  const ownedWindowListeners = new OwnedWindowListeners();
+
+  afterEach(() => {
+    ownedWindowListeners.dispose();
+    vi.unstubAllGlobals();
+    document.querySelectorAll('script[src^="chrome-extension://"]').forEach((script) => {
+      script.remove();
+    });
+  });
+
+  it('rejects storage relay requests without the per-injection nonce', async () => {
+    const storageGet = vi.fn().mockResolvedValue({});
+    const storageSet = vi.fn().mockResolvedValue(undefined);
+    const addRuntimeListener = vi.fn();
+    const addStorageListener = vi.fn();
+    vi.stubGlobal('chrome', {
+      runtime: {
+        id: 'test-extension',
+        getURL: (path: string) => `chrome-extension://test-extension/${path}`,
+        onMessage: { addListener: addRuntimeListener },
+      },
+      storage: {
+        local: {
+          get: storageGet,
+          set: storageSet,
+        },
+        onChanged: { addListener: addStorageListener },
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(new Response('self.postMessage({ type: "ready" });', { status: 200 }))
+    );
+
+    await ownedWindowListeners.load(loadContentScript);
+    expect(addRuntimeListener).toHaveBeenCalledOnce();
+    expect(addStorageListener).toHaveBeenCalledOnce();
+
+    const injectedScript = await vi.waitFor(() => {
+      const script = document.querySelector<HTMLScriptElement>('script[src$="/page-script.js"]');
+      expect(script).not.toBeNull();
+      return script;
+    });
+    const nonce = injectedScript?.dataset.ytExtensionBridgeNonce;
+    expect(nonce).toEqual(expect.any(String));
+    expect(injectedScript?.dataset.ytExtensionWorkerSource).toContain('ready');
+    expect(injectedScript?.dataset.ytExtensionWorkerUrl).toBeUndefined();
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window,
+        origin: window.location.origin,
+        data: {
+          source: 'yt-storage-relay',
+          requestId: 1,
+          method: 'set',
+          key: 'yt-live-chat-overlay-settings',
+          value: '{}',
+        },
+      })
+    );
+    await Promise.resolve();
+    expect(storageSet).not.toHaveBeenCalled();
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window,
+        origin: window.location.origin,
+        data: {
+          source: 'yt-storage-relay',
+          nonce,
+          requestId: 2,
+          method: 'set',
+          key: 'yt-live-chat-overlay-settings',
+          value: '{}',
+        },
+      })
+    );
+    await vi.waitFor(() =>
+      expect(storageSet).toHaveBeenCalledWith({
+        'yt-live-chat-overlay-settings': '{}',
+      })
+    );
+
+    storageGet.mockClear();
+    storageSet.mockClear();
+    const hostileMessages = [
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 3,
+        method: 'set',
+        key: 'another-extension-key',
+        value: '{}',
+      },
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 4,
+        method: 'delete',
+        key: 'yt-live-chat-overlay-settings',
+      },
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 5,
+        method: 'set',
+        key: 'yt-live-chat-overlay-settings',
+        value: { injected: true },
+      },
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 'not-a-number',
+        method: 'get',
+        key: 'yt-live-chat-overlay-settings',
+      },
+    ];
+    for (const data of hostileMessages) {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: window,
+          origin: window.location.origin,
+          data,
+        })
+      );
+    }
+    await Promise.resolve();
+
+    expect(storageGet).not.toHaveBeenCalled();
+    expect(storageSet).not.toHaveBeenCalled();
+  });
+});
