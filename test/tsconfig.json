@@ -1,5 +1,5 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "../tsconfig.json",
   "compilerOptions": {
     "types": ["vitest/globals"],
     "strict": true,
@@ -12,6 +12,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src/**/*.d.ts", "test/**/*.ts"],
-  "exclude": ["test/e2e", "test/node_modules", "test/unit/config/fixtures/devtools-endpoint.ts"]
+  "include": [
+    "../src/**/*.d.ts",
+    "unit/**/*.ts",
+    "consistency/**/*.ts",
+    "typecheck/**/*.ts",
+    "setup.ts",
+    "owned-window-listeners.ts",
+    "raw-html.d.ts"
+  ],
+  "exclude": ["e2e", "browser", "node_modules"]
 }

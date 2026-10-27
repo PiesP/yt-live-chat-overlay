@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["vitest/globals"]
+  },
+  "include": [
+    "**/*.ts",
+    "../../src/**/*.d.ts",
+    "../setup.ts",
+    "../owned-window-listeners.ts",
+    "../raw-html.d.ts"
+  ]
+}

@@ -560,7 +560,7 @@ export function drawRoundRect(
     // Native path — single call replaces the 9 arcTo operations.
     // roundRect() does NOT call beginPath() internally, so the caller
     // (or this function) must do so — this is handled above.
-    void (ctx as CanvasRenderingContext2D).roundRect(x, y, w, h, r);
+    (ctx as CanvasRenderingContext2D).roundRect(x, y, w, h, r);
     // With native roundRect, the path is open by default and does NOT
     // need closePath() for fill/stroke to work.  The arcTo path below
     // calls closePath() explicitly for visual parity; for roundRect the

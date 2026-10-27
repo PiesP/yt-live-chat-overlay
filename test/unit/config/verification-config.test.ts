@@ -31,12 +31,6 @@ describe('Vite+ verification ownership', () => {
     expect(scripts.quality).toBe('vp run quality-gate');
     expect(commands('quality-gate')).toEqual([
       "vp check src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
-      'vp run check',
-      'vp run check:extension',
-      'vp run check:test',
-      'vp run check:e2e',
-      'vp run check:scripts',
-      'vp run check:windows',
       'vp run test:ci',
       'vp run check:i18n',
     ]);
@@ -95,10 +89,10 @@ describe('Vite+ verification ownership', () => {
       'vp run test:e2e:prepared',
     ]);
     expect(scripts['test:core']).toBe('vp run core-verify');
-    expect(commands('core-verify')).toEqual([
-      'cd packages/core && vp install --frozen-lockfile -- --no-runtime',
-      'cd packages/core && vp run verify',
-    ]);
+    expect(tasks?.['core-verify']).toEqual({
+      cwd: 'packages/core',
+      command: ['vp install --frozen-lockfile -- --no-runtime', 'pnpm run verify'],
+    });
     expect(scripts['pretest:e2e']).toBe('vp run e2e-prepare');
     expect(commands('e2e-prepare')).toEqual([
       'vp run build:dev',
@@ -112,6 +106,42 @@ describe('Vite+ verification ownership', () => {
       'vp run check:artifacts --e2e',
       'playwright test --config test/e2e/playwright.config.ts',
     ]);
+  });
+
+  it('prepares the unit job and Chromium before either core or consumer browser tests', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
+    const unit = workflow.split('\n  unit:\n')[1]?.split('\n  e2e:\n')[0] ?? '';
+    const coreOrUnit =
+      "${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' || needs.changes.outputs.unit == 'true' }}";
+    const step = (name: string) => {
+      const start = unit.indexOf(`      - name: ${name}\n`);
+      expect(start).toBeGreaterThan(-1);
+      const end = unit.indexOf('\n      - name: ', start + 1);
+      return unit.slice(start, end < 0 ? undefined : end);
+    };
+
+    for (const name of [
+      '📥 Checkout code',
+      '📦 Set up project',
+      'Install Chromium for Browser Mode unit tests',
+    ]) {
+      expect(step(name)).toContain(`if: ${coreOrUnit}`);
+    }
+    expect(step('Install Chromium for Browser Mode unit tests')).toContain(
+      'run: vp exec playwright install --with-deps chromium'
+    );
+    expect(step('Verify the pinned browser-core contracts')).toContain(
+      "if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' }}"
+    );
+    const positions = [
+      '📥 Checkout code',
+      '📦 Set up project',
+      'Install Chromium for Browser Mode unit tests',
+      'Verify the pinned browser-core contracts',
+      '🧪 Run unit tests and coverage thresholds',
+    ].map((name) => unit.indexOf(`      - name: ${name}\n`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
   it('retains browser traces from the first failed attempt without changing retry verdicts', () => {

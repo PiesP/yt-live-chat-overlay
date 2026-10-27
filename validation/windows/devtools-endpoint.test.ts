@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
-import * as positive from '../../../../validation/windows/natural-chrome.ts';
+import * as positive from './natural-chrome.ts';
 
 const endpoint = 'ws://127.0.0.1:27683/devtools/browser/77b8a8c0-diagnostic';
 const identity = {

@@ -2,6 +2,18 @@ import { defineConfig } from 'vite-plus';
 
 import { createUserscriptConfig } from './tooling/vite/configs/userscript.ts';
 
+// These existing fixtures predate type-aware lint; native type checking still covers them.
+const fixtureTypeAwareBaseline = {
+  'typescript/unbound-method': 'off',
+  'typescript/no-floating-promises': 'off',
+  'typescript/no-base-to-string': 'off',
+  'typescript/no-redundant-type-constituents': 'off',
+  'typescript/restrict-template-expressions': 'off',
+  'typescript/require-array-sort-compare': 'off',
+  'typescript/no-misused-spread': 'off',
+  'typescript/await-thenable': 'off',
+} as const;
+
 export default defineConfig((env) => ({
   ...createUserscriptConfig(env),
   run: {
@@ -10,12 +22,6 @@ export default defineConfig((env) => ({
     tasks: {
       'quality-gate': [
         "vp check src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
-        'vp run check',
-        'vp run check:extension',
-        'vp run check:test',
-        'vp run check:e2e',
-        'vp run check:scripts',
-        'vp run check:windows',
         'vp run test:ci',
         'vp run check:i18n',
       ],
@@ -58,10 +64,11 @@ export default defineConfig((env) => ({
         'vp run check:i18n',
         'vp run build:targets:ci',
       ],
-      'core-verify': [
-        'cd packages/core && vp install --frozen-lockfile -- --no-runtime',
-        'cd packages/core && vp run verify',
-      ],
+      'core-verify': {
+        // A nested vp run is inlined into this consumer graph; pnpm executes the core script in its own project.
+        cwd: 'packages/core',
+        command: ['vp install --frozen-lockfile -- --no-runtime', 'pnpm run verify'],
+      },
       'e2e-prepare': [
         'vp run build:dev',
         'vp run build:extension:ci',
@@ -100,7 +107,7 @@ export default defineConfig((env) => ({
   },
   lint: {
     plugins: ['unicorn', 'typescript', 'oxc', 'import'],
-    options: { typeAware: false, typeCheck: false, maxWarnings: 0 },
+    options: { typeAware: true, typeCheck: true, maxWarnings: 0 },
     categories: { correctness: 'error' },
     rules: {
       'no-unused-vars': [
@@ -132,7 +139,44 @@ export default defineConfig((env) => ({
       { files: ['src/**', 'extension/**'], rules: { 'typescript/no-non-null-assertion': 'error' } },
       {
         files: ['test/**', 'scripts/**/*.test.ts'],
-        rules: { 'typescript/no-non-null-assertion': 'off', 'no-template-curly-in-string': 'off' },
+        rules: {
+          ...fixtureTypeAwareBaseline,
+          'typescript/no-non-null-assertion': 'off',
+          'no-template-curly-in-string': 'off',
+        },
+      },
+      {
+        // Windows acceptance helpers predate type-aware lint. Preserve floating-promise checks.
+        files: ['validation/windows/**/*.ts'],
+        rules: { ...fixtureTypeAwareBaseline, 'typescript/no-floating-promises': 'error' },
+      },
+      {
+        files: ['validation/windows/**/*.test.ts'],
+        rules: fixtureTypeAwareBaseline,
+      },
+      {
+        // These callbacks are static or keep their receiver at the call site.
+        files: [
+          'src/chat/fetch-interceptor.ts',
+          'src/renderer/canvas-renderer.ts',
+          'src/renderer/worker/renderer.ts',
+        ],
+        rules: { 'typescript/unbound-method': 'off' },
+      },
+      {
+        files: ['src/platform/storage-adapters.ts'],
+        rules: {
+          'typescript/no-base-to-string': 'off',
+          'typescript/await-thenable': 'off',
+        },
+      },
+      {
+        files: ['src/main.ts'],
+        rules: { 'typescript/await-thenable': 'off' },
+      },
+      {
+        files: ['src/renderer/canvas/shared.ts'],
+        rules: { 'typescript/no-misused-spread': 'off' },
       },
       {
         files: [
@@ -149,8 +193,8 @@ export default defineConfig((env) => ({
       {
         files: [
           'test/unit/app/standby-controller.test.ts',
-          'test/unit/settings/ui/controller.browser.test.ts',
-          'test/unit/worker/manager.browser.test.ts',
+          'test/browser/settings/ui/controller.browser.test.ts',
+          'test/browser/worker/manager.browser.test.ts',
           'test/unit/worker/renderer.test.ts',
         ],
         rules: { 'typescript/no-explicit-any': 'off' },
@@ -159,8 +203,8 @@ export default defineConfig((env) => ({
       { files: ['test/e2e/specs/firefox-extension.spec.ts'], rules: { 'no-empty-pattern': 'off' } },
       {
         files: [
-          'test/unit/core/canvas-render-mock.browser.test.ts',
-          'test/unit/core/vertical-spacing.browser.test.ts',
+          'test/browser/core/canvas-render-mock.browser.test.ts',
+          'test/browser/core/vertical-spacing.browser.test.ts',
         ],
         rules: { 'no-constructor-return': 'off' },
       },

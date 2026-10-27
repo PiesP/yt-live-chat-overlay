@@ -134,7 +134,7 @@ jobs:
         uses: PiesP/browser-core/automation/actions/prepare-node-trust@381b4ca733494cf069212cd0d16458389a83c623
         id: node_trust
       - name: 📥 Checkout code
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' || needs.changes.outputs.unit == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Core's workflow fixtures restore immutable helper commits from history.
@@ -142,7 +142,7 @@ jobs:
           submodules: true
 
       - name: 📦 Set up project
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' || needs.changes.outputs.unit == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
 
       - name: Record release setup inputs
@@ -170,6 +170,10 @@ jobs:
           test "$(node --version)" = "v$expected_node"
           test "$(pnpm --version)" = "$expected_pnpm"
 
+      - name: Install Chromium for Browser Mode unit tests
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' || needs.changes.outputs.unit == 'true' }}
+        run: vp exec playwright install --with-deps chromium
+
       - name: Verify the pinned browser-core contracts
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' }}
         run: vp run test:core
@@ -177,10 +181,6 @@ jobs:
       - name: Skip unchanged browser-core contracts
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.core != 'true' }}
         run: echo "browser-core inputs are unchanged; the shared-core contract check is skipped."
-
-      - name: Install Chromium for Browser Mode unit tests
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        run: vp exec playwright install --with-deps chromium
 
       - name: 🧪 Run focused CI regression tests
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.unit == 'true' && needs.changes.outputs.quality != 'true' }}

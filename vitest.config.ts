@@ -27,16 +27,17 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
+          // Source-wide lint probes and temporary type fixtures share the checkout.
+          fileParallelism: false,
           setupFiles: ['./test/setup.ts'],
           include: ['test/unit/**/*.test.ts', 'test/consistency/**/*.test.ts'],
-          exclude: ['test/unit/**/*.browser.test.ts'],
         },
       },
       {
         test: {
           name: 'browser',
           setupFiles: ['./test/setup.ts'],
-          include: ['test/unit/**/*.browser.test.ts'],
+          include: ['test/browser/**/*.browser.test.ts'],
           browser: {
             enabled: true,
             provider: playwright(),

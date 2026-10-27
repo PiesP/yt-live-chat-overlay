@@ -13,7 +13,7 @@ const scripts = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).
 
 // Vite+ owns both tool configurations; exercise its effective linter config rather than a copied fixture.
 describe('Vite+ quality coverage', () => {
-  it('keeps native lint failures and explicit compiler projects', () => {
+  it('keeps native lint failures and one integrated type-check command', () => {
     const result = spawnSync(resolve(root, 'node_modules/.bin/vp'), ['lint', '--print-config'], {
       cwd: root,
       encoding: 'utf8',
@@ -61,6 +61,7 @@ describe('Vite+ quality coverage', () => {
       rmSync(directory, { recursive: true, force: true });
     }
     expect(scripts.quality).toBe('vp run quality-gate');
+    expect(scripts.check).toContain('vp check --no-fmt --no-lint');
   });
 
   it('keeps first-party format boundaries and generated/dependency exclusions', () => {
@@ -80,7 +81,7 @@ describe('Vite+ quality coverage', () => {
     }
     const viteConfig = readFileSync(resolve(root, 'vite.config.ts'), 'utf8');
     expect(viteConfig).toContain('maxWarnings: 0');
-    expect(viteConfig).toContain('typeCheck: false');
+    expect(viteConfig).toContain('typeAware: true, typeCheck: true');
     for (const excluded of [
       'packages/core/**',
       '**/dist*/**',

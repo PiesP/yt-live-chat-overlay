@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", ".github/actions/**/*.ts"]
+  "include": ["**/*.ts"]
 }

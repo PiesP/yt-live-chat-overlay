@@ -8,7 +8,10 @@ import { expect, it } from 'vite-plus/test';
 
 it('enforces owned fixed-port DevTools discovery and connection boundaries', async () => {
   // A subprocess keeps native Node HTTP and VM behavior isolated from the Vitest loader.
-  const fixture = resolve(import.meta.dirname, 'fixtures/devtools-endpoint.ts');
+  const fixture = resolve(
+    import.meta.dirname,
+    '../../../validation/windows/devtools-endpoint.test.ts'
+  );
   const { stdout } = await promisify(execFile)(
     process.execPath,
     ['--experimental-strip-types', '--test', fixture],
