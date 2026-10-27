@@ -232,6 +232,8 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
+          # This immutable pre-migration base used only Volta; newer bases use .node-version.
+          node-version: ${{ github.event.pull_request.base.sha == 'ace0fe0626246a5953d5ce9dd72a28efefdcd820' && '26.12.1' || '' }}
           install-dependencies: 'false'
 
       - name: 🔒 Prepare pinned OSV helper
