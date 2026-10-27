@@ -20,9 +20,13 @@ describe('Vite+ quality coverage', () => {
     });
     expect(result.status, result.stderr).toBe(0);
     const config = JSON.parse(result.stdout) as {
+      plugins: string[];
       rules: Record<string, unknown>;
       ignorePatterns: string[];
     };
+    for (const plugin of ['unicorn', 'typescript', 'oxc', 'import']) {
+      expect(config.plugins).toContain(plugin);
+    }
     for (const rule of [
       'no-unused-vars',
       'typescript/no-non-null-assertion',
@@ -35,6 +39,7 @@ describe('Vite+ quality coverage', () => {
       'typescript/no-useless-empty-export',
       'no-lone-blocks',
       'oxc/no-accumulating-spread',
+      'import/no-cycle',
     ]) {
       expect(config.rules[rule], rule).not.toBe('off');
     }

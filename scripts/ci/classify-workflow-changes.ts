@@ -85,10 +85,7 @@ export function classifyWorkflowChanges(
       mark('quality', 'unit', 'semgrep', 'codeql_javascript');
     } else if (path.startsWith('test/visual/')) {
       mark('semgrep', 'codeql_javascript');
-    } else if (
-      ['knip.json', 'vitest.config.ts'].includes(path) ||
-      /^tsconfig.*\.json$/.test(path)
-    ) {
+    } else if (path === 'vitest.config.ts' || /^tsconfig.*\.json$/.test(path)) {
       mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript');
     } else if (path.startsWith('scripts/')) {
       mark('quality', 'unit', 'build', 'semgrep', 'codeql_javascript');

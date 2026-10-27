@@ -405,8 +405,6 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         'check:windows',
         'test:ci',
         'check:i18n',
-        'circular',
-        'knip',
       ]);
       const rejected = run(
         'quality',

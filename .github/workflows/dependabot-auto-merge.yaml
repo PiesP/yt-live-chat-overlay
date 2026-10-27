@@ -72,7 +72,7 @@ jobs:
             for dep in "${DEPS[@]}"; do
               dep=$(echo "$dep" | xargs)
               case "$dep" in
-                typescript|knip|@types/*|vite-plugin-monkey|@playwright/test|canvas|dpdm|jsdom)
+                typescript|@types/*|vite-plugin-monkey|@playwright/test|canvas|jsdom)
                   ;;
                 *)
                   SAFE="false"
