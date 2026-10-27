@@ -352,7 +352,7 @@ appendFileSync(process.env.CALL_LOG, JSON.stringify(args) + '\\n');
 process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
 `
       );
-      for (const tool of ['vp', 'biome', 'pnpm']) {
+      for (const tool of ['vp', 'pnpm']) {
         const shim = join(bin, tool);
         writeFileSync(shim, `#!/bin/sh\nexec '${process.execPath}' '${record}' ${tool} "$@"\n`);
         chmodSync(shim, 0o755);
@@ -396,9 +396,7 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
         '*.json',
       ]);
       expect(quality.calls.filter(([tool]) => tool === 'vp')).toHaveLength(1);
-      expect(quality.calls[1]).toEqual(['pnpm', '-s', 'lint:residual']);
       expect(quality.calls.slice(1).map((call) => call.at(-1))).toEqual([
-        'lint:residual',
         'check',
         'check:extension',
         'check:test',
@@ -416,14 +414,10 @@ process.exit(args.join(' ') === process.env.FAIL_COMMAND ? 17 : 0);
       );
       expect(rejected.status).toBe(17);
       expect(rejected.calls).toHaveLength(1);
-      const residualFailure = run('quality', 'pnpm -s lint:residual');
-      expect(residualFailure.status).toBe(17);
-      expect(residualFailure.calls).toHaveLength(2);
       const typeFailure = run('quality', 'pnpm -s check:extension');
       expect(typeFailure.status).toBe(17);
       expect(typeFailure.calls.map((call) => call.at(-1))).toEqual([
         '*.json',
-        'lint:residual',
         'check',
         'check:extension',
       ]);

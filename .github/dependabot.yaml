@@ -70,7 +70,6 @@ updates:
 
       quality:
         patterns:
-          - "@biomejs/biome"
           - "knip"
         update-types:
           - "minor"
