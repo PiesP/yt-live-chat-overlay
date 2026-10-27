@@ -291,7 +291,7 @@ messages.
 From this repository, use the pinned Node toolchain to build the production userscript:
 
 ```bash
-pnpm build:ci
+vp run build:ci
 ```
 
 The bundle producer must include every path listed in `profile.json`. The common runner supplies
@@ -671,7 +671,7 @@ node validation/windows/prepare-userscript-manager.ts \
 ```
 
 This is a host-side preparation step before VM installation, not an asset bundled
-in `profile.json` or code run by the Windows profile. Run it with the manifest-pinned
+in `profile.json` or code run by the Windows profile. Run it with the `.node-version`-pinned
 Node 26.12.1. The dependency-free TypeScript helper owns the reviewed Tampermonkey
 5.5.1 version, extension ID, exact Store URL, and SHA-256 pin. Importing the
 module has no preparation side effects; the CLI checks its runtime before any

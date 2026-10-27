@@ -197,6 +197,7 @@ describe('workflow change classification', () => {
   });
 
   it('fails closed for unknown paths, manual runs, and unavailable revisions', () => {
+    expect(Object.values(classify(['.node-version']))).not.toContain(false);
     expect(Object.values(classify(['new-config.unknown']))).not.toContain(false);
     expect(Object.values(classifyEvent({ EVENT_NAME: 'workflow_dispatch' }))).not.toContain(false);
     expect(
@@ -274,9 +275,9 @@ describe('workflow scope integration', () => {
       expect(unitFocusedRuns).toBe(expectedUnit);
       expect(coverageRuns).toBe(expectedCoverage);
       expect(Number(qualityRuns) + Number(unitFocusedRuns)).toBeLessThanOrEqual(1);
-      expect(qualityJob).toContain('run: pnpm quality');
-      expect(unitJob).toContain('run: pnpm test:ci');
-      expect(unitJob).toContain('run: pnpm test:cov');
+      expect(qualityJob).toContain('run: vp run quality');
+      expect(unitJob).toContain('run: vp run test:ci');
+      expect(unitJob).toContain('run: vp run test:cov');
       expect(qualityJob).toContain('name: pr-gate/quality');
       expect(qualityJob).toContain('if: ${{ !cancelled() }}');
       expect(unitJob).toContain('name: pr-gate/unit');

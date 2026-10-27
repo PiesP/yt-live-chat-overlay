@@ -14,7 +14,7 @@ function resolveRuntime(pin: unknown, requested = ''): string {
   const fixture = mkdtempSync(join(tmpdir(), 'release-runtime-'));
   try {
     const output = join(fixture, 'output');
-    writeFileSync(join(fixture, 'package.json'), JSON.stringify({ volta: { node: pin } }));
+    if (pin !== undefined) writeFileSync(join(fixture, '.node-version'), `${String(pin)}\n`);
     execFileSync(process.execPath, [script], {
       cwd: fixture,
       env: {
@@ -32,15 +32,15 @@ function resolveRuntime(pin: unknown, requested = ''): string {
 }
 
 describe('release runtime selection', () => {
-  it('uses the official manifest pin even when a compatibility override is present', () => {
-    expect(resolveRuntime('26.9.0')).toBe('version=26.9.0\n');
+  it('uses the checked-out .node-version pin even when a compatibility override is present', () => {
+    expect(resolveRuntime('26.12.1')).toBe('version=26.12.1\n');
     expect(resolveRuntime('26.10.1')).toBe('version=26.10.1\n');
   });
 
   it('requires the workflow-provided version to match the tagged source', () => {
-    expect(resolveRuntime('26.9.0', '26.9.0')).toBe('version=26.9.0\n');
-    expect(() => resolveRuntime('26.9.0', '26')).toThrow();
-    expect(() => resolveRuntime('26.9.0', '26.10.1')).toThrow();
+    expect(resolveRuntime('26.12.1', '26.12.1')).toBe('version=26.12.1\n');
+    expect(() => resolveRuntime('26.12.1', '26')).toThrow();
+    expect(() => resolveRuntime('26.12.1', '26.10.1')).toThrow();
   });
 
   it('runs the trusted provenance helper before tagged release setup', () => {
@@ -63,7 +63,7 @@ describe('release runtime selection', () => {
     ).toHaveLength(4);
   });
 
-  it.each([undefined, 26, '26', 'latest', '26.9.0\nextra=value'])(
+  it.each([undefined, 26, '26', 'latest', '26.12.1\nextra=value'])(
     'rejects missing, moving or malformed release pins: %s',
     (pin) => expect(() => resolveRuntime(pin)).toThrow()
   );

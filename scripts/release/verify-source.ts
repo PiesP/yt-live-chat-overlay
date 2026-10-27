@@ -25,13 +25,30 @@ function taggedNodeVersion(sha: string, releaseVersion: string): string {
   const manifest = JSON.parse(git(['show', `${sha}:package.json`])) as unknown;
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
     throw new Error('Invalid release source manifest');
-  const volta = (manifest as { volta?: unknown }).volta;
-  const version =
-    volta && typeof volta === 'object' && !Array.isArray(volta)
-      ? (volta as { node?: unknown }).node
-      : undefined;
-  if (typeof version !== 'string' || !matchesExactly(exactNodeVersion, version))
-    throw new Error('Release source must declare an exact volta.node pin');
+  const nodeEntry = git(['ls-tree', sha, '--', '.node-version']);
+  let version: string;
+  if (nodeEntry) {
+    if (!/^100644 blob [0-9a-f]{40}\t\.node-version$/.test(nodeEntry))
+      throw new Error('Release source must declare a regular .node-version pin');
+    const contents = execFileSync('git', ['show', `${sha}:.node-version`], { encoding: 'utf8' });
+    const taggedVersion = contents.endsWith('\n') ? contents.slice(0, -1) : contents;
+    if (!matchesExactly(exactNodeVersion, taggedVersion))
+      throw new Error('Release source must declare an exact .node-version pin');
+    version = taggedVersion;
+  } else {
+    // Tags created before the runtime migration declared only volta.node.
+    const volta = (manifest as { volta?: unknown }).volta;
+    const historicalVersion =
+      volta && typeof volta === 'object' && !Array.isArray(volta)
+        ? (volta as { node?: unknown }).node
+        : undefined;
+    if (
+      typeof historicalVersion !== 'string' ||
+      !matchesExactly(exactNodeVersion, historicalVersion)
+    )
+      throw new Error('Historical release source must declare an exact volta.node pin');
+    version = historicalVersion;
+  }
   const sourceVersion = (manifest as { version?: unknown }).version;
   if (sourceVersion !== releaseVersion)
     throw new Error(

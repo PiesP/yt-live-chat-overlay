@@ -39,8 +39,10 @@ function createReleaseFixture(): string {
     join(fixtureRoot, 'package.json'),
     '{"version":"1.2.3","packageManager":"pnpm@12.15.0"}\n'
   );
+  writeFileSync(join(fixtureRoot, '.node-version'), '26.12.1\n');
   writeFileSync(join(fixtureRoot, '.gitignore'), 'test-results/\nrelease-bundle/\n');
   writeFileSync(join(fixtureRoot, 'pnpm-lock.yaml'), 'lockfileVersion: test\n');
+  writeFileSync(join(fixtureRoot, 'pnpm-workspace.yaml'), 'runtimeOnFail: ignore\n');
   mkdirSync(join(fixtureRoot, 'tooling', 'vite'), { recursive: true });
   writeFileSync(join(fixtureRoot, 'tooling', 'vite', 'config.ts'), 'export {};\n');
   for (const name of [

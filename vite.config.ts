@@ -4,6 +4,77 @@ import { createUserscriptConfig } from './tooling/vite/configs/userscript.ts';
 
 export default defineConfig((env) => ({
   ...createUserscriptConfig(env),
+  run: {
+    // Builds, release guards and receipts must execute for every invocation.
+    cache: false,
+    tasks: {
+      'quality-gate': [
+        "vp check src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
+        'vp run check',
+        'vp run check:extension',
+        'vp run check:test',
+        'vp run check:e2e',
+        'vp run check:scripts',
+        'vp run check:windows',
+        'vp run test:ci',
+        'vp run check:i18n',
+      ],
+      'quality-fix-gate': [
+        "vp check --fix src scripts extension test tooling validation/windows .github/actions '*.ts' '*.json'",
+        'vp run quality',
+      ],
+      'prebuild-gate': ['vp run check:versions', 'vp run quality'],
+      'verify-gate': ['vp run quality', 'vp run check:versions', 'vp run build:targets:ci'],
+      'verify-full-gate': [
+        'vp run verify',
+        'vp run test:core',
+        'vp run test:cov',
+        'vp run test:e2e:prepared',
+      ],
+      'chrome-build': [
+        'vp build --config vite.config.extension.ts',
+        'vp build --config vite.config.extension.cs.ts',
+        'vp build --config vite.config.extension.page.ts',
+      ],
+      'chrome-dev-build': [
+        'vp build --mode development',
+        'vp build --config vite.config.extension.ts --mode development',
+        'vp build --config vite.config.extension.cs.ts --mode development',
+        'vp build --config vite.config.extension.page.ts --mode development',
+      ],
+      'firefox-build': [
+        'vp build --config vite.config.extension.firefox.ts',
+        'vp build --config vite.config.extension.cs.firefox.ts',
+        'vp build --config vite.config.extension.page.firefox.ts',
+      ],
+      'production-build': [
+        'vp run build:ci',
+        'vp run build:extension:ci',
+        'vp run build:extension:firefox:ci',
+        'vp run check:artifacts',
+      ],
+      'build-all-ci-gate': [
+        'vp run check:versions',
+        'vp run check:i18n',
+        'vp run build:targets:ci',
+      ],
+      'core-verify': [
+        'cd packages/core && vp install --frozen-lockfile -- --no-runtime',
+        'cd packages/core && vp run verify',
+      ],
+      'e2e-prepare': [
+        'vp run build:dev',
+        'vp run build:extension:ci',
+        'vp run build:extension:firefox:ci',
+        'vp run check:artifacts --e2e',
+      ],
+      'e2e-prepared': [
+        'vp run build:dev',
+        'vp run check:artifacts --e2e',
+        'playwright test --config test/e2e/playwright.config.ts',
+      ],
+    },
+  },
   fmt: {
     useTabs: false,
     tabWidth: 2,

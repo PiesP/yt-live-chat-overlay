@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as https from 'node:https';
 import { dirname, join, resolve } from 'node:path';
@@ -39,8 +40,18 @@ const zipApi = zlib as typeof zlib & {
   ZipEntry?: { read(buffer: Buffer): Iterable<ZipEntryView> };
 };
 
-export function assertQualifiedRuntime(version: string = process.versions.node): void {
-  if (version !== '26.12.1' || typeof zipApi.ZipEntry?.read !== 'function') {
+export function assertQualifiedRuntime(
+  version: string = process.versions.node,
+  selectedVersion: string = readFileSync(
+    resolve(import.meta.dirname, '../../.node-version'),
+    'utf8'
+  )
+): void {
+  if (
+    selectedVersion !== '26.12.1\n' ||
+    version !== '26.12.1' ||
+    typeof zipApi.ZipEntry?.read !== 'function'
+  ) {
     throw new Error('Userscript manager preparation requires the pinned Node 26.12.1 ZIP runtime.');
   }
 }

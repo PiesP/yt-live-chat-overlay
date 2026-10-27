@@ -60,10 +60,7 @@ describe('Vite+ quality coverage', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-    expect(scripts.quality).toMatch(/^vp check /);
-    for (const name of ['check', 'check:extension', 'check:test', 'check:e2e', 'check:scripts']) {
-      expect(scripts.quality).toContain(`pnpm -s ${name}`);
-    }
+    expect(scripts.quality).toBe('vp run quality-gate');
   });
 
   it('keeps first-party format boundaries and generated/dependency exclusions', () => {
@@ -78,7 +75,7 @@ describe('Vite+ quality coverage', () => {
       "'*.ts'",
       "'*.json'",
     ];
-    for (const command of ['fmt', 'lint', 'quality']) {
+    for (const command of ['fmt', 'lint']) {
       for (const path of scope) expect(scripts[command]).toContain(path);
     }
     const viteConfig = readFileSync(resolve(root, 'vite.config.ts'), 'utf8');
