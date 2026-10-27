@@ -12,9 +12,27 @@ export default defineConfig({
     // Preserve Vitest 4 mock history while validating the migrated test suite.
     clearMocks: false,
     globals: true,
-    environment: 'jsdom',
-    setupFiles: ['./test/setup.ts'],
-    include: ['test/unit/**/*.test.ts', 'test/consistency/**/*.test.ts'],
+    projects: [
+      {
+        test: {
+          name: 'unit',
+          environment: 'jsdom',
+          setupFiles: ['./test/setup.ts'],
+          include: ['test/unit/**/*.test.ts', 'test/consistency/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'node-policy',
+          environment: 'node',
+          include: [
+            'scripts/ci/repository-authority.test.ts',
+            'scripts/release/verify-source.test.ts',
+            'scripts/release/verify-publication.test.ts',
+          ],
+        },
+      },
+    ],
     exclude: ['node_modules', 'dist'],
     passWithNoTests: false,
     maxWorkers: 8,

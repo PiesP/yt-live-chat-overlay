@@ -38,5 +38,6 @@ and exercises the real Action preparation and CLI without changing the runtime
 CI runs `test:ci` within quality when quality is selected. When only unit is
 selected, the unit job runs it before independent full coverage. A failed or
 unavailable owner is not a completed check. Local `pnpm quality` always runs
-`test:ci`. Protected release-source verification rejects tags whose quality
-scripts still invoke retired Nose tooling before any validation job starts.
+the Vite+ Node policy `test:ci` project. Protected release-source verification
+rejects tags whose quality scripts still invoke retired Nose tooling before any
+validation job starts.
