@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: MIT
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
+import { OwnedWindowListeners } from '../owned-window-listeners';
+
 vi.mock('../../src/main', () => ({}));
 
+function loadPageScript(): Promise<unknown> {
+  return import(/* @vite-ignore */ `/extension/page-script.ts?browser-test=${crypto.randomUUID()}`);
+}
+
 describe('extension command bridge authentication', () => {
+  const ownedWindowListeners = new OwnedWindowListeners();
+
   afterEach(() => {
+    ownedWindowListeners.dispose();
     delete window.__ytExtensionBridge;
     Reflect.deleteProperty(window, '__ytChatOverlay');
-    vi.resetModules();
   });
 
   it('ignores reset commands that do not carry the bridge nonce', async () => {
@@ -22,7 +30,8 @@ describe('extension command bridge authentication', () => {
       configurable: true,
       value: { resetSettings, restartRuntime: vi.fn() },
     });
-    await import('../../extension/page-script');
+    await ownedWindowListeners.load(loadPageScript);
+    expect(ownedWindowListeners.size).toBe(1);
 
     const foreignFrame = document.createElement('iframe');
     document.body.appendChild(foreignFrame);

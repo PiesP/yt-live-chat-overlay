@@ -3,9 +3,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { claimNativePageBootstrap } from '../../extension/native-bootstrap';
+import { OwnedWindowListeners } from '../owned-window-listeners';
 
 const nonce = '12345678-1234-1234-1234-123456789abc';
 const documentId = '0123456789abcdef0123456789abcdef';
+
+function loadBackground(): Promise<unknown> {
+  return import(/* @vite-ignore */ `/extension/background.ts?browser-test=${crypto.randomUUID()}`);
+}
+
+function loadContentScript(): Promise<unknown> {
+  return import(
+    /* @vite-ignore */ `/extension/content-script.ts?browser-test=${crypto.randomUUID()}`
+  );
+}
 
 type MessageListener = (
   message: unknown,
@@ -23,21 +34,28 @@ const validSender = {
 };
 
 describe('Chrome native page bootstrap', () => {
-  let listener: MessageListener;
+  let listener: MessageListener | undefined;
+  const registeredListeners = new Set<MessageListener>();
   const executeScript = vi.fn();
   const send = (
     sender: unknown = validSender,
     message: unknown = { type: 'native-page-bootstrap', nonce }
-  ) =>
-    new Promise<unknown>((resolve) => {
-      listener(message, sender, resolve);
+  ) => {
+    const callback = listener;
+    if (!callback) throw new Error('This case did not register a background listener');
+    return new Promise<unknown>((resolve) => {
+      callback(message, sender, resolve);
     });
+  };
 
   beforeEach(async () => {
-    vi.resetModules();
+    listener = undefined;
     vi.stubGlobal('__CHROME_NATIVE_BOOTSTRAP__', true);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('self.onmessage = () => {};')));
     executeScript.mockReset();
+    const addMessageListener = vi.fn((callback: MessageListener) => {
+      listener = callback;
+    });
     vi.stubGlobal('chrome', {
       contextMenus: {
         removeAll: vi.fn(),
@@ -48,16 +66,16 @@ describe('Chrome native page bootstrap', () => {
         id: 'test-extension',
         getURL: (path: string) => `chrome-extension://test-extension/${path}`,
         onInstalled: { addListener: vi.fn() },
-        onMessage: {
-          addListener: (callback: MessageListener) => {
-            listener = callback;
-          },
-        },
+        onMessage: { addListener: addMessageListener },
       },
       tabs: { sendMessage: vi.fn() },
       scripting: { executeScript },
     });
-    await import('../../extension/background');
+    await loadBackground();
+    expect(addMessageListener).toHaveBeenCalledOnce();
+    if (!listener) throw new Error('This case did not register a background listener');
+    expect(registeredListeners.has(listener)).toBe(false);
+    registeredListeners.add(listener);
   });
 
   afterEach(() => {
@@ -207,10 +225,12 @@ describe('MAIN-world one-shot claim and worker lifetime', () => {
 });
 
 describe('Chrome isolated-world entry', () => {
+  const ownedWindowListeners = new OwnedWindowListeners();
+
   afterEach(() => {
+    ownedWindowListeners.dispose();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    vi.resetModules();
   });
 
   it('requests native bootstrap without exposing its nonce in a DOM script element', async () => {
@@ -228,7 +248,7 @@ describe('Chrome isolated-world entry', () => {
       },
     });
 
-    await import('../../extension/content-script');
+    await ownedWindowListeners.load(loadContentScript);
     expect(sendMessage).toHaveBeenCalledOnce();
     expect(sendMessage).toHaveBeenCalledWith({
       type: 'native-page-bootstrap',

@@ -1,30 +1,42 @@
 // SPDX-License-Identifier: MIT
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
+import { OwnedWindowListeners } from '../owned-window-listeners';
+
+function loadContentScript(): Promise<unknown> {
+  return import(
+    /* @vite-ignore */ `/extension/content-script.ts?browser-test=${crypto.randomUUID()}`
+  );
+}
+
 describe('extension storage bridge authentication', () => {
+  const ownedWindowListeners = new OwnedWindowListeners();
+
   afterEach(() => {
+    ownedWindowListeners.dispose();
     vi.unstubAllGlobals();
     document.querySelectorAll('script[src^="chrome-extension://"]').forEach((script) => {
       script.remove();
     });
-    vi.resetModules();
   });
 
   it('rejects storage relay requests without the per-injection nonce', async () => {
     const storageGet = vi.fn().mockResolvedValue({});
     const storageSet = vi.fn().mockResolvedValue(undefined);
+    const addRuntimeListener = vi.fn();
+    const addStorageListener = vi.fn();
     vi.stubGlobal('chrome', {
       runtime: {
         id: 'test-extension',
         getURL: (path: string) => `chrome-extension://test-extension/${path}`,
-        onMessage: { addListener: vi.fn() },
+        onMessage: { addListener: addRuntimeListener },
       },
       storage: {
         local: {
           get: storageGet,
           set: storageSet,
         },
-        onChanged: { addListener: vi.fn() },
+        onChanged: { addListener: addStorageListener },
       },
     });
     vi.stubGlobal(
@@ -34,7 +46,9 @@ describe('extension storage bridge authentication', () => {
         .mockResolvedValue(new Response('self.postMessage({ type: "ready" });', { status: 200 }))
     );
 
-    await import('../../extension/content-script');
+    await ownedWindowListeners.load(loadContentScript);
+    expect(addRuntimeListener).toHaveBeenCalledOnce();
+    expect(addStorageListener).toHaveBeenCalledOnce();
 
     const injectedScript = await vi.waitFor(() => {
       const script = document.querySelector<HTMLScriptElement>('script[src$="/page-script.js"]');

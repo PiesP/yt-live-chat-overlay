@@ -2,12 +2,20 @@
 
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
-let moduleInstance = 0;
-function loadPageBridge(): Promise<unknown> {
-  return import(/* @vite-ignore */ `/extension/page-bridge.ts?browser-test=${++moduleInstance}`);
+import { OwnedWindowListeners } from '../owned-window-listeners';
+
+const ownedWindowListeners = new OwnedWindowListeners();
+
+function loadPageBridge(): Promise<void> {
+  return ownedWindowListeners.load(
+    () => import(/* @vite-ignore */ `/extension/page-bridge.ts?browser-test=${crypto.randomUUID()}`)
+  );
 }
-function loadContentScript(): Promise<unknown> {
-  return import(/* @vite-ignore */ `/extension/content-script.ts?browser-test=${++moduleInstance}`);
+function loadContentScript(): Promise<void> {
+  return ownedWindowListeners.load(
+    () =>
+      import(/* @vite-ignore */ `/extension/content-script.ts?browser-test=${crypto.randomUUID()}`)
+  );
 }
 
 function stubChrome(): void {
@@ -25,6 +33,7 @@ function stubChrome(): void {
 }
 
 afterEach(() => {
+  ownedWindowListeners.dispose();
   document.querySelectorAll('script[src^="chrome-extension://"]').forEach((script) => {
     script.remove();
   });
@@ -35,7 +44,6 @@ afterEach(() => {
   });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  vi.resetModules();
 });
 
 describe('extension worker injection lifecycle', () => {
