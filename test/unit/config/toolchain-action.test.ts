@@ -49,7 +49,9 @@ describe('project setup actions', () => {
         )?.[0];
 
         expect(jobSection).toContain(`uses: ${centralAction}`);
-        if (filename === 'security.yaml' && job === 'osv-scan-pr') {
+        if (filename === 'ci.yaml' && job === 'unit') {
+          expect(jobSection).toContain('node-version: ${{ steps.release_pin.outputs.version }}');
+        } else if (filename === 'security.yaml' && job === 'osv-scan-pr') {
           expect(jobSection).toContain(
             "node-version: ${{ github.event.pull_request.base.sha == 'ace0fe0626246a5953d5ce9dd72a28efefdcd820' && '26.12.1' || '' }}"
           );
@@ -60,17 +62,18 @@ describe('project setup actions', () => {
           expect(jobSection).not.toContain('node-version:');
         }
       }
-      expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
+      expect(workflow.split(centralAction)).toHaveLength(
+        jobs.length + (filename === 'ci.yaml' ? 2 : 1)
+      );
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
       if (filename === 'ci.yaml') {
         const unit = workflow.split('\n  unit:\n')[1]?.split('\n  e2e:\n')[0] ?? '';
-        expect(workflow.split(releaseAction)).toHaveLength(2);
-        expect(unit).toContain(`uses: ${releaseAction}`);
-        expect(unit.indexOf(centralAction)).toBeLessThan(unit.indexOf(releaseAction));
-        expect(unit.indexOf('Record release setup inputs')).toBeLessThan(
-          unit.indexOf(releaseAction)
-        );
-        expect(unit.indexOf(releaseAction)).toBeLessThan(unit.indexOf('Verify release setup'));
+        expect(workflow).not.toContain(releaseAction);
+        const override = unit.indexOf('Exercise release setup with a numeric override');
+        expect(unit.indexOf(centralAction)).toBeLessThan(override);
+        expect(unit.indexOf('Record release setup inputs')).toBeLessThan(override);
+        expect(override).toBeLessThan(unit.indexOf('Verify release setup'));
+        expect(unit).toContain('node-version: ${{ steps.release_pin.outputs.version }}');
         expect(unit).toContain('sha256sum --check "$RUNNER_TEMP/release-setup-inputs.sha256"');
         expect(unit).toContain('expected_node=$(cat .node-version)');
         expect(unit).toContain('test "$(node --version)" = "v$expected_node"');
@@ -117,6 +120,12 @@ describe('project setup actions', () => {
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
     expect(provenance).toContain(
       'run: node --experimental-strip-types scripts/release/verify-source.ts'
+    );
+    expect(provenance.indexOf('Checkout protected workflow source')).toBeLessThan(
+      provenance.indexOf('Setup trusted provenance runtime')
+    );
+    expect(provenance.indexOf('Setup trusted provenance runtime')).toBeLessThan(
+      provenance.indexOf('scripts/release/verify-source.ts')
     );
     expect(releaseWorkflow).toContain('make_latest: legacy');
     expect(releaseWorkflow).not.toContain('make_latest: true');
@@ -170,17 +179,13 @@ describe('project setup actions', () => {
     }
   });
 
-  it('keeps the local release setup bound to the checked-out pin and shared provider', () => {
+  it('retires the local release setup in favor of the shared provider', () => {
     const actionPath = resolve(root, '.github/actions/setup-release/action.yaml');
 
-    expect(existsSync(actionPath)).toBe(true);
-    const action = readFileSync(actionPath, 'utf8');
-    expect(action).toContain(`uses: ${centralAction}`);
-    expect(action).toContain('node-version: ${{ steps.runtime.outputs.version }}');
-    expect(action.indexOf('id: runtime')).toBeLessThan(action.indexOf(`uses: ${centralAction}`));
-    expect(action).not.toContain('uses: pnpm/action-setup@');
-    expect(action).not.toContain('uses: actions/setup-node@');
-    expect(action).not.toContain('run: pnpm install');
+    expect(existsSync(actionPath)).toBe(false);
+    expect(existsSync(resolve(root, '.github/actions/setup-release/resolve-runtime.mjs'))).toBe(
+      false
+    );
     expect(existsSync(resolve(root, '.github/actions/setup-toolchain/action.yaml'))).toBe(false);
   });
 

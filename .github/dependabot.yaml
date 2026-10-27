@@ -71,7 +71,6 @@ updates:
   - package-ecosystem: "github-actions"
     directories:
       - "/"
-      - "/.github/actions/setup-release"
     schedule:
       interval: "weekly"
       time: "09:00"

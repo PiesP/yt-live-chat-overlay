@@ -149,9 +149,16 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
         run: sha256sum .node-version package.json pnpm-lock.yaml pnpm-workspace.yaml > "$RUNNER_TEMP/release-setup-inputs.sha256"
 
-      - name: Exercise local release setup
+      - name: Read the release setup override
+        id: release_pin
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        uses: ./.github/actions/setup-release
+        run: echo "version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Exercise release setup with a numeric override
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
+        with:
+          node-version: ${{ steps.release_pin.outputs.version }}
 
       - name: Verify release setup
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}

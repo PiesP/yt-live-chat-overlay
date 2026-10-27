@@ -315,9 +315,10 @@ graph issues are absent. Review touched entry points and dependency ownership
 when changing them. A separately requested versioned audit can be run without
 adding a recurring second toolchain.
 
-The GitHub Actions updater watches root workflows and
-`.github/actions/setup-release/action.yaml`, with separate CodeQL and general
-Actions groups. The nested `setup-vp` revision is reviewed in the
+The GitHub Actions updater watches root workflows, with separate CodeQL and
+general Actions groups. Runtime and release setup use the shared provider
+directly; the retired local setup Action has no updater entry. The nested
+`setup-vp` revision is reviewed in the
 independently pinned shared provider. For each Action SHA update, verify the
 full commit against the official upstream release and wait at least 24 hours
 from that release. Review changed executable behavior and update independent
