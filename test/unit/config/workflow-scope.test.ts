@@ -152,15 +152,6 @@ describe('workflow change classification', () => {
     });
   });
 
-  it('routes the retained single-rule template-literal policy through quality checks', () => {
-    expect(classify(['biome-residual.json'])).toMatchObject({
-      quality: true,
-      unit: true,
-      e2e: true,
-      build: true,
-    });
-  });
-
   it('runs workflow contracts and Actions analysis for workflow changes', () => {
     const scopes = classify(['.github/workflows/ci.yaml']);
 

@@ -68,14 +68,6 @@ updates:
           - "minor"
           - "patch"
 
-      quality:
-        patterns:
-          - "@biomejs/biome"
-          - "knip"
-        update-types:
-          - "minor"
-          - "patch"
-
   - package-ecosystem: "github-actions"
     directories:
       - "/"

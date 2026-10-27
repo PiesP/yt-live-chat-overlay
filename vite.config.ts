@@ -28,6 +28,7 @@ export default defineConfig((env) => ({
     ],
   },
   lint: {
+    plugins: ['unicorn', 'typescript', 'oxc', 'import'],
     options: { typeAware: false, typeCheck: false, maxWarnings: 0 },
     categories: { correctness: 'error' },
     rules: {
@@ -50,6 +51,7 @@ export default defineConfig((env) => ({
       'typescript/no-useless-empty-export': 'error',
       'no-lone-blocks': 'error',
       'oxc/no-accumulating-spread': 'error',
+      'import/no-cycle': ['error', { ignoreTypes: false, ignoreExternal: false }],
       'typescript/triple-slash-reference': 'off',
       'unicorn/no-useless-fallback-in-spread': 'off',
       'unicorn/no-useless-spread': 'off',

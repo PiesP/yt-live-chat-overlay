@@ -73,18 +73,21 @@ pinned. The table records execution stage, inputs, side effects and checks.
 | `pnpm check:i18n`, `check:artifacts`                                                                      | `scripts/check/i18n.ts` compares locale keys to English; `scripts/check/artifacts.ts` verifies built userscript/extensions and enforces the packaged renderer's runtime-owned UTF-8 byte limit. `--e2e` selects the development user script. The checker is read-only; the all-target build owns the footprint receipt.                                                                                                                                                                                                                                                                                                     | Reads locale or generated build files; reports failures. `test/consistency/i18n-coverage.test.ts`, artifact/config tests and direct commands.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `pnpm check:versions`, `sync:versions`, `release:prepare`                                                 | `scripts/release/version.ts` checks or syncs extension versions against package version (`BUILD_VERSION` may select check target). `scripts/release/prepare.ts` validates `RELEASE_VERSION` and optional SHA, checks the producing-build footprint receipt against current files, then prepares archives, checksums, metadata and release notes.                                                                                                                                                                                                    | `check` reads; `sync` writes manifests; prepare includes per-file raw bytes/hashes, unpacked totals and actual ZIP bytes/hashes in the existing metadata. An exact `RELEASE_SHA` requires a clean source-bound receipt; without one, local metadata labels footprint unavailable. `test/unit/config/{node-script-boundaries,release-prepare,release-runtime}.test.ts` plus artifact inspection. Preparation does not publish.                                                                                                                                                                                                                                                                                                                             |
 | `pnpm check`, `check:extension`, `check:test`, `check:e2e`, `check:scripts`, `check:windows`, `typecheck` | TypeScript projects for browser, extension, Vitest, Playwright and strict NodeNext/erasable scripts. `tsconfig.scripts.json` includes only `scripts/**/*.ts`; `tsconfig.windows.json` checks Windows helpers and the DevTools endpoint fixture with DOM types. `tsconfig.test.json` excludes that direct-Node fixture.                                                                                                                                                          | Read-only; `pnpm quality` executes every type boundary, including `check:windows`. Native Node syntax/unit checks complement the Windows TypeScript project.                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `pnpm fmt`, `fmt:check`, `lint`, `knip`, `knip:full`, `knip:production`, `circular`                       | `fmt`/`fmt:check` check formatting and import assists; `lint` checks lint alone. Knip and circular check unused code and source graphs.                                                                                                                                                                                                                                                                                                                                         | Read-only; `fmt:fix` and `lint:fix` apply only safe fixes in their respective surfaces. `quality:fix` applies one complete safe Vite+ pass, then runs quality. Review the diff; unsafe transformations require separate review.                                                                                                                                                                                                                                                                                                                                                       |
-| `pnpm quality`, `verify`, `verify:full`                                                                   | Quality runs one read-only `vp check` for formatting, lint and imports, scoped Biome residual rules, then all type projects, direct Node CI tests, i18n, circular, Knip without an optional clone detector. Verify adds versions and all production target builds/artifact checks; full adds core verification, coverage and the internal `test:e2e:prepared` path.                                                                                                             | `verify` ends with production `dist` and both extensions. `verify:full` validates those outputs first, then rebuilds only the development userscript for E2E; its final `dist` is development-only because Vite clears that directory. Full verification does not leave a prepared release candidate. Reports and browser fixtures are also generated.                                                                                                                                                                                                                                |
+| `pnpm fmt`, `fmt:check`, `lint` | Vite+/Oxfmt checks formatting and imports; Oxlint checks source, scripts, extension, tests, tooling, Windows helpers and Action files. `import/no-cycle` checks static and type-import edges in the maintained source graph. | Read-only; `fmt:fix` and `lint:fix` apply safe fixes. `quality:fix` applies one safe Vite+ pass, then runs quality. Review the diff before committing. |
+| `pnpm quality`, `verify`, `verify:full` | Quality runs one read-only `vp check` for format, lint, imports and static/type cycles, then all type projects, direct Node CI tests and i18n. Verify adds versions and production builds/artifact checks; full adds core verification, coverage and `test:e2e:prepared`. | `verify` ends with production `dist` and both extensions. `verify:full` rebuilds the development userscript for E2E; its final `dist` is development-only. Reports and browser fixtures are generated. |
 | `pnpm test`, `test:watch`, `test:cov`, `test:ci`, `test:core`, `validate:consistency`                     | Vitest and direct Node `scripts/ci/repository-authority.test.ts` and `scripts/release/{verify-source,verify-publication}.test.ts`; `test:core` installs/verifies the pinned core checkout, and consistency selects contract tests.                                                                                                                                                                                                                                              | Watch persists and coverage writes reports; `test:ci` checks repository authority and release source/publication guards, not UI. `test:core` changes submodule dependencies and needs a prepared checkout.                                                                                                                                                                                                                                                                                                                                                                            |
 | `pnpm test:e2e`, `test:e2e:headed`, `pretest:e2e`, internal `test:e2e:prepared`                           | Public E2E commands run `pretest:e2e`: rebuild development userscript and all three Chromium and Firefox extension contexts, check `--e2e` artifacts, then run the configured Playwright browser projects. `test:e2e:prepared` is called only after the successful production builds, artifact check, core verification and coverage in the same `verify:full` sequence; it rebuilds development userscript, checks `--e2e` artifacts and runs Playwright with the same config. | Public E2E remains self-contained from absent or stale outputs. The internal path consumes the extension bytes built earlier in that invocation; do not run it standalone or after source/input changes. All E2E paths leave development-only `dist` and write profiles/results/screenshots. Pass Playwright options directly to `pnpm run test:e2e`, for example `pnpm run test:e2e --project=chromium --grep=... --reporter=line`, or use `pnpm run test:e2e:headed -- --project=chromium`. Headed local tests are distinct from source-bound Windows installation/live acceptance. |
 | `node validation/windows/prepare-userscript-manager.ts --output <new-directory>`                          | Host-side, manifest-pinned Node 26.12.1 preparation of reviewed Tampermonkey before optional Windows userscript installation; it is not a guest bundle asset.                                                                                                                                                                                                                                                                                                                    | Direct HTTPS to clients2.google.com or clients2.googleusercontent.com, at most five redirects, 60-second deadline and 16 MiB body; verifies pinned SHA-256, CRX3 bounds, all ZIP entries, CRC, 1,000-entry/64 MiB expansion limits and MV3 manifest, then writes an installation receipt by staged rename. Sixteen local fixtures in `test/unit/config/userscript-manager-node.test.ts`; see `validation/windows/README.md` for the Windows installation gate.                                                                                                                        |
 
-`pnpm circular` passes a quoted recursive `src/**/*.ts` pattern to dpdm, so the
-application root, settings UI, and separately bundled renderer Worker are
-entry files even when imports do not reach them from another source file. The
-gate covers the `src/` TypeScript graph, including resolved imports into the
-linked core. Extension entry files under `extension/` remain outside this
-source-graph gate; their build and type checks are separate.
+The Vite+ `import/no-cycle` rule checks static and type-only edges across the
+recursive `src` scope, including the application root, deep settings UI and
+separately bundled renderer Worker. It follows configured TypeScript aliases
+and resolved imports into the linked core without a depth limit. The normal
+`vp check` also passes top-level extension files to Oxlint, so resolved static
+cycles there may be reported; extension build and type gates remain separate.
+Arbitrary dynamic-only
+and mixed static/dynamic cycles no longer have a whole-graph prevention gate.
+Keep initialization and Worker-loading behavior tests for their real boundaries.
 
 `pnpm test` and `pnpm test:cov` each run Vitest once through `vp test run`.
 `pnpm test:watch` uses `vp test watch` and reruns affected tests after edits.
@@ -226,17 +229,13 @@ Keep the recommended lint preset and explicitly stronger correctness and
 performance severities. Oxlint type-aware lint is disabled because automatic
 project discovery does not cover all six TypeScript contexts reliably;
 all six explicit `tsc --noEmit` checks, including `check:windows`, remain
-mandatory in `pnpm quality`. Oxlint has no equivalent rule for no-substitution
-template literals, and strict `tsc` accepts evolving-any declarations such as
-`let value; value = 1`.
-The manifest-selected Biome remains only for `noUnusedTemplateLiteral` and
-`noImplicitAnyLet` over first-party TypeScript/JavaScript sources, including
-Windows validation helpers and GitHub Action code in both `.ts` and `.mjs`. Run
-`pnpm lint:residual`; `pnpm quality` includes it after `vp check`. Biome
-formatting and every other Biome lint rule are disabled. The real-tool negative
-fixtures in `test/unit/config/vite-plus-quality.test.ts` protect both rules.
-Remove a residual rule only when a replacement rejects its negative fixture
-and the complete quality gate passes.
+mandatory in `pnpm quality`. Vite+/Oxlint/Oxfmt own routine lint and format
+checks across the first-party source, scripts, extension, tooling, Windows helpers
+and GitHub Action files. The former Biome-only `noUnusedTemplateLiteral` and
+`noImplicitAnyLet` restrictions are retired: no-substitution template literals
+and evolving-any locals are no longer rejected separately. Strict TypeScript
+`noImplicitAny` does not enforce the retired evolving-any restriction. Native
+explicit-any, unused-binding and correctness rules remain active.
 
 Non-null expression assertions are errors in product
 and extension code: use checked initialization or guards, or explain a proven
@@ -283,12 +282,12 @@ cooling window. Keep pnpm trust, build-script, and transitive-source controls
 enabled. `package.json`, `pnpm-workspace.yaml`, the lockfile, and pinned workflow
 references are authoritative.
 
-When upgrading static-analysis tools, review configuration hints and reconcile
-automatic entry discovery with manual entries in `knip.json`. Run
-`pnpm knip:full` and `pnpm knip:production` separately, keeping configuration
-hints fatal. Use debug output to confirm that userscript, extension, and worker
-entry points remain analyzed in both modes before running `pnpm quality` and
-`pnpm build:all:ci`.
+Vite+ keeps ordinary unused-binding/import checks and static/type cycle lint.
+Whole-project unused-file, export and dependency reachability are no longer
+mandatory checks; local lint, type checking and builds do not prove that those
+graph issues are absent. Review touched entry points and dependency ownership
+when changing them. A separately requested versioned audit can be run without
+adding a recurring second toolchain.
 
 The GitHub Actions updater watches root workflows and
 `.github/actions/setup-release/action.yaml`, with independent CodeQL,
