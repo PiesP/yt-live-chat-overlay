@@ -64,10 +64,11 @@ export default defineConfig((env) => ({
         'vp run check:i18n',
         'vp run build:targets:ci',
       ],
-      'core-verify': [
-        'cd packages/core && vp install --frozen-lockfile -- --no-runtime',
-        'cd packages/core && vp run verify',
-      ],
+      'core-verify': {
+        // A nested vp run is inlined into this consumer graph; pnpm executes the core script in its own project.
+        cwd: 'packages/core',
+        command: ['vp install --frozen-lockfile -- --no-runtime', 'pnpm run verify'],
+      },
       'e2e-prepare': [
         'vp run build:dev',
         'vp run build:extension:ci',
