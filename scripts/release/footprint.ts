@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -22,7 +22,9 @@ const root = resolve(import.meta.dirname, '..', '..');
 const receiptPath = join(root, 'test-results', 'distribution-footprint.json');
 const targets = ['dist', 'dist-extension', 'dist-extension-firefox'] as const;
 const buildConfigs = [
+  '.node-version',
   'package.json',
+  'pnpm-workspace.yaml',
   'vite.config.ts',
   'vite.config.extension.ts',
   'vite.config.extension.cs.ts',
@@ -68,7 +70,7 @@ export interface FootprintReceipt {
   vitePlusVersion: string;
   buildVersion: string;
   mode: 'production';
-  command: 'pnpm build:targets:ci';
+  command: 'vp run build:targets:ci';
   workerLimitBytes: number;
   sourceBound: boolean;
   files: MeasuredFile[];
@@ -178,6 +180,16 @@ export function captureBuildIdentity(): BuildIdentity {
   };
 }
 
+export function retireFootprint(path: string = receiptPath): void {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  renameSync(path, `${path}.superseded-${randomUUID()}`);
+}
+
 export function recordFootprint(identity: BuildIdentity, workerLimitBytes: number): void {
   if (JSON.stringify(captureBuildIdentity()) !== JSON.stringify(identity)) {
     throw new Error('Build inputs changed while producing distribution artifacts');
@@ -187,7 +199,7 @@ export function recordFootprint(identity: BuildIdentity, workerLimitBytes: numbe
     schemaVersion: 1,
     ...inputs,
     mode: 'production',
-    command: 'pnpm build:targets:ci',
+    command: 'vp run build:targets:ci',
     workerLimitBytes,
     sourceBound: worktreeStatus.length === 0,
     files: measuredFiles(),
@@ -219,7 +231,7 @@ export function verifiedFootprint(
     [receipt.sourceDiffSha256 === current.sourceDiffSha256, 'source diff'],
     [receipt.buildVersion === version, 'build version'],
     [receipt.mode === 'production', 'mode'],
-    [receipt.command === 'pnpm build:targets:ci', 'command'],
+    [receipt.command === 'vp run build:targets:ci', 'command'],
     [
       Number.isSafeInteger(receipt.workerLimitBytes) && receipt.workerLimitBytes > 0,
       'worker limit',

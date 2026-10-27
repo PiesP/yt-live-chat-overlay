@@ -52,7 +52,7 @@ jobs:
           submodules: false
 
       - name: 📦 Setup trusted script runtime
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
           install-dependencies: 'false'
 
@@ -109,7 +109,7 @@ jobs:
           submodules: false
 
       - name: 📦 Setup trusted script runtime
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
           install-dependencies: 'false'
 

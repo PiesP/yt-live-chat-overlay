@@ -59,7 +59,7 @@ jobs:
         id: runtime
         if: ${{ steps.checkout.outcome == 'success' }}
         continue-on-error: true
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
           install-dependencies: 'false'
 
@@ -113,11 +113,11 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
 
       - name: ✅ Run quality gate
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
-        run: pnpm quality
+        run: vp run quality
 
       - name: No relevant changes
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.quality != 'true' }}
@@ -143,29 +143,36 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
 
       - name: Record release setup inputs
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        run: sha256sum package.json pnpm-lock.yaml pnpm-workspace.yaml > "$RUNNER_TEMP/release-setup-inputs.sha256"
+        run: sha256sum .node-version package.json pnpm-lock.yaml pnpm-workspace.yaml > "$RUNNER_TEMP/release-setup-inputs.sha256"
 
-      - name: Exercise local release setup
+      - name: Read the release setup override
+        id: release_pin
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        uses: ./.github/actions/setup-release
+        run: echo "version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Exercise release setup with a numeric override
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
+        with:
+          node-version: ${{ steps.release_pin.outputs.version }}
 
       - name: Verify release setup
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
         run: |
           set -euo pipefail
           sha256sum --check "$RUNNER_TEMP/release-setup-inputs.sha256"
-          expected_node=$(node -p "require('./package.json').volta.node")
+          expected_node=$(cat .node-version)
           expected_pnpm=$(node -p "require('./package.json').packageManager.split('@')[1]")
           test "$(node --version)" = "v$expected_node"
           test "$(pnpm --version)" = "$expected_pnpm"
 
       - name: Verify the pinned browser-core contracts
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.core == 'true' }}
-        run: pnpm test:core
+        run: vp run test:core
 
       - name: Skip unchanged browser-core contracts
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.core != 'true' }}
@@ -173,11 +180,11 @@ jobs:
 
       - name: 🧪 Run focused CI regression tests
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.unit == 'true' && needs.changes.outputs.quality != 'true' }}
-        run: pnpm test:ci
+        run: vp run test:ci
 
       - name: 🧪 Run unit tests and coverage thresholds
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
-        run: pnpm test:cov
+        run: vp run test:cov
 
       - name: No relevant changes
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.unit != 'true' }}
@@ -201,13 +208,13 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
 
       - name: 🎭 Run E2E tests
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
         run: |
-          pnpm exec playwright install --with-deps chromium firefox
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e
+          vp exec playwright install --with-deps chromium firefox
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" vp run test:e2e
 
       - name: 📤 Upload Playwright diagnostics
         if: ${{ steps.node_trust.outcome == 'success' && ((needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true') && failure() && !cancelled()) }}
@@ -248,11 +255,11 @@ jobs:
 
       - name: 📦 Set up project
         if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
 
       - name: 🏗️ Build all targets
         if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
-        run: pnpm build:all:ci
+        run: vp run build:all:ci
 
       - name: 📊 Upload userscript artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

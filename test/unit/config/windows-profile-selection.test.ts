@@ -11,7 +11,7 @@ const profile = JSON.parse(
 ) as {
   entry?: string;
   assets?: string[];
-  installation?: { entry?: string; assets?: string[] };
+  installation?: { entry?: string; assets?: string[]; build_commands?: string[][] };
 };
 
 function expectBundledImportClosure(entry: string, assets: string[]): void {
@@ -43,6 +43,11 @@ function expectBundledImportClosure(entry: string, assets: string[]): void {
 it('selects both native TypeScript entrypoints and their installation helper graph', () => {
   expect(profile.entry).toBe('validation/windows/profile.ts');
   expect(profile.installation?.entry).toBe('validation/windows/install-profile.ts');
+  expect(profile.installation?.build_commands).toEqual([
+    ['vp', 'run', 'build:ci'],
+    ['vp', 'run', 'build:extension:ci'],
+    ['vp', 'run', 'build:extension:firefox:ci'],
+  ]);
   for (const helper of [
     'validation/windows/chrome-install.ts',
     'validation/windows/natural-chrome.ts',

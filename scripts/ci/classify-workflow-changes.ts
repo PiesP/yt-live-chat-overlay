@@ -37,7 +37,7 @@ export function classifyWorkflowChanges(
   const markAll = (): void => mark(...SCOPES);
 
   function classifyPath(path: string): void {
-    if (path === 'scripts/ci/classify-workflow-changes.ts') {
+    if (path === 'scripts/ci/classify-workflow-changes.ts' || path === '.node-version') {
       markAll();
     } else if (
       [

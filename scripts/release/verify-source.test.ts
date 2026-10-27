@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -39,12 +39,21 @@ function fixture() {
     commit(
       pin: unknown,
       version: unknown = '1.2.3',
-      scripts: unknown = { quality: 'pnpm -s check' }
+      scripts: unknown = { quality: 'pnpm -s check' },
+      runtime: 'volta' | 'node-version' = 'volta'
     ): string {
       writeFileSync(
         join(source, 'package.json'),
-        JSON.stringify({ version, volta: { node: pin }, scripts })
+        JSON.stringify({
+          version,
+          ...(runtime === 'volta' ? { volta: { node: pin } } : {}),
+          scripts,
+        })
       );
+      if (runtime === 'node-version') {
+        writeFileSync(join(source, '.node-version'), `${String(pin)}\n`);
+        git(source, 'add', '.node-version');
+      }
       git(source, 'add', 'package.json');
       git(source, 'commit', '-qm', `manifest ${String(pin)}`);
       return git(source, 'rev-parse', 'HEAD');
@@ -89,6 +98,45 @@ test('annotated tag resolves to its commit and reads the tagged historical Node 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.values(), `node-version=24.15.0\nrelease-sha=${releaseSha}\nversion=1.2.3\n`);
   assert.equal(git(f.checkout, 'tag', '--list', 'v1.2.3'), 'v1.2.3');
+});
+
+test('current tags read the exact regular .node-version pin', () => {
+  const f = fixture();
+  const releaseSha = f.commit('26.12.1', '1.2.3', { quality: 'vp run quality' }, 'node-version');
+  f.tag('v1.2.3');
+  f.clone();
+  const result = f.run('v1.2.3', releaseSha);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.values(), `node-version=26.12.1\nrelease-sha=${releaseSha}\nversion=1.2.3\n`);
+});
+
+test('malformed current .node-version fails without historical fallback', () => {
+  for (const pin of ['latest', '26', '26.12.1\nversion=0', '26.12.1\n']) {
+    const f = fixture();
+    const head = f.commit(pin, '1.2.3', { quality: 'vp run quality' }, 'node-version');
+    f.tag('v1.2.3');
+    f.clone();
+    const result = f.run('v1.2.3', head);
+    assert.notEqual(result.status, 0, pin);
+    assert.match(result.stderr, /exact \.node-version pin/);
+    assert.equal(f.values(), '');
+  }
+});
+
+test('tagged runtime symlinks are not accepted as source pins', () => {
+  const f = fixture();
+  f.commit('26.12.1', '1.2.3', { quality: 'vp run quality' }, 'node-version');
+  rmSync(join(f.source, '.node-version'));
+  symlinkSync('package.json', join(f.source, '.node-version'));
+  git(f.source, 'add', '.node-version');
+  git(f.source, 'commit', '-qm', 'symlinked runtime pin');
+  const head = git(f.source, 'rev-parse', 'HEAD');
+  f.tag('v1.2.3');
+  f.clone();
+  const result = f.run('v1.2.3', head);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /regular \.node-version pin/);
+  assert.equal(f.values(), '');
 });
 
 test('a protected workflow can validate an older tag with inactive historical config', () => {

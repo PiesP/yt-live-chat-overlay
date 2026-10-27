@@ -58,8 +58,10 @@ jobs:
           submodules: false
 
       - name: 📦 Setup reviewed pin runtime
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
+          # The reviewed 5adbdf8 source predates .node-version and pins this in Volta.
+          node-version: '26.12.1'
           install-dependencies: 'false'
 
       - name: 🔐 Prepare reviewed scanner pin helper
@@ -102,7 +104,7 @@ jobs:
         id: runtime
         if: ${{ steps.checkout.outcome == 'success' }}
         continue-on-error: true
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
           install-dependencies: 'false'
 
@@ -160,8 +162,10 @@ jobs:
 
       - name: 📦 Setup reviewed pin runtime
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
+          # The reviewed 5adbdf8 source predates .node-version and pins this in Volta.
+          node-version: '26.12.1'
           install-dependencies: 'false'
 
       - name: 🔐 Prepare reviewed scanner pin helper
@@ -226,8 +230,10 @@ jobs:
 
       - name: 📦 Setup trusted OSV runtime
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
+          # This immutable pre-migration base used only Volta; newer bases use .node-version.
+          node-version: ${{ github.event.pull_request.base.sha == 'ace0fe0626246a5953d5ce9dd72a28efefdcd820' && '26.12.1' || '' }}
           install-dependencies: 'false'
 
       - name: 🔒 Prepare pinned OSV helper
@@ -325,7 +331,7 @@ jobs:
 
       - name: 📦 Setup trusted OSV runtime
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.osv == 'true' }}
-        uses: PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9
+        uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
           install-dependencies: 'false'
 

@@ -5,15 +5,15 @@ import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
-  'PiesP/browser-core/automation/actions/setup-project@af19a6597c351f03a65e49532bdec6276e4b5ae9';
+  'PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc';
 const centralWorkflowJobs = {
   'ci.yaml': ['changes', 'quality', 'unit', 'e2e', 'build'],
   'security.yaml': ['changes', 'pin-metadata', 'pinned-tools', 'osv-scan-pr', 'osv-scan-dispatch'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'build'];
-const releaseLocalExecutionJobs = releaseJobs;
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
+const reviewedScannerSource = '5adbdf8592366862002d5e8c9a408845f889f099';
 
 function topLevelBlock(workflow: string, key: string): string {
   const marker = `${key}:\n`;
@@ -26,6 +26,19 @@ function topLevelBlock(workflow: string, key: string): string {
 }
 
 describe('project setup actions', () => {
+  it('passes the reviewed pre-.node-version scanner pin to shared setup', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
+    for (const job of ['pin-metadata', 'pinned-tools']) {
+      const jobSection = workflow.match(
+        new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
+      )?.[0];
+      expect(jobSection).toContain(`ref: ${reviewedScannerSource}`);
+      expect(jobSection).toContain(`uses: ${centralAction}`);
+      expect(jobSection).toContain("node-version: '26.12.1'");
+      expect(jobSection).toContain("install-dependencies: 'false'");
+    }
+  });
+
   it('keeps CI and security jobs on the immutable central action', () => {
     for (const [filename, jobs] of Object.entries(centralWorkflowJobs)) {
       const workflow = readFileSync(resolve(root, '.github/workflows', filename), 'utf8');
@@ -36,20 +49,33 @@ describe('project setup actions', () => {
         )?.[0];
 
         expect(jobSection).toContain(`uses: ${centralAction}`);
-        expect(jobSection).not.toContain('node-version:');
+        if (filename === 'ci.yaml' && job === 'unit') {
+          expect(jobSection).toContain('node-version: ${{ steps.release_pin.outputs.version }}');
+        } else if (filename === 'security.yaml' && job === 'osv-scan-pr') {
+          expect(jobSection).toContain(
+            "node-version: ${{ github.event.pull_request.base.sha == 'ace0fe0626246a5953d5ce9dd72a28efefdcd820' && '26.12.1' || '' }}"
+          );
+        } else if (
+          filename !== 'security.yaml' ||
+          !['pin-metadata', 'pinned-tools'].includes(job)
+        ) {
+          expect(jobSection).not.toContain('node-version:');
+        }
       }
-      expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
+      expect(workflow.split(centralAction)).toHaveLength(
+        jobs.length + (filename === 'ci.yaml' ? 2 : 1)
+      );
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
       if (filename === 'ci.yaml') {
         const unit = workflow.split('\n  unit:\n')[1]?.split('\n  e2e:\n')[0] ?? '';
-        expect(workflow.split(releaseAction)).toHaveLength(2);
-        expect(unit).toContain(`uses: ${releaseAction}`);
-        expect(unit.indexOf(centralAction)).toBeLessThan(unit.indexOf(releaseAction));
-        expect(unit.indexOf('Record release setup inputs')).toBeLessThan(
-          unit.indexOf(releaseAction)
-        );
-        expect(unit.indexOf(releaseAction)).toBeLessThan(unit.indexOf('Verify release setup'));
+        expect(workflow).not.toContain(releaseAction);
+        const override = unit.indexOf('Exercise release setup with a numeric override');
+        expect(unit.indexOf(centralAction)).toBeLessThan(override);
+        expect(unit.indexOf('Record release setup inputs')).toBeLessThan(override);
+        expect(override).toBeLessThan(unit.indexOf('Verify release setup'));
+        expect(unit).toContain('node-version: ${{ steps.release_pin.outputs.version }}');
         expect(unit).toContain('sha256sum --check "$RUNNER_TEMP/release-setup-inputs.sha256"');
+        expect(unit).toContain('expected_node=$(cat .node-version)');
         expect(unit).toContain('test "$(node --version)" = "v$expected_node"');
         expect(unit).toContain('test "$(pnpm --version)" = "$expected_pnpm"');
       } else {
@@ -65,7 +91,7 @@ describe('project setup actions', () => {
     }
   });
 
-  it('uses the release-only action for every release dependency-backed job', () => {
+  it('uses the shared Vite+ setup with verified runtime overrides for tagged releases', () => {
     const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yaml'), 'utf8');
 
     for (const job of releaseJobs) {
@@ -73,11 +99,10 @@ describe('project setup actions', () => {
         new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
       )?.[0];
 
-      expect(jobSection).toContain(`uses: ${releaseAction}`);
-      expect(jobSection).not.toContain(centralAction);
+      expect(jobSection).toContain(`uses: ${centralAction}`);
       expect(jobSection).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
     }
-    expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
+    expect(releaseWorkflow).not.toContain(releaseAction);
     const provenance =
       releaseWorkflow.match(/ {2}provenance:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:|$)/)?.[0] ?? '';
     expect(provenance).toContain(`uses: ${centralAction}`);
@@ -89,14 +114,18 @@ describe('project setup actions', () => {
     if (!publishSection) throw new Error('Release publish job not found');
     expect(publishSection).toContain(`uses: ${centralAction}`);
     expect(publishSection).toContain("install-dependencies: 'false'");
-    expect(releaseWorkflow.replace(provenance, '').replace(publishSection, '')).not.toContain(
-      centralAction
-    );
+    expect(releaseWorkflow.split(centralAction)).toHaveLength(releaseJobs.length + 3);
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
     expect(provenance).toContain(
       'run: node --experimental-strip-types scripts/release/verify-source.ts'
+    );
+    expect(provenance.indexOf('Checkout protected workflow source')).toBeLessThan(
+      provenance.indexOf('Setup trusted provenance runtime')
+    );
+    expect(provenance.indexOf('Setup trusted provenance runtime')).toBeLessThan(
+      provenance.indexOf('scripts/release/verify-source.ts')
     );
     expect(releaseWorkflow).toContain('make_latest: legacy');
     expect(releaseWorkflow).not.toContain('make_latest: true');
@@ -126,14 +155,14 @@ describe('project setup actions', () => {
     expect(releasePrepare).not.toContain('process.env.GITHUB_SHA');
   });
 
-  it('restores the verified release submodule before local execution', () => {
+  it('restores the verified release submodule before shared setup', () => {
     const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yaml'), 'utf8');
 
-    for (const job of releaseLocalExecutionJobs) {
+    for (const job of releaseJobs) {
       const jobSection = releaseWorkflow.match(
         new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
       )?.[0];
-      const firstLocalExecution = `uses: ${releaseAction}`;
+      const firstLocalExecution = `uses: ${centralAction}`;
 
       expect(jobSection).toBeDefined();
       if (!jobSection) throw new Error(`Release job not found: ${job}`);
@@ -150,29 +179,19 @@ describe('project setup actions', () => {
     }
   });
 
-  it('keeps the release install recipe local and immutable', () => {
+  it('retires the local release setup in favor of the shared provider', () => {
     const actionPath = resolve(root, '.github/actions/setup-release/action.yaml');
 
-    expect(existsSync(actionPath)).toBe(true);
-    const action = readFileSync(actionPath, 'utf8');
-    const nodeAction = 'uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0';
-    const pnpmAction = 'uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0';
-    const nodeStep = action.split(nodeAction)[1]?.split('    - name:')[0] ?? '';
-    const pnpmStep = action.split(pnpmAction)[1]?.split('    - name:')[0] ?? '';
-    expect(nodeStep).toContain('node-version: ${{ steps.runtime.outputs.version }}');
-    expect(nodeStep).toContain('package-manager-cache: false');
-    expect(pnpmStep).toContain('package_json_file: package.json');
-    expect(pnpmStep).toMatch(/\n        cache: false\n/);
-    expect(pnpmStep).toContain('run_install: false');
-    expect(pnpmStep).toContain('standalone: false');
-    expect(pnpmStep).not.toMatch(/\n        version:/);
-    expect(action).toContain('pnpm install --frozen-lockfile --no-runtime');
-    expect(action).not.toContain('uses: pnpm/setup@');
-    expect(action.indexOf('id: runtime')).toBeLessThan(action.indexOf(nodeAction));
-    expect(action.indexOf(nodeAction)).toBeLessThan(action.indexOf(pnpmAction));
-    expect(action.indexOf(pnpmAction)).toBeLessThan(
-      action.indexOf('pnpm install --frozen-lockfile --no-runtime')
+    expect(existsSync(actionPath)).toBe(false);
+    expect(existsSync(resolve(root, '.github/actions/setup-release/resolve-runtime.mjs'))).toBe(
+      false
     );
     expect(existsSync(resolve(root, '.github/actions/setup-toolchain/action.yaml'))).toBe(false);
+  });
+
+  it('does not schedule updates for the retired standalone pnpm setup action', () => {
+    const dependabot = readFileSync(resolve(root, '.github/dependabot.yaml'), 'utf8');
+    expect(dependabot).not.toContain('pnpm/action-setup');
+    expect(dependabot).toContain('github/codeql-action*');
   });
 });
