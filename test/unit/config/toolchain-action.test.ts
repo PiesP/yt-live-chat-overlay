@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -14,6 +13,7 @@ const centralWorkflowJobs = {
 const releaseJobs = ['quality', 'unit', 'e2e', 'build'];
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
+const reviewedScannerSource = '5adbdf8592366862002d5e8c9a408845f889f099';
 
 function topLevelBlock(workflow: string, key: string): string {
   const marker = `${key}:\n`;
@@ -26,29 +26,17 @@ function topLevelBlock(workflow: string, key: string): string {
 }
 
 describe('project setup actions', () => {
-  it('keeps the immutable pre-.node-version release eligible for numeric override', () => {
-    const historical = '5adbdf8592366862002d5e8c9a408845f889f099';
-    const manifest = JSON.parse(
-      execFileSync('git', ['show', `${historical}:package.json`], {
-        cwd: root,
-        encoding: 'utf8',
-      })
-    ) as { volta: { node: string }; packageManager: string };
-    const workspace = execFileSync('git', ['show', `${historical}:pnpm-workspace.yaml`], {
-      cwd: root,
-      encoding: 'utf8',
-    });
-    const nodeFile = execFileSync('git', ['ls-tree', historical, '--', '.node-version'], {
-      cwd: root,
-      encoding: 'utf8',
-    });
-    expect(nodeFile).toBe('');
-    expect(manifest.volta.node).toBe('26.12.1');
-    expect(manifest.packageManager).toBe('pnpm@11.26.0');
-    expect(workspace).toContain('  vite-plus: 1.2.0\n');
-    const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yaml'), 'utf8');
-    expect(releaseWorkflow).toContain(`uses: ${centralAction}`);
-    expect(releaseWorkflow).toContain('node-version: ${{ needs.provenance.outputs.node-version }}');
+  it('passes the reviewed pre-.node-version scanner pin to shared setup', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
+    for (const job of ['pin-metadata', 'pinned-tools']) {
+      const jobSection = workflow.match(
+        new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
+      )?.[0];
+      expect(jobSection).toContain(`ref: ${reviewedScannerSource}`);
+      expect(jobSection).toContain(`uses: ${centralAction}`);
+      expect(jobSection).toContain("node-version: '26.12.1'");
+      expect(jobSection).toContain("install-dependencies: 'false'");
+    }
   });
 
   it('keeps CI and security jobs on the immutable central action', () => {
@@ -61,7 +49,9 @@ describe('project setup actions', () => {
         )?.[0];
 
         expect(jobSection).toContain(`uses: ${centralAction}`);
-        expect(jobSection).not.toContain('node-version:');
+        if (filename !== 'security.yaml' || !['pin-metadata', 'pinned-tools'].includes(job)) {
+          expect(jobSection).not.toContain('node-version:');
+        }
       }
       expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
