@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -10,11 +10,12 @@ const script = resolve(
   '../../../.github/actions/setup-release/resolve-runtime.mjs'
 );
 
-function resolveRuntime(pin: unknown, requested = ''): string {
+function resolveRuntime(pin: unknown, requested = '', prepare?: (fixture: string) => void): string {
   const fixture = mkdtempSync(join(tmpdir(), 'release-runtime-'));
   try {
     const output = join(fixture, 'output');
     if (pin !== undefined) writeFileSync(join(fixture, '.node-version'), `${String(pin)}\n`);
+    prepare?.(fixture);
     execFileSync(process.execPath, [script], {
       cwd: fixture,
       env: {
@@ -41,6 +42,22 @@ describe('release runtime selection', () => {
     expect(resolveRuntime('26.12.1', '26.12.1')).toBe('version=26.12.1\n');
     expect(() => resolveRuntime('26.12.1', '26')).toThrow();
     expect(() => resolveRuntime('26.12.1', '26.10.1')).toThrow();
+  });
+
+  it('rejects a linked runtime pin even when its target contains a valid version', () => {
+    expect(() =>
+      resolveRuntime(undefined, '', (fixture) => {
+        const target = join(fixture, 'linked-pin');
+        writeFileSync(target, '26.12.1\n');
+        symlinkSync(target, join(fixture, '.node-version'));
+      })
+    ).toThrow();
+  });
+
+  it('rejects a directory instead of a runtime pin', () => {
+    expect(() =>
+      resolveRuntime(undefined, '', (fixture) => mkdirSync(join(fixture, '.node-version')))
+    ).toThrow();
   });
 
   it('runs the trusted provenance helper before tagged release setup', () => {
