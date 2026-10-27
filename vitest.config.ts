@@ -27,6 +27,8 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
+          // Source-wide lint probes and temporary type fixtures share the checkout.
+          fileParallelism: false,
           setupFiles: ['./test/setup.ts'],
           include: ['test/unit/**/*.test.ts', 'test/consistency/**/*.test.ts'],
         },
