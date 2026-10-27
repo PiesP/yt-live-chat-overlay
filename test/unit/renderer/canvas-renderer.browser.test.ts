@@ -1,0 +1,2151 @@
+// SPDX-License-Identifier: MIT
+
+import type { ChatMessage, OverlaySettings } from '@app-types';
+import { Overlay } from '@app/overlay';
+import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
+import { ImageFetchManager } from '@media/image-fetch-manager';
+import { LruMap } from '@piesp/browser-core/util';
+import { CanvasRenderer } from '@renderer/canvas-renderer';
+import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
+import { type CanvasMessage, GRADIENT_CACHE_MAX } from '@renderer/constants';
+import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import {
+  messageXAtTime,
+  motionPlanFromMessage,
+  motionPlansCollide,
+} from '@renderer/layout/message-schedule';
+import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
+import type { WorkerStatsMessage } from '@renderer/worker/types';
+import {
+  applySettingsPatch,
+  normalizeStoredSettings,
+  shouldResetRendererForSettingsChange,
+} from '@settings/schema';
+import { LanguageDetectorService } from '@translation/language-detector';
+import type { MessageActivator } from '@util/message-activator';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+
+function makeSettings(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
+  return {
+    enabled: true,
+    danmakuMode: 'scroll' as const,
+    speedPxPerSec: 250,
+    fontSize: 32,
+    opacity: 1,
+    superChatOpacity: 0.95,
+    safeTop: 0,
+    safeBottom: 0,
+    maxConcurrentMessages: 300,
+    allowShortTextMessages: false,
+    minTextLength: 1,
+    logLevel: 'warn' as const,
+    showAuthor: {
+      normal: false,
+      member: true,
+      moderator: true,
+      owner: true,
+      verified: true,
+      superChat: true,
+    },
+    backgroundColors: {
+      normal: '#00000000',
+      member: '#00000000',
+      moderator: '#00000000',
+      owner: '#00000000',
+      verified: '#00000000',
+      superChat: '#00000000',
+    },
+    colors: {
+      normal: '#FFFFFF',
+      member: '#0F9D58',
+      moderator: '#5E84F1',
+      owner: '#FFD600',
+      verified: '#AAAAAA',
+    },
+    outline: { enabled: true, widthPx: 2, opacity: 0.7 },
+    laneSpacing: 1,
+    showDebugOverlay: false,
+    ignoreReducedMotion: false,
+    authorRateLimit: 'normal' as const,
+    backlogMaxRate: 10,
+    backlogSpeedMultiplier: 1,
+    backlogMode: 'playback' as const,
+    backlogRecentMinutes: 5,
+    backlogOpacityMultiplier: 0.5,
+    depthLayersEnabled: false,
+    depthNearSpeedMul: 1.2,
+    depthFarSpeedMul: 0.8,
+    depthFarOpacityMul: 0.6,
+    modOwnerDurationMultiplier: 1.5,
+    showSuperChatAmount: true,
+    fontWeight: 'bold' as const,
+    fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
+    preserveUserColor: true,
+    superChatMaxBodyLines: 3,
+    membershipMaxBodyLines: 2,
+    fadeDurationMs: 300,
+    minPollIntervalMs: 1000,
+    maxPollIntervalMs: 10000,
+    language: 'en' as const,
+    translationEnabled: false,
+    translationService: 'auto' as const,
+    translationSource: 'auto' as const,
+    translationTarget: 'en' as const,
+    translationMode: 'dual' as const,
+    exitPaddingPx: 50,
+    scrollDurationMinMs: 3000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    maxMessageAgeMs: 30000,
+    headwayGapRatio: 0.3,
+    emojiCacheMb: 20,
+    photoCacheMb: 10,
+    stickerCacheMb: 5,
+    textCacheMb: 5,
+    translationBatchSize: 5,
+    emojiFetchLimit: 20,
+    failedEmojiRetryMins: 5,
+    burstSampleWindow: 60,
+    burstElevatedThreshold: 5,
+    burstHighThreshold: 15,
+    burstExtremeThreshold: 30,
+    backlogInjectionMax: 50,
+    backlogDensityRampMs: 5000,
+    livePollFallbackMs: 2000,
+    livePollFailureLimit: 5,
+    speedBoostThreshold: 2,
+    backlogPauseThreshold: 0.3,
+    backlogResumeThreshold: 0.1,
+    activityTimeoutMs: 60000,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    emojiFetchTimeoutMs: 5000,
+    backlogDensityRampMaxMs: 10000,
+    backlogInjectionRateMin: 1,
+    speedBoostMax: 1,
+    speedBoostDenom: 2,
+    backlogToggleCooldownMs: 2000,
+    replayPrefetchPages: 50,
+    replayBatchLimit: 50,
+    ...overrides,
+  } as OverlaySettings;
+}
+
+function recoveredMainThreadMessages(renderer: CanvasRenderer): ChatMessage[] {
+  const state = renderer as unknown as {
+    pendingQueue: { toArray(): ChatMessage[] };
+    activeMessages: Array<{ message: ChatMessage }>;
+  };
+  return [...state.pendingQueue.toArray(), ...state.activeMessages.map(({ message }) => message)];
+}
+
+function makeMessage(id: string, text: string): ChatMessage {
+  return {
+    id,
+    text,
+    content: [{ type: 'text', content: text }],
+    kind: 'text',
+    timestamp: Date.now(),
+    authorType: 'normal',
+  };
+}
+
+describe('Canvas gradient cache', () => {
+  it('uses the bounded core cache and clears it on state reset', () => {
+    const renderer = new CanvasRenderer(new Overlay(), makeSettings());
+    const internals = renderer as unknown as {
+      superChatGradientCache: LruMap<string, CanvasGradient>;
+      resetState(): void;
+    };
+    const cache = internals.superChatGradientCache;
+    expect(cache).toBeInstanceOf(LruMap);
+    expect(cache.maxSize).toBe(GRADIENT_CACHE_MAX);
+    cache.set('old', { addColorStop: vi.fn() } as unknown as CanvasGradient);
+
+    internals.resetState();
+
+    expect(cache.size).toBe(0);
+    renderer.destroy();
+  });
+
+  it('drops gradients bound to the old context after restoration', () => {
+    const renderer = new CanvasRenderer(new Overlay(), makeSettings());
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      superChatGradientCache: LruMap<string, CanvasGradient>;
+      handleContextRestored(): void;
+    };
+    const canvas = document.createElement('canvas');
+    vi.spyOn(canvas, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
+    internals.canvas = canvas;
+    renderer.isPaused = true;
+    internals.superChatGradientCache.set('old', {
+      addColorStop: vi.fn(),
+    } as unknown as CanvasGradient);
+
+    internals.handleContextRestored();
+
+    expect(internals.superChatGradientCache.size).toBe(0);
+    renderer.destroy();
+  });
+});
+
+describe('Canvas reservation safety', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function setup(mode: OverlaySettings['danmakuMode'] = 'scroll') {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 640,
+      height: 40,
+    };
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({
+        danmakuMode: mode,
+        speedPxPerSec: 350,
+        scrollDurationMinMs: 5000,
+        laneSpacing: 0,
+        scrollDurationMaxMs: 30000,
+        exitPaddingPx: 100,
+        headwayGapRatio: 0.08,
+        outline: { enabled: false, widthPx: 0, opacity: 0 },
+      })
+    );
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      reducedMotion: boolean;
+      pausedAt: number | null;
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      drainQueue(now: number): void;
+      reflowActiveMessages(dimensions: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.restore({
+      heap: [
+        [0, 0],
+        [1, 0],
+      ],
+      indexMap: { 0: 0, 1: 1 },
+      laneHeight: 20,
+      laneCount: 2,
+      speedTierLanes: {},
+    });
+    internals.estimateDimensions = (message) => ({
+      width: message.id === 'short' ? 100 : 600,
+      height: 20,
+    });
+    return { renderer, internals };
+  }
+
+  it.each(['scroll', 'reverse'] as const)(
+    'validates future reservations and chooses a safe alternative in %s',
+    (mode) => {
+      const { renderer, internals } = setup(mode);
+      for (const id of ['first', 'short', 'long'])
+        internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+      internals.drainQueue(0);
+      expect(internals.activeMessages).toHaveLength(3);
+      const short = internals.activeMessages.find((m) => m.message.id === 'short');
+      const long = internals.activeMessages.find((m) => m.message.id === 'long');
+      expect(short?.startTime).toBeGreaterThan(0);
+      expect(long?.laneIndex).not.toBe(short?.laneIndex);
+      for (const a of internals.activeMessages) {
+        for (const b of internals.activeMessages) {
+          if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
+          expect(
+            motionPlansCollide(
+              motionPlanFromMessage(a, mode, 640, 100),
+              motionPlanFromMessage(b, mode, 640, 100),
+              0.08,
+              0
+            )
+          ).toBe(false);
+        }
+      }
+      renderer.destroy();
+    }
+  );
+
+  it('reserves centered reduced-motion rectangles for their full displayed lifetime', () => {
+    const { renderer, internals } = setup();
+    internals.reducedMotion = true;
+    for (const id of ['first', 'short', 'long'])
+      internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(0);
+    const sameLane = internals.activeMessages.filter((m) => m.laneIndex === 0);
+    expect(sameLane).toHaveLength(2);
+    const [first, second] = sameLane;
+    expect(second && first && second.startTime >= first.startTime + first.duration).toBe(true);
+    for (const message of internals.activeMessages) {
+      expect(message.motion?.isScrolling).toBe(false);
+      expect(message.motion && messageXAtTime(message.motion, message.startTime + 600)).toBe(
+        Math.floor((640 - message.width) / 2)
+      );
+    }
+    renderer.destroy();
+  });
+
+  it('rebuilds reservations at the frozen pause clock before resume shifts timers', () => {
+    const { renderer, internals } = setup();
+    internals.pausedAt = 1000;
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    internals.reflowActiveMessages({ width: 640, height: 40 });
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 1000)).toBe(true);
+    internals.laneAllocator.shiftAll(9000);
+    expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 10000)).toBe(
+      true
+    );
+    renderer.destroy();
+  });
+
+  it('reflows an asynchronously taller fixed row with its configured clearance', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const dimensions = { width: 640, height: 400 };
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ danmakuMode: 'top', laneSpacing: 8 })
+    );
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      activeMessagesByLane: Map<number, CanvasMessage[]>;
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      applyMessageGeometry(
+        message: CanvasMessage,
+        geometry: { width: number; height: number; translationHeight: number }
+      ): boolean;
+      drainQueue(now: number): void;
+      reflowActiveMessages(dimensions: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.updateLaneDensityFactor(0.5);
+    internals.laneAllocator.reset(dimensions, 1000);
+    const baselineHeight = internals.laneAllocator.getLaneHeight() * 4 - 8;
+    internals.estimateDimensions = () => ({ width: 100, height: baselineHeight });
+    for (const id of ['first', 'second']) internals.pendingQueue.enqueue(makeMessage(id, id), 0);
+    internals.drainQueue(1000);
+    expect(internals.activeMessages.map(({ laneIndex }) => laneIndex)).toEqual([0, 4]);
+    const first = internals.activeMessages[0];
+    if (!first) throw new Error('first row was not activated');
+    expect(
+      internals.applyMessageGeometry(first, {
+        width: first.width,
+        height: baselineHeight + 2,
+        translationHeight: 0,
+      })
+    ).toBe(true);
+    internals.reflowActiveMessages(dimensions);
+    const [taller, second] = internals.activeMessages;
+    expect(internals.activeMessages).toHaveLength(2);
+    if (!taller || !second) throw new Error('row was lost during reflow');
+    expect(taller.laneIndex).toBe(0);
+    expect(second.laneIndex).toBe(5);
+    expect(second.y - (taller.y + taller.height)).toBeGreaterThanOrEqual(8);
+    expect(internals.activeMessagesByLane.get(second.laneIndex)).toContain(second);
+    renderer.destroy();
+  });
+
+  it.each([
+    {
+      name: 'mixed heights with only 1px clearance',
+      activeY: 5,
+      activeHeight: 46,
+      candidateY: 52,
+      allowed: false,
+    },
+    {
+      name: 'exactly 8px of clearance',
+      activeY: 0,
+      activeHeight: 44,
+      candidateY: 52,
+      allowed: true,
+    },
+    {
+      name: 'fractional safe-zone origin at exact clearance',
+      activeY: 15.99,
+      activeHeight: 44,
+      candidateY: 67.99,
+      allowed: true,
+    },
+    {
+      name: 'fractional origin with 7.9px clearance',
+      activeY: 15.99,
+      activeHeight: 44.1,
+      candidateY: 67.99,
+      allowed: false,
+    },
+  ])(
+    'checks normal Canvas admission for $name',
+    ({ activeY, activeHeight, candidateY, allowed }) => {
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      const overlay = new Overlay();
+      const dimensions = { width: 640, height: 156 };
+      (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+      const renderer = new CanvasRenderer(
+        overlay,
+        makeSettings({
+          danmakuMode: 'top',
+          laneSpacing: 8,
+          safeTop: activeY === 15.99 ? 15.99 / dimensions.height : 0,
+        })
+      );
+      const internals = renderer as unknown as {
+        laneAllocator: LaneAllocator;
+        activeMessagesByLane: Map<number, CanvasMessage[]>;
+        estimateDimensions(message: ChatMessage): { width: number; height: number };
+        checkPlacement(
+          message: ChatMessage,
+          now: number,
+          dimensions: { width: number; height: number }
+        ): { ok: boolean };
+      };
+      const heap = Array.from({ length: 12 }, (_, lane) => [lane, 1000] as [number, number]);
+      internals.laneAllocator.restore({
+        heap,
+        indexMap: Object.fromEntries(heap.map(([lane], index) => [lane, index])),
+        laneHeight: 13,
+        laneCount: 12,
+        speedTierLanes: {},
+      });
+      internals.estimateDimensions = () => ({ width: 100, height: 44 });
+      const original = makeMessage('active', 'active');
+      const active = {
+        message: original,
+        renderMessage: original,
+        startTime: 0,
+        fadeStartTime: 0,
+        duration: 5000,
+        invDuration: 1 / 5000,
+        width: 100,
+        height: activeHeight,
+        startX: 270,
+        x: 270,
+        y: activeY,
+        pausedDuration: 0,
+        laneIndex: 0,
+        staggerDelay: 0,
+        speedTier: 1,
+        ghostText: 'active',
+        laneArrayIndices: [],
+      } as CanvasMessage;
+      for (let lane = 0; lane < getRowSlotCount(activeHeight, 13, 8); lane++) {
+        internals.activeMessagesByLane.set(lane, [active]);
+      }
+      const placement = {
+        laneIndex: 4,
+        waitMs: 0,
+        laneY: candidateY,
+        slotCount: 4,
+        verticalOffset: 0,
+      };
+      vi.spyOn(internals.laneAllocator, 'findPlacement')
+        .mockReturnValueOnce(placement)
+        .mockReturnValue(null);
+
+      expect(
+        internals.checkPlacement(makeMessage('candidate', 'candidate'), 1000, dimensions).ok
+      ).toBe(allowed);
+      renderer.destroy();
+    }
+  );
+});
+
+describe('CanvasRenderer', () => {
+  let overlay: Overlay;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    overlay = new Overlay();
+    // Worker transport is covered by its own protocol and packaged E2E suites.
+    vi.spyOn(RenderWorkerManager.prototype, 'init').mockReturnValue({
+      started: false,
+      canvasTransferred: false,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('constructs without throwing', () => {
+    const settings = makeSettings();
+    expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
+  });
+
+  it.each([
+    [false, false, false],
+    [false, true, false],
+    [true, false, true],
+    [true, true, false],
+  ])(
+    'resolves system reduced motion %s and stored override %s to %s',
+    (systemReduced, override, expected) => {
+      const renderer = new CanvasRenderer(overlay, makeSettings({ ignoreReducedMotion: override }));
+      const internals = renderer as unknown as {
+        reducedMotion: boolean;
+        readonly isReducedMotionActive: boolean;
+      };
+      internals.reducedMotion = systemReduced;
+      expect(internals.isReducedMotionActive).toBe(expected);
+      renderer.destroy();
+    }
+  );
+
+  it('constructs and updates from normalized fractional cache budgets', () => {
+    const storedSettings = normalizeStoredSettings({
+      emojiCacheMb: 1.000001,
+      photoCacheMb: 1.000001,
+      stickerCacheMb: 1.000001,
+      textCacheMb: 1.000001,
+    });
+    const renderer = new CanvasRenderer(overlay, storedSettings);
+    const updatedSettings = applySettingsPatch(storedSettings, {
+      emojiCacheMb: 2.000001,
+      photoCacheMb: 2.000001,
+      stickerCacheMb: 2.000001,
+      textCacheMb: 2.000001,
+    });
+
+    expect(() => renderer.updateSettings(updatedSettings)).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('admits the exact shared render budget and rejects one astral code point above it', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const enqueueMessage = vi.fn();
+    const internals = renderer as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+      isMessageAllowed(message: ChatMessage): boolean;
+    };
+    internals.enqueueMessage = enqueueMessage;
+    internals.isMessageAllowed = () => true;
+    const exactText = '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
+
+    renderer.addMessage({
+      ...makeMessage('exact-resource-limit', exactText),
+      content: [{ type: 'text', content: exactText }],
+    });
+    renderer.addMessage({
+      ...makeMessage('over-resource-limit', `${exactText}😀`),
+      content: [{ type: 'text', content: `${exactText}😀` }],
+    });
+
+    expect(enqueueMessage).toHaveBeenCalledOnce();
+    expect(enqueueMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'exact-resource-limit' }),
+      true
+    );
+    renderer.destroy();
+  });
+
+  it('confines a bypassed font family to its single style property', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ fontFamily: 'sans-serif;position:fixed;inset:0' })
+    );
+    const button = container.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+
+    expect(button?.style.position).toBe('absolute');
+    expect(button?.style.inset).toBe('');
+    expect(button?.style.cssText).not.toContain('position: fixed');
+    renderer.destroy();
+  });
+
+  it('replaces a transferred canvas before main-thread fallback', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const transferredGetContext = vi.fn(() => null);
+    const initSpy = vi.spyOn(RenderWorkerManager.prototype, 'init').mockImplementation((canvas) => {
+      canvas.getContext = transferredGetContext as typeof canvas.getContext;
+      return { started: false, canvasTransferred: true } as never;
+    });
+
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as { canvas: HTMLCanvasElement | null };
+    const [transferredCanvas] = initSpy.mock.calls[0] ?? [];
+
+    expect(internals.canvas).not.toBe(transferredCanvas);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    expect(transferredCanvas?.isConnected).toBe(false);
+    expect(transferredGetContext).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('destroys without error', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.destroy()).not.toThrow();
+  });
+
+  it('addMessage is a function', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(typeof renderer.addMessage).toBe('function');
+    renderer.destroy();
+  });
+
+  it('does not prefetch images for a message rejected by queue admission', () => {
+    const prefetch = vi.spyOn(ImageFetchManager.prototype, 'prefetchImages');
+    const renderer = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 1 }));
+
+    renderer.addMessage({
+      ...makeMessage('accepted-paid', 'accepted'),
+      kind: 'superchat',
+      superChat: { amount: '$10', tier: 'red' },
+    });
+    prefetch.mockClear();
+
+    renderer.addMessage({
+      ...makeMessage('dropped-image', 'dropped'),
+      authorPhotoUrl: 'https://yt3.ggpht.com/dropped.png',
+    });
+
+    expect(prefetch).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('attributes main queue displacement to the message actually discarded', () => {
+    const highPriority = {
+      ...makeMessage('high-priority', 'high priority'),
+      kind: 'superchat' as const,
+      superChat: { amount: '$10', tier: 'red' as const },
+    };
+
+    const untrackedQueue = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    untrackedQueue.pause();
+    const untrackedInternals = untrackedQueue as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+    };
+    const untrackedDrop = vi.spyOn(untrackedQueue.observability, 'onMessageDropped');
+    untrackedInternals.enqueueMessage(makeMessage('replay-low-oldest', 'replay low oldest'), false);
+    untrackedInternals.enqueueMessage(makeMessage('live-low-newest', 'live low newest'), true);
+    untrackedInternals.enqueueMessage(highPriority, true);
+    expect(untrackedDrop).not.toHaveBeenCalled();
+    untrackedQueue.destroy();
+
+    const trackedQueue = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    trackedQueue.pause();
+    const trackedInternals = trackedQueue as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+    };
+    const trackedDrop = vi.spyOn(trackedQueue.observability, 'onMessageDropped');
+    trackedInternals.enqueueMessage(makeMessage('live-low-oldest', 'live low oldest'), true);
+    trackedInternals.enqueueMessage(makeMessage('replay-low-newest', 'replay low newest'), false);
+    trackedInternals.enqueueMessage({ ...highPriority, id: 'replay-high' }, false);
+    expect(trackedDrop).toHaveBeenCalledOnce();
+    expect(trackedDrop).toHaveBeenCalledWith('queue_replaced');
+    trackedQueue.destroy();
+  });
+
+  it('replaces a pending message with the same id instead of duplicating it', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { toArray(): ChatMessage[] };
+    };
+    renderer.addMessage(makeMessage('replace-pending', 'original'));
+
+    renderer.addMessage({
+      ...makeMessage('replace-pending', 'updated'),
+      actionType: 'replace',
+    });
+
+    expect(internals.pendingQueue.toArray()).toHaveLength(1);
+    expect(internals.pendingQueue.toArray()[0]?.text).toBe('updated');
+    renderer.destroy();
+  });
+
+  it('updates active message content and geometry for a replacement', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings({ fontSize: 16 }));
+    const original = makeMessage('replace-active', 'old');
+    const active = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 24,
+      height: 20,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'old',
+      laneArrayIndices: [],
+      translatedText: 'stale translation',
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(active);
+
+    renderer.addMessage({
+      ...makeMessage('replace-active', 'updated active content'),
+      actionType: 'replace',
+    });
+
+    expect(internals.activeMessages).toHaveLength(1);
+    expect(active.message.text).toBe('updated active content');
+    expect(active.renderMessage.text).toBe('updated active content');
+    expect(active.ghostText).toBe('updated active content');
+    expect(active.translatedText).toBeNull();
+    expect(active.width).toBeGreaterThan(24);
+    renderer.destroy();
+  });
+
+  it('pause and resume work', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.pause()).not.toThrow();
+    expect(() => renderer.resume()).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('stops the main-thread animation loop while user-paused', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as { animFrameId: number | null };
+    expect(internals.animFrameId).not.toBeNull();
+
+    renderer.setUserPaused(true);
+    expect(internals.animFrameId).toBeNull();
+
+    renderer.setUserPaused(false);
+    expect(internals.animFrameId).not.toBeNull();
+    renderer.destroy();
+  });
+
+  it('clears the Worker visibility pause while the user pause remains active', () => {
+    const setPaused = vi.spyOn(RenderWorkerManager.prototype, 'setPaused');
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+
+    renderer.setUserPaused(true);
+    renderer.pause();
+    renderer.resume();
+
+    expect(setPaused).toHaveBeenNthCalledWith(1, true);
+    expect(setPaused).toHaveBeenNthCalledWith(2, false);
+    renderer.setUserPaused(false);
+    renderer.destroy();
+  });
+
+  it('preserves active message elapsed time across a long user pause', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    const renderer = new CanvasRenderer(overlay, makeSettings({ maxMessageAgeMs: 30_000 }));
+    const message = makeMessage('long-user-pause', 'long user pause');
+    const active = {
+      message,
+      renderMessage: message,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5_000,
+      invDuration: 1 / 5_000,
+      width: 100,
+      height: 20,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: message.text,
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(active);
+
+    renderer.setUserPaused(true);
+    nowSpy.mockReturnValue(121_000);
+    renderer.setUserPaused(false);
+
+    expect(active.pausedDuration).toBe(120_000);
+    expect(121_000 - active.startTime - active.pausedDuration).toBe(1_000);
+    renderer.destroy();
+  });
+
+  it('isPaused is false after construction', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(renderer.isPaused).toBe(false);
+    renderer.destroy();
+  });
+
+  it('updateSettings works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.updateSettings(makeSettings({ fontSize: 64 }))).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('applies text-cache and translation-batch limits without a reload', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      translationBatchSize: number;
+      textBitmapCache: { maxBytes: number };
+    };
+
+    renderer.updateSettings(makeSettings({ textCacheMb: 3, translationBatchSize: 11 }));
+
+    expect(internals.translationBatchSize).toBe(11);
+    expect(internals.textBitmapCache.maxBytes).toBe(3_000_000);
+    renderer.destroy();
+  });
+
+  it('preserves main text caches for opacity changes and invalidates outline geometry', () => {
+    const initial = makeSettings();
+    const renderer = new CanvasRenderer(overlay, initial);
+    const internals = renderer as unknown as {
+      textBitmapCache: { set(key: string, value: HTMLCanvasElement): boolean; size: number };
+      dimensionCache: Map<string, { width: number; height: number }>;
+    };
+    const bitmap = document.createElement('canvas');
+    bitmap.width = 2;
+    bitmap.height = 2;
+    internals.textBitmapCache.set('cached-text', bitmap);
+    internals.dimensionCache.set('cached-dimensions', { width: 100, height: 20 });
+
+    renderer.updateSettings({ ...initial, opacity: 0.75 });
+    expect(internals.textBitmapCache.size).toBe(1);
+    expect(internals.dimensionCache.size).toBe(1);
+
+    renderer.updateSettings({
+      ...initial,
+      opacity: 0.75,
+      outline: { ...initial.outline, widthPx: initial.outline.widthPx + 1 },
+    });
+    expect(internals.textBitmapCache.size).toBe(0);
+    expect(internals.dimensionCache.size).toBe(0);
+    renderer.destroy();
+  });
+
+  it('invalidates cached card dimensions when the overlay size changes', () => {
+    const callbacks: Array<Parameters<Overlay['onDimensionsChanged']>[0]> = [];
+    vi.spyOn(overlay, 'onDimensionsChanged').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return vi.fn();
+    });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      dimensionCache: Map<string, { width: number; height: number }>;
+    };
+    internals.dimensionCache.set('paid-card', { width: 320, height: 80 });
+
+    for (const callback of callbacks) callback({ width: 240, height: 180 });
+
+    expect(internals.dimensionCache.size).toBe(0);
+    renderer.destroy();
+  });
+
+  it('collects auto source-language samples after Worker dispatch', async () => {
+    const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const internals = renderer as unknown as {
+      workerManager: {
+        setActive(active: boolean): void;
+        worker: Worker | null;
+      };
+      sourceSampleBuffer: string[];
+    };
+    internals.workerManager.worker = {
+      addEventListener: vi.fn(),
+      postMessage: vi.fn(),
+      removeEventListener: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    internals.workerManager.setActive(true);
+
+    renderer.addMessage(makeMessage('worker-language-sample', 'hello from worker rendering'));
+    await Promise.resolve();
+
+    expect(internals.sourceSampleBuffer).toEqual(['hello from worker rendering']);
+    renderer.destroy();
+  });
+
+  it('lazily initializes source detection when translation is enabled later', () => {
+    const settings = makeSettings({ translationEnabled: false, translationSource: 'auto' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const internals = renderer as unknown as {
+      languageDetector: unknown;
+      channelMemory: unknown;
+    };
+    expect(internals.languageDetector).toBeNull();
+    expect(internals.channelMemory).toBeNull();
+
+    renderer.updateSettings(makeSettings({ translationEnabled: true, translationSource: 'auto' }));
+
+    expect(internals.languageDetector).not.toBeNull();
+    expect(internals.channelMemory).not.toBeNull();
+    renderer.destroy();
+  });
+
+  it('rejects an in-flight translation result after translation is disabled', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'replace' })
+    );
+    const original = makeMessage('translation-result', 'original');
+    const message = {
+      message: original,
+      renderMessage: original,
+      translatedText: 'queued translation',
+      translatedRenderMessage: makeMessage('translation-result', 'queued translation'),
+      width: 180,
+      height: 40,
+      translationHeight: 16,
+      duration: 5000,
+      invDuration: 0.0002,
+      startTime: 0,
+      pausedDuration: 0,
+      x: 500,
+      speedTier: 1,
+    } as CanvasMessage;
+    const internals = renderer as unknown as {
+      activeMessages: CanvasMessage[];
+      pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
+      translationConfigurationGeneration: number;
+      queueTranslationResult(msg: CanvasMessage, text: string | null, generation: number): void;
+      applyPendingTranslations(): void;
+    };
+    internals.activeMessages.push(message);
+    internals.pendingTranslations.push({ msg: message, text: 'queued translation' });
+    const generation = internals.translationConfigurationGeneration;
+
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: false, translationMode: 'replace' })
+    );
+    internals.queueTranslationResult(message, 'late translation', generation);
+    internals.applyPendingTranslations();
+
+    expect(internals.pendingTranslations).toEqual([]);
+    expect(message.translatedText).toBeNull();
+    expect(message.translatedRenderMessage).toBeUndefined();
+    renderer.destroy();
+  });
+
+  it('rejects an oversized main-thread translation before queueing or geometry work', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'replace' })
+    );
+    const original = makeMessage('translation-resource-limit', 'original');
+    const message = { message: original } as CanvasMessage;
+    const estimateTranslatedDimensions = vi.fn();
+    const internals = renderer as unknown as {
+      pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
+      translationConfigurationGeneration: number;
+      estimateTranslatedDimensions: typeof estimateTranslatedDimensions;
+      queueTranslationResult(msg: CanvasMessage, text: string | null, generation: number): void;
+    };
+    internals.estimateTranslatedDimensions = estimateTranslatedDimensions;
+
+    internals.queueTranslationResult(
+      message,
+      '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1),
+      internals.translationConfigurationGeneration
+    );
+
+    expect(internals.pendingTranslations).toEqual([]);
+    expect(estimateTranslatedDimensions).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('rejects an oversized Worker translation before geometry or protocol send', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'replace' })
+    );
+    const original = makeMessage('worker-translation-resource-limit', 'original');
+    const sendTranslation = vi.fn();
+    const estimateTranslatedDimensions = vi.fn();
+    const translate = vi.fn().mockResolvedValue('😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1));
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate(text: string): Promise<string> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      estimateTranslatedDimensions: typeof estimateTranslatedDimensions;
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = translate;
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+    internals.estimateTranslatedDimensions = estimateTranslatedDimensions;
+
+    internals.prefetchAndTranslateForWorker(original, original.id!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(translate).toHaveBeenCalledOnce();
+    expect(estimateTranslatedDimensions).not.toHaveBeenCalled();
+    expect(sendTranslation).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('rejects a delayed Worker translation after its configuration changes', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'en', translationTarget: 'ja' })
+    );
+    const original = makeMessage('stale-worker-translation', 'original');
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const translate = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveTranslation = resolve;
+        })
+    );
+    const sendTranslation = vi.fn();
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate(text: string): Promise<string | null> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = translate;
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+
+    internals.prefetchAndTranslateForWorker(original, original.id!);
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: true, translationSource: 'en', translationTarget: 'ko' })
+    );
+    resolveTranslation?.('late old-target translation');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendTranslation).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('keeps a Main message translation pending across an unrelated settings update', async () => {
+    const settings = makeSettings({ translationEnabled: true, translationSource: 'en' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate: ReturnType<typeof vi.fn> };
+      messageActivator: MessageActivator;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveTranslation = resolve;
+        })
+    );
+    const activator = internals.messageActivator;
+    const onTranslationResult = vi.fn();
+    activator.activate(makeMessage('main-settings', 'hello'), 0, 100, 20, 0, {
+      onActivated: vi.fn(),
+      onMessageRendered: vi.fn(),
+      onTranslationResult,
+    });
+    const signal = internals.translationService.translate.mock.calls[0]?.[1].signal as AbortSignal;
+    const next = { ...settings, showDebugOverlay: !settings.showDebugOverlay };
+    expect(shouldResetRendererForSettingsChange(settings, next)).toBe(false);
+    renderer.updateSettings(next);
+    expect(internals.messageActivator).toBe(activator);
+    expect(signal.aborted).toBe(false);
+    resolveTranslation?.('translated');
+    await Promise.resolve();
+    expect(onTranslationResult).toHaveBeenCalledWith(expect.any(Object), 'translated');
+    renderer.destroy();
+  });
+
+  it('keeps a Worker message translation pending across an unrelated settings update', async () => {
+    const settings = makeSettings({ translationEnabled: true, translationSource: 'en' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const message = makeMessage('worker-settings', 'hello');
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const sendTranslation = vi.fn();
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate: ReturnType<typeof vi.fn> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      estimateTranslatedDimensions: ReturnType<typeof vi.fn>;
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveTranslation = resolve;
+        })
+    );
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+    internals.estimateTranslatedDimensions = vi.fn(() => ({
+      width: 100,
+      height: 20,
+      translationHeight: 12,
+    }));
+    internals.prefetchAndTranslateForWorker(message, message.id!);
+    const signal = internals.translationService.translate.mock.calls[0]?.[1].signal as AbortSignal;
+    const next = { ...settings, showDebugOverlay: !settings.showDebugOverlay };
+    expect(shouldResetRendererForSettingsChange(settings, next)).toBe(false);
+    renderer.updateSettings(next);
+    expect(signal.aborted).toBe(false);
+    resolveTranslation?.('translated');
+    await Promise.resolve();
+    expect(sendTranslation).toHaveBeenCalledWith(
+      message.id,
+      'translated',
+      { width: 100, height: 20, translationHeight: 12 },
+      expect.any(Number)
+    );
+    renderer.destroy();
+  });
+
+  it('recomputes active card geometry when a translation result arrives', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'dual', fontSize: 16 })
+    );
+    const original = makeMessage('translation-geometry', 'Hi');
+    const message = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 28,
+      height: 25,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'Hi',
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as {
+      activeMessages: CanvasMessage[];
+      pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
+      applyPendingTranslations(): void;
+    };
+    internals.activeMessages.push(message);
+    internals.pendingTranslations.push({
+      msg: message,
+      text: 'A substantially longer translated message',
+    });
+
+    internals.applyPendingTranslations();
+
+    expect(message.width).toBeGreaterThan(28);
+    expect(message.height).toBeGreaterThan(25);
+    expect(message.translationHeight).toBeGreaterThan(0);
+    renderer.destroy();
+  });
+
+  it('restores original card geometry when translation is disabled', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'dual', fontSize: 16 })
+    );
+    const original = makeMessage('translation-disabled-geometry', 'Hi');
+    const message = {
+      message: original,
+      renderMessage: original,
+      translatedText: 'A substantially longer translated message',
+      translatedRenderMessage: makeMessage(
+        'translation-disabled-geometry',
+        'A substantially longer translated message'
+      ),
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 420,
+      height: 80,
+      translationHeight: 24,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'Hi',
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(message);
+
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: false, translationMode: 'dual', fontSize: 16 })
+    );
+
+    expect(message.translatedText).toBeNull();
+    expect(message.translatedRenderMessage).toBeUndefined();
+    expect(message.width).toBeLessThan(420);
+    expect(message.height).toBeLessThan(80);
+    expect(message.translationHeight).toBe(0);
+    renderer.destroy();
+  });
+
+  it('keeps bounded fallback detection after detector initialization rejects', async () => {
+    vi.spyOn(LanguageDetectorService.prototype, 'initialize').mockRejectedValueOnce(
+      new Error('detector initialization failed')
+    );
+    const detectFromSamples = vi
+      .spyOn(LanguageDetectorService.prototype, 'detectFromSamples')
+      .mockResolvedValue('en');
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'auto' })
+    );
+    const internals = renderer as unknown as {
+      languageDetector: LanguageDetectorService | null;
+      sourceSampleBuffer: string[];
+      sourceDetectionDone: boolean;
+      collectSourceLanguageSample(message: ChatMessage): void;
+    };
+
+    await Promise.resolve();
+    expect(internals.languageDetector).not.toBeNull();
+
+    for (let index = 0; index < 16; index++) {
+      internals.collectSourceLanguageSample(makeMessage(`sample-${index}`, `sample ${index}`));
+    }
+    await vi.waitFor(() => expect(internals.sourceDetectionDone).toBe(true));
+
+    expect(detectFromSamples).toHaveBeenCalledTimes(1);
+    expect(detectFromSamples.mock.calls[0]?.[0]).toHaveLength(8);
+    expect(internals.sourceSampleBuffer).toEqual([]);
+    renderer.destroy();
+  });
+
+  it('runs only one source-language detection from a bounded sample snapshot', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'auto' })
+    );
+    let resolveDetection!: (language: 'ja') => void;
+    const detection = new Promise<'ja'>((resolve) => {
+      resolveDetection = resolve;
+    });
+    const detectFromSamples = vi.fn(() => detection);
+    const internals = renderer as unknown as {
+      languageDetector: {
+        detectFromSamples(samples: string[]): Promise<'ja'>;
+        destroy(): void;
+      };
+      sourceSampleBuffer: string[];
+      performSourceDetection(): Promise<void>;
+    };
+    internals.languageDetector = { detectFromSamples, destroy: vi.fn() };
+    internals.sourceSampleBuffer = Array.from({ length: 10 }, (_, index) => `sample-${index}`);
+    const setDetectedSource = vi
+      .spyOn(renderer['translationService'], 'setDetectedSource')
+      .mockResolvedValue();
+
+    const first = internals.performSourceDetection();
+    const second = internals.performSourceDetection();
+
+    expect(detectFromSamples).toHaveBeenCalledTimes(1);
+    expect(detectFromSamples).toHaveBeenCalledWith(internals.sourceSampleBuffer.slice(0, 8));
+
+    resolveDetection('ja');
+    await Promise.all([first, second]);
+    expect(setDetectedSource).toHaveBeenCalledOnce();
+    expect(setDetectedSource).toHaveBeenCalledWith('ja');
+    renderer.destroy();
+  });
+
+  it('ignores a source-language result after translation is disabled', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'auto' })
+    );
+    let resolveDetection!: (language: 'ja') => void;
+    const detection = new Promise<'ja'>((resolve) => {
+      resolveDetection = resolve;
+    });
+    const internals = renderer as unknown as {
+      languageDetector: {
+        detectFromSamples(samples: string[]): Promise<'ja'>;
+        destroy(): void;
+      };
+      sourceSampleBuffer: string[];
+      translationService: { setDetectedSource(language: 'ja'): Promise<void> };
+      performSourceDetection(): Promise<void>;
+    };
+    internals.languageDetector = { detectFromSamples: () => detection, destroy: vi.fn() };
+    internals.sourceSampleBuffer = Array.from({ length: 8 }, (_, index) => `sample-${index}`);
+    const setDetectedSource = vi
+      .spyOn(internals.translationService, 'setDetectedSource')
+      .mockResolvedValue();
+
+    const pending = internals.performSourceDetection();
+    renderer.updateSettings(makeSettings({ translationEnabled: false, translationSource: 'auto' }));
+    resolveDetection('ja');
+    await pending;
+
+    expect(setDetectedSource).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('does not overlap source detection across configuration generations', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'auto' })
+    );
+    let resolveFirst!: (language: 'ja') => void;
+    const firstDetection = new Promise<'ja'>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const detectFromSamples = vi
+      .fn<() => Promise<'ja'>>()
+      .mockReturnValueOnce(firstDetection)
+      .mockResolvedValue('ja');
+    const internals = renderer as unknown as {
+      languageDetector: {
+        detectFromSamples(samples: string[]): Promise<'ja'>;
+        destroy(): void;
+      };
+      sourceSampleBuffer: string[];
+      performSourceDetection(): Promise<void>;
+    };
+    internals.languageDetector = { detectFromSamples, destroy: vi.fn() };
+    internals.sourceSampleBuffer = Array.from({ length: 8 }, (_, index) => `old-${index}`);
+    const setDetectedSource = vi
+      .spyOn(renderer['translationService'], 'setDetectedSource')
+      .mockResolvedValue();
+
+    const oldRun = internals.performSourceDetection();
+    renderer.updateSettings(makeSettings({ translationEnabled: false, translationSource: 'auto' }));
+    renderer.updateSettings(makeSettings({ translationEnabled: true, translationSource: 'auto' }));
+    internals.sourceSampleBuffer = Array.from({ length: 8 }, (_, index) => `new-${index}`);
+    const blockedRun = internals.performSourceDetection();
+
+    expect(detectFromSamples).toHaveBeenCalledTimes(1);
+    resolveFirst('ja');
+    await Promise.all([oldRun, blockedRun]);
+
+    await internals.performSourceDetection();
+    expect(detectFromSamples).toHaveBeenCalledTimes(2);
+    expect(setDetectedSource).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it('setConnectionStatus accepts all status values', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.setConnectionStatus('connected')).not.toThrow();
+    expect(() => renderer.setConnectionStatus('disconnected')).not.toThrow();
+    expect(() => renderer.setConnectionStatus('degraded')).not.toThrow();
+    expect(() => renderer.setConnectionStatus('standby')).not.toThrow();
+    expect(() => renderer.setConnectionStatus('connecting')).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('limits disconnected pointer handling to a dedicated reload button', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    (overlay as unknown as { container: HTMLDivElement }).container = container;
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const onStatusBarClick = vi.fn();
+    renderer.onStatusBarClick = onStatusBarClick;
+
+    renderer.setConnectionStatus('disconnected');
+
+    const canvas = container.querySelector('canvas');
+    const button = container.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+    expect(canvas?.style.pointerEvents).toBe('none');
+    expect(button?.style.display).toBe('flex');
+    button?.click();
+    expect(onStatusBarClick).toHaveBeenCalledOnce();
+
+    renderer.setConnectionStatus('connected');
+    expect(button?.style.display).toBe('none');
+    renderer.destroy();
+  });
+
+  it('clears exactly once for a connected active frame', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    const clearRect = vi.fn();
+    const message = makeMessage('active-frame', 'active');
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      ctx: CanvasRenderingContext2D;
+      activeMessages: CanvasMessage[];
+      workerManager: { setActive(active: boolean): void };
+      laneAllocator: { resetBatch(now?: number): void; getUtilization(): number };
+      drainQueue(now: number): void;
+      applyPendingTranslations(): void;
+      updateCanvasDpr(
+        canvas: HTMLCanvasElement,
+        ctx: CanvasRenderingContext2D,
+        dims: { width: number; height: number }
+      ): void;
+      applyLaneDensityIfChanged(): void;
+      renderFrame(): void;
+    };
+    internals.canvas = canvas;
+    internals.ctx = { clearRect } as unknown as CanvasRenderingContext2D;
+    internals.workerManager.setActive(false);
+    internals.laneAllocator = { resetBatch: vi.fn(), getUtilization: () => 0 };
+    internals.drainQueue = vi.fn();
+    internals.applyPendingTranslations = vi.fn();
+    internals.updateCanvasDpr = vi.fn();
+    internals.applyLaneDensityIfChanged = vi.fn();
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    internals.activeMessages.push({
+      message,
+      renderMessage: message,
+      ghostText: message.text,
+      startTime: performance.now() + 1_000,
+      fadeStartTime: performance.now() + 1_000,
+      duration: 5_000,
+      invDuration: 1 / 5_000,
+      width: 100,
+      height: 20,
+      startX: 640,
+      x: 640,
+      y: 0,
+      pausedDuration: 0,
+      laneIndex: 0,
+      laneArrayIndices: [],
+      staggerDelay: 1_000,
+      speedTier: 1,
+    });
+
+    internals.renderFrame();
+
+    expect(clearRect).toHaveBeenCalledOnce();
+    expect(clearRect).toHaveBeenCalledWith(0, 0, 640, 360);
+    renderer.destroy();
+  });
+
+  it('updates lane density before returning from a Worker-owned frame', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      ctx: CanvasRenderingContext2D;
+      workerManager: { setActive(active: boolean): void };
+      applyLaneDensityIfChanged(): boolean;
+      renderFrame(): void;
+    };
+    internals.canvas = canvas;
+    internals.ctx = {} as CanvasRenderingContext2D;
+    internals.workerManager.setActive(true);
+    const applyLaneDensity = vi
+      .spyOn(internals, 'applyLaneDensityIfChanged')
+      .mockReturnValue(false);
+
+    internals.renderFrame();
+
+    expect(applyLaneDensity).toHaveBeenCalledOnce();
+    internals.workerManager.setActive(false);
+    renderer.destroy();
+  });
+
+  it('synchronizes lane density and utilization without a main-thread canvas context', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      ctx: CanvasRenderingContext2D | null;
+      workerManager: {
+        worker: Worker | null;
+        _laneUtilization: number;
+        deps: { onStats?: (stats: WorkerStatsMessage) => void };
+        setActive(active: boolean): void;
+      };
+      burstDetector: { currentLevel: 'normal' | 'elevated' | 'high' | 'extreme' };
+      densityIndicator: { update(activeCount: number, maxConcurrent: number): void };
+    };
+    internals.ctx = null;
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    const updateIndicator = vi.spyOn(internals.densityIndicator, 'update');
+    internals.burstDetector.currentLevel = 'high';
+
+    renderer.addMessage(makeMessage('worker-density', 'density'));
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'laneDensity', factor: 0.75 });
+
+    internals.workerManager._laneUtilization = 0.75;
+    internals.burstDetector.currentLevel = 'extreme';
+    internals.workerManager.deps.onStats?.({
+      type: 'stats',
+      activeMessages: 12,
+      pendingQueueDepth: 3,
+      totalRendered: 12,
+      totalDrops: 0,
+      processedBatchSequence: 0,
+      laneUtilization: 0.75,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+    });
+
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'laneDensity', factor: 0.5 });
+    expect(updateIndicator).toHaveBeenCalledWith(12, 300);
+    expect(renderer.getLaneUtilization()).toBe(0.75);
+    internals.workerManager.setActive(false);
+    renderer.destroy();
+  });
+
+  it('setReplayMode works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.setReplayMode(true)).not.toThrow();
+    expect(() => renderer.setReplayMode(false)).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('getLaneUtilization returns a number between 0 and 1', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    const util = renderer.getLaneUtilization();
+    expect(typeof util).toBe('number');
+    expect(util).toBeGreaterThanOrEqual(0);
+    expect(util).toBeLessThanOrEqual(1);
+    renderer.destroy();
+  });
+
+  it('isWorkerAlive returns boolean', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    const alive = renderer.isWorkerAlive();
+    expect(typeof alive).toBe('boolean');
+    renderer.destroy();
+  });
+
+  it('getActiveMessageCount returns number', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(typeof renderer.getActiveMessageCount()).toBe('number');
+    renderer.destroy();
+  });
+
+  it('getQueueLength returns number', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(typeof renderer.getQueueLength()).toBe('number');
+    renderer.destroy();
+  });
+
+  it('getMsSinceLastRenderActivity returns number', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(typeof renderer.getMsSinceLastRenderActivity()).toBe('number');
+    renderer.destroy();
+  });
+
+  it('prepareForRefresh works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    resolveTextDirection('مرحبا');
+    expect(getBidiLayoutCacheUsage().direction.entries).toBe(1);
+    expect(() => renderer.prepareForRefresh()).not.toThrow();
+    expect(getBidiLayoutCacheUsage().direction.entries).toBe(0);
+    renderer.destroy();
+  });
+
+  it('resumeRenderLoop works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.resumeRenderLoop()).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('fallbackToMainThread works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.fallbackToMainThread('test-reason')).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('preserves messages accepted while a Worker snapshot is pending', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    let resolveSnapshot!: (messages: WorkerRecoveryMessage[]) => void;
+    const snapshot = new Promise<WorkerRecoveryMessage[]>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+      finalizeDrainBatch(batch: {
+        candidates: readonly ChatMessage[];
+        committed: ChatMessage[];
+        unplaceable: ChatMessage[];
+        batchIndex: number;
+        staggerCursorMs: number;
+      }): void;
+    };
+    renderer.pause();
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockReturnValue(snapshot);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    const beforeError = makeMessage('before-error', 'before error');
+    const duringFallback = makeMessage('during-fallback', 'during fallback');
+    const afterSnapshot = makeMessage('after-snapshot', 'after snapshot');
+    const replayDuringFallback = makeMessage('replay-during-fallback', 'replay during fallback');
+    const pendingSnapshotMessage = makeMessage('snapshot-pending', 'snapshot pending');
+    const activeSnapshotMessage = makeMessage('snapshot-active', 'snapshot active');
+    const replacementDuringFallback = {
+      ...makeMessage('before-error', 'replacement during fallback'),
+      actionType: 'replace' as const,
+    };
+
+    renderer.addMessage(beforeError);
+    renderer.fallbackToMainThread('worker-load-error');
+    renderer.addMessage(duringFallback);
+    renderer.addMessage(replacementDuringFallback);
+    renderer.replayMessage(replayDuringFallback);
+    resolveSnapshot([
+      { message: beforeError, trackDrops: false },
+      { message: pendingSnapshotMessage, trackDrops: true },
+      { message: activeSnapshotMessage, trackDrops: false },
+    ]);
+    queueMicrotask(() => renderer.addMessage(afterSnapshot));
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+
+    const recoveredIds = recoveredMainThreadMessages(renderer).map((message) => message.id);
+    expect(recoveredIds.filter((id) => id === beforeError.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === duringFallback.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === afterSnapshot.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === replayDuringFallback.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === pendingSnapshotMessage.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === activeSnapshotMessage.id)).toHaveLength(1);
+    expect(
+      recoveredMainThreadMessages(renderer).find((message) => message.id === beforeError.id)?.text
+    ).toBe('replacement during fallback');
+
+    expect(renderer.observability.getMetrics().totalDropped).toBe(0);
+    renderer.destroy();
+  });
+
+  it('counts only tracked pending messages when a drain batch is unplaceable', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const tracked = Array.from({ length: 3 }, (_, index) =>
+      makeMessage(`oversized-${index}`, `oversized ${index}`)
+    );
+    const internals = renderer as unknown as {
+      trackedPendingMessages: Set<ChatMessage>;
+      finalizeDrainBatch(batch: {
+        candidates: ChatMessage[];
+        committed: ChatMessage[];
+        unplaceable: ChatMessage[];
+        batchIndex: number;
+        staggerCursorMs: number;
+      }): void;
+    };
+    tracked.forEach((message) => internals.trackedPendingMessages.add(message));
+    const onMessagesDropped = vi.spyOn(renderer.observability, 'onMessagesDropped');
+    internals.finalizeDrainBatch({
+      candidates: tracked,
+      committed: [],
+      unplaceable: tracked,
+      batchIndex: 0,
+      staggerCursorMs: 0,
+    });
+    expect(onMessagesDropped).toHaveBeenCalledWith(3, 'oversized');
+    renderer.destroy();
+  });
+
+  it('restores the newest image URL once through bounded fallback ingress', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 1 }));
+    let resolveSnapshot!: (messages: WorkerRecoveryMessage[]) => void;
+    const snapshot = new Promise<WorkerRecoveryMessage[]>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      fallbackIngressQueue: { size: number; toArray(): Array<{ message: ChatMessage }> };
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+    };
+    renderer.pause();
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockReturnValue(snapshot);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    vi.mocked(worker.postMessage).mockClear();
+    const original = {
+      ...makeMessage('replacement-image', 'original'),
+      authorPhotoUrl: 'https://yt3.ggpht.com/old-image.png',
+    };
+    const replacement = {
+      ...original,
+      text: 'replacement',
+      content: [{ type: 'text' as const, content: 'replacement' }],
+      authorPhotoUrl: 'https://yt3.ggpht.com/new-image.png',
+      actionType: 'replace' as const,
+    };
+
+    try {
+      renderer.addMessage(original);
+      renderer.fallbackToMainThread('held-image-snapshot');
+      renderer.addMessage(makeMessage('displaced-ingress', 'displaced'));
+      renderer.addMessage(replacement);
+      expect(internals.fallbackIngressQueue.size).toBe(1);
+      expect(internals.fallbackIngressQueue.toArray().map(({ message }) => message)).toEqual([
+        replacement,
+      ]);
+
+      resolveSnapshot([{ message: original, trackDrops: false }]);
+      await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+      const recovered = recoveredMainThreadMessages(renderer);
+      expect(recovered.filter((message) => message.id === original.id)).toHaveLength(1);
+      expect(recovered[0]).toMatchObject({
+        id: original.id,
+        text: 'replacement',
+        authorPhotoUrl: replacement.authorPhotoUrl,
+      });
+      expect(
+        vi
+          .mocked(worker.postMessage)
+          .mock.calls.every(([message]) => (message as { type?: string }).type !== 'addMessages')
+      ).toBe(true);
+    } finally {
+      renderer.destroy();
+    }
+  });
+
+  it.each([
+    { paused: false, backlog: false },
+    { paused: true, backlog: false },
+    { paused: false, backlog: true },
+    { paused: true, backlog: true },
+  ])(
+    'restores Worker progress and future reservations across fallback (paused=$paused, backlog=$backlog)',
+    async ({ paused, backlog }) => {
+      let clock = 1000;
+      const viewportWidth = backlog ? 1920 : 640;
+      const messageWidth = backlog ? 1980 : 100;
+      const durationMs = backlog ? 8000 : 5000;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: viewportWidth, height: 360 });
+      const renderer = new CanvasRenderer(
+        overlay,
+        makeSettings({
+          speedPxPerSec: backlog ? 250 : 350,
+          backlogSpeedMultiplier: 2,
+          scrollDurationMinMs: 5000,
+          scrollDurationMaxMs: 30000,
+          exitPaddingPx: 100,
+          headwayGapRatio: 0.08,
+        })
+      );
+      const internals = renderer as unknown as {
+        activeMessages: CanvasMessage[];
+        pendingQueue: { toArray(): ChatMessage[] };
+        fallbackInProgress: boolean;
+        workerManager: {
+          snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+          destroy(): void;
+          setActive(active: boolean): void;
+        };
+        replaceCanvas(): boolean;
+        reflowActiveMessages(size: { width: number; height: number }): void;
+        startRenderLoop(): void;
+      };
+      if (paused) renderer.pause();
+      vi.spyOn(internals, 'replaceCanvas').mockReturnValue(true);
+      vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+      vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+      const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
+      const origin = performance.timeOrigin;
+      vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
+        ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
+          message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog },
+          trackDrops: false,
+          activeMotion: {
+            id: `active-${laneIndex}`,
+            mode: 'scroll',
+            startX: viewportWidth,
+            width: messageWidth,
+            height: 20,
+            y: laneIndex * 20,
+            laneIndex,
+            laneSlotCount: 1,
+            durationMs,
+            startEpochMs: origin + start,
+            fadeStartEpochMs: origin + start,
+            speedTier: backlog ? 3 : 1,
+            epoch: 0,
+            capturedAtEpochMs: origin + 1000,
+            effectiveNowEpochMs: origin + 1000,
+            isPaused: paused,
+            viewportWidthPx: viewportWidth,
+            exitPaddingPx: 100,
+          },
+        })),
+        { message: makeMessage('pending-only', 'pending'), trackDrops: true },
+      ]);
+      clock = 1500;
+      renderer.fallbackToMainThread('controlled-snapshot');
+      await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+      expect(internals.activeMessages).toHaveLength(2);
+      expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
+      const [visible, future] = internals.activeMessages;
+      expect(visible?.startTime).toBe(0);
+      expect(future?.startTime).toBe(2000);
+      const effectiveNow = paused ? 1000 : 1500;
+      expect(visible?.x).toBeCloseTo(
+        viewportWidth - effectiveNow * ((viewportWidth + messageWidth + 100) / durationMs)
+      );
+      expect(future?.x).toBe(viewportWidth);
+      if (backlog) {
+        internals.reflowActiveMessages({ width: viewportWidth, height: 360 });
+        const reflowed = internals.activeMessages;
+        expect(reflowed).toHaveLength(2);
+        expect(
+          reflowed.every((message) => message.duration === 8000 && message.speedTier === 3)
+        ).toBe(true);
+        expect(reflowed[0]?.startTime).toBe(0);
+        expect(reflowed[1]?.startTime).toBe(2000);
+      }
+      expect(rendered).not.toHaveBeenCalled();
+      if (paused) {
+        clock = 5000;
+        renderer.resume();
+        expect(visible?.pausedDuration).toBe(4000);
+        expect(future && future.startTime + future.pausedDuration).toBe(6000);
+      }
+      renderer.destroy();
+    }
+  );
+
+  it('keeps failed canvas recovery unhealthy and retries without losing buffered ingress', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    renderer.pause();
+    const healthyContext = document.createElement('canvas').getContext('2d');
+    if (!healthyContext) throw new Error('Canvas test context is unavailable');
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+    };
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    const beforeFailure = makeMessage('retry-before', 'before failed recovery');
+    const duringFailure = makeMessage('retry-during', 'during failed recovery');
+    const afterFailure = makeMessage('retry-after', 'after failed recovery');
+    vi.spyOn(internals.workerManager, 'snapshotMessages')
+      .mockResolvedValueOnce([{ message: beforeFailure, trackDrops: false }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValueOnce(null)
+      .mockReturnValue(healthyContext);
+
+    renderer.addMessage(beforeFailure);
+    renderer.fallbackToMainThread('worker-load-error');
+    renderer.addMessage(duringFailure);
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+
+    expect(renderer.isWorkerAlive()).toBe(false);
+    expect(renderer.getQueueLength()).toBe(2);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    renderer.addMessage(afterFailure);
+    expect(renderer.getQueueLength()).toBe(3);
+
+    renderer.fallbackToMainThread('canvas-recovery-retry');
+    await vi.waitFor(() => expect(renderer.isWorkerAlive()).toBe(true));
+
+    const recoveredIds = recoveredMainThreadMessages(renderer).map((message) => message.id);
+    expect(recoveredIds.filter((id) => id === beforeFailure.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === duringFailure.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === afterFailure.id)).toHaveLength(1);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+
+    renderer.destroy();
+    expect(renderer.getQueueLength()).toBe(0);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
+  });
+
+  it('setStandbyStatus works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.setStandbyStatus(true)).not.toThrow();
+    expect(() => renderer.setStandbyStatus(false)).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('setChatPanelOpen works', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(() => renderer.setChatPanelOpen(true)).not.toThrow();
+    expect(() => renderer.setChatPanelOpen(false)).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('destroy then further calls are safe no-ops', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    renderer.destroy();
+    // After destroy, pause/resume should be safe no-ops
+    expect(() => renderer.pause()).not.toThrow();
+    expect(() => renderer.resume()).not.toThrow();
+    // addMessage may fail after destroy because it accesses internal state
+    // through message.content iteration — but it should not throw unrecoverably
+  });
+
+  it('onStatusBarClick callback is settable', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(renderer.onStatusBarClick).toBeNull();
+    const cb = vi.fn();
+    renderer.onStatusBarClick = cb;
+    expect(renderer.onStatusBarClick).toBe(cb);
+    renderer.destroy();
+  });
+
+  it('onBacklogPauseChange callback is settable', () => {
+    const settings = makeSettings();
+    const renderer = new CanvasRenderer(overlay, settings);
+    expect(renderer.onBacklogPauseChange).toBeNull();
+    const cb = vi.fn();
+    renderer.onBacklogPauseChange = cb;
+    expect(renderer.onBacklogPauseChange).toBe(cb);
+    renderer.destroy();
+  });
+
+  it('keeps sync and async drain queue bookkeeping in parity', async () => {
+    const runDrain = async (asyncMode: boolean) => {
+      const localOverlay = new Overlay();
+      (localOverlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+        width: 1280,
+        height: 720,
+      };
+      const renderer = new CanvasRenderer(localOverlay, makeSettings());
+      const messages = [
+        makeMessage('placed-a', 'a'),
+        makeMessage('transient', 'b'),
+        makeMessage('placed-b', 'c'),
+      ];
+      type DrainInternals = {
+        pendingQueue: {
+          enqueue(message: ChatMessage, priority: number): void;
+          toArray(): ChatMessage[];
+        };
+        placeQueuedMessage: ReturnType<typeof vi.fn>;
+        drainQueue(now: number): void;
+        drainQueueAsync(now: number): Promise<void>;
+      };
+      const internals = renderer as unknown as DrainInternals;
+      for (const message of messages) internals.pendingQueue.enqueue(message, 0);
+      internals.placeQueuedMessage = vi.fn((message: ChatMessage) => ({
+        placed: message.id !== 'transient',
+        oversized: false,
+      }));
+
+      if (asyncMode) await internals.drainQueueAsync(100);
+      else internals.drainQueue(100);
+
+      const result = {
+        pendingIds: internals.pendingQueue.toArray().map((message) => message.id),
+        placements: internals.placeQueuedMessage.mock.calls.map(
+          ([message, _now, _dimensions, batchIndex]) => [
+            (message as ChatMessage).id,
+            batchIndex as number,
+          ]
+        ),
+      };
+      renderer.destroy();
+      return result;
+    };
+
+    expect(await runDrain(true)).toEqual(await runDrain(false));
+  });
+
+  it('bounds failed sync attempts and eventually reaches a placeable message beyond the prefix', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 1280,
+      height: 720,
+    };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    for (let index = 0; index < 80; index++) {
+      internals.pendingQueue.enqueue(makeMessage(`${index}`, 'bounded'), 0);
+    }
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => ({
+      placed: message.id === '79',
+      oversized: false,
+    }));
+    for (let frame = 0; frame < 3; frame++) {
+      const before = internals.placeQueuedMessage.mock.calls.length;
+      internals.drainQueue(frame * 16);
+      expect(internals.placeQueuedMessage.mock.calls.length - before).toBeLessThanOrEqual(32);
+    }
+    expect(internals.pendingQueue.toArray()).toHaveLength(79);
+    expect(internals.pendingQueue.toArray().some((message) => message.id === '79')).toBe(false);
+    renderer.destroy();
+  });
+
+  it('counts failed collision work against the time budget and lets a lower priority group progress', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 1280,
+      height: 720,
+    };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    for (let index = 0; index < 40; index++) {
+      internals.pendingQueue.enqueue(
+        { ...makeMessage(`paid-${index}`, 'paid'), kind: 'superchat' },
+        100
+      );
+    }
+    internals.pendingQueue.enqueue(makeMessage('normal', 'normal'), 0);
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => {
+      clock += 5;
+      return { placed: message.id === 'normal', oversized: false };
+    });
+    internals.drainQueue(0);
+    expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
+    expect(internals.placeQueuedMessage.mock.calls[0]?.[0].id).toBe('paid-0');
+    internals.drainQueue(16);
+    expect(internals.placeQueuedMessage.mock.calls[1]?.[0].id).toBe('normal');
+    expect(internals.pendingQueue.toArray()).toHaveLength(40);
+    renderer.destroy();
+  });
+
+  it('aborts async drain after destruction when the shared 8ms budget yields', async () => {
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 1280,
+      height: 720,
+    };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    type DrainInternals = {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueueAsync(now: number): Promise<void>;
+      drainLocked: boolean;
+    };
+    const internals = renderer as unknown as DrainInternals;
+    internals.pendingQueue.enqueue(makeMessage('first', 'a'), 0);
+    internals.pendingQueue.enqueue(makeMessage('second', 'b'), 0);
+    internals.placeQueuedMessage = vi.fn(() => ({ placed: true, oversized: false }));
+
+    const originalScheduler = Object.getOwnPropertyDescriptor(globalThis, 'scheduler');
+    Object.defineProperty(globalThis, 'scheduler', {
+      configurable: true,
+      value: { yield: vi.fn(async () => renderer.destroy()) },
+    });
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(9);
+
+    try {
+      await internals.drainQueueAsync(100);
+    } finally {
+      if (originalScheduler) {
+        Object.defineProperty(globalThis, 'scheduler', originalScheduler);
+      } else {
+        Reflect.deleteProperty(globalThis, 'scheduler');
+      }
+    }
+
+    expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
+    expect(internals.drainLocked).toBe(false);
+  });
+});

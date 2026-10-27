@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// @vitest-environment jsdom
 
 import { ROOT_SETTING_META } from '@settings/meta';
 import { DEFAULT_SETTINGS } from '@settings/schema';

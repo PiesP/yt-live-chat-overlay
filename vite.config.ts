@@ -149,8 +149,8 @@ export default defineConfig((env) => ({
       {
         files: [
           'test/unit/app/standby-controller.test.ts',
-          'test/unit/settings/ui/controller.test.ts',
-          'test/unit/worker/manager.test.ts',
+          'test/unit/settings/ui/controller.browser.test.ts',
+          'test/unit/worker/manager.browser.test.ts',
           'test/unit/worker/renderer.test.ts',
         ],
         rules: { 'typescript/no-explicit-any': 'off' },
@@ -159,8 +159,8 @@ export default defineConfig((env) => ({
       { files: ['test/e2e/specs/firefox-extension.spec.ts'], rules: { 'no-empty-pattern': 'off' } },
       {
         files: [
-          'test/unit/core/canvas-render-mock.test.ts',
-          'test/unit/core/vertical-spacing.test.ts',
+          'test/unit/core/canvas-render-mock.browser.test.ts',
+          'test/unit/core/vertical-spacing.browser.test.ts',
         ],
         rules: { 'no-constructor-return': 'off' },
       },

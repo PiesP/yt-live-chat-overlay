@@ -21,6 +21,14 @@ import { resolveLimits } from '@settings/limits';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
+vi.hoisted(() => {
+  Object.defineProperty(globalThis, 'self', {
+    value: globalThis,
+    writable: true,
+    configurable: true,
+  });
+});
+
 const mockContext = {
   setTransform: vi.fn(),
   clearRect: vi.fn(),

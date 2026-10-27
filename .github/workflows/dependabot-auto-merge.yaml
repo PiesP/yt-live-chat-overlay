@@ -42,7 +42,7 @@ jobs:
         id: dependabot-metadata
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
-          github-token: "${{ github.token }}"
+          github-token: '${{ github.token }}'
 
       - name: 🔍 Decide merge eligibility
         id: decide
@@ -72,7 +72,7 @@ jobs:
             for dep in "${DEPS[@]}"; do
               dep=$(echo "$dep" | xargs)
               case "$dep" in
-                typescript|@types/*|vite-plugin-monkey|@playwright/test|canvas|jsdom)
+                typescript|@types/*|vite-plugin-monkey|@playwright/test)
                   ;;
                 *)
                   SAFE="false"

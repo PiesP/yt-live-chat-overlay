@@ -128,6 +128,9 @@ jobs:
         with:
           node-version: ${{ needs.provenance.outputs.node-version }}
 
+      - name: Install Chromium for Browser Mode unit tests
+        run: vp exec playwright install --with-deps chromium
+
       - name: 🧪 Run unit tests and coverage thresholds
         run: vp run test:cov
 

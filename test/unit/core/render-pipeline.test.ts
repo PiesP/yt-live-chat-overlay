@@ -547,6 +547,7 @@ describe('mirrorVisibleMessages', () => {
   });
 
   it('sends snippets when throttle expires', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
     const updateLiveRegion = vi.fn();
     const ctx = makeCompactCtx({
       activeMessages: [
@@ -564,6 +565,7 @@ describe('mirrorVisibleMessages', () => {
       text: string;
     }>;
     expect(messages.map((message) => message.text)).toEqual(['first message', 'second message']);
+    nowSpy.mockRestore();
   });
 
   it('skips when there are no active messages', () => {

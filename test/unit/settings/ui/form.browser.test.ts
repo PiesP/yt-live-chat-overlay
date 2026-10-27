@@ -1,0 +1,967 @@
+// SPDX-License-Identifier: MIT
+
+import type { OverlaySettings } from '@app-types';
+import { resolveActiveLanguage, t } from '@i18n/index';
+import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
+import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
+import type { TranslationRuntimeStatus } from '@translation/service';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+
+function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
+  return {
+    enabled: true,
+    danmakuMode: 'scroll' as const,
+    speedPxPerSec: 250,
+    fontSize: 32,
+    opacity: 1,
+    superChatOpacity: 0.95,
+    safeTop: 0,
+    safeBottom: 0,
+    maxConcurrentMessages: 300,
+    allowShortTextMessages: false,
+    minTextLength: 1,
+    logLevel: 'warn' as const,
+    showAuthor: {
+      normal: false,
+      member: true,
+      moderator: true,
+      owner: true,
+      verified: true,
+      superChat: true,
+    },
+    colors: {
+      normal: '#FFFFFF',
+      member: '#0F9D58',
+      moderator: '#5E84F1',
+      owner: '#FFD600',
+      verified: '#AAAAAA',
+    },
+    backgroundColors: {
+      normal: '#00000000',
+      member: '#00000000',
+      moderator: '#1B3A6F59',
+      owner: '#6B4F0059',
+      verified: '#00000000',
+    },
+    outline: { enabled: true, widthPx: 2, opacity: 0.7 },
+    laneSpacing: 1,
+    showDebugOverlay: false,
+    ignoreReducedMotion: false,
+    authorRateLimit: 'normal' as const,
+    backlogMaxRate: 10,
+    backlogSpeedMultiplier: 1,
+    backlogMode: 'playback' as const,
+    backlogRecentMinutes: 5,
+    backlogOpacityMultiplier: 0.5,
+    depthLayersEnabled: false,
+    depthNearSpeedMul: 1.2,
+    depthFarSpeedMul: 0.8,
+    depthFarOpacityMul: 0.6,
+    modOwnerDurationMultiplier: 1.5,
+    showSuperChatAmount: true,
+    fontWeight: 'bold' as const,
+    fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
+    preserveUserColor: true,
+    superChatMaxBodyLines: 3,
+    membershipMaxBodyLines: 2,
+    fadeDurationMs: 300,
+    minPollIntervalMs: 1000,
+    maxPollIntervalMs: 10000,
+    language: 'en' as const,
+    translationEnabled: false,
+    translationService: 'auto' as const,
+    translationSource: 'auto' as const,
+    translationTarget: 'en' as const,
+    translationMode: 'dual' as const,
+    exitPaddingPx: 50,
+    scrollDurationMinMs: 3000,
+    scrollDurationMaxMs: 15000,
+    topBottomDurationMs: 5000,
+    queueMaxSize: 500,
+    backgroundQueueMax: 200,
+    maxMessageAgeMs: 30000,
+    headwayGapRatio: 0.3,
+    emojiCacheMb: 20,
+    photoCacheMb: 10,
+    stickerCacheMb: 5,
+    textCacheMb: 5,
+    translationBatchSize: 5,
+    emojiFetchLimit: 20,
+    failedEmojiRetryMins: 5,
+    burstSampleWindow: 60,
+    burstElevatedThreshold: 5,
+    burstHighThreshold: 15,
+    burstExtremeThreshold: 30,
+    backlogInjectionMax: 50,
+    backlogDensityRampMs: 5000,
+    livePollFallbackMs: 2000,
+    livePollFailureLimit: 5,
+    speedBoostThreshold: 2,
+    backlogPauseThreshold: 0.3,
+    backlogResumeThreshold: 0.1,
+    activityTimeoutMs: 60000,
+    staggerMaxDelayMs: 100,
+    staggerMediumDelayMs: 50,
+    emojiFetchTimeoutMs: 5000,
+    backlogDensityRampMaxMs: 10000,
+    backlogInjectionRateMin: 1,
+    speedBoostMax: 1,
+    speedBoostDenom: 2,
+    backlogToggleCooldownMs: 2000,
+    replayPrefetchPages: 50,
+    replayBatchLimit: 50,
+    ...overrides,
+  } as OverlaySettings;
+}
+
+describe('SettingsUiForm', () => {
+  let getSettings: () => Readonly<OverlaySettings>;
+  let onPreview: () => void;
+
+  beforeEach(() => {
+    getSettings = () => makeDefaults();
+    onPreview = vi.fn();
+  });
+
+  it('constructs without throwing', () => {
+    expect(() => new SettingsUiForm(getSettings, onPreview)).not.toThrow();
+  });
+
+  it('createModalContent returns an array of nodes', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+
+    const nodes = form.createModalContent();
+    expect(Array.isArray(nodes)).toBe(true);
+    expect(nodes.length).toBeGreaterThan(0);
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('setModal with null unregisters modal', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    form.setModal(null);
+    form.destroy();
+  });
+
+  it('setModal binds event listeners', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    modal.innerHTML = '<div></div>';
+    document.body.appendChild(modal);
+
+    form.setModal(modal);
+    expect(() => form.setModal(null)).not.toThrow();
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('populateForm populates a created modal', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+
+    // Create content and add to modal
+    const nodes = form.createModalContent();
+    modal.append(...nodes);
+    form.setModal(modal);
+
+    const settings = getSettings();
+    form.populateForm(settings);
+
+    // Verify some inputs are populated
+    const fontSizeEl = modal.querySelector<HTMLInputElement>('input[name="fontSize"]');
+    if (fontSizeEl) {
+      expect(fontSizeEl.value).toBe(String(settings.fontSize));
+    }
+
+    const enabledEl = modal.querySelector<HTMLInputElement>('input[name="enabled"]');
+    if (enabledEl) {
+      expect(enabledEl.checked).toBe(settings.enabled);
+    }
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('collectSettings returns original settings when no modal', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const collected = form.collectSettings();
+    const expected = getSettings();
+    expect(collected.fontSize).toBe(expected.fontSize);
+    expect(collected.enabled).toBe(expected.enabled);
+    form.destroy();
+  });
+
+  it('populateForm does nothing when modal is null', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    expect(() => form.populateForm(makeDefaults())).not.toThrow();
+    form.destroy();
+  });
+
+  it('getFocusableElements returns empty array when no modal', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    expect(form.getFocusableElements()).toEqual([]);
+    form.destroy();
+  });
+
+  it('getFocusableElements returns elements from modal', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    modal.innerHTML = '<div></div>';
+    document.body.appendChild(modal);
+
+    const nodes = form.createModalContent();
+    modal.append(...nodes);
+    form.setModal(modal);
+
+    const focusable = form.getFocusableElements();
+    expect(focusable.length).toBeGreaterThan(0);
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('createModalContent produces header with title', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const nodes = form.createModalContent();
+    const headerEl = nodes.find(
+      (n: Node) =>
+        n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-header')
+    );
+    expect(headerEl).toBeInstanceOf(HTMLElement);
+    form.destroy();
+  });
+
+  it('createModalContent produces tabs', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const nodes = form.createModalContent();
+    const tabsEl = nodes.find(
+      (n: Node) => n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-tabs')
+    );
+    expect(tabsEl).toBeInstanceOf(HTMLElement);
+    form.destroy();
+  });
+
+  it('createModalContent produces action buttons', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const nodes = form.createModalContent();
+    const actionsEl = nodes.find(
+      (n: Node) =>
+        n instanceof HTMLElement && n.classList.contains('yt-chat-overlay-settings-actions-wrapper')
+    );
+    expect(actionsEl).toBeInstanceOf(HTMLElement);
+    form.destroy();
+  });
+
+  it('renders comment fine tuning as an accessible, default-collapsed disclosure', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const pane = modal.querySelector<HTMLElement>('#pane-comments');
+    const details = pane?.querySelector<HTMLDetailsElement>('.yt-chat-overlay-settings-disclosure');
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toBe('Fine tuning');
+
+    for (const name of ['enabled', 'danmakuMode', 'fontSize', 'speedPxPerSec', 'opacity']) {
+      const control = pane?.querySelector<HTMLElement>(`[name="${name}"]`);
+      expect(control, `${name} should remain prominent`).not.toBeNull();
+      expect(control?.closest('details')).toBeNull();
+    }
+    for (const name of ['laneSpacing', 'safeTop', 'safeBottom', 'scrollDurationMinMs']) {
+      const control = details?.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+      expect(control, `${name} should remain directly editable`).not.toBeNull();
+      expect(control?.type).toBe('number');
+    }
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('keeps the session pause action outside persisted settings and the enabled label', () => {
+    const onTogglePause = vi.fn();
+    let settings = getSettings();
+    const form = new SettingsUiForm(() => settings, onPreview, onTogglePause);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    form.populateForm(settings);
+
+    const enabled = modal.querySelector<HTMLInputElement>('#pane-comments input[name="enabled"]');
+    const hint = modal.querySelector<HTMLElement>(
+      '#pane-comments .yt-chat-overlay-settings-pause-hint'
+    );
+    const pause = modal.querySelector<HTMLButtonElement>('#yt-chat-overlay-pause-button');
+    const badge = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-pause-badge');
+    const row = modal.querySelector<HTMLElement>(
+      '#pane-comments .yt-chat-overlay-settings-pause-row'
+    );
+    const preview = modal.querySelector<HTMLElement>(
+      '#pane-comments .yt-chat-overlay-settings-font-preview'
+    );
+    expect(enabled?.checked).toBe(true);
+    expect(hint?.textContent).toContain('Ctrl+Space');
+    expect(hint?.closest('label')).toBeNull();
+    expect(pause?.closest('label')).toBeNull();
+    expect(row?.contains(enabled)).toBe(true);
+    expect(row?.contains(pause)).toBe(true);
+    expect(row?.contains(badge)).toBe(true);
+    expect(row?.contains(hint)).toBe(false);
+    expect(preview && hint ? preview.compareDocumentPosition(hint) : null).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(pause?.disabled).toBe(true);
+    expect(badge?.hidden).toBe(true);
+    expect(badge?.getAttribute('aria-hidden')).toBe('true');
+    form.setUserPauseState(false);
+    expect(pause?.disabled).toBe(false);
+    expect(pause?.textContent).toBe('Pause comments');
+    expect(pause?.getAttribute('aria-pressed')).toBe('false');
+    expect(badge?.hidden).toBe(true);
+    pause?.click();
+    expect(onTogglePause).toHaveBeenCalledOnce();
+    form.setUserPauseState(true);
+    expect(pause?.textContent).toBe('Pause comments');
+    expect(pause?.getAttribute('aria-pressed')).toBe('true');
+    expect(badge?.textContent).toBe(t('Paused'));
+    expect(badge?.hidden).toBe(false);
+    expect(form.collectSettings().enabled).toBe(true);
+    expect(onPreview).not.toHaveBeenCalled();
+    settings = makeDefaults({ enabled: false });
+    form.populateForm(settings);
+    expect(pause?.disabled).toBe(true);
+    expect(badge?.hidden).toBe(true);
+    settings = makeDefaults();
+    form.populateForm(settings);
+    expect(badge?.hidden).toBe(false);
+    form.setUserPauseState(null);
+    expect(pause?.disabled).toBe(true);
+    expect(badge?.hidden).toBe(true);
+    hint?.click();
+    expect(enabled?.checked).toBe(true);
+
+    form.setUserPauseState(true);
+    form.setModal(null);
+    modal.remove();
+    const rebuiltModal = document.createElement('dialog');
+    rebuiltModal.append(...form.createModalContent());
+    document.body.appendChild(rebuiltModal);
+    form.setModal(rebuiltModal);
+    form.populateForm(settings);
+    const rebuiltPause = rebuiltModal.querySelector<HTMLButtonElement>(
+      '#yt-chat-overlay-pause-button'
+    );
+    const rebuiltBadge = rebuiltModal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-pause-badge'
+    );
+    expect(rebuiltPause?.getAttribute('aria-pressed')).toBe('true');
+    expect(rebuiltBadge?.hidden).toBe(false);
+    form.setUserPauseState(false);
+    expect(rebuiltPause?.getAttribute('aria-pressed')).toBe('false');
+    expect(rebuiltBadge?.hidden).toBe(true);
+
+    form.destroy();
+    rebuiltModal.remove();
+  });
+
+  it('previews accepted opacity, outline, safe-zone, and font values without raw invalid input', () => {
+    const settings = makeDefaults({
+      fontSize: 40,
+      opacity: 0.65,
+      safeTop: 0.15,
+      safeBottom: 0.2,
+      colors: { ...makeDefaults().colors, normal: '#101010' },
+      outline: { enabled: true, widthPx: 3, opacity: 0.6 },
+    });
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    form.populateForm(settings);
+
+    const preview = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview');
+    const text = preview?.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-text');
+    expect(preview?.getAttribute('aria-label')).toBe('Comment preview');
+    expect(text?.style.fontSize).toBe('40px');
+    expect(text?.style.color).toBe('rgb(16, 16, 16)');
+    expect(text?.style.opacity).toBe('0.65');
+    expect(text?.style.getPropertyValue('-webkit-text-stroke')).toBe(
+      '2.55px rgba(255, 255, 255, 0.6)'
+    );
+    const stage = preview?.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-stage'
+    );
+    expect(stage?.style.gridTemplateRows).toBe(
+      'minmax(0px, 0.15fr) minmax(0px, 0.65fr) minmax(0px, 0.2fr)'
+    );
+    expect(stage?.dataset.previewAvailableFraction).toBe('0.65');
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Text Opacity (%): 65%'
+    );
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Text Outline: 3px / 60%'
+    );
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Top Clear Zone (%): 15%'
+    );
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Bottom Clear Zone (%): 20%'
+    );
+
+    const fontSize = modal.querySelector<HTMLInputElement>('input[name="fontSize"]');
+    expect(fontSize).not.toBeNull();
+    fontSize!.value = '9999';
+    fontSize!.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(text?.style.fontSize).toBe('50px');
+    expect(text?.style.fontSize).not.toBe('9999px');
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('grows the preview stage from real layout and disconnects its observer', async () => {
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame');
+    const settings = makeDefaults({ fontSize: 50, safeTop: 0.25, safeBottom: 0.5 });
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    modal.showModal();
+    const stage = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-stage')!;
+    const text = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-text')!;
+    stage.style.minBlockSize = '144px';
+    stage.style.width = '280px';
+    text.style.display = 'block';
+    text.style.minBlockSize = '260px';
+
+    try {
+      form.setModal(modal);
+      form.populateForm(settings);
+      expect(stage.getBoundingClientRect().width).toBe(280);
+      expect(text.scrollHeight).toBeGreaterThanOrEqual(260);
+      expect(Number.parseFloat(stage.style.blockSize)).toBeGreaterThanOrEqual(1040);
+
+      text.style.display = 'none';
+      form.populateForm(settings);
+      const oldCanvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
+      const oldStageHeight = Number.parseFloat(stage.style.blockSize);
+      form.populateForm({ ...settings, outline: { ...settings.outline, widthPx: 3 } });
+      const canvasHeight = Number.parseFloat(text.querySelector('canvas')!.style.blockSize);
+      expect(canvasHeight).toBeGreaterThan(oldCanvasHeight);
+      expect(Number.parseFloat(stage.style.blockSize)).toBeGreaterThan(oldStageHeight);
+      expect(Number.parseFloat(stage.style.blockSize) * 0.25).toBeGreaterThanOrEqual(
+        canvasHeight + 1
+      );
+
+      text.style.display = 'block';
+      form.populateForm(settings);
+      await vi.waitFor(() =>
+        expect(Number.parseFloat(stage.style.blockSize)).toBeGreaterThanOrEqual(1040)
+      );
+      stage.style.width = '300px';
+      await vi.waitFor(() =>
+        expect(text.querySelector('canvas')?.dataset.logicalWidth).toBe('300')
+      );
+      form.populateForm(settings);
+    } finally {
+      form.destroy();
+      modal.close();
+      modal.remove();
+    }
+    expect(disconnect).toHaveBeenCalled();
+    expect(cancelFrame).toHaveBeenCalled();
+  });
+
+  it('keeps an unsupported browser translation-off preference through an open form round trip', () => {
+    const previousTranslator = globalThis.Translator;
+    // @ts-expect-error Exercise the unsupported-browser UI branch.
+    delete globalThis.Translator;
+    try {
+      const settings = makeDefaults({ translationService: 'off' });
+      const form = new SettingsUiForm(() => settings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      form.setModal(modal);
+      form.populateForm(settings);
+
+      const pane = modal.querySelector<HTMLElement>('#pane-translation');
+      const preference = pane?.querySelector<HTMLInputElement>('[name="translationEnabled"]');
+      expect(preference).not.toBeNull();
+      const capability = pane?.querySelector('.yt-chat-overlay-settings-capability');
+      expect(capability?.getAttribute('role')).toBe('note');
+      expect((capability as HTMLElement | null)?.dataset.supported).toBe('false');
+      expect(capability?.textContent).toBe(
+        'This browser does not expose the built-in Translator API. Your preference is kept, but translation will stay inactive here.'
+      );
+      expect(pane?.textContent).not.toContain('ready');
+      const service = pane?.querySelector<HTMLSelectElement>('[name="translationService"]');
+      expect(service?.value).toBe('off');
+      expect(service?.selectedOptions[0]?.textContent).toBe('Off');
+      preference!.checked = true;
+      expect(form.collectSettings().translationEnabled).toBe(true);
+      expect(form.collectSettings().translationService).toBe('off');
+
+      form.destroy();
+    } finally {
+      globalThis.Translator = previousTranslator;
+    }
+  });
+
+  it('describes an exposed translation API without claiming language-pair readiness', () => {
+    const previousTranslator = globalThis.Translator;
+    globalThis.Translator = {
+      availability: async () => 'available' as const,
+      create: async () => ({
+        translate: async (text: string) => text,
+        destroy: () => undefined,
+      }),
+    };
+    try {
+      const form = new SettingsUiForm(getSettings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+
+      const capability = modal.querySelector<HTMLElement>(
+        '#pane-translation .yt-chat-overlay-settings-capability'
+      );
+      expect(capability?.dataset.supported).toBe('true');
+      expect(capability?.textContent).toContain('Language-pair and model availability');
+      expect(capability?.textContent.toLowerCase()).not.toContain('ready');
+      expect(modal.querySelector('#pane-translation [name="translationEnabled"]')).not.toBeNull();
+
+      form.destroy();
+    } finally {
+      globalThis.Translator = previousTranslator;
+    }
+  });
+
+  it('renders runtime progress and readiness only for the current enabled pair', () => {
+    const previousTranslator = globalThis.Translator;
+    globalThis.Translator = {
+      availability: async () => 'available' as const,
+      create: async () => ({ translate: async (text: string) => text, destroy: () => undefined }),
+    };
+    try {
+      let settings = makeDefaults({ translationEnabled: true, translationSource: 'en' });
+      const form = new SettingsUiForm(() => settings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      form.setModal(modal);
+      const line = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-runtime-status');
+      expect(line?.getAttribute('role')).toBe('status');
+      expect(line?.textContent).toContain('Waiting for an overlay session');
+
+      const status: TranslationRuntimeStatus = {
+        phase: 'downloading',
+        reason: null,
+        source: 'en',
+        target: 'en',
+        progressPercent: 42,
+        generation: 1,
+      };
+      form.setTranslationStatus(status);
+      expect(line?.dataset.phase).toBe('downloading');
+      expect(line?.textContent).toContain('download 42%');
+
+      form.setTranslationStatus({ ...status, phase: 'active', progressPercent: null });
+      expect(line?.dataset.phase).toBe('active');
+      expect(line?.textContent).toContain('en → en');
+
+      settings = makeDefaults({ translationEnabled: true, translationSource: 'ja' });
+      form.populateForm(settings);
+      expect(line?.dataset.phase).toBe('preparing');
+      expect(line?.textContent).not.toContain('active');
+
+      settings = makeDefaults({ translationEnabled: true, translationService: 'off' });
+      form.populateForm(settings);
+      expect(line?.dataset.phase).toBe('off');
+      expect(line?.textContent).toContain('Service is Off');
+      form.destroy();
+    } finally {
+      globalThis.Translator = previousTranslator;
+    }
+  });
+
+  it('styles the disclosure, unmasked preview, metrics, and capability states inside the modal', () => {
+    expect(SETTINGS_UI_STYLES).toMatch(/\.yt-chat-overlay-settings-disclosure\s*\{[^}]*border:/s);
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-disclosure\s*>\s*summary:focus-visible\s*\{[^}]*outline:/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview\s*\{[^}]*flex:\s*none/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*display:\s*grid[^}]*flex:\s*none/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-text\s*\{[^}]*position:\s*relative/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-metrics\s*\{[^}]*font-size:/s
+    );
+    expect(SETTINGS_UI_STYLES).not.toContain('mask-image:');
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(max-height: 640px\)[\s\S]*?dialog\.yt-chat-overlay-settings-modal\[open\]\s*\{[^}]*max-height:\s*calc\(100dvh - 16px\)/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(max-height: 800px\)[\s\S]*?\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*min-height:\s*112px/s
+    );
+    expect(SETTINGS_UI_STYLES).toContain(
+      '.yt-chat-overlay-settings-capability[data-supported="false"]'
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(forced-colors: active\)[\s\S]*?\.yt-chat-overlay-settings-disclosure > summary\s*\{[^}]*background:\s*ButtonFace;[^}]*color:\s*ButtonText;/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(forced-colors: active\)[\s\S]*?\.yt-chat-overlay-settings-disclosure > summary::marker\s*\{[^}]*color:\s*ButtonText;/s
+    );
+  });
+
+  it('keeps localized tabs and actions reflowable at narrow widths', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    form.createModalContent();
+
+    expect(SETTINGS_UI_STYLES).toContain('@media (max-width: 480px)');
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-tab\s*\{[^}]*flex:\s*1 0 auto;[^}]*white-space:\s*nowrap/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-actions\s*\{[^}]*flex-wrap:\s*wrap/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-actions button\s*\{[^}]*flex:\s*1 0 auto;[^}]*white-space:\s*nowrap/s
+    );
+    form.destroy();
+  });
+
+  it('uses explicit transition properties for font chips', () => {
+    expect(SETTINGS_UI_STYLES).not.toMatch(
+      /\.yt-chat-overlay-settings-font-chip\s*\{[^}]*transition:\s*all/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-chip\s*\{[^}]*transition:[^;}]*background-color[^;}]*border-color[^;}]*color/s
+    );
+  });
+
+  it('synchronizes the selected font weight for assistive technology', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(makeDefaults({ fontWeight: 'bold' }));
+
+    const normal = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn[data-value="normal"]'
+    );
+    const bold = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn[data-value="bold"]'
+    );
+    expect(normal?.getAttribute('aria-pressed')).toBe('false');
+    expect(bold?.getAttribute('aria-pressed')).toBe('true');
+
+    normal?.click();
+    expect(normal?.getAttribute('aria-pressed')).toBe('true');
+    expect(bold?.getAttribute('aria-pressed')).toBe('false');
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it.each(['en', 'ko', 'ja', 'es', 'zh-CN', 'ar'] as const)(
+    'names font groups and every control independently in %s',
+    (language) => {
+      resolveActiveLanguage(language);
+      const form = new SettingsUiForm(getSettings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      document.body.appendChild(modal);
+      form.setModal(modal);
+      form.populateForm(getSettings());
+
+      const weightGroup = modal.querySelector<HTMLFieldSetElement>(
+        'fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-weight-toggle)'
+      );
+      const familyGroup = modal.querySelector<HTMLFieldSetElement>(
+        'fieldset.yt-chat-overlay-settings-control-group:has(.yt-chat-overlay-settings-font-chips-wrapper)'
+      );
+      expect(weightGroup?.querySelector('legend')?.textContent).toBe(t('danmaku.fontWeight'));
+      expect(familyGroup?.querySelector('legend')?.textContent).toBe(t('danmaku.fontFamily'));
+      expect(weightGroup?.closest('label')).toBeNull();
+      expect(familyGroup?.closest('label')).toBeNull();
+      expect(weightGroup?.querySelectorAll('label')).toHaveLength(0);
+      expect(familyGroup?.querySelectorAll('label')).toHaveLength(0);
+
+      const bold = weightGroup?.querySelector<HTMLButtonElement>('[data-value="bold"]');
+      const regular = weightGroup?.querySelector<HTMLButtonElement>('[data-value="normal"]');
+      expect(bold?.textContent).toBe(t('danmaku.weightBold'));
+      expect(regular?.textContent).toBe(t('danmaku.weightRegular'));
+      expect(bold?.getAttribute('aria-pressed')).toBe('true');
+      expect(regular?.getAttribute('aria-pressed')).toBe('false');
+      for (const button of weightGroup?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        expect(button.type).toBe('button');
+        expect(button.textContent?.trim()).toBeTruthy();
+        expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
+      }
+      const chips = familyGroup?.querySelectorAll<HTMLButtonElement>(
+        '.yt-chat-overlay-settings-font-chip'
+      );
+      expect(chips?.length).toBeGreaterThan(1);
+      for (const button of chips ?? []) {
+        expect(button.type).toBe('button');
+        expect(button.textContent?.trim()).toBeTruthy();
+        expect(button.getAttribute('aria-pressed')).toMatch(/^(true|false)$/);
+      }
+      const chip = familyGroup?.querySelector<HTMLButtonElement>(
+        '.yt-chat-overlay-settings-font-chip'
+      );
+      expect(chip?.textContent).toBe(t('danmaku.fontSystemDefault'));
+      expect(chip?.hasAttribute('aria-pressed')).toBe(true);
+      expect(
+        familyGroup?.querySelector<HTMLButtonElement>(
+          '.yt-chat-overlay-settings-font-chip[data-value="monospace"]'
+        )?.textContent
+      ).toBe(t('danmaku.fontMonospace'));
+      const namedFont = Array.from(
+        familyGroup?.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-font-chip') ??
+          []
+      ).find((button) => button.dataset.value === '"Noto Sans KR", sans-serif');
+      expect(namedFont?.textContent).toBe('Noto Sans KR');
+      const custom = familyGroup?.querySelector<HTMLInputElement>(
+        '.yt-chat-overlay-settings-font-custom-input'
+      );
+      expect(custom?.getAttribute('aria-label')).toBe(t('danmaku.fontCustom'));
+      expect(custom?.getAttribute('aria-label')).not.toBe(
+        familyGroup?.querySelector('legend')?.textContent
+      );
+
+      weightGroup
+        ?.querySelector('legend')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(bold?.getAttribute('aria-pressed')).toBe('true');
+      expect(onPreview).not.toHaveBeenCalled();
+      form.destroy();
+      modal.remove();
+      resolveActiveLanguage('en');
+    }
+  );
+
+  it('round-trips preset and custom fonts, weight, and saved motion override values', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+
+    for (const ignoreReducedMotion of [false, true]) {
+      form.populateForm(makeDefaults({ ignoreReducedMotion }));
+      expect(
+        modal.querySelector<HTMLInputElement>('input[name="ignoreReducedMotion"]')?.checked
+      ).toBe(ignoreReducedMotion);
+      expect(form.collectSettings().ignoreReducedMotion).toBe(ignoreReducedMotion);
+    }
+
+    const regular = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn[data-value="normal"]'
+    );
+    regular?.click();
+    expect(form.collectSettings().fontWeight).toBe('normal');
+    expect(regular?.getAttribute('aria-pressed')).toBe('true');
+
+    const chip = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-font-chip[data-value="monospace"]'
+    );
+    chip?.click();
+    expect(form.collectSettings().fontFamily).toBe('monospace');
+    expect(chip?.getAttribute('aria-pressed')).toBe('true');
+
+    const custom = modal.querySelector<HTMLInputElement>(
+      '.yt-chat-overlay-settings-font-custom-input'
+    );
+    custom!.value = 'Georgia, serif';
+    custom!.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(form.collectSettings().fontFamily).toBe('Georgia, serif');
+    expect(chip?.getAttribute('aria-pressed')).toBe('false');
+    expect(onPreview).toHaveBeenCalled();
+
+    form.populateForm(
+      makeDefaults({
+        fontFamily: 'Georgia, serif',
+        fontWeight: 'normal',
+        ignoreReducedMotion: true,
+      })
+    );
+    expect(custom?.value).toBe('Georgia, serif');
+    expect(regular?.getAttribute('aria-pressed')).toBe('true');
+    expect(form.collectSettings().ignoreReducedMotion).toBe(true);
+    form.destroy();
+    modal.remove();
+  });
+
+  it('keeps clamping feedback in a stable slot until the value is corrected', () => {
+    vi.useFakeTimers();
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const input = modal.querySelector<HTMLInputElement>('input[name="opacity"]');
+    expect(input).not.toBeNull();
+    const slot = modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-field-error[data-for="opacity"]'
+    );
+    expect(slot).not.toBeNull();
+    expect(slot?.textContent).toBe('');
+    expect(slot?.hasAttribute('role')).toBe(false);
+    expect(slot?.getAttribute('aria-live')).toBe('polite');
+    expect(slot?.getAttribute('aria-atomic')).toBe('true');
+
+    input!.value = '9999';
+    form.collectSettings();
+    expect(slot?.textContent).not.toBe('');
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(input?.getAttribute('aria-errormessage')).toBe(slot?.id);
+
+    vi.advanceTimersByTime(3000);
+    expect(slot?.textContent).not.toBe('');
+
+    const slider = modal.querySelector<HTMLInputElement>(
+      `input[type="range"][aria-describedby="${input!.id}"]`
+    );
+    expect(slider).not.toBeNull();
+    slider!.value = '50';
+    slider!.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(input?.value).toBe('50');
+    expect(slot?.textContent).toBe('');
+    expect(input?.getAttribute('aria-invalid')).toBe('false');
+    expect(input?.hasAttribute('aria-errormessage')).toBe(false);
+
+    form.destroy();
+    modal.remove();
+    vi.useRealTimers();
+  });
+
+  it('collectSettings from populated modal returns valid settings', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+
+    const nodes = form.createModalContent();
+    modal.append(...nodes);
+    form.setModal(modal);
+    form.populateForm(makeDefaults({ fontSize: 48, opacity: 0.8 }));
+
+    const collected = form.collectSettings();
+    expect(typeof collected.fontSize).toBe('number');
+    expect(typeof collected.opacity).toBe('number');
+    // fontSize should be preserved
+    expect(collected.fontSize).toBe(48);
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('populates and collects author background color controls', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const normalColor = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundColor-normal"]'
+    );
+    const normalEnabled = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundEnabled-normal"]'
+    );
+    const moderatorColor = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundColor-moderator"]'
+    );
+    const moderatorEnabled = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundEnabled-moderator"]'
+    );
+
+    expect(normalColor?.value).toBe('#000000');
+    expect(normalEnabled?.checked).toBe(false);
+    expect(normalColor?.getAttribute('aria-label')).toBe('Normal Background');
+    expect(normalEnabled?.getAttribute('aria-label')).toBe('Show Normal Background');
+    expect(moderatorColor?.value).toBe('#1b3a6f');
+    expect(moderatorEnabled?.checked).toBe(true);
+
+    normalColor!.value = '#112233';
+    normalColor!.dispatchEvent(new Event('change'));
+    expect(normalEnabled?.checked).toBe(true);
+    moderatorEnabled!.checked = false;
+
+    const collected = form.collectSettings();
+    expect(collected.backgroundColors.normal).toBe('#11223359');
+    expect(collected.backgroundColors.moderator).toBe('#1B3A6F00');
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('round-trips outline, author color, and visibility control groups', () => {
+    const settings = makeDefaults({
+      outline: { enabled: false, widthPx: 3.5, opacity: 0.4 },
+      colors: { ...makeDefaults().colors, member: '#123456' },
+      showAuthor: { ...makeDefaults().showAuthor, normal: true, superChat: false },
+    });
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+
+    form.populateForm(settings);
+    const collected = form.collectSettings();
+
+    expect(collected.outline).toEqual(settings.outline);
+    expect(collected.colors.member).toBe('#123456');
+    expect(collected.showAuthor.normal).toBe(true);
+    expect(collected.showAuthor.superChat).toBe(false);
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('destroy cleans up resources', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+
+    form.setModal(modal);
+    form.destroy();
+
+    // After destroy, getFocusableElements should return empty
+    expect(form.getFocusableElements()).toEqual([]);
+    modal.remove();
+  });
+});

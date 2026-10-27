@@ -178,6 +178,10 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.core != 'true' }}
         run: echo "browser-core inputs are unchanged; the shared-core contract check is skipped."
 
+      - name: Install Chromium for Browser Mode unit tests
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
+        run: vp exec playwright install --with-deps chromium
+
       - name: 🧪 Run focused CI regression tests
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.unit == 'true' && needs.changes.outputs.quality != 'true' }}
         run: vp run test:ci

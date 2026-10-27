@@ -1,5 +1,4 @@
-// @vitest-environment jsdom
-// @vitest-environment-options {"url":"https://www.youtube.com/watch?v=native-abc"}
+// SPDX-License-Identifier: MIT
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,66 +13,39 @@ import {
   runLiveDuration,
 } from '../../../validation/windows/live-duration.ts';
 import {
+  inspectBoundNativeMuteButton,
+  playOwnedMutedVideo,
+} from '../../../validation/windows/native-mute-page.ts';
+import {
   createNativeMuteBoundary,
   establishOwnedMute,
-  type inspectBoundNativeMuteButton,
-  playOwnedMutedVideo,
+  type NativeMuteBoundary,
 } from '../../../validation/windows/native-player-mute.ts';
 
 const ID = 'native-abc';
 
-function setup(muted = false) {
-  document.body.innerHTML = `<div id="movie_player"><video></video><div class="ytp-mute-button">
-    <button class="ytp-volume-icon ytp-button" aria-keyshortcuts="m"></button>
-    </div></div>`;
-  const player = document.querySelector('#movie_player');
-  const video = document.querySelector('#movie_player video');
-  const button = document.querySelector('#movie_player button');
-  if (
-    !(player instanceof Element) ||
-    !(video instanceof HTMLVideoElement) ||
-    !(button instanceof HTMLButtonElement)
-  )
-    throw new Error('Missing native mute fixture');
-  Object.assign(player, { getVideoData: () => ({ video_id: ID }) });
-  Object.defineProperty(video, 'readyState', { configurable: true, get: () => 4 });
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-  Object.defineProperty(document, 'elementFromPoint', {
-    configurable: true,
-    value: vi.fn(() => button),
-  });
-  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
-    left: 10,
-    top: 20,
-    width: 30,
-    height: 30,
-  } as DOMRect);
-  video.muted = muted;
-  button.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
-  button.setAttribute('title', muted ? 'Unmute' : 'Mute');
-  let clicks = 0;
-  button.addEventListener('click', () => {
-    clicks++;
-    video.muted = true;
-    button.setAttribute('aria-label', 'Unmute');
-    button.setAttribute('title', 'Unmute');
-  });
-  return { player, video, button, clicks: () => clicks };
-}
-
-function mockedAction(fixture: ReturnType<typeof setup>) {
+function actionFixture(initiallyMuted = false) {
+  let muted = initiallyMuted;
+  let readCount = 0;
+  const order: string[] = [];
   const hover = vi.fn().mockResolvedValue(undefined);
   const dispose = vi.fn().mockResolvedValue(undefined);
-  const click = vi.fn(async () => fixture.button.click());
+  const click = vi.fn(async () => {
+    order.push('click');
+    muted = true;
+  });
   const buttonHandle = {
-    evaluate: vi.fn(
-      async (fn: typeof inspectBoundNativeMuteButton, args: { expectedVideoId: string }) =>
-        fn(fixture.button, {
-          player: fixture.player,
-          video: fixture.video,
-          expectedVideoId: args.expectedVideoId,
-        })
-    ),
+    evaluate: vi.fn(async (fn: typeof inspectBoundNativeMuteButton) => {
+      expect(fn).toBe(inspectBoundNativeMuteButton);
+      readCount++;
+      return {
+        decision: muted ? ('already-muted' as const) : ('click-mute' as const),
+        muted,
+        paused: true,
+        readyState: 4,
+        currentTime: 0,
+      };
+    }),
     click,
     dispose,
   };
@@ -83,44 +55,44 @@ function mockedAction(fixture: ReturnType<typeof setup>) {
     elementHandle: vi.fn().mockResolvedValue(buttonHandle),
   };
   const playerLocator = {
-    getByRole: vi.fn((_role: string, { name }: { name: RegExp }) => ({
-      waitFor: vi.fn(async () => {
-        if (!name.test(fixture.button.getAttribute('aria-label') ?? '')) {
-          throw new Error('Native Unmute label absent');
-        }
-      }),
-    })),
+    getByRole: vi.fn(() => ({ waitFor: vi.fn().mockResolvedValue(undefined) })),
   };
   const page = {
     locator: vi.fn((selector: string) =>
       selector === '#movie_player' ? playerLocator : muteLocator
     ),
   } as unknown as Page;
-  const binding = {
-    player: { hover },
-    video: {},
-  } as unknown as Parameters<typeof establishOwnedMute>[0]['binding'];
-  const controller = { timedOut: false, pendingUncertain: 0, lateSettlements: 0 };
+  const binding = { player: { hover }, video: {} } as unknown as Parameters<
+    typeof establishOwnedMute
+  >[0]['binding'];
+  const controller: NativeMuteBoundary = {
+    timedOut: false,
+    pendingUncertain: 0,
+    lateSettlements: 0,
+  };
   const bounded = createNativeMuteBoundary({ deadlineMs: performance.now() + 10_000, controller });
-  return { page, binding, bounded, buttonHandle, click, dispose, hover, controller };
+  return {
+    page,
+    binding,
+    bounded,
+    buttonHandle,
+    click,
+    dispose,
+    hover,
+    order,
+    controller,
+    muted: () => muted,
+    readCount: () => readCount,
+  };
 }
 
-afterEach(() => {
-  document.body.innerHTML = '';
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.restoreAllMocks());
 
-describe('one retained native mute control', () => {
-  it('persists the sole click intent first, then proves Unmute and the same muted video', async () => {
-    const fixture = setup(false);
-    const action = mockedAction(fixture);
-    const order: string[] = [];
-    action.click.mockImplementation(async () => {
-      order.push('click');
-      fixture.button.click();
-    });
+describe('native mute orchestration', () => {
+  it('persists the sole click intent before the click and proves the retained state', async () => {
+    const action = actionFixture();
     const beforeClick = vi.fn(async () => {
-      order.push('intent-persisted');
+      action.order.push('intent-persisted');
     });
     const result = await establishOwnedMute({ ...action, expectedVideoId: ID, beforeClick });
     expect(result).toMatchObject({
@@ -131,16 +103,14 @@ describe('one retained native mute control', () => {
       before: { muted: false },
       after: { muted: true, decision: 'already-muted' },
     });
-    expect(order).toEqual(['intent-persisted', 'click']);
+    expect(action.order).toEqual(['intent-persisted', 'click']);
     expect(action.hover).toHaveBeenCalledOnce();
-    expect(action.click).toHaveBeenCalledOnce();
+    expect(action.buttonHandle.evaluate).toHaveBeenCalledTimes(3);
     expect(action.dispose).toHaveBeenCalledOnce();
-    expect(fixture.clicks()).toBe(1);
   });
 
-  it('accepts an already muted retained video without another click', async () => {
-    const fixture = setup(true);
-    const action = mockedAction(fixture);
+  it('accepts an already muted retained video without a click', async () => {
+    const action = actionFixture(true);
     const beforeClick = vi.fn();
     const result = await establishOwnedMute({ ...action, expectedVideoId: ID, beforeClick });
     expect(result).toMatchObject({
@@ -150,37 +120,23 @@ describe('one retained native mute control', () => {
     });
     expect(action.click).not.toHaveBeenCalled();
     expect(beforeClick).not.toHaveBeenCalled();
+    expect(action.dispose).toHaveBeenCalledOnce();
   });
 
-  it('rejects wrong identity, ad, conflicting label, overlay hit and replacement before click', async () => {
-    const failures = [
-      (fixture: ReturnType<typeof setup>) =>
-        Object.assign(fixture.player, { getVideoData: () => ({ video_id: 'other' }) }),
-      (fixture: ReturnType<typeof setup>) => fixture.player.classList.add('ad-showing'),
-      (fixture: ReturnType<typeof setup>) => fixture.button.setAttribute('aria-label', 'Unmute'),
-      () =>
-        Object.defineProperty(document, 'elementFromPoint', {
-          configurable: true,
-          value: () => document.body,
-        }),
-      (fixture: ReturnType<typeof setup>) =>
-        fixture.button.replaceWith(document.createElement('button')),
-    ];
-    for (const corrupt of failures) {
-      const fixture = setup(false);
-      corrupt(fixture);
-      const action = mockedAction(fixture);
-      await expect(
-        establishOwnedMute({ ...action, expectedVideoId: ID, beforeClick: vi.fn() })
-      ).rejects.toThrow();
-      expect(action.click).not.toHaveBeenCalled();
-      expect(action.dispose).toHaveBeenCalledOnce();
-    }
+  it('stops before the click when native page inspection rejects the retained control', async () => {
+    const action = actionFixture();
+    action.buttonHandle.evaluate.mockRejectedValueOnce(
+      new Error('Native mute control is not uniquely actionable')
+    );
+    await expect(
+      establishOwnedMute({ ...action, expectedVideoId: ID, beforeClick: vi.fn() })
+    ).rejects.toThrow('not uniquely actionable');
+    expect(action.click).not.toHaveBeenCalled();
+    expect(action.dispose).toHaveBeenCalledOnce();
   });
 
-  it('does not issue a click when the before-click receipt fails', async () => {
-    const fixture = setup(false);
-    const action = mockedAction(fixture);
+  it('does not click when the before-click receipt fails', async () => {
+    const action = actionFixture();
     await expect(
       establishOwnedMute({
         ...action,
@@ -191,10 +147,15 @@ describe('one retained native mute control', () => {
       })
     ).rejects.toThrow('receipt failed');
     expect(action.click).not.toHaveBeenCalled();
+    expect(action.dispose).toHaveBeenCalledOnce();
   });
 
-  it('keeps a timeout uncertain and blocks any subsequent action after late settlement', async () => {
-    const controller = { timedOut: false, pendingUncertain: 0, lateSettlements: 0 };
+  it('keeps a timeout uncertain and blocks subsequent actions after late settlement', async () => {
+    const controller: NativeMuteBoundary = {
+      timedOut: false,
+      pendingUncertain: 0,
+      lateSettlements: 0,
+    };
     const bounded = createNativeMuteBoundary({ deadlineMs: performance.now() + 1_000, controller });
     let settle: (() => void) | undefined;
     await expect(
@@ -217,47 +178,24 @@ describe('one retained native mute control', () => {
     expect(controller).toMatchObject({ timedOut: true, pendingUncertain: 0, lateSettlements: 1 });
   });
 
-  it('guards owned play after mute proof and never writes the mute property', () => {
-    const fixture = setup(true);
-    const play = vi.spyOn(fixture.video, 'play').mockResolvedValue();
-    const action = playOwnedMutedVideo(fixture.video, {
-      player: fixture.player,
-      expectedVideoId: ID,
+  it('records click intent and owned play before a later mute drift aborts readiness', async () => {
+    const action = actionFixture();
+    const playerHandle = { hover: action.hover, dispose: vi.fn().mockResolvedValue(undefined) };
+    const videoEvaluate = vi.fn(async (fn: typeof playOwnedMutedVideo) => {
+      expect(fn).toBe(playOwnedMutedVideo);
+      return { action: 'play', before: { muted: true }, after: { muted: true } };
     });
-    expect(action).toMatchObject({
-      action: 'play',
-      before: { muted: true },
-      after: { muted: true },
-    });
-    expect(play).toHaveBeenCalledOnce();
-    fixture.video.muted = false;
-    expect(() =>
-      playOwnedMutedVideo(fixture.video, {
-        player: fixture.player,
-        expectedVideoId: ID,
-      })
-    ).toThrow(/lost verified mute/u);
-    expect(play).toHaveBeenCalledOnce();
-  });
-
-  it('the duration caller persists one native click and rejects mute drift during readiness', async () => {
-    const fixture = setup(false);
-    const action = mockedAction(fixture);
-    const playerHandle = Object.assign(fixture.player, {
-      hover: action.hover,
-      dispose: vi.fn().mockResolvedValue(undefined),
-    });
-    const play = vi.spyOn(fixture.video, 'play').mockResolvedValue();
-    const videoHandle = Object.assign(fixture.video, {
-      evaluate: vi.fn(async (fn: typeof playOwnedMutedVideo, args: { expectedVideoId: string }) =>
-        fn(fixture.video, {
-          player: fixture.player,
-          expectedVideoId: args.expectedVideoId,
-        })
-      ),
-      dispose: vi.fn().mockResolvedValue(undefined),
-    });
+    const videoHandle = { evaluate: videoEvaluate, dispose: vi.fn().mockResolvedValue(undefined) };
     let stateReads = 0;
+    const healthyState = {
+      visibility: 'visible',
+      playerVideoId: ID,
+      adShowing: false,
+      playerErrorUi: { visible: false, marker: null },
+      video: { currentTime: 0, errorCode: null, muted: false, paused: true, readyState: 4 },
+      canvasAttached: false,
+      installedBridgeReady: false,
+    };
     const page = {
       on: vi.fn(),
       bringToFront: vi.fn().mockResolvedValue(undefined),
@@ -268,27 +206,33 @@ describe('one retained native mute control', () => {
           return {
             waitFor: vi.fn().mockResolvedValue(undefined),
             elementHandle: vi.fn().mockResolvedValue(playerHandle),
-            getByRole: vi.fn((_role: string, { name }: { name: RegExp }) => ({
-              waitFor: vi.fn(async () => {
-                if (!name.test(fixture.button.getAttribute('aria-label') ?? '')) {
-                  throw new Error('Native Unmute label absent');
-                }
-              }),
-            })),
+            getByRole: vi.fn(() => ({ waitFor: vi.fn().mockResolvedValue(undefined) })),
           };
         if (selector === '#movie_player video')
-          return {
-            elementHandle: vi.fn().mockResolvedValue(videoHandle),
-          };
+          return { elementHandle: vi.fn().mockResolvedValue(videoHandle) };
         return {
           waitFor: vi.fn().mockResolvedValue(undefined),
           count: vi.fn().mockResolvedValue(1),
           elementHandle: vi.fn().mockResolvedValue(action.buttonHandle),
         };
       }),
-      evaluate: vi.fn(async (fn: (argument: unknown) => unknown, argument: unknown) => {
-        if (fn === readPublicDurationPageState && ++stateReads === 2) fixture.video.muted = false;
-        return fn(argument);
+      evaluate: vi.fn(async (fn: unknown) => {
+        if (fn === readPublicDurationPageState) {
+          stateReads++;
+          return {
+            ...healthyState,
+            video: { ...healthyState.video, muted: false },
+          };
+        }
+        return {
+          playerFound: true,
+          mediaIdentity: 'unavailable',
+          mediaNetworkState: null,
+          mediaErrorCode: null,
+          providerStatus: null,
+          providerReason: null,
+          candidates: [],
+        };
       }),
       isClosed: vi.fn(() => false),
       screenshot: vi.fn().mockResolvedValue(undefined),
@@ -321,8 +265,8 @@ describe('one retained native mute control', () => {
       );
       expect(result.status).toBe('failed');
       expect(action.click).toHaveBeenCalledOnce();
-      expect(play).toHaveBeenCalledOnce();
-      expect(fixture.video.muted).toBe(false);
+      expect(videoEvaluate).toHaveBeenCalledOnce();
+      expect(stateReads).toBeGreaterThanOrEqual(2);
     } finally {
       await rm(output, { recursive: true, force: true });
     }

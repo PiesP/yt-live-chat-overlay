@@ -32,6 +32,13 @@ declare global {
   interface Window {
     /** Debug handle exposed by the overlay script (available in DevTools). */
     __ytChatOverlay: YtChatOverlayDebugHandle | undefined;
+    /** Installed extension bridge exposed by the page bootstrap. */
+    __ytExtensionBridge?: {
+      workerSupported?: boolean;
+      storageType?: string;
+      workerUrl?: string;
+      nonce?: string;
+    };
     GM_listValues?: () => string[];
     GM_openInTab?: (url: string) => void;
     GM_cookie?: {

@@ -11,6 +11,9 @@ import { join } from 'node:path';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 
 import { buildVisibleWatchHtml } from '../visible-watch.ts';
+import { INSTALLED_SCRIPT_ROW_SELECTOR } from './manager-row.ts';
+
+export { INSTALLED_SCRIPT_ROW_SELECTOR } from './manager-row.ts';
 
 type UpgradeInput = {
   schemaVersion: number;
@@ -313,10 +316,6 @@ export function requireInstalledScriptRow(rows: string[], version: string) {
   );
   return { scriptName: SCRIPT_NAME, version, rowText: words.slice(0, 200) };
 }
-
-// Tampermonkey's dashboard renders each installed script as tr.scripttr.
-// Its separate action-menu renderer also uses tr.script, so that is not a list entry.
-export const INSTALLED_SCRIPT_ROW_SELECTOR = 'tr.scripttr';
 
 export function requireRetainedSettings(before: Settings, after: Settings) {
   const numericValues = (values: Settings) => {

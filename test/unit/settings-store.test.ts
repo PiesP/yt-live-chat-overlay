@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// @vitest-environment jsdom
 
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';

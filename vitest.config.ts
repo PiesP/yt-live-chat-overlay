@@ -2,12 +2,22 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vite-plus';
+import { playwright } from 'vite-plus/test/browser-playwright';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const srcDir = resolve(__dirname, 'src');
 
 export default defineConfig({
   define: { __DEV__: true, __USERSCRIPT__: false },
+  optimizeDeps: {
+    include: [
+      '@piesp/browser-core/async',
+      '@piesp/browser-core/design',
+      '@piesp/browser-core/error',
+      '@piesp/browser-core/locale',
+      '@piesp/browser-core/util',
+    ],
+  },
   test: {
     // Preserve Vitest 4 mock history while validating the migrated test suite.
     clearMocks: false,
@@ -16,9 +26,23 @@ export default defineConfig({
       {
         test: {
           name: 'unit',
-          environment: 'jsdom',
+          environment: 'node',
           setupFiles: ['./test/setup.ts'],
           include: ['test/unit/**/*.test.ts', 'test/consistency/**/*.test.ts'],
+          exclude: ['test/unit/**/*.browser.test.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'browser',
+          setupFiles: ['./test/setup.ts'],
+          include: ['test/unit/**/*.browser.test.ts'],
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [{ browser: 'chromium' }],
+          },
         },
       },
       {
