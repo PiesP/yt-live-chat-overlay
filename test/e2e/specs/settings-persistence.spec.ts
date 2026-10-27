@@ -94,6 +94,77 @@ test.describe('Settings Persistence', () => {
     }
   });
 
+  test('recovers a denied initial read without replacing untouched form preferences', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript((key) => {
+      const original = Storage.prototype.getItem;
+      const testWindow = window as Window & {
+        allowSettingsRead?: boolean;
+        deniedReads?: number;
+        readActualSettings?: () => string | null;
+      };
+      testWindow.allowSettingsRead = sessionStorage.getItem('__ytTestAllowSettingsRead') === '1';
+      testWindow.deniedReads = 0;
+      testWindow.readActualSettings = () => original.call(localStorage, key);
+      Storage.prototype.getItem = function (name: string): string | null {
+        const stored = original.call(this, name);
+        if (name === key && stored !== null && !testWindow.allowSettingsRead) {
+          testWindow.deniedReads = (testWindow.deniedReads ?? 0) + 1;
+          throw new Error('Controlled initial settings read denial');
+        }
+        return stored;
+      };
+    }, SETTINGS_STORAGE_KEY);
+    await setupPersistentSettingsPage(page, {
+      ...DEFAULT_SETTINGS,
+      language: 'en',
+      fontSize: 48,
+      speedPxPerSec: 420,
+      opacity: 0.75,
+    });
+    const originalRaw = await page.evaluate(() =>
+      (window as Window & { readActualSettings?: () => string | null }).readActualSettings?.()
+    );
+    expect(originalRaw).toBeTruthy();
+    await expect
+      .poll(async () => (await getSettings(page)).fontSize)
+      .toBe(DEFAULT_SETTINGS.fontSize);
+
+    await page.locator('#movie_player').hover();
+    await page.locator(`#${BUTTON_ID}`).click();
+    const dialog = page.locator('#yt-chat-overlay-settings-backdrop');
+    await dialog.locator('input[name="opacity"]').fill('50');
+    await expect.poll(async () => (await getSettings(page)).opacity).toBe(0.5);
+    await page.keyboard.press('Escape');
+    const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
+    await expect(notice).toContainText('were not saved');
+    expect(
+      await page.evaluate(() =>
+        (window as Window & { readActualSettings?: () => string | null }).readActualSettings?.()
+      )
+    ).toBe(originalRaw);
+    expect(
+      await page.evaluate(() => (window as Window & { deniedReads?: number }).deniedReads)
+    ).toBeGreaterThanOrEqual(2);
+
+    await page.evaluate(() => {
+      const testWindow = window as Window & { allowSettingsRead?: boolean };
+      testWindow.allowSettingsRead = true;
+      sessionStorage.setItem('__ytTestAllowSettingsRead', '1');
+    });
+    await notice.getByRole('button', { name: 'Retry save' }).click();
+    await expect(notice).toContainText('Settings saved.');
+    await waitForStoredSettings(page, { fontSize: 48, speedPxPerSec: 420, opacity: 0.5 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached' });
+    await expect.poll(async () => (await getSettings(page)).fontSize).toBe(48);
+    expect(await getSettings(page)).toMatchObject({ speedPxPerSec: 420, opacity: 0.5 });
+    expect(errors).toEqual([]);
+  });
+
   test('keeps preview usable after a denied write, then retries and reloads the saved value', async ({
     page,
   }) => {

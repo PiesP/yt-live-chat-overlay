@@ -310,6 +310,36 @@ flow and check:
 
 Explain any browser or extension lane that could not be run.
 
+### Settings read recovery
+
+Storage adapters return `null` only when the settings key is verified absent;
+GM, direct Chrome, localStorage and extension-relay read failures reject. A
+missing key starts with defaults and permits a normal first edit. An unreadable
+key starts a usable session with an unsaved notice. The app does not write a
+default-derived settings record while the baseline remains unreadable. A manual
+retry without edits reads again and installs the recovered preferences. With
+edits, retry reads the record, applies only the explicitly changed fields and
+then saves. A failed read or write keeps those edits unsaved for another manual
+retry. A malformed stored record also remains unavailable rather than being
+treated as an absent key; valid legacy records continue through migration and
+normalization on read. A recovery read that finishes during a live dialog
+preview leaves the older edit unsaved until the form closes. Close applies the
+final form value before saving, including a pending preview revert. A remote
+conflict cannot be resolved while a preview is still open; after close, the
+explicit conflict choice uses the accepted form value.
+
+The dialog records the settings it displayed at open and sends only changed
+fields on preview and close, including nested author/color/outline fields. Reset
+and import remain explicit whole-settings choices. An in-document replacement
+owner receives pending edits through the settings handoff; a browser restart
+without a successful write cannot recover memory-only edits. Remote storage
+notifications during a pending edit retain the existing conflict notice and
+require the user's explicit "Save my values" choice. The single settings record
+still has no atomic cross-document compare-and-swap; a successful read followed
+by a concurrent external write can race. A blanket retry of the default-filled
+form or a read exception alone would lose unrelated preferences, so neither is
+used as the recovery contract.
+
 `pnpm test:e2e` covers the Firefox userscript and installed extension on
 deterministic fixtures. Before a release, also complete the
 [Firefox extension checklist](./extension/README.md#browser-validation) on a real

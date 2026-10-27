@@ -48,6 +48,9 @@ declare global {
     __ytAcceptanceDenySettings?: boolean;
     __ytAcceptanceDeniedWrites?: number;
     __ytAcceptanceDeniedWriteStacks?: string[];
+    __ytAcceptanceAllowSettingsRead?: boolean;
+    __ytAcceptanceDeniedReads?: number;
+    __ytAcceptanceActualSettings?: () => string | null;
   }
 }
 
@@ -128,10 +131,11 @@ async function routeFixture(context: BrowserContext, watchHtml: string): Promise
 async function installFixtureScripts(
   context: BrowserContext,
   userscript: string,
-  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>
+  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>,
+  initialReadFailure = false
 ): Promise<void> {
   await context.addInitScript(
-    ({ storageKey, selectedLanguage }) => {
+    ({ storageKey, selectedLanguage, denyInitialRead }) => {
       (window as Window & { unsafeWindow?: Window }).unsafeWindow = window;
       window.__ytAcceptanceDenySettings = false;
       window.__ytAcceptanceDeniedWrites = 0;
@@ -139,8 +143,27 @@ async function installFixtureScripts(
       if (localStorage.getItem(storageKey) === null) {
         localStorage.setItem(
           storageKey,
-          JSON.stringify({ fontSize: 32, language: selectedLanguage })
+          JSON.stringify(
+            denyInitialRead
+              ? { fontSize: 48, speedPxPerSec: 420, opacity: 0.75, language: selectedLanguage }
+              : { fontSize: 32, language: selectedLanguage }
+          )
         );
+      }
+      if (denyInitialRead) {
+        const originalGet = Storage.prototype.getItem;
+        window.__ytAcceptanceDeniedReads = 0;
+        window.__ytAcceptanceAllowSettingsRead =
+          sessionStorage.getItem('__ytAcceptanceAllowSettingsRead') === '1';
+        window.__ytAcceptanceActualSettings = () => originalGet.call(localStorage, storageKey);
+        Storage.prototype.getItem = function (key: string): string | null {
+          const value = originalGet.call(this, key);
+          if (key === storageKey && value !== null && !window.__ytAcceptanceAllowSettingsRead) {
+            window.__ytAcceptanceDeniedReads = (window.__ytAcceptanceDeniedReads ?? 0) + 1;
+            throw new Error('Controlled initial settings read denial');
+          }
+          return value;
+        };
       }
       const original = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key: string, value: string): void {
@@ -154,7 +177,11 @@ async function installFixtureScripts(
         original.call(this, key, value);
       };
     },
-    { storageKey: SETTINGS_KEY, selectedLanguage: language.language }
+    {
+      storageKey: SETTINGS_KEY,
+      selectedLanguage: language.language,
+      denyInitialRead: initialReadFailure,
+    }
   );
   await context.addInitScript({ content: userscript });
 }
@@ -162,13 +189,14 @@ async function installFixtureScripts(
 async function createFixtureContext(
   browser: Browser,
   userscript: string,
-  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>
+  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>,
+  initialReadFailure = false
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
     locale: language.locale,
     viewport: { width: language.width, height: 720 },
   });
-  await installFixtureScripts(context, userscript, language);
+  await installFixtureScripts(context, userscript, language, initialReadFailure);
   return context;
 }
 
@@ -680,6 +708,83 @@ async function runChromeZoomCase({
   return { ...result, cleanup: { zoomRestored, contextClosed, profileRemoved } };
 }
 
+async function runInitialReadRecoveryCase({
+  browser,
+  output,
+  userscript,
+  watchHtml,
+}: {
+  browser: Browser;
+  output: string;
+  userscript: string;
+  watchHtml: string;
+}) {
+  const context = await createFixtureContext(
+    browser,
+    userscript,
+    { locale: 'en-US', language: 'en', width: 1280 },
+    true
+  );
+  const pageErrors: string[] = [];
+  try {
+    await routeFixture(context, watchHtml);
+    const page = await openFixturePage(context, pageErrors);
+    const before = await page.evaluate(() => window.__ytAcceptanceActualSettings?.());
+    assert(before, 'Initial-read fixture did not seed existing preferences');
+    assert.equal(JSON.parse(before).fontSize, 48);
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize !== 48);
+
+    await openSettings(page);
+    await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('50');
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().opacity === 0.5);
+    await page.keyboard.press('Escape');
+    const notice = page.locator(NOTICE_SELECTOR);
+    const retry = notice.getByRole('button', { name: 'Retry save' });
+    await retry.waitFor({ state: 'visible' });
+    assert.match((await notice.textContent()) ?? '', /were not saved/u);
+    assert.equal(await page.evaluate(() => window.__ytAcceptanceActualSettings?.()), before);
+    const deniedReads = await page.evaluate(() => window.__ytAcceptanceDeniedReads ?? 0);
+    assert(deniedReads >= 2, 'Initial load and persistence must each attempt a real read');
+    await page.screenshot({ path: join(output, 'settings-initial-read-unsaved.png') });
+
+    await page.evaluate(() => {
+      window.__ytAcceptanceAllowSettingsRead = true;
+      sessionStorage.setItem('__ytAcceptanceAllowSettingsRead', '1');
+    });
+    await retry.click();
+    await notice.getByText('Settings saved.').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => {
+      const raw = window.__ytAcceptanceActualSettings?.();
+      if (!raw) return false;
+      const stored = JSON.parse(raw) as {
+        fontSize: number;
+        speedPxPerSec: number;
+        opacity: number;
+      };
+      return stored.fontSize === 48 && stored.speedPxPerSec === 420 && stored.opacity === 0.5;
+    });
+    await page.screenshot({ path: join(output, 'settings-initial-read-saved.png') });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
+    await page.waitForFunction(() => {
+      const settings = window.__ytChatOverlay?.getSettings?.();
+      return (
+        settings?.fontSize === 48 && settings.speedPxPerSec === 420 && settings.opacity === 0.5
+      );
+    });
+    assert.deepEqual(pageErrors, []);
+    return {
+      deniedReads,
+      before: { fontSize: 48, speedPxPerSec: 420, opacity: 0.75 },
+      after: { fontSize: 48, speedPxPerSec: 420, opacity: 0.5 },
+      screenshots: ['settings-initial-read-unsaved.png', 'settings-initial-read-saved.png'],
+      pageErrors,
+    };
+  } finally {
+    await context.close();
+  }
+}
+
 /** Bounded built-userscript fixture selected by a bundle-hashed local input. */
 export async function runSettingsPersistenceFixture({
   browser,
@@ -769,6 +874,12 @@ export async function runSettingsPersistenceFixture({
       localized.push(await runLocalizedCase({ browser, output, userscript, watchHtml, language }));
     }
     const conflict = await runConflictCase({ browser, output, userscript, watchHtml });
+    const initialReadRecovery = await runInitialReadRecoveryCase({
+      browser,
+      output,
+      userscript,
+      watchHtml,
+    });
     const browserZoom200 = await runChromeZoomCase({
       browser,
       root,
@@ -788,6 +899,7 @@ export async function runSettingsPersistenceFixture({
         oneDeniedWriteBeforeRetry: true,
         repeatedDenialRemainsRecoverable: true,
         crossTabConflictRequiresDecision: true,
+        deniedInitialReadPreservesPreferences: true,
         realBrowserZoom200Observed: true,
         retryPersisted: true,
         reloadReadPersisted: true,
@@ -798,12 +910,13 @@ export async function runSettingsPersistenceFixture({
         deniedWrites: 2,
         beforeFontSize: JSON.parse(before).fontSize,
         afterFontSize: 44,
-        notice: { unsaved, repeatedUnsaved, saved, localized, conflict },
+        notice: { unsaved, repeatedUnsaved, saved, localized, conflict, initialReadRecovery },
         browserZoom200,
         installedExtension: 'not-run: focused selector exercises the built userscript',
         screenshots: [
           'settings-unsaved.png',
           'settings-saved.png',
+          ...initialReadRecovery.screenshots,
           ...localized.flatMap((item) => item.screenshots),
           ...conflict.screenshots,
           'settings-zoom-ko-100.png',

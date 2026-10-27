@@ -7,6 +7,7 @@ import { getStorageAdapter } from '@platform/storage-adapters';
 import {
   applySettingsPatch,
   cloneSettings,
+  combineSettingsPatches,
   DEFAULT_SETTINGS,
   normalizeStoredSettings,
   SETTINGS_VERSION,
@@ -23,6 +24,8 @@ type Handoff = {
   owner: symbol;
   revision: number;
   settings: OverlaySettings;
+  patch: Partial<OverlaySettings>;
+  baselineAvailable: boolean;
   baselineRaw: string | null;
   conflicted: boolean;
 };
@@ -49,9 +52,14 @@ export class Settings {
   private localRevision = 0;
   private previewDirty = false;
   private unsaved: UnsavedSnapshot | null = null;
+  /** Edits made without a readable starting record must survive recovery. */
+  private pendingPatch: Partial<OverlaySettings> = {};
+  private baselineAvailable = false;
   private writeFailed = false;
   private remoteConflict = false;
   private conflictEpoch = 0;
+  /** Invalidates older read results when a new storage notification arrives. */
+  private storageEpoch = 0;
   private lastStoredRaw: string | null = null;
   private inFlightRaw: string | null = null;
   private retired = false;
@@ -68,6 +76,7 @@ export class Settings {
       (changedRaw === this.lastStoredRaw && !this.saving)
     )
       return;
+    this.storageEpoch++;
     if (this.unsaved || this.previewDirty || this.saving || this.savePromise) {
       // A remote decision cannot silently replace this local edit, and an
       // automatic retry cannot silently replace the remote decision.
@@ -78,6 +87,8 @@ export class Settings {
           owner: this.owner,
           revision: this.localRevision,
           settings: cloneSettings(this.settings),
+          patch: cloneSettings(this.settings),
+          baselineAvailable: this.baselineAvailable,
           baselineRaw: this.lastStoredRaw,
           conflicted: true,
         };
@@ -101,48 +112,67 @@ export class Settings {
     // storage state before applying the in-document handoff.
     await writeTail;
     if (this.retired || activeOwner !== this.owner) return;
+    let raw: string | null = null;
+    let readable = false;
     try {
-      const raw = await getStorageAdapter().getItem(STORAGE_KEY);
-      if (this.retired || activeOwner !== this.owner) return;
-      const handoff = pendingHandoff;
-      if (handoff) {
-        this.settings = cloneSettings(handoff.settings);
-        if (raw === serialized(handoff.settings) && !handoff.conflicted) {
-          pendingHandoff = null;
-          this.lastStoredRaw = raw;
-        } else {
-          this.localRevision++;
-          this.unsaved = {
-            revision: this.localRevision,
-            settings: cloneSettings(handoff.settings),
-          };
-          this.lastStoredRaw = handoff.baselineRaw;
-          this.remoteConflict = handoff.conflicted || raw !== handoff.baselineRaw;
-          this.writeFailed = !this.remoteConflict;
-          pendingHandoff = { ...handoff, owner: this.owner, revision: this.localRevision };
-        }
-      } else {
-        this.lastStoredRaw = raw;
-        if (raw) {
-          const parsed: unknown = JSON.parse(raw);
-          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            this.settings = normalizeStoredSettings(parsed as Record<string, unknown>);
-          }
-        }
-      }
+      raw = await getStorageAdapter().getItem(STORAGE_KEY);
+      // A malformed record is an unavailable baseline, not a missing record.
+      this.readSettings(raw);
+      readable = true;
     } catch (error: unknown) {
       log.warn('settings.store.load-failed', { error: String(error) });
-      if (pendingHandoff) {
-        this.settings = cloneSettings(pendingHandoff.settings);
+    }
+    if (this.retired || activeOwner !== this.owner) return;
+    const handoff = pendingHandoff;
+    if (handoff) {
+      this.pendingPatch = handoff.patch;
+      this.settings = cloneSettings(handoff.settings);
+      if (readable && raw === serialized(handoff.settings) && !handoff.conflicted) {
+        this.lastStoredRaw = raw;
+        this.baselineAvailable = true;
+        this.pendingPatch = {};
+        pendingHandoff = null;
+      } else {
         this.localRevision++;
+        this.baselineAvailable = readable;
+        if (readable && !handoff.baselineAvailable) {
+          this.settings = applySettingsPatch(this.readSettings(raw), handoff.patch);
+          this.lastStoredRaw = raw;
+        } else {
+          this.lastStoredRaw = handoff.baselineRaw;
+        }
         this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
-        this.writeFailed = true;
-        pendingHandoff = { ...pendingHandoff, owner: this.owner, revision: this.localRevision };
+        this.remoteConflict =
+          handoff.conflicted ||
+          (readable && handoff.baselineAvailable && raw !== handoff.baselineRaw);
+        this.writeFailed = !this.remoteConflict;
+        pendingHandoff = {
+          ...handoff,
+          owner: this.owner,
+          revision: this.localRevision,
+          settings: cloneSettings(this.settings),
+          baselineAvailable: this.baselineAvailable,
+        };
       }
+    } else if (readable) {
+      this.baselineAvailable = true;
+      this.lastStoredRaw = raw;
+      this.settings = this.readSettings(raw);
+    } else {
+      this.writeFailed = true;
     }
     if (this.retired || activeOwner !== this.owner) return;
     this.crossTabSyncAdapter.addListener(this.onCrossTabChange);
     this.notifyPersistence();
+  }
+
+  private readSettings(raw: string | null): OverlaySettings {
+    if (raw === null) return cloneSettings(DEFAULT_SETTINGS);
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('Stored settings are not an object');
+    }
+    return normalizeStoredSettings(parsed as Record<string, unknown>);
   }
 
   subscribe(callback: () => void): () => void {
@@ -164,7 +194,7 @@ export class Settings {
 
   private settledState(): PersistenceState {
     if (this.remoteConflict) return 'conflict';
-    if (this.writeFailed) return 'unsaved';
+    if (this.writeFailed || !this.baselineAvailable) return 'unsaved';
     return this.unsaved ? 'pending' : 'saved';
   }
 
@@ -190,9 +220,12 @@ export class Settings {
 
   private async reloadFromStorage(): Promise<void> {
     const revisionAtStart = this.localRevision;
+    const storageEpochAtStart = this.storageEpoch;
     try {
       const raw = await getStorageAdapter().getItem(STORAGE_KEY);
-      if (!raw || this.retired || activeOwner !== this.owner) return;
+      const recovered = this.readSettings(raw);
+      if (this.retired || activeOwner !== this.owner || storageEpochAtStart !== this.storageEpoch)
+        return;
       if (
         revisionAtStart !== this.localRevision ||
         this.unsaved ||
@@ -201,14 +234,20 @@ export class Settings {
         this.savePromise
       )
         return;
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        this.settings = normalizeStoredSettings(parsed as Record<string, unknown>);
-        this.lastStoredRaw = raw;
-        for (const cb of this.onChangeCallbacks) cb();
-      }
+      this.settings = recovered;
+      this.lastStoredRaw = raw;
+      this.baselineAvailable = true;
+      this.writeFailed = false;
+      for (const cb of this.onChangeCallbacks) cb();
+      this.notifyPersistence();
     } catch (error: unknown) {
       log.warn('settings.store.reload-failed', { error: String(error) });
+      if (storageEpochAtStart !== this.storageEpoch) return;
+      if (!this.unsaved && !this.previewDirty) {
+        this.baselineAvailable = false;
+        this.writeFailed = true;
+        this.notifyPersistence();
+      }
     }
   }
 
@@ -222,6 +261,36 @@ export class Settings {
     try {
       if (this.retired || activeOwner !== this.owner || this.remoteConflict || !this.unsaved) {
         return this.persistenceState();
+      }
+      if (!this.baselineAvailable) {
+        // A live form preview is memory-only. Let its close decide which
+        // values are committed before recovering and saving the older edit.
+        if (this.previewDirty) return this.settledState();
+        try {
+          const recoveredRaw = await getStorageAdapter().getItem(STORAGE_KEY);
+          const recovered = this.readSettings(recoveredRaw);
+          if (this.retired || activeOwner !== this.owner || this.remoteConflict || !this.unsaved) {
+            return this.persistenceState();
+          }
+          if (this.previewDirty) return this.settledState();
+          this.baselineAvailable = true;
+          this.lastStoredRaw = recoveredRaw;
+          this.settings = applySettingsPatch(recovered, this.pendingPatch);
+          this.unsaved = {
+            revision: this.unsaved.revision,
+            settings: cloneSettings(this.settings),
+          };
+          if (pendingHandoff?.owner === this.owner) {
+            pendingHandoff.settings = cloneSettings(this.settings);
+            pendingHandoff.baselineRaw = recoveredRaw;
+            pendingHandoff.baselineAvailable = true;
+          }
+          for (const callback of this.onChangeCallbacks) callback();
+        } catch (error: unknown) {
+          this.writeFailed = true;
+          log.warn('settings.store.recovery-failed', { error: String(error) });
+          return this.settledState();
+        }
       }
       const snapshot = this.unsaved;
       const raw = serialized(snapshot.settings);
@@ -237,6 +306,7 @@ export class Settings {
           this.unsaved?.revision === snapshot.revision
         ) {
           this.unsaved = null;
+          this.pendingPatch = {};
           this.writeFailed = false;
           if (
             pendingHandoff?.owner === this.owner &&
@@ -308,7 +378,37 @@ export class Settings {
 
   /** Exactly one manual attempt; a denial never starts a retry timer. */
   retrySave(): Promise<PersistenceState> {
+    if (!this.unsaved && !this.baselineAvailable && !this.previewDirty)
+      return this.recoverWithoutEdits();
     return this.flushSave(true);
+  }
+
+  private async recoverWithoutEdits(): Promise<PersistenceState> {
+    const revision = this.localRevision;
+    const storageEpochAtStart = this.storageEpoch;
+    try {
+      const raw = await getStorageAdapter().getItem(STORAGE_KEY);
+      const recovered = this.readSettings(raw);
+      if (
+        this.retired ||
+        activeOwner !== this.owner ||
+        revision !== this.localRevision ||
+        storageEpochAtStart !== this.storageEpoch
+      ) {
+        return this.persistenceState();
+      }
+      this.settings = recovered;
+      this.lastStoredRaw = raw;
+      this.baselineAvailable = true;
+      this.writeFailed = false;
+      for (const callback of this.onChangeCallbacks) callback();
+    } catch (error: unknown) {
+      if (storageEpochAtStart !== this.storageEpoch) return this.persistenceState();
+      this.writeFailed = true;
+      log.warn('settings.store.recovery-failed', { error: String(error) });
+    }
+    this.notifyPersistence();
+    return this.persistenceState();
   }
 
   get(): Readonly<OverlaySettings> {
@@ -317,14 +417,18 @@ export class Settings {
 
   set(partial: Partial<OverlaySettings>): void {
     if (this.retired || activeOwner !== this.owner) return;
+    if (Object.keys(partial).length === 0) return;
     this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
+    this.pendingPatch = combineSettingsPatches(this.pendingPatch, partial);
     this.previewDirty = false;
     this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
     pendingHandoff = {
       owner: this.owner,
       revision: this.localRevision,
       settings: cloneSettings(this.settings),
+      patch: this.pendingPatch,
+      baselineAvailable: this.baselineAvailable,
       baselineRaw: this.lastStoredRaw,
       conflicted: this.remoteConflict,
     };
@@ -339,16 +443,40 @@ export class Settings {
     this.previewDirty = true;
   }
 
+  /** A dialog closed with no net edit must release its transient preview. */
+  endPreview(): void {
+    if (this.retired || activeOwner !== this.owner) return;
+    this.previewDirty = false;
+    if (this.remoteConflict && this.unsaved) {
+      // A remote notice may have captured an earlier preview. The form has
+      // now closed, so its restored value becomes the accepted local choice.
+      this.localRevision++;
+      this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
+      this.pendingPatch = cloneSettings(this.settings);
+      if (pendingHandoff?.owner === this.owner) {
+        pendingHandoff.revision = this.localRevision;
+        pendingHandoff.settings = cloneSettings(this.settings);
+        pendingHandoff.patch = this.pendingPatch;
+      }
+    }
+    // If the previous save is still unwinding after deferring to the form,
+    // this explicit close needs one queued attempt with the retained edit.
+    if (this.unsaved && this.savePromise) this.savePending = true;
+  }
+
   reset(): void {
     if (this.retired || activeOwner !== this.owner) return;
     this.localRevision++;
     this.settings = cloneSettings(DEFAULT_SETTINGS);
+    this.pendingPatch = cloneSettings(this.settings);
     this.previewDirty = false;
     this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
     pendingHandoff = {
       owner: this.owner,
       revision: this.localRevision,
       settings: cloneSettings(this.settings),
+      patch: this.pendingPatch,
+      baselineAvailable: this.baselineAvailable,
       baselineRaw: this.lastStoredRaw,
       conflicted: this.remoteConflict,
     };
@@ -359,11 +487,15 @@ export class Settings {
 
   /** Only a direct user choice may replace a known remote decision. */
   chooseLocalAndPersist(): Promise<PersistenceState> {
-    if (!this.unsaved || this.retired || activeOwner !== this.owner) {
+    if (!this.unsaved || this.previewDirty || this.retired || activeOwner !== this.owner) {
       return Promise.resolve(this.persistenceState());
     }
     this.remoteConflict = false;
-    if (pendingHandoff?.owner === this.owner) pendingHandoff.conflicted = false;
+    this.pendingPatch = cloneSettings(this.settings);
+    if (pendingHandoff?.owner === this.owner) {
+      pendingHandoff.conflicted = false;
+      pendingHandoff.patch = this.pendingPatch;
+    }
     this.notifyPersistence();
     return this.flushSave(true, true);
   }

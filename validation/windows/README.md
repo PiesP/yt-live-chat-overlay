@@ -160,9 +160,12 @@ For a focused settings-persistence run, create the ignored
 The declared `inputs` asset includes and hashes this local selector in the bundle.
 The profile runs the built userscript fixture in the prepared browser: preview a
 font edit, deny and retry settings writes, observe the session-only notice, test
-a real cross-tab storage conflict, and reload the saved value. It records
-computed notice typography, focus, bounds, and screenshots for English and
-narrow Korean/Japanese layouts. A separate owned Chrome profile sets real 200%
+a real cross-tab storage conflict, and reload the saved value. A separate owned
+page denies the initial settings read, edits one form field, confirms zero
+replacement writes while reads fail, then recovers and checks untouched values
+in a fresh document. It records computed notice typography, focus, bounds, and
+screenshots for English and narrow Korean/Japanese layouts. A separate owned
+Chrome profile sets real 200%
 page zoom through Chrome Settings and repeats the affected localized and conflict
 states, then restores zoom and removes that profile after confirmed closure.
 This is a controlled localStorage boundary, not an installed extension or live

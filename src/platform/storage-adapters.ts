@@ -159,14 +159,10 @@ export function getStorageAdapter(): StorageAdapter {
   if (typeof GM_getValue !== 'undefined' && typeof GM_setValue !== 'undefined') {
     cachedAdapter = {
       async getItem(key: string): Promise<string | null> {
-        try {
-          const rawValue: unknown = GM_getValue(key);
-          if (rawValue === undefined || rawValue === null) return null;
-          if (typeof rawValue === 'object') return JSON.stringify(rawValue);
-          return String(rawValue);
-        } catch (_error: unknown) {
-          return null;
-        }
+        const rawValue: unknown = GM_getValue(key);
+        if (rawValue === undefined || rawValue === null) return null;
+        if (typeof rawValue === 'object') return JSON.stringify(rawValue);
+        return String(rawValue);
       },
       async setItem(key: string, value: string): Promise<void> {
         if (typeof GM_setValue === 'undefined') throw new Error('GM storage is unavailable');
@@ -186,15 +182,13 @@ export function getStorageAdapter(): StorageAdapter {
     const storage = chrome.storage.local;
     cachedAdapter = {
       async getItem(key: string): Promise<string | null> {
-        try {
-          const result = await storage.get(key);
-          if (!result) return null;
-          const value = result[key];
-          if (value === undefined || value === null) return null;
-          return typeof value === 'string' ? value : JSON.stringify(value);
-        } catch (_error: unknown) {
-          return null;
+        const result = await storage.get(key);
+        if (!result || typeof result !== 'object') {
+          throw new Error('Chrome storage read returned no result');
         }
+        const value = result[key];
+        if (value === undefined || value === null) return null;
+        return typeof value === 'string' ? value : JSON.stringify(value);
       },
       async setItem(key: string, value: string): Promise<void> {
         try {
@@ -216,11 +210,7 @@ export function getStorageAdapter(): StorageAdapter {
   // localStorage (fallback)
   cachedAdapter = {
     async getItem(key: string): Promise<string | null> {
-      try {
-        return localStorage.getItem(key);
-      } catch (_error: unknown) {
-        return null;
-      }
+      return localStorage.getItem(key);
     },
     async setItem(key: string, value: string): Promise<void> {
       try {
