@@ -82,9 +82,10 @@ pinned. The table records execution stage, inputs, side effects and checks.
 The Vite+ `import/no-cycle` rule checks static and type-only edges across the
 recursive `src` scope, including the application root, deep settings UI and
 separately bundled renderer Worker. It follows configured TypeScript aliases
-and resolved imports into the linked core without a depth limit. Top-level
-extension entry files are linted for local rules and have separate build and
-type checks; they are outside this `src` cycle policy. Arbitrary dynamic-only
+and resolved imports into the linked core without a depth limit. The normal
+`vp check` also passes top-level extension files to Oxlint, so resolved static
+cycles there may be reported; extension build and type gates remain separate.
+Arbitrary dynamic-only
 and mixed static/dynamic cycles no longer have a whole-graph prevention gate.
 Keep initialization and Worker-loading behavior tests for their real boundaries.
 
