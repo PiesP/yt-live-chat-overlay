@@ -735,7 +735,7 @@ async function runInitialReadRecoveryCase({
     await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize !== 48);
 
     await openSettings(page);
-    await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('0.5');
+    await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('50');
     await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().opacity === 0.5);
     await page.keyboard.press('Escape');
     const notice = page.locator(NOTICE_SELECTOR);

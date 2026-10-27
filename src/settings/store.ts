@@ -58,6 +58,8 @@ export class Settings {
   private writeFailed = false;
   private remoteConflict = false;
   private conflictEpoch = 0;
+  /** Invalidates older read results when a new storage notification arrives. */
+  private storageEpoch = 0;
   private lastStoredRaw: string | null = null;
   private inFlightRaw: string | null = null;
   private retired = false;
@@ -74,6 +76,7 @@ export class Settings {
       (changedRaw === this.lastStoredRaw && !this.saving)
     )
       return;
+    this.storageEpoch++;
     if (this.unsaved || this.previewDirty || this.saving || this.savePromise) {
       // A remote decision cannot silently replace this local edit, and an
       // automatic retry cannot silently replace the remote decision.
@@ -127,6 +130,7 @@ export class Settings {
       if (readable && raw === serialized(handoff.settings) && !handoff.conflicted) {
         this.lastStoredRaw = raw;
         this.baselineAvailable = true;
+        this.pendingPatch = {};
         pendingHandoff = null;
       } else {
         this.localRevision++;
@@ -216,10 +220,12 @@ export class Settings {
 
   private async reloadFromStorage(): Promise<void> {
     const revisionAtStart = this.localRevision;
+    const storageEpochAtStart = this.storageEpoch;
     try {
       const raw = await getStorageAdapter().getItem(STORAGE_KEY);
       const recovered = this.readSettings(raw);
-      if (this.retired || activeOwner !== this.owner) return;
+      if (this.retired || activeOwner !== this.owner || storageEpochAtStart !== this.storageEpoch)
+        return;
       if (
         revisionAtStart !== this.localRevision ||
         this.unsaved ||
@@ -236,6 +242,7 @@ export class Settings {
       this.notifyPersistence();
     } catch (error: unknown) {
       log.warn('settings.store.reload-failed', { error: String(error) });
+      if (storageEpochAtStart !== this.storageEpoch) return;
       if (!this.unsaved && !this.previewDirty) {
         this.baselineAvailable = false;
         this.writeFailed = true;
@@ -374,10 +381,16 @@ export class Settings {
 
   private async recoverWithoutEdits(): Promise<PersistenceState> {
     const revision = this.localRevision;
+    const storageEpochAtStart = this.storageEpoch;
     try {
       const raw = await getStorageAdapter().getItem(STORAGE_KEY);
       const recovered = this.readSettings(raw);
-      if (this.retired || activeOwner !== this.owner || revision !== this.localRevision) {
+      if (
+        this.retired ||
+        activeOwner !== this.owner ||
+        revision !== this.localRevision ||
+        storageEpochAtStart !== this.storageEpoch
+      ) {
         return this.persistenceState();
       }
       this.settings = recovered;
@@ -386,6 +399,7 @@ export class Settings {
       this.writeFailed = false;
       for (const callback of this.onChangeCallbacks) callback();
     } catch (error: unknown) {
+      if (storageEpochAtStart !== this.storageEpoch) return this.persistenceState();
       this.writeFailed = true;
       log.warn('settings.store.recovery-failed', { error: String(error) });
     }
@@ -423,6 +437,11 @@ export class Settings {
     this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
     this.previewDirty = true;
+  }
+
+  /** A dialog closed with no net edit must release its transient preview. */
+  endPreview(): void {
+    this.previewDirty = false;
   }
 
   reset(): void {

@@ -161,7 +161,7 @@ export class SettingsUi {
     this.previewTimer = clearSafeTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
-      const preview = this.formChanges();
+      const preview = changedSettingsPatch(this.getSettings(), this.form.collectSettings());
       this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());

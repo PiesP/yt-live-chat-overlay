@@ -158,6 +158,7 @@ class App {
 
   private persistSettings(partial: Partial<OverlaySettings>) {
     if (Object.keys(partial).length > 0) this.applySettings(partial);
+    else this.settings.endPreview();
     return this.settings.persistNow();
   }
 

@@ -3,6 +3,7 @@
 import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage } from '@i18n/index';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
+import { applySettingsPatch, cloneSettings } from '@settings/schema';
 import { MAX_SETTINGS_IMPORT_BYTES, SettingsUi } from '@settings/ui/controller';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
@@ -158,6 +159,54 @@ describe('SettingsUi', () => {
 
   it('constructs without throwing', () => {
     expect(() => makeController()).not.toThrow();
+  });
+
+  it('restores scalar and nested previews when the form returns to its opening values', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let current = cloneSettings(DEFAULT_SETTINGS);
+    const onPersist = vi.fn(async (_patch: Partial<OverlaySettings>) => 'saved' as const);
+    const controller = new SettingsUi(
+      () => current,
+      (patch) => {
+        current = applySettingsPatch(current, patch);
+      },
+      vi.fn(),
+      onPersist
+    );
+    await controller.attach();
+    player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+    const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+    const opacity = modal?.querySelector<HTMLInputElement>('input[name="opacity"]');
+    const outline = modal?.querySelector<HTMLInputElement>('input[name="outline-enabled"]');
+    expect(modal?.open).toBe(true);
+    expect(opacity).not.toBeNull();
+    expect(outline).not.toBeNull();
+
+    opacity!.value = '75';
+    opacity!.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.waitFor(() => expect(current.opacity).toBe(0.75));
+    opacity!.value = '100';
+    opacity!.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.waitFor(() => expect(current.opacity).toBe(1));
+    expect(opacity?.value).toBe('100');
+
+    outline!.checked = !DEFAULT_SETTINGS.outline.enabled;
+    outline!.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() =>
+      expect(current.outline.enabled).not.toBe(DEFAULT_SETTINGS.outline.enabled)
+    );
+    outline!.checked = DEFAULT_SETTINGS.outline.enabled;
+    outline!.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(current.outline.enabled).toBe(DEFAULT_SETTINGS.outline.enabled));
+    expect(outline?.checked).toBe(DEFAULT_SETTINGS.outline.enabled);
+
+    controller.close();
+    await vi.waitFor(() => expect(onPersist).toHaveBeenCalledTimes(1));
+    expect(onPersist).toHaveBeenCalledWith({});
+    controller.destroy();
   });
 
   it('close does not throw when never opened', () => {

@@ -35,6 +35,12 @@ describe('STORAGE_KEY', () => {
 });
 
 describe('settings form intent', () => {
+  it('does not mistake browser color-input casing for a user edit', () => {
+    const displayed = cloneSettings(DEFAULT_SETTINGS);
+    displayed.colors.normal = displayed.colors.normal.toLowerCase();
+    expect(changedSettingsPatch(DEFAULT_SETTINGS, displayed)).toEqual({});
+  });
+
   it('retains only changed scalar and nested values when a form starts from defaults', () => {
     const form = applySettingsPatch(DEFAULT_SETTINGS, {
       opacity: 0.5,

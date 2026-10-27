@@ -291,19 +291,26 @@ export function changedSettingsPatch(
   baseline: Readonly<OverlaySettings>,
   current: Readonly<OverlaySettings>
 ): Partial<OverlaySettings> {
+  const equal = (left: unknown, right: unknown): boolean =>
+    left === right ||
+    (typeof left === 'string' &&
+      typeof right === 'string' &&
+      /^#[0-9a-f]+$/i.test(left) &&
+      /^#[0-9a-f]+$/i.test(right) &&
+      left.toLowerCase() === right.toLowerCase());
   const changed: Record<string, unknown> = {};
   for (const key of Object.keys(current) as (keyof OverlaySettings)[]) {
     const next = current[key];
     const previous = baseline[key];
     if (typeof next === 'object' && next !== null && !Array.isArray(next)) {
       const nested: Record<string, unknown> = {};
-      const oldValues = previous as Record<string, unknown>;
+      const oldValues = (previous ?? {}) as Record<string, unknown>;
       for (const child of Object.keys(next)) {
         const value = (next as Record<string, unknown>)[child];
-        if (value !== oldValues[child]) nested[child] = value;
+        if (!equal(value, oldValues[child])) nested[child] = value;
       }
       if (Object.keys(nested).length > 0) changed[key] = nested;
-    } else if (next !== previous) {
+    } else if (!equal(next, previous)) {
       changed[key] = next;
     }
   }

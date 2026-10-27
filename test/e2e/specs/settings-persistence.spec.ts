@@ -136,7 +136,7 @@ test.describe('Settings Persistence', () => {
     await page.locator('#movie_player').hover();
     await page.locator(`#${BUTTON_ID}`).click();
     const dialog = page.locator('#yt-chat-overlay-settings-backdrop');
-    await dialog.locator('input[name="opacity"]').fill('0.5');
+    await dialog.locator('input[name="opacity"]').fill('50');
     await expect.poll(async () => (await getSettings(page)).opacity).toBe(0.5);
     await page.keyboard.press('Escape');
     const notice = page.locator('.yt-chat-overlay-settings-persistence-notice');
