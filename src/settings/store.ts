@@ -263,12 +263,16 @@ export class Settings {
         return this.persistenceState();
       }
       if (!this.baselineAvailable) {
+        // A live form preview is memory-only. Let its close decide which
+        // values are committed before recovering and saving the older edit.
+        if (this.previewDirty) return this.settledState();
         try {
           const recoveredRaw = await getStorageAdapter().getItem(STORAGE_KEY);
           const recovered = this.readSettings(recoveredRaw);
           if (this.retired || activeOwner !== this.owner || this.remoteConflict || !this.unsaved) {
             return this.persistenceState();
           }
+          if (this.previewDirty) return this.settledState();
           this.baselineAvailable = true;
           this.lastStoredRaw = recoveredRaw;
           this.settings = applySettingsPatch(recovered, this.pendingPatch);
@@ -441,7 +445,23 @@ export class Settings {
 
   /** A dialog closed with no net edit must release its transient preview. */
   endPreview(): void {
+    if (this.retired || activeOwner !== this.owner) return;
     this.previewDirty = false;
+    if (this.remoteConflict && this.unsaved) {
+      // A remote notice may have captured an earlier preview. The form has
+      // now closed, so its restored value becomes the accepted local choice.
+      this.localRevision++;
+      this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
+      this.pendingPatch = cloneSettings(this.settings);
+      if (pendingHandoff?.owner === this.owner) {
+        pendingHandoff.revision = this.localRevision;
+        pendingHandoff.settings = cloneSettings(this.settings);
+        pendingHandoff.patch = this.pendingPatch;
+      }
+    }
+    // If the previous save is still unwinding after deferring to the form,
+    // this explicit close needs one queued attempt with the retained edit.
+    if (this.unsaved && this.savePromise) this.savePending = true;
   }
 
   reset(): void {
@@ -467,7 +487,7 @@ export class Settings {
 
   /** Only a direct user choice may replace a known remote decision. */
   chooseLocalAndPersist(): Promise<PersistenceState> {
-    if (!this.unsaved || this.retired || activeOwner !== this.owner) {
+    if (!this.unsaved || this.previewDirty || this.retired || activeOwner !== this.owner) {
       return Promise.resolve(this.persistenceState());
     }
     this.remoteConflict = false;

@@ -322,7 +322,11 @@ edits, retry reads the record, applies only the explicitly changed fields and
 then saves. A failed read or write keeps those edits unsaved for another manual
 retry. A malformed stored record also remains unavailable rather than being
 treated as an absent key; valid legacy records continue through migration and
-normalization on read.
+normalization on read. A recovery read that finishes during a live dialog
+preview leaves the older edit unsaved until the form closes. Close applies the
+final form value before saving, including a pending preview revert. A remote
+conflict cannot be resolved while a preview is still open; after close, the
+explicit conflict choice uses the accepted form value.
 
 The dialog records the settings it displayed at open and sends only changed
 fields on preview and close, including nested author/color/outline fields. Reset

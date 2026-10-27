@@ -175,6 +175,19 @@ export class SettingsUi {
     );
   }
 
+  private persistCurrentForm(): void {
+    const changes = this.formChanges();
+    if (this.previewTimer !== null) {
+      this.previewTimer = clearSafeTimeout(this.previewTimer);
+      // A pending revert must reach live settings before the net form patch
+      // is committed; otherwise an older preview can leak into the save.
+      const preview = changedSettingsPatch(this.getSettings(), this.form.collectSettings());
+      if (Object.keys(preview).length > 0) this.onChange(preview);
+    }
+    this.persistForm(changes);
+    this.formBaseline = null;
+  }
+
   async attach(): Promise<void> {
     // Cancel any in-flight player lookup from a previous attach() that
     // hasn't resolved yet (SPA navigation during await).
@@ -224,11 +237,7 @@ export class SettingsUi {
     // writes settings to storage — preview (memory only) never writes.
     // Covers: X button, Close button, Escape (cancel event), and
     // SPA navigation (destroy() calls close()).
-    if (this.previewTimer !== null) {
-      this.previewTimer = clearSafeTimeout(this.previewTimer);
-    }
-    this.persistForm(this.formChanges());
-    this.formBaseline = null;
+    this.persistCurrentForm();
 
     // The native close event may arrive in a later task. Its handler must not
     // persist the same form a second time after this method has returned.
@@ -686,11 +695,7 @@ export class SettingsUi {
       // Only handle backdrop-initiated closes — our own code sets closing=true
       // before calling modal.close(), which would re-enter here harmlessly.
       this.closing = true;
-      if (this.previewTimer !== null) {
-        this.previewTimer = clearSafeTimeout(this.previewTimer);
-      }
-      this.persistForm(this.formChanges());
-      this.formBaseline = null;
+      this.persistCurrentForm();
       this.restoreDocumentLangDir();
       if (this.previousFocus?.isConnected) {
         this.previousFocus.focus();

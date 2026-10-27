@@ -206,6 +206,90 @@ describe('Settings persistence', () => {
     await settings.destroy();
   });
 
+  it('keeps a newer form preview visible until its explicit close while an older recovery waits', async () => {
+    const existing = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
+    let stored = existing;
+    let reads = 0;
+    let completeRecovery: (() => void) | undefined;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(() => {
+        reads++;
+        if (reads === 1) return Promise.reject(new Error('initial read denied'));
+        if (reads === 2) {
+          return new Promise<string>((resolve) => {
+            completeRecovery = () => resolve(existing);
+          });
+        }
+        return Promise.resolve(stored);
+      }),
+      setItem,
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    settings.set({ opacity: 0.5 });
+    const recovery = settings.persistNow();
+    await vi.waitFor(() => expect(completeRecovery).toBeTypeOf('function'));
+
+    const formSync = vi.fn();
+    settings.subscribe(formSync);
+    settings.preview({ fontSize: 36 });
+    completeRecovery?.();
+    expect(await recovery).toBe('unsaved');
+    expect(settings.get()).toMatchObject({ fontSize: 36, opacity: 0.5 });
+    expect(formSync).not.toHaveBeenCalled();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(stored).toBe(existing);
+
+    settings.set({ fontSize: 36 });
+    expect(await settings.persistNow()).toBe('saved');
+    expect(JSON.parse(stored)).toMatchObject({ fontSize: 36, speedPxPerSec: 420, opacity: 0.5 });
+    await settings.destroy();
+  });
+
+  it('retries an older committed edit when a reverted preview closes as recovery settles', async () => {
+    const existing = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
+    let stored = existing;
+    let reads = 0;
+    let completeRecovery: (() => void) | undefined;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(() => {
+        reads++;
+        if (reads === 1) return Promise.reject(new Error('initial read denied'));
+        if (reads === 2) {
+          return new Promise<string>((resolve) => {
+            completeRecovery = () => resolve(existing);
+          });
+        }
+        return Promise.resolve(stored);
+      }),
+      setItem,
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    settings.set({ opacity: 0.5 });
+    const recovery = settings.persistNow();
+    await vi.waitFor(() => expect(completeRecovery).toBeTypeOf('function'));
+    settings.preview({ fontSize: 36 });
+    settings.preview({ fontSize: 32 });
+
+    completeRecovery?.();
+    const close = Promise.resolve().then(() => {
+      settings.endPreview();
+      return settings.persistNow();
+    });
+    expect(await recovery).toBe('unsaved');
+    expect(await close).toBe('saved');
+    expect(JSON.parse(stored)).toMatchObject({ fontSize: 48, speedPxPerSec: 420, opacity: 0.5 });
+    expect(setItem).toHaveBeenCalledTimes(1);
+    await settings.destroy();
+  });
+
   it('does not write over a remote change announced during initial recovery', async () => {
     let completeRecovery: (() => void) | undefined;
     let onRemote: ((value: string) => void) | undefined;
@@ -515,6 +599,40 @@ describe('Settings persistence', () => {
     settings.set({ fontSize: 45 });
     expect(await settings.persistNow()).toBe('conflict');
     expect(await settings.chooseLocalAndPersist()).toBe('saved');
+    await settings.destroy();
+  });
+
+  it('resolves a preview-time remote conflict with the accepted form value after close', async () => {
+    let stored = JSON.stringify({ fontSize: 32, opacity: 1 });
+    let onRemote: (() => void) | undefined;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(async () => stored),
+      setItem,
+    });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+      }),
+      removeListener: vi.fn(),
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    settings.preview({ fontSize: 45 });
+    stored = JSON.stringify({ fontSize: 52, opacity: 1 });
+    onRemote?.();
+    expect(settings.persistenceState()).toBe('conflict');
+    expect(await settings.chooseLocalAndPersist()).toBe('conflict');
+    expect(setItem).not.toHaveBeenCalled();
+
+    settings.preview({ fontSize: 32 });
+    settings.endPreview();
+    expect(await settings.persistNow()).toBe('conflict');
+    expect(await settings.chooseLocalAndPersist()).toBe('saved');
+    expect(JSON.parse(stored)).toMatchObject({ fontSize: 32, opacity: 1 });
+    expect(setItem).toHaveBeenCalledTimes(1);
     await settings.destroy();
   });
 

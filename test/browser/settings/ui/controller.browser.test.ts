@@ -2,8 +2,10 @@
 
 import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage } from '@i18n/index';
+import { getStorageAdapter } from '@platform/storage-adapters';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
 import { applySettingsPatch, cloneSettings } from '@settings/schema';
+import { Settings } from '@settings/store';
 import { MAX_SETTINGS_IMPORT_BYTES, SettingsUi } from '@settings/ui/controller';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
@@ -18,6 +20,8 @@ vi.mock('@util/dom', async () => {
     findPlayerContainerElement: vi.fn(),
   };
 });
+
+vi.mock('@platform/storage-adapters', () => ({ getStorageAdapter: vi.fn() }));
 
 import { findPlayerContainerElement as mockFinder } from '@util/dom';
 
@@ -207,6 +211,127 @@ describe('SettingsUi', () => {
     await vi.waitFor(() => expect(onPersist).toHaveBeenCalledTimes(1));
     expect(onPersist).toHaveBeenCalledWith({});
     controller.destroy();
+  });
+
+  it.each([
+    ['controller', false],
+    ['controller', true],
+    ['native', false],
+    ['native', true],
+  ] as const)(
+    'reconciles a pending preview revert before %s close (other edit: %s)',
+    async (closePath, editOpacity) => {
+      const player = document.createElement('div');
+      player.id = 'movie_player';
+      document.body.appendChild(player);
+      vi.mocked(mockFinder).mockResolvedValue(player);
+      let current = cloneSettings(DEFAULT_SETTINGS);
+      const onPersist = vi.fn(async (patch: Partial<OverlaySettings>) => {
+        current = applySettingsPatch(current, patch);
+        return 'saved' as const;
+      });
+      const controller = new SettingsUi(
+        () => current,
+        (patch) => {
+          current = applySettingsPatch(current, patch);
+        },
+        vi.fn(),
+        onPersist
+      );
+      await controller.attach();
+      player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+      const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+      const fontSize = modal?.querySelector<HTMLInputElement>('input[name="fontSize"]');
+      const opacity = modal?.querySelector<HTMLInputElement>('input[name="opacity"]');
+      expect(fontSize).not.toBeNull();
+      expect(opacity).not.toBeNull();
+
+      fontSize!.value = '36';
+      fontSize!.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.waitFor(() => expect(current.fontSize).toBe(36));
+      fontSize!.value = String(DEFAULT_SETTINGS.fontSize);
+      fontSize!.dispatchEvent(new Event('input', { bubbles: true }));
+      if (editOpacity) {
+        opacity!.value = '75';
+        opacity!.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      if (closePath === 'native') modal?.close();
+      else controller.close();
+
+      await vi.waitFor(() => expect(onPersist).toHaveBeenCalledTimes(1));
+      expect(onPersist).toHaveBeenCalledWith(editOpacity ? { opacity: 0.75 } : {});
+      expect(current).toMatchObject({
+        fontSize: DEFAULT_SETTINGS.fontSize,
+        opacity: editOpacity ? 0.75 : DEFAULT_SETTINGS.opacity,
+      });
+      controller.destroy();
+    }
+  );
+
+  it('keeps an open form preview during a delayed recovery read and saves it on close', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const existing = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
+    let stored = existing;
+    let reads = 0;
+    let completeRecovery: (() => void) | undefined;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(() => {
+        reads++;
+        if (reads === 1) return Promise.reject(new Error('initial read denied'));
+        if (reads === 2) {
+          return new Promise<string>((resolve) => {
+            completeRecovery = () => resolve(existing);
+          });
+        }
+        return Promise.resolve(stored);
+      }),
+      setItem,
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    settings.set({ opacity: 0.5 });
+    const recovery = settings.persistNow();
+    await vi.waitFor(() => expect(completeRecovery).toBeTypeOf('function'));
+
+    const controller = new SettingsUi(
+      () => settings.get(),
+      (patch) => settings.preview(patch),
+      vi.fn(),
+      (patch) => {
+        if (Object.keys(patch).length > 0) settings.set(patch);
+        else settings.endPreview();
+        return settings.persistNow();
+      }
+    );
+    const unsubscribe = settings.subscribe(() => controller.syncForm());
+    await controller.attach();
+    player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+    const fontSize = document.querySelector<HTMLInputElement>(
+      '#yt-chat-overlay-settings-backdrop input[name="fontSize"]'
+    );
+    expect(fontSize).not.toBeNull();
+    fontSize!.value = '36';
+    fontSize!.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.waitFor(() => expect(settings.get().fontSize).toBe(36));
+
+    completeRecovery?.();
+    expect(await recovery).toBe('unsaved');
+    expect(fontSize?.value).toBe('36');
+    expect(settings.get().fontSize).toBe(36);
+    expect(setItem).not.toHaveBeenCalled();
+
+    controller.close();
+    await vi.waitFor(() => expect(JSON.parse(stored).fontSize).toBe(36));
+    expect(JSON.parse(stored)).toMatchObject({ speedPxPerSec: 420, opacity: 0.5 });
+    unsubscribe();
+    controller.destroy();
+    await settings.destroy();
   });
 
   it('close does not throw when never opened', () => {
