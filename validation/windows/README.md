@@ -724,23 +724,37 @@ the source-bound `.user.js` through Tampermonkey's
 real file-import and installation confirmation UI. GM storage remains real.
 
 The historical issue #227 receipt covers public v0.45.5 to v0.45.6 and retains
-those source identities. For the v0.45.7 to v0.45.8 update qualification, place
-the downloaded public `yt-live-chat-overlay.user.js` at
-`validation/windows/release-upgrade/public-v0.45.7.user.js` after independently
-verifying it against the published release checksum. Place an ignored
+those source identities. Before preparing another upgrade, match the intended
+candidate version and public predecessor to the supported transition in
+[`release-upgrade/upgrade.ts`](release-upgrade/upgrade.ts) for userscripts or
+[`release-upgrade/extension.ts`](release-upgrade/extension.ts) for extensions.
+The current v0.45.9 userscript transition uses public v0.45.8. Download its
+`yt-live-chat-overlay.user.js` to
+`validation/windows/release-upgrade/public-v0.45.8.user.js` and independently
+verify it against the published v0.45.8 checksum. Place an ignored
 `validation/windows/release-upgrade/input.json` beside it with exactly:
 
 ```json
 {
   "schemaVersion": 1,
-  "baselineSha256": "<64 lowercase hexadecimal characters from the published checksum>",
-  "candidateVersion": "0.45.8",
-  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.7/yt-live-chat-overlay.user.js"
+  "baselineSha256": "57086baac72b02815916edc99dfb679a7eb627a28835e47a2b80ca235448a9a2",
+  "candidateVersion": "0.45.9",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay.user.js"
 }
 ```
 
+The digest above matches the published v0.45.8 release asset and its checksum
+file; recheck both against the downloaded bytes before use. Check the selected
+candidate's source and produced bytes separately: the retained v0.45.9
+candidate from #339 is bound to source
+`eb689bb2cf159c57357554d62979b96577d190dd`; building a later maintenance
+HEAD does not recreate that qualification. The earlier public v0.45.7 to
+candidate v0.45.8 example belongs to its historical receipt. Remove or replace
+any ignored selector for that older pair before packaging a new attempt; an
+invalid supplied selector fails preflight rather than selecting fresh install.
+
 The `publishedAssetUrl` identifies the version-specific URL used to retrieve
-the public baseline; it is not that file's `@downloadURL`. Public v0.45.7
+the public baseline; it is not that file's `@downloadURL`. Public v0.45.8
 already has a Latest `@downloadURL`, which the candidate must retain. The existing
 `--installation userscript` invocation then uses the same fresh, owned
 Tampermonkey profile for both versions. It verifies fixed paths, public
@@ -755,9 +769,9 @@ the ordinary seven-phase installed fixture can run on the candidate from its
 normal initial state, including actual page fetch ingress. The candidate digest
 is computed from the production file bundled
 by the Windows controller, whose build can embed a current timestamp. The input
-and public bytes are local-only and ignored by Git. Remove those two files from
-the checkout when the campaign is complete; retain their verified digest and
-the VM receipt outside Git. With no `input.json`, the existing fresh-install
+and public bytes are local-only and ignored by Git. After the campaign, remove
+spent checkout copies only after matching them to retained original inputs,
+digests and VM receipts. With no `input.json`, the existing fresh-install
 path runs unchanged. A supplied but invalid input fails closed.
 
 The receipt retains separate observed, deferred and approved update events.
@@ -777,10 +791,15 @@ the prompt as unobserved. It does not prove an automatic public update or
 publication.
 
 For Chrome or Edge manual extension-update qualification, provide the separate
-ignored `validation/windows/release-upgrade/extension-input.json`. The exact
-schema, fixed baseline paths and supported version pair are defined by
-`validateExtensionUpgradeInput` in [release-upgrade/extension.ts](release-upgrade/extension.ts).
-Place the checksum-verified public ZIP and its unpacked files at those paths.
+ignored `validation/windows/release-upgrade/extension-input.json`. For the
+current v0.45.9 candidate, set `previousVersion` to `0.45.8`,
+`candidateVersion` to `0.45.9`, and `publicAssetUrl` to
+`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip`.
+Place the checksum-verified public ZIP at
+`validation/windows/release-upgrade/public-v0.45.8-chrome/artifact.zip` and its
+unpacked files under the adjacent `unpacked` directory. The exact schema and
+fixed paths are defined by `validateExtensionUpgradeInput` in
+[release-upgrade/extension.ts](release-upgrade/extension.ts).
 Use `extensionInventory` from the same module to compute the baseline and
 production `dist-extension` inventory digests for the input.
 
@@ -794,9 +813,11 @@ The receipt records this separately as `extensionUpgrade`. Without the input it
 records `not-requested` and installs the candidate directly; an invalid supplied
 input retains a failed preflight receipt before browser launch.
 
-Remove the task's `extension-input.json` and baseline directory from the
-checkout after qualification, retaining the verified inputs and receipts in
-restricted evidence storage. This procedure covers the documented manual
+After qualification, compare both selectors and their baseline copies with the
+completed campaign's retained originals, digests, receipts and current callers.
+Remove only spent task-owned checkout copies after confirming that custody;
+retain an active or unowned input until its disposition is established. This
+procedure covers the documented manual
 unpacked update. Store updates and Firefox temporary-add-on updates require
 their own evidence.
 
