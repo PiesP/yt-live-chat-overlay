@@ -51,10 +51,6 @@ describe('project setup actions', () => {
         expect(jobSection).toContain(`uses: ${centralAction}`);
         if (filename === 'ci.yaml' && job === 'unit') {
           expect(jobSection).toContain('node-version: ${{ steps.release_pin.outputs.version }}');
-        } else if (filename === 'security.yaml' && job === 'osv-scan-pr') {
-          expect(jobSection).toContain(
-            "node-version: ${{ github.event.pull_request.base.sha == 'ace0fe0626246a5953d5ce9dd72a28efefdcd820' && '26.12.1' || '' }}"
-          );
         } else if (
           filename !== 'security.yaml' ||
           !['pin-metadata', 'pinned-tools'].includes(job)
