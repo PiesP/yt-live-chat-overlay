@@ -171,7 +171,12 @@ without committing the new draft, and the font value persists after close in a
 fresh document. The before-preview case dispatches input and releases the read
 in the same browser task. Each case captures the open form with font `36`, the
 fresh-document time origin, and console diagnostics; the controlled initial-read
-warning is recorded separately from unexpected errors. The profile also records
+warning is recorded separately from unexpected errors. Four asynchronous remote-read
+cases then accept font `36` before an older read resolves or rejects, and retain
+current-read and failed-write controls. They record the actual form, durable value,
+read/write counts and notice mutations: a successful save must not acquire a false
+Retry save notice, while applicable failures remain visible. The same cases run
+in the maintained E2E suite. The profile also records
 computed notice typography, focus, bounds, and screenshots for English and narrow
 Korean/Japanese layouts. A separate owned Chrome profile sets real 200% page zoom
 through Chrome Settings and repeats the affected localized and conflict
