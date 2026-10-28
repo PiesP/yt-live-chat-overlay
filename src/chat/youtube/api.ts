@@ -17,7 +17,7 @@ import {
 import { readBoundedChatResponseText, readBoundedResponseText } from '@chat/youtube/response-text';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { sleep } from '@piesp/browser-core/async';
-import { isAbortError } from '@piesp/browser-core/error';
+import { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('Youtubei');
@@ -549,8 +549,7 @@ const fetchChatEndpoint = async (
   let lastError: unknown;
 
   for (let attempt = 0; attempt < ENDPOINT_RETRY_MAX_ATTEMPTS; attempt++) {
-    // Check abort signal before each attempt
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    throwIfAborted(signal);
 
     try {
       const response = await fetch(buildEndpointUrl(endpoint, data.apiKey), {
@@ -601,12 +600,7 @@ const fetchChatEndpoint = async (
         lastError
       );
 
-      try {
-        await sleep(delayMs, signal);
-      } catch {
-        // sleep threw (AbortError during wait) — propagate
-        throw new DOMException('Aborted', 'AbortError');
-      }
+      await sleep(delayMs, signal);
     }
   }
 

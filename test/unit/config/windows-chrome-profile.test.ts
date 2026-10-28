@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import * as chromeInstallModule from '../../../validation/windows/chrome-install.ts';
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.ts';
+import * as naturalChromeModule from '../../../validation/windows/natural-chrome.ts';
 
 const {
   cleanupChromeInstallation,
@@ -64,6 +65,70 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('selects the owned natural Chrome route only for focused public tab visibility', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    await writeFile(
+      join(inputDir, 'chat-request-deadline.json'),
+      JSON.stringify({ scenario: 'chat-request-deadline' })
+    );
+    const before = (await readdir(paths.root)).sort();
+    const launchPersistentContext = vi.fn();
+    const launchOwnedNaturalChrome = vi
+      .spyOn(naturalChromeModule, 'launchOwnedNaturalChrome')
+      .mockRejectedValueOnce(new Error('owned natural Chrome launch reached'));
+    try {
+      await expect(
+        chromeInstallModule.runChromeInstallation({
+          chromium: { launchPersistentContext } as unknown as BrowserType,
+          root: paths.root,
+          output: paths.output,
+          browserName: 'chrome',
+          installation: 'extension',
+          liveUrls: ['https://www.youtube.com/watch?v=public'],
+        })
+      ).rejects.toThrow('owned natural Chrome launch reached');
+      expect(launchOwnedNaturalChrome).toHaveBeenCalledOnce();
+      expect(launchPersistentContext).not.toHaveBeenCalled();
+      expect((await readdir(paths.root)).sort()).toEqual(before);
+    } finally {
+      launchOwnedNaturalChrome.mockRestore();
+    }
+  });
+
+  it('keeps focused Edge runs on the ordinary installed profile', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    await writeFile(
+      join(inputDir, 'chat-request-deadline.json'),
+      JSON.stringify({ scenario: 'chat-request-deadline' })
+    );
+    const launchError = new Error('ordinary Edge launch reached');
+    const launchPersistentContext = vi.fn().mockRejectedValueOnce(launchError);
+    const launchOwnedNaturalChrome = vi.spyOn(naturalChromeModule, 'launchOwnedNaturalChrome');
+    try {
+      await expect(
+        chromeInstallModule.runChromeInstallation({
+          chromium: { launchPersistentContext } as unknown as BrowserType,
+          root: paths.root,
+          output: paths.output,
+          browserName: 'msedge',
+          installation: 'extension',
+          liveUrls: ['https://www.youtube.com/watch?v=public'],
+        })
+      ).rejects.toBe(launchError);
+      expect(launchPersistentContext).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ channel: 'msedge' })
+      );
+      expect(launchOwnedNaturalChrome).not.toHaveBeenCalled();
+    } finally {
+      launchOwnedNaturalChrome.mockRestore();
+    }
+  });
+
   it('records extension input preflight failure and removes its profile before browser launch', async () => {
     const paths = await fixture();
     const inputDir = join(paths.root, 'validation/windows/release-upgrade');

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chat request deadlines** — Preserve request timeouts during internal retry waits so live polling counts the failure and can recover on the next healthy response. Session stop and replay seek still cancel their owned requests.
+
 ## [0.45.9] - 2026-10-28
 
 ### Fixed

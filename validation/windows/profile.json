@@ -20,6 +20,7 @@
     "entry": "validation/windows/install-profile.ts",
     "assets": [
       "validation/windows/chrome-install.ts",
+      "validation/windows/chat-request-deadline.ts",
       "validation/windows/installed-viewing-tasks.ts",
       "validation/windows/translator-native-cancellation.ts",
       "validation/windows/chromium-network-diagnostics.ts",

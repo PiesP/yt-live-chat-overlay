@@ -644,7 +644,11 @@ export class ReplayChatSource extends ChatSource {
           mergedSignal
         );
       } catch (error: unknown) {
-        if (isAbortError(error) && timeoutSignal.aborted && !signal?.aborted) {
+        if (
+          timeoutSignal.aborted &&
+          error === timeoutSignal.reason &&
+          mergedSignal.reason === timeoutSignal.reason
+        ) {
           log.warn('chat.replay.fetch-timeout', { timeoutMs: REPLAY_FETCH_TIMEOUT_MS });
         }
         throw error;
