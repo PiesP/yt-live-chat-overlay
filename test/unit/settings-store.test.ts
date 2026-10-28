@@ -2,6 +2,7 @@
 
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';
+import { SETTINGS_VERSION } from '@settings/schema';
 import { Settings } from '@settings/store';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
@@ -15,6 +16,10 @@ vi.mock('@platform/cross-tab-sync-adapters', () => ({
 vi.mock('@platform/storage-adapters', () => ({
   getStorageAdapter: vi.fn(),
 }));
+
+function currentRecord(fontSize: number): string {
+  return JSON.stringify({ _version: SETTINGS_VERSION, fontSize });
+}
 
 describe('Settings persistence', () => {
   it('treats an unreadable first load differently from a verified missing record', async () => {
@@ -310,7 +315,7 @@ describe('Settings persistence', () => {
   it.each(['resolved', 'rejected'] as const)(
     'keeps a successful local save after an older remote read is %s',
     async (outcome) => {
-      let stored = JSON.stringify({ fontSize: 32 });
+      let stored = currentRecord(32);
       let releaseRead: (() => void) | undefined;
       let onRemote: (() => void) | undefined;
       const getItem = vi
@@ -340,7 +345,7 @@ describe('Settings persistence', () => {
       await settings.initialize();
       const observed: string[] = [];
       const unsubscribe = settings.subscribePersistence((state) => observed.push(state));
-      stored = JSON.stringify({ fontSize: 52 });
+      stored = currentRecord(52);
       onRemote?.();
       await vi.waitFor(() => expect(releaseRead).toBeTypeOf('function'));
       settings.setDraftPending(true);
@@ -365,7 +370,7 @@ describe('Settings persistence', () => {
   it.each(['no edit', 'reverted preview'] as const)(
     'reports a current remote read failure after %s',
     async (phase) => {
-      let stored = JSON.stringify({ fontSize: 32 });
+      let stored = currentRecord(32);
       let rejectRead: (() => void) | undefined;
       let onRemote: (() => void) | undefined;
       const getItem = vi
@@ -387,7 +392,7 @@ describe('Settings persistence', () => {
       });
       const settings = new Settings();
       await settings.initialize();
-      stored = JSON.stringify({ fontSize: 52 });
+      stored = currentRecord(52);
       onRemote?.();
       await vi.waitFor(() => expect(rejectRead).toBeTypeOf('function'));
       if (phase === 'reverted preview') {
@@ -406,7 +411,7 @@ describe('Settings persistence', () => {
   );
 
   it('does not hide a failed newer write behind an older remote read failure', async () => {
-    let stored = JSON.stringify({ fontSize: 32 });
+    let stored = currentRecord(32);
     let rejectRead: (() => void) | undefined;
     let onRemote: (() => void) | undefined;
     const getItem = vi
@@ -432,7 +437,7 @@ describe('Settings persistence', () => {
     });
     const settings = new Settings();
     await settings.initialize();
-    stored = JSON.stringify({ fontSize: 52 });
+    stored = currentRecord(52);
     onRemote?.();
     await vi.waitFor(() => expect(rejectRead).toBeTypeOf('function'));
     settings.set({ fontSize: 36 });
@@ -450,7 +455,7 @@ describe('Settings persistence', () => {
   });
 
   it('keeps the newer remote result when an earlier read later fails', async () => {
-    let stored = JSON.stringify({ fontSize: 32 });
+    let stored = currentRecord(32);
     let rejectFirst: (() => void) | undefined;
     let onRemote: (() => void) | undefined;
     const getItem = vi.fn(() => {
@@ -473,10 +478,10 @@ describe('Settings persistence', () => {
     });
     const settings = new Settings();
     await settings.initialize();
-    stored = JSON.stringify({ fontSize: 40 });
+    stored = currentRecord(40);
     onRemote?.();
     await vi.waitFor(() => expect(rejectFirst).toBeTypeOf('function'));
-    stored = JSON.stringify({ fontSize: 42 });
+    stored = currentRecord(42);
     onRemote?.();
     await vi.waitFor(() => expect(settings.get().fontSize).toBe(42));
     rejectFirst?.();
@@ -488,7 +493,7 @@ describe('Settings persistence', () => {
   });
 
   it('does not notify a retired owner when its earlier remote read fails', async () => {
-    let stored = JSON.stringify({ fontSize: 32 });
+    let stored = currentRecord(32);
     let rejectRead: (() => void) | undefined;
     let onRemote: (() => void) | undefined;
     const getItem = vi.fn(() => {
@@ -513,7 +518,7 @@ describe('Settings persistence', () => {
     await old.initialize();
     const observed: string[] = [];
     old.subscribePersistence((state) => observed.push(state));
-    stored = JSON.stringify({ fontSize: 42 });
+    stored = currentRecord(42);
     onRemote?.();
     await vi.waitFor(() => expect(rejectRead).toBeTypeOf('function'));
     const replacement = new Settings();
