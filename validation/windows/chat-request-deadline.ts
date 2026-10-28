@@ -147,7 +147,9 @@ export async function runChatRequestDeadline({
       record.finishedMs = performance.now();
       return;
     }
-    throw new Error(`Unexpected deadline fixture request: ${url.origin}${url.pathname}`);
+    if (errors.length < 12) errors.push(`Unexpected request: ${url.origin}${url.pathname}`);
+    else overflow++;
+    return route.fulfill({ status: 403, body: 'Blocked by deadline fixture' });
   };
   let probe: Awaited<ReturnType<typeof installNativePageScriptProbe>> | undefined;
   let result: Record<string, unknown> = { status: 'failed' };
@@ -175,6 +177,7 @@ export async function runChatRequestDeadline({
         },
       };
       window.ytInitialData = {
+        currentVideoEndpoint: { watchEndpoint: { videoId: 'windowsRequestDeadline' } },
         contents: {
           twoColumnWatchNextResults: {
             conversationBar: {
