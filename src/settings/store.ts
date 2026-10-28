@@ -102,7 +102,7 @@ export class Settings {
       return;
     }
     log.debug('settings.store.cross-tab-change');
-    void this.reloadFromStorage();
+    void this.reloadFromStorage(changedRaw);
   };
 
   constructor() {
@@ -220,7 +220,7 @@ export class Settings {
     if (activeOwner === this.owner) activeOwner = null;
   }
 
-  private async reloadFromStorage(): Promise<void> {
+  private async reloadFromStorage(announcedRaw: string | null): Promise<void> {
     const revisionAtStart = this.localRevision;
     const storageEpochAtStart = this.storageEpoch;
     try {
@@ -228,14 +228,14 @@ export class Settings {
       const recovered = this.readSettings(raw);
       if (this.retired || activeOwner !== this.owner || storageEpochAtStart !== this.storageEpoch)
         return;
-      if (
-        revisionAtStart !== this.localRevision ||
-        this.unsaved ||
-        this.previewDirty ||
-        this.draftPending ||
-        this.saving ||
-        this.savePromise
-      )
+      if (this.draftPending || this.previewDirty) {
+        // The notification arrived before the form established ownership.
+        // A read completing during the draft must still require the existing
+        // explicit remote-conflict choice, even when the read itself succeeds.
+        this.onCrossTabChange(STORAGE_KEY, announcedRaw);
+        return;
+      }
+      if (revisionAtStart !== this.localRevision || this.unsaved || this.saving || this.savePromise)
         return;
       this.settings = recovered;
       this.lastStoredRaw = raw;
@@ -246,7 +246,11 @@ export class Settings {
     } catch (error: unknown) {
       log.warn('settings.store.reload-failed', { error: String(error) });
       if (storageEpochAtStart !== this.storageEpoch) return;
-      if (!this.unsaved && !this.previewDirty && !this.draftPending) {
+      if (this.draftPending || this.previewDirty) {
+        // Failure to inspect the announced remote value must not authorize a
+        // stale local write while the user's form still holds a draft.
+        this.onCrossTabChange(STORAGE_KEY, announcedRaw);
+      } else if (!this.unsaved) {
         this.baselineAvailable = false;
         this.writeFailed = true;
         this.notifyPersistence();
