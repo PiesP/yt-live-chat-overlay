@@ -58,6 +58,14 @@ declare global {
       writes: number;
       release: () => void;
     };
+    __ytAcceptanceRemoteRead?: {
+      reads: number;
+      writes: number;
+      waiting: boolean;
+      notices: string[];
+      announce: () => void;
+      release: () => void;
+    };
   }
 }
 
@@ -128,7 +136,19 @@ async function routeFixture(context: BrowserContext, watchHtml: string): Promise
         status: 200,
         contentType: 'application/json',
         json: {
-          continuationContents: { liveChatContinuation: { actions: [], continuations: [] } },
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [],
+              continuations: [
+                {
+                  timedContinuationData: {
+                    continuation: 'settings-persistence-next',
+                    timeoutMs: 30_000,
+                  },
+                },
+              ],
+            },
+          },
         },
       });
     } else await route.fulfill({ status: 204 });
@@ -1050,6 +1070,243 @@ async function runQueuedInputRecoveryCase({
   }
 }
 
+/** Real form and production adapters; only the asynchronous storage boundary is controlled. */
+export async function runRemoteReadStatusCase({
+  browser,
+  output,
+  userscript,
+  watchHtml,
+  outcome,
+}: {
+  browser: Browser;
+  output: string;
+  userscript: string;
+  watchHtml: string;
+  outcome: 'resolved' | 'rejected' | 'current-failure' | 'failed-write';
+}) {
+  const context = await browser.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 720 },
+  });
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const expectedWarnings: string[] = [];
+  const otherWarnings: string[] = [];
+  let stage = 'initialize';
+  try {
+    await context.addInitScript(
+      ({ key, selectedOutcome, noticeSelector }) => {
+        window.ytcfg = {
+          data_: {
+            INNERTUBE_API_KEY: 'windows-acceptance-key',
+            INNERTUBE_CONTEXT_CLIENT_NAME: '1',
+            INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
+            INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } },
+          },
+        };
+        window.ytInitialData = {
+          currentVideoEndpoint: { watchEndpoint: { videoId: 'windowsAcceptance' } },
+          contents: {
+            twoColumnWatchNextResults: {
+              conversationBar: {
+                liveChatRenderer: {
+                  isReplay: false,
+                  continuations: [
+                    {
+                      timedContinuationData: {
+                        continuation: 'windows-acceptance-live',
+                        timeoutMs: 30_000,
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        };
+        // Keep this current-format fixture aligned with the canonical version
+        // through the E2E assertion; the packaged VM helper has no source imports.
+        localStorage.setItem(key, JSON.stringify({ fontSize: 32, language: 'en', _version: 2 }));
+        const listeners = new Set<(changes: Record<string, unknown>, area: string) => void>();
+        let releaseRead: (() => void) | undefined;
+        const state = {
+          reads: 0,
+          writes: 0,
+          waiting: false,
+          notices: [] as string[],
+          announce: () => {
+            const raw = JSON.stringify({ fontSize: 52, language: 'en', _version: 2 });
+            localStorage.setItem(key, raw);
+            for (const listener of listeners) listener({ [key]: { newValue: raw } }, 'local');
+          },
+          release: () => releaseRead?.(),
+        };
+        window.__ytAcceptanceRemoteRead = state;
+        const local = {
+          async get(storageKey: string): Promise<Record<string, unknown>> {
+            if (storageKey !== key) return {};
+            state.reads++;
+            const captured = localStorage.getItem(key);
+            if (state.reads === 2) {
+              return new Promise<Record<string, unknown>>((resolve, reject) => {
+                state.waiting = true;
+                releaseRead = () => {
+                  state.waiting = false;
+                  if (selectedOutcome === 'resolved') resolve({ [key]: captured });
+                  else reject(new Error('Controlled older remote read denial'));
+                };
+              });
+            }
+            return { [key]: captured };
+          },
+          async set(items: Record<string, unknown>): Promise<void> {
+            state.writes++;
+            if (selectedOutcome === 'failed-write') {
+              throw new Error('Controlled newer settings write denial');
+            }
+            const value = items[key];
+            if (typeof value !== 'string') throw new Error('Settings write lacked a string value');
+            localStorage.setItem(key, value);
+          },
+        };
+        const existingChrome =
+          (window as Window & { chrome?: Record<string, unknown> }).chrome ?? {};
+        Object.defineProperty(window, 'chrome', {
+          configurable: true,
+          value: {
+            ...existingChrome,
+            storage: {
+              local,
+              onChanged: {
+                addListener: (listener: (changes: Record<string, unknown>, area: string) => void) =>
+                  listeners.add(listener),
+                removeListener: (
+                  listener: (changes: Record<string, unknown>, area: string) => void
+                ) => listeners.delete(listener),
+              },
+            },
+          },
+        });
+        document.addEventListener('DOMContentLoaded', () => {
+          new MutationObserver(() => {
+            const text = document.querySelector(noticeSelector)?.textContent ?? '';
+            if (state.notices.at(-1) !== text) state.notices.push(text);
+          }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        });
+      },
+      { key: SETTINGS_KEY, selectedOutcome: outcome, noticeSelector: NOTICE_SELECTOR }
+    );
+    await context.addInitScript({ content: userscript });
+    await routeFixture(context, watchHtml);
+    const page = await context.newPage();
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      const text = message.text();
+      if (message.type() === 'error') consoleErrors.push(text);
+      if (message.type() !== 'warning') return;
+      if (
+        text.includes('Controlled older remote read denial') ||
+        text.includes('Controlled newer settings write denial')
+      ) {
+        expectedWarnings.push(text);
+      } else otherWarnings.push(text);
+    });
+    await page.goto(WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 32);
+    const seedVersion = await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) ?? 'null')?._version,
+      SETTINGS_KEY
+    );
+    stage = 'hold-remote-read';
+    await page.evaluate(() => window.__ytAcceptanceRemoteRead?.announce());
+    await page.waitForFunction(() => window.__ytAcceptanceRemoteRead?.waiting);
+    if (outcome !== 'current-failure') {
+      stage = 'accept-form-edit';
+      await openSettings(page);
+      await page.locator('#yt-chat-overlay-settings-backdrop input[name="fontSize"]').fill('36');
+      await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 36);
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => window.__ytAcceptanceRemoteRead?.writes === 1);
+      if (outcome === 'failed-write') {
+        await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).waitFor();
+      } else {
+        await page.waitForFunction(
+          (key) => JSON.parse(localStorage.getItem(key) ?? 'null')?.fontSize === 36,
+          SETTINGS_KEY
+        );
+      }
+    }
+    const snapshot = () =>
+      page.evaluate(
+        ({ key, noticeSelector }) => ({
+          memoryFont: window.__ytChatOverlay?.getSettings?.().fontSize,
+          durableFont: JSON.parse(localStorage.getItem(key) ?? 'null')?.fontSize,
+          reads: window.__ytAcceptanceRemoteRead?.reads,
+          writes: window.__ytAcceptanceRemoteRead?.writes,
+          notices: [...(window.__ytAcceptanceRemoteRead?.notices ?? [])],
+          notice: document.querySelector(noticeSelector)?.textContent ?? null,
+          timeOrigin: performance.timeOrigin,
+        }),
+        { key: SETTINGS_KEY, noticeSelector: NOTICE_SELECTOR }
+      );
+    const beforeRelease = await snapshot();
+    stage = 'settle-older-read';
+    await page.evaluate(async () => {
+      window.__ytAcceptanceRemoteRead?.release();
+      // Observe after the adapter/store/UI promise continuations and mutations.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    const afterRelease = await snapshot();
+    const failed = outcome === 'current-failure' || outcome === 'failed-write';
+    assert.equal(afterRelease.memoryFont, outcome === 'current-failure' ? 32 : 36);
+    assert.equal(afterRelease.durableFont, failed ? 52 : 36);
+    assert.equal(afterRelease.reads, 2);
+    assert.equal(afterRelease.writes, outcome === 'current-failure' ? 0 : 1);
+    if (failed) {
+      assert.match(afterRelease.notice ?? '', /were not saved/u);
+      assert.equal(
+        await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).count(),
+        1
+      );
+    } else {
+      assert.equal(afterRelease.notice, null, 'An obsolete read produced failure feedback');
+      assert(!afterRelease.notices.some((text) => /were not saved|Retry save/u.test(text)));
+    }
+    assert.deepEqual(pageErrors, []);
+    assert.deepEqual(consoleErrors, []);
+    assert.deepEqual(otherWarnings, []);
+    assert.equal(
+      expectedWarnings.length,
+      outcome === 'resolved' ? 0 : outcome === 'failed-write' ? 2 : 1
+    );
+    const screenshot = `settings-remote-read-${outcome}.png`;
+    await page.screenshot({ path: join(output, screenshot) });
+    const result = {
+      outcome,
+      seedVersion,
+      beforeRelease,
+      afterRelease,
+      pageErrors,
+      consoleErrors,
+      expectedWarnings,
+      screenshots: [screenshot],
+    };
+    await writeFile(
+      join(output, `settings-remote-read-${outcome}.json`),
+      `${JSON.stringify(result, null, 2)}\n`
+    );
+    return result;
+  } catch (error: unknown) {
+    await writeFile(
+      join(output, `settings-remote-read-${outcome}-failure.json`),
+      `${JSON.stringify({ stage, error: String(error), pageErrors, consoleErrors, expectedWarnings, otherWarnings }, null, 2)}\n`
+    );
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
 /** Bounded built-userscript fixture selected by a bundle-hashed local input. */
 export async function runSettingsPersistenceFixture({
   browser,
@@ -1159,6 +1416,12 @@ export async function runSettingsPersistenceFixture({
       watchHtml,
       timing: 'after-preview',
     });
+    const remoteReadStatus = [];
+    for (const outcome of ['resolved', 'rejected', 'current-failure', 'failed-write'] as const) {
+      remoteReadStatus.push(
+        await runRemoteReadStatusCase({ browser, output, userscript, watchHtml, outcome })
+      );
+    }
     const browserZoom200 = await runChromeZoomCase({
       browser,
       root,
@@ -1181,6 +1444,8 @@ export async function runSettingsPersistenceFixture({
         deniedInitialReadPreservesPreferences: true,
         queuedInputSurvivesBeforePreviewRecovery: true,
         queuedInputSurvivesAfterPreviewRecovery: true,
+        olderReadCannotInvalidateSavedFeedback: true,
+        currentReadAndWriteFailuresRemainVisible: true,
         realBrowserZoom200Observed: true,
         retryPersisted: true,
         reloadReadPersisted: true,
@@ -1194,6 +1459,7 @@ export async function runSettingsPersistenceFixture({
         notice: { unsaved, repeatedUnsaved, saved, localized, conflict, initialReadRecovery },
         queuedInputBeforePreview,
         queuedInputAfterPreview,
+        remoteReadStatus,
         browserZoom200,
         installedExtension: 'not-run: focused selector exercises the built userscript',
         screenshots: [
@@ -1202,6 +1468,7 @@ export async function runSettingsPersistenceFixture({
           ...initialReadRecovery.screenshots,
           ...queuedInputBeforePreview.screenshots,
           ...queuedInputAfterPreview.screenshots,
+          ...remoteReadStatus.flatMap((item) => item.screenshots),
           ...localized.flatMap((item) => item.screenshots),
           ...conflict.screenshots,
           'settings-zoom-ko-100.png',
