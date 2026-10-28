@@ -175,6 +175,58 @@ describe('platform storage adapters', () => {
     expect(storageValues.has('key')).toBe(false);
   });
 
+  it('rejects denied reads while preserving a verified missing key', async () => {
+    const denied = new Error('read denied');
+    globals.GM_getValue = vi.fn((key: string) => {
+      if (key === 'missing') return null;
+      throw denied;
+    });
+    globals.GM_setValue = vi.fn();
+    const gm = await loadAdapter();
+    await expect(gm.getItem('missing')).resolves.toBeNull();
+    await expect(gm.getItem('settings')).rejects.toBe(denied);
+
+    delete globals.GM_getValue;
+    delete globals.GM_setValue;
+    globals.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => {
+            if (key === 'missing') return {};
+            throw denied;
+          }),
+          set: vi.fn(),
+        },
+      },
+    };
+    const direct = await loadAdapter();
+    await expect(direct.getItem('missing')).resolves.toBeNull();
+    await expect(direct.getItem('settings')).rejects.toBe(denied);
+
+    globals.chrome = {
+      storage: { local: { get: vi.fn(async () => undefined), set: vi.fn() } },
+    };
+    const invalidResponse = await loadAdapter();
+    await expect(invalidResponse.getItem('settings')).rejects.toThrow(
+      'Chrome storage read returned no result'
+    );
+
+    delete globals.chrome;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        ...memoryStorage,
+        getItem: (key: string) => {
+          if (key === 'missing') return null;
+          throw denied;
+        },
+      },
+    });
+    const local = await loadAdapter();
+    await expect(local.getItem('missing')).resolves.toBeNull();
+    await expect(local.getItem('settings')).rejects.toBe(denied);
+  });
+
   it('uses the authenticated extension relay in the MAIN world', async () => {
     window.__ytExtensionBridge = {
       workerSupported: true,

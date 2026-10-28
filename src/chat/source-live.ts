@@ -251,7 +251,11 @@ export class LiveChatSource extends ChatSource {
     try {
       return await this.requestPayload(fetchLiveChat, continuation, mergedSignal);
     } catch (error: unknown) {
-      if (isAbortError(error) && timeoutSignal.aborted && !signal?.aborted) {
+      if (
+        timeoutSignal.aborted &&
+        error === timeoutSignal.reason &&
+        mergedSignal.reason === timeoutSignal.reason
+      ) {
         log.warn('chat.live.poll-timeout', { timeoutMs: LIVE_POLL_TIMEOUT_MS });
       }
       throw error;

@@ -81,7 +81,111 @@ describe('ReplayChatSource', () => {
   afterEach(() => {
     document.body.replaceChildren();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('counts a retry-wait timeout, releases its queue, and resets failures on a healthy replay request', async () => {
+    vi.useFakeTimers();
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValueOnce(deadline.signal)
+      .mockReturnValue(new AbortController().signal);
+    const internals = source as unknown as {
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      replayConsecutiveFailures: number;
+      activeReplayRequestController: AbortController | null;
+      fetchReplayPlayerSeek: (offsetMs: number, signal?: AbortSignal) => Promise<boolean>;
+    };
+    source.setInitialBootstrap({
+      videoId: 'video-id',
+      isReplay: true,
+      clientContext: {},
+      clientNameHeader: '1',
+      ytcfg: {},
+      initialContinuation: { continuation: 'initial' },
+    });
+    internals.replayPlayerSeekContinuation = { continuation: 'seek' };
+    const fetchMock = vi.fn(async () =>
+      fetchMock.mock.calls.length === 1
+        ? new Response('', { status: 503 })
+        : new Response(
+            JSON.stringify({
+              continuationContents: {
+                liveChatContinuation: {
+                  actions: [makeReplayAction('healthy-after-timeout', 1_000)],
+                  continuations: [{ playerSeekContinuationData: { continuation: 'healthy-next' } }],
+                },
+              },
+            })
+          )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const timedOut = internals.fetchReplayPlayerSeek(1_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    deadline.abort(new DOMException('Request deadline', 'TimeoutError'));
+    await expect(timedOut).resolves.toBe(false);
+    expect(internals.replayConsecutiveFailures).toBe(1);
+    expect(internals.activeReplayRequestController).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(internals.fetchReplayPlayerSeek(1_000)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(internals.replayConsecutiveFailures).toBe(0);
+    expect(internals.activeReplayRequestController).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retires a cancelled replay retry before admitting the queued request', async () => {
+    vi.useFakeTimers();
+    const internals = source as unknown as {
+      activeReplayRequestController: AbortController | null;
+      replayConsecutiveFailures: number;
+      requestReplayPayload: (
+        continuation: InnertubeContinuationData,
+        signal?: AbortSignal
+      ) => Promise<LiveChatPayload | null>;
+    };
+    source.setInitialBootstrap({
+      videoId: 'video-id',
+      isReplay: true,
+      clientContext: {},
+      clientNameHeader: '1',
+      ytcfg: {},
+      initialContinuation: { continuation: 'initial' },
+    });
+    const fetchMock = vi.fn(async () =>
+      fetchMock.mock.calls.length === 1
+        ? new Response('', { status: 503 })
+        : new Response(
+            JSON.stringify({
+              continuationContents: {
+                liveChatContinuation: {
+                  actions: [],
+                  continuations: [],
+                },
+              },
+            })
+          )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const cancelled = internals
+      .requestReplayPayload({ continuation: 'old' })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    const queuedParent = new AbortController();
+    const queued = internals.requestReplayPayload({ continuation: 'new' }, queuedParent.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const reason = new DOMException('Replay seek replaced', 'AbortError');
+    internals.activeReplayRequestController?.abort(reason);
+    expect(await cancelled).toBe(reason);
+    await expect(queued).resolves.toEqual({ actions: [], continuations: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(queuedParent.signal.aborted).toBe(false);
+    expect(internals.replayConsecutiveFailures).toBe(0);
+    expect(internals.activeReplayRequestController).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('constructs without error', () => {

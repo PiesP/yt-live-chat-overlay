@@ -48,6 +48,24 @@ declare global {
     __ytAcceptanceDenySettings?: boolean;
     __ytAcceptanceDeniedWrites?: number;
     __ytAcceptanceDeniedWriteStacks?: string[];
+    __ytAcceptanceAllowSettingsRead?: boolean;
+    __ytAcceptanceDeniedReads?: number;
+    __ytAcceptanceActualSettings?: () => string | null;
+    __ytAcceptanceDeferredRecovery?: {
+      reads: number;
+      waiting: boolean;
+      released: boolean;
+      writes: number;
+      release: () => void;
+    };
+    __ytAcceptanceRemoteRead?: {
+      reads: number;
+      writes: number;
+      waiting: boolean;
+      notices: string[];
+      announce: () => void;
+      release: () => void;
+    };
   }
 }
 
@@ -118,7 +136,19 @@ async function routeFixture(context: BrowserContext, watchHtml: string): Promise
         status: 200,
         contentType: 'application/json',
         json: {
-          continuationContents: { liveChatContinuation: { actions: [], continuations: [] } },
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [],
+              continuations: [
+                {
+                  timedContinuationData: {
+                    continuation: 'settings-persistence-next',
+                    timeoutMs: 30_000,
+                  },
+                },
+              ],
+            },
+          },
         },
       });
     } else await route.fulfill({ status: 204 });
@@ -128,10 +158,11 @@ async function routeFixture(context: BrowserContext, watchHtml: string): Promise
 async function installFixtureScripts(
   context: BrowserContext,
   userscript: string,
-  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>
+  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>,
+  initialReadFailure = false
 ): Promise<void> {
   await context.addInitScript(
-    ({ storageKey, selectedLanguage }) => {
+    ({ storageKey, selectedLanguage, denyInitialRead }) => {
       (window as Window & { unsafeWindow?: Window }).unsafeWindow = window;
       window.__ytAcceptanceDenySettings = false;
       window.__ytAcceptanceDeniedWrites = 0;
@@ -139,8 +170,27 @@ async function installFixtureScripts(
       if (localStorage.getItem(storageKey) === null) {
         localStorage.setItem(
           storageKey,
-          JSON.stringify({ fontSize: 32, language: selectedLanguage })
+          JSON.stringify(
+            denyInitialRead
+              ? { fontSize: 48, speedPxPerSec: 420, opacity: 0.75, language: selectedLanguage }
+              : { fontSize: 32, language: selectedLanguage }
+          )
         );
+      }
+      if (denyInitialRead) {
+        const originalGet = Storage.prototype.getItem;
+        window.__ytAcceptanceDeniedReads = 0;
+        window.__ytAcceptanceAllowSettingsRead =
+          sessionStorage.getItem('__ytAcceptanceAllowSettingsRead') === '1';
+        window.__ytAcceptanceActualSettings = () => originalGet.call(localStorage, storageKey);
+        Storage.prototype.getItem = function (key: string): string | null {
+          const value = originalGet.call(this, key);
+          if (key === storageKey && value !== null && !window.__ytAcceptanceAllowSettingsRead) {
+            window.__ytAcceptanceDeniedReads = (window.__ytAcceptanceDeniedReads ?? 0) + 1;
+            throw new Error('Controlled initial settings read denial');
+          }
+          return value;
+        };
       }
       const original = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key: string, value: string): void {
@@ -154,7 +204,11 @@ async function installFixtureScripts(
         original.call(this, key, value);
       };
     },
-    { storageKey: SETTINGS_KEY, selectedLanguage: language.language }
+    {
+      storageKey: SETTINGS_KEY,
+      selectedLanguage: language.language,
+      denyInitialRead: initialReadFailure,
+    }
   );
   await context.addInitScript({ content: userscript });
 }
@@ -162,13 +216,14 @@ async function installFixtureScripts(
 async function createFixtureContext(
   browser: Browser,
   userscript: string,
-  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>
+  language: Pick<FixtureLanguage, 'locale' | 'language' | 'width'>,
+  initialReadFailure = false
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
     locale: language.locale,
     viewport: { width: language.width, height: 720 },
   });
-  await installFixtureScripts(context, userscript, language);
+  await installFixtureScripts(context, userscript, language, initialReadFailure);
   return context;
 }
 
@@ -680,6 +735,620 @@ async function runChromeZoomCase({
   return { ...result, cleanup: { zoomRestored, contextClosed, profileRemoved } };
 }
 
+async function runInitialReadRecoveryCase({
+  browser,
+  output,
+  userscript,
+  watchHtml,
+}: {
+  browser: Browser;
+  output: string;
+  userscript: string;
+  watchHtml: string;
+}) {
+  const context = await createFixtureContext(
+    browser,
+    userscript,
+    { locale: 'en-US', language: 'en', width: 1280 },
+    true
+  );
+  const pageErrors: string[] = [];
+  try {
+    await routeFixture(context, watchHtml);
+    const page = await openFixturePage(context, pageErrors);
+    const before = await page.evaluate(() => window.__ytAcceptanceActualSettings?.());
+    assert(before, 'Initial-read fixture did not seed existing preferences');
+    assert.equal(JSON.parse(before).fontSize, 48);
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize !== 48);
+
+    await openSettings(page);
+    await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('50');
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().opacity === 0.5);
+    await page.keyboard.press('Escape');
+    const notice = page.locator(NOTICE_SELECTOR);
+    const retry = notice.getByRole('button', { name: 'Retry save' });
+    await retry.waitFor({ state: 'visible' });
+    assert.match((await notice.textContent()) ?? '', /were not saved/u);
+    assert.equal(await page.evaluate(() => window.__ytAcceptanceActualSettings?.()), before);
+    const deniedReads = await page.evaluate(() => window.__ytAcceptanceDeniedReads ?? 0);
+    assert(deniedReads >= 2, 'Initial load and persistence must each attempt a real read');
+    await page.screenshot({ path: join(output, 'settings-initial-read-unsaved.png') });
+
+    await page.evaluate(() => {
+      window.__ytAcceptanceAllowSettingsRead = true;
+      sessionStorage.setItem('__ytAcceptanceAllowSettingsRead', '1');
+    });
+    await retry.click();
+    await notice.getByText('Settings saved.').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => {
+      const raw = window.__ytAcceptanceActualSettings?.();
+      if (!raw) return false;
+      const stored = JSON.parse(raw) as {
+        fontSize: number;
+        speedPxPerSec: number;
+        opacity: number;
+      };
+      return stored.fontSize === 48 && stored.speedPxPerSec === 420 && stored.opacity === 0.5;
+    });
+    await page.screenshot({ path: join(output, 'settings-initial-read-saved.png') });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
+    await page.waitForFunction(() => {
+      const settings = window.__ytChatOverlay?.getSettings?.();
+      return (
+        settings?.fontSize === 48 && settings.speedPxPerSec === 420 && settings.opacity === 0.5
+      );
+    });
+    assert.deepEqual(pageErrors, []);
+    return {
+      deniedReads,
+      before: { fontSize: 48, speedPxPerSec: 420, opacity: 0.75 },
+      after: { fontSize: 48, speedPxPerSec: 420, opacity: 0.5 },
+      screenshots: ['settings-initial-read-unsaved.png', 'settings-initial-read-saved.png'],
+      pageErrors,
+    };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runQueuedInputRecoveryCase({
+  browser,
+  output,
+  userscript,
+  watchHtml,
+  timing,
+}: {
+  browser: Browser;
+  output: string;
+  userscript: string;
+  watchHtml: string;
+  timing: 'before-preview' | 'after-preview';
+}) {
+  const context = await browser.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 720 },
+  });
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const expectedReadWarnings: string[] = [];
+  const otherWarnings: string[] = [];
+  let stage = 'initialize';
+  try {
+    // The maintained Chrome storage adapter awaits get(). This controlled
+    // page boundary supplies one failed initial read and one deferred recovery
+    // read while the real App, Settings, and form execute from the built script.
+    await context.addInitScript((storageKey) => {
+      const seed = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
+      if (localStorage.getItem(storageKey) === null) localStorage.setItem(storageKey, seed);
+      let releaseRead: (() => void) | undefined;
+      const state = {
+        reads: 0,
+        waiting: false,
+        released: false,
+        writes: 0,
+        release: () => releaseRead?.(),
+      };
+      window.__ytAcceptanceDeferredRecovery = state;
+      const local = {
+        async get(key: string): Promise<Record<string, unknown>> {
+          if (key !== storageKey) return {};
+          state.reads++;
+          if (sessionStorage.getItem('__ytAcceptanceRecoveryFinished') !== '1') {
+            if (state.reads === 1) throw new Error('Controlled initial settings read denial');
+            if (state.reads === 2) {
+              return new Promise<Record<string, unknown>>((resolve) => {
+                state.waiting = true;
+                releaseRead = () => {
+                  state.waiting = false;
+                  state.released = true;
+                  resolve({ [key]: localStorage.getItem(key) });
+                };
+              });
+            }
+          }
+          return { [key]: localStorage.getItem(key) };
+        },
+        async set(items: Record<string, unknown>): Promise<void> {
+          const value = items[storageKey];
+          if (typeof value !== 'string') throw new Error('Settings write lacked a string value');
+          state.writes++;
+          localStorage.setItem(storageKey, value);
+        },
+      };
+      const existingChrome = (window as Window & { chrome?: Record<string, unknown> }).chrome ?? {};
+      Object.defineProperty(window, 'chrome', {
+        configurable: true,
+        value: { ...existingChrome, storage: { local } },
+      });
+    }, SETTINGS_KEY);
+    await context.addInitScript({ content: userscript });
+    await routeFixture(context, watchHtml);
+    const page = await context.newPage();
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+      if (message.type() === 'warning') {
+        const warning = message.text();
+        if (warning.includes('Controlled initial settings read denial')) {
+          expectedReadWarnings.push(warning);
+        } else {
+          otherWarnings.push(warning);
+        }
+      }
+    });
+    await page.goto(WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
+    const seed = await page.evaluate((key) => localStorage.getItem(key), SETTINGS_KEY);
+    assert(seed, 'Deferred-recovery fixture did not seed preferences');
+    assert.equal(JSON.parse(seed).fontSize, 48);
+    await page.waitForFunction(() => window.__ytAcceptanceDeferredRecovery?.reads === 1);
+    // Overlay attachment and the first storage call precede App.start()'s
+    // completion. Observe the exported settings handle before reading it.
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 32);
+    assert.equal(await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().fontSize), 32);
+
+    stage = 'accept-opacity-and-hold-recovery';
+    await openSettings(page);
+    await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('50');
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().opacity === 0.5);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__ytAcceptanceDeferredRecovery?.waiting === true);
+    assert.equal(await page.evaluate(() => window.__ytAcceptanceDeferredRecovery?.reads), 2);
+    assert.equal(await page.evaluate(() => window.__ytAcceptanceDeferredRecovery?.writes), 0);
+
+    stage = 'reopen-and-enter-font';
+    await openSettings(page);
+    const fontInput = page.locator('#yt-chat-overlay-settings-backdrop input[name="fontSize"]');
+    let atRelease: { font: number | undefined; form: string; released: boolean };
+    if (timing === 'before-preview') {
+      // Dispatch and release in one browser task. The deferred read settles in
+      // microtasks, before the 100 ms preview timer can possibly fire.
+      atRelease = await page.evaluate(() => {
+        const field = document.querySelector<HTMLInputElement>(
+          '#yt-chat-overlay-settings-backdrop input[name="fontSize"]'
+        );
+        const recovery = window.__ytAcceptanceDeferredRecovery;
+        if (!field || !recovery?.waiting) throw new Error('Recovery/input fixture was not ready');
+        field.value = '36';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        const font = window.__ytChatOverlay?.getSettings?.().fontSize;
+        recovery.release();
+        return { font, form: field.value, released: recovery.released };
+      });
+      assert.equal(atRelease.font, 32, 'Preview ran before recovery was released');
+    } else {
+      await fontInput.fill('36');
+      await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 36);
+      atRelease = await page.evaluate(() => {
+        const recovery = window.__ytAcceptanceDeferredRecovery;
+        if (!recovery?.waiting) throw new Error('Recovery was not waiting after preview');
+        const form = document.querySelector<HTMLInputElement>(
+          '#yt-chat-overlay-settings-backdrop input[name="fontSize"]'
+        );
+        recovery.release();
+        return {
+          font: window.__ytChatOverlay?.getSettings?.().fontSize,
+          form: form?.value ?? '',
+          released: recovery.released,
+        };
+      });
+      assert.equal(atRelease.font, 36);
+    }
+    assert.equal(atRelease.form, '36');
+    assert(atRelease.released);
+
+    stage = 'observe-recovery-and-preview';
+    if (timing === 'before-preview') {
+      await page.waitForFunction((key) => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return false;
+        const stored = JSON.parse(raw) as { opacity: number; fontSize: number };
+        return stored.opacity === 0.5 && stored.fontSize === 48;
+      }, SETTINGS_KEY);
+    }
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 36);
+    assert.equal(await fontInput.inputValue(), '36');
+    const beforeClose = await page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
+      const stored = raw ? (JSON.parse(raw) as { fontSize: number; opacity: number }) : null;
+      const recovery = window.__ytAcceptanceDeferredRecovery;
+      return {
+        stored,
+        memoryFont: window.__ytChatOverlay?.getSettings?.().fontSize,
+        formFont: document.querySelector<HTMLInputElement>(
+          '#yt-chat-overlay-settings-backdrop input[name="fontSize"]'
+        )?.value,
+        recovery: recovery
+          ? {
+              reads: recovery.reads,
+              waiting: recovery.waiting,
+              released: recovery.released,
+              writes: recovery.writes,
+            }
+          : null,
+      };
+    }, SETTINGS_KEY);
+    assert(beforeClose.stored);
+    assert.equal(beforeClose.stored.fontSize, 48, 'An unaccepted font draft was persisted');
+    assert.equal(beforeClose.memoryFont, 36);
+    assert.equal(beforeClose.formFont, '36');
+    assert.deepEqual(beforeClose.recovery?.reads, 2);
+    assert.equal(beforeClose.recovery?.waiting, false);
+    assert.equal(beforeClose.recovery?.released, true);
+    const openFormScreenshot = `settings-queued-recovery-${timing}-open.png`;
+    await page.screenshot({ path: join(output, openFormScreenshot) });
+
+    stage = 'close-and-read-fresh-document';
+    await page.keyboard.press('Escape');
+    await page.waitForFunction((key) => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return false;
+      const stored = JSON.parse(raw) as {
+        fontSize: number;
+        speedPxPerSec: number;
+        opacity: number;
+      };
+      return stored.fontSize === 36 && stored.speedPxPerSec === 420 && stored.opacity === 0.5;
+    }, SETTINGS_KEY);
+    const afterClose = await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) ?? 'null'),
+      SETTINGS_KEY
+    );
+    const originalDocumentTimeOrigin = await page.evaluate(() => performance.timeOrigin);
+    await page.evaluate(() => sessionStorage.setItem('__ytAcceptanceRecoveryFinished', '1'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
+    const freshDocumentTimeOrigin = await page.evaluate(() => performance.timeOrigin);
+    assert(
+      freshDocumentTimeOrigin > originalDocumentTimeOrigin,
+      'The final read did not execute in a fresh document'
+    );
+    await page.waitForFunction(() => {
+      const settings = window.__ytChatOverlay?.getSettings?.();
+      return (
+        settings?.fontSize === 36 && settings.speedPxPerSec === 420 && settings.opacity === 0.5
+      );
+    });
+    assert.deepEqual(pageErrors, []);
+    assert.deepEqual(consoleErrors, []);
+    return {
+      timing,
+      atRelease,
+      beforeClose,
+      afterClose: {
+        fontSize: afterClose.fontSize,
+        speedPxPerSec: afterClose.speedPxPerSec,
+        opacity: afterClose.opacity,
+      },
+      freshDocument: { originalDocumentTimeOrigin, freshDocumentTimeOrigin },
+      screenshots: [openFormScreenshot],
+      pageErrors,
+      consoleErrors,
+      expectedReadWarnings,
+      otherWarnings,
+    };
+  } catch (error) {
+    await writeFile(
+      join(output, `settings-queued-recovery-${timing}-failure.json`),
+      `${JSON.stringify(
+        {
+          stage,
+          error: error instanceof Error ? error.message : String(error),
+          pageErrors,
+          consoleErrors,
+          expectedReadWarnings,
+          otherWarnings,
+        },
+        null,
+        2
+      )}\n`
+    );
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
+/** Real form and production adapters; only the asynchronous storage boundary is controlled. */
+export async function runRemoteReadStatusCase({
+  browser,
+  output,
+  userscript,
+  watchHtml,
+  outcome,
+}: {
+  browser: Browser;
+  output: string;
+  userscript: string;
+  watchHtml: string;
+  outcome: 'resolved' | 'rejected' | 'current-failure' | 'failed-write' | 'manual-retry';
+}) {
+  const context = await browser.newContext({
+    locale: 'en-US',
+    viewport: { width: 1280, height: 720 },
+  });
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const expectedWarnings: string[] = [];
+  const otherWarnings: string[] = [];
+  let stage = 'initialize';
+  try {
+    await context.addInitScript(
+      ({ key, selectedOutcome, noticeSelector }) => {
+        window.ytcfg = {
+          data_: {
+            INNERTUBE_API_KEY: 'windows-acceptance-key',
+            INNERTUBE_CONTEXT_CLIENT_NAME: '1',
+            INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
+            INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } },
+          },
+        };
+        window.ytInitialData = {
+          currentVideoEndpoint: { watchEndpoint: { videoId: 'windowsAcceptance' } },
+          contents: {
+            twoColumnWatchNextResults: {
+              conversationBar: {
+                liveChatRenderer: {
+                  isReplay: false,
+                  continuations: [
+                    {
+                      timedContinuationData: {
+                        continuation: 'windows-acceptance-live',
+                        timeoutMs: 30_000,
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        };
+        // Keep this current-format fixture aligned with the canonical version
+        // through the E2E assertion; the packaged VM helper has no source imports.
+        localStorage.setItem(
+          key,
+          JSON.stringify(
+            selectedOutcome === 'manual-retry'
+              ? { fontSize: 48, opacity: 0.75, language: 'en', _version: 2 }
+              : { fontSize: 32, language: 'en', _version: 2 }
+          )
+        );
+        const listeners = new Set<(changes: Record<string, unknown>, area: string) => void>();
+        let releaseRead: (() => void) | undefined;
+        const state = {
+          reads: 0,
+          writes: 0,
+          waiting: false,
+          notices: [] as string[],
+          announce: () => {
+            const raw = JSON.stringify({ fontSize: 52, language: 'en', _version: 2 });
+            localStorage.setItem(key, raw);
+            for (const listener of listeners) listener({ [key]: { newValue: raw } }, 'local');
+          },
+          release: () => releaseRead?.(),
+        };
+        window.__ytAcceptanceRemoteRead = state;
+        const local = {
+          async get(storageKey: string): Promise<Record<string, unknown>> {
+            if (storageKey !== key) return {};
+            state.reads++;
+            const captured = localStorage.getItem(key);
+            if (selectedOutcome === 'manual-retry' && state.reads === 1) {
+              throw new Error('Controlled initial settings read denial');
+            }
+            if (state.reads === 2) {
+              return new Promise<Record<string, unknown>>((resolve, reject) => {
+                state.waiting = true;
+                releaseRead = () => {
+                  state.waiting = false;
+                  if (selectedOutcome === 'resolved') resolve({ [key]: captured });
+                  else reject(new Error('Controlled older remote read denial'));
+                };
+              });
+            }
+            return { [key]: captured };
+          },
+          async set(items: Record<string, unknown>): Promise<void> {
+            state.writes++;
+            if (selectedOutcome === 'failed-write') {
+              throw new Error('Controlled newer settings write denial');
+            }
+            const value = items[key];
+            if (typeof value !== 'string') throw new Error('Settings write lacked a string value');
+            localStorage.setItem(key, value);
+          },
+        };
+        const existingChrome =
+          (window as Window & { chrome?: Record<string, unknown> }).chrome ?? {};
+        Object.defineProperty(window, 'chrome', {
+          configurable: true,
+          value: {
+            ...existingChrome,
+            storage: {
+              local,
+              onChanged: {
+                addListener: (listener: (changes: Record<string, unknown>, area: string) => void) =>
+                  listeners.add(listener),
+                removeListener: (
+                  listener: (changes: Record<string, unknown>, area: string) => void
+                ) => listeners.delete(listener),
+              },
+            },
+          },
+        });
+        document.addEventListener('DOMContentLoaded', () => {
+          new MutationObserver(() => {
+            const text = document.querySelector(noticeSelector)?.textContent ?? '';
+            if (state.notices.at(-1) !== text) state.notices.push(text);
+          }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        });
+      },
+      { key: SETTINGS_KEY, selectedOutcome: outcome, noticeSelector: NOTICE_SELECTOR }
+    );
+    await context.addInitScript({ content: userscript });
+    await routeFixture(context, watchHtml);
+    const page = await context.newPage();
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      const text = message.text();
+      if (message.type() === 'error') consoleErrors.push(text);
+      if (message.type() !== 'warning') return;
+      if (
+        text.includes('Controlled older remote read denial') ||
+        text.includes('Controlled newer settings write denial') ||
+        text.includes('Controlled initial settings read denial')
+      ) {
+        expectedWarnings.push(text);
+      } else otherWarnings.push(text);
+    });
+    await page.goto(WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 32);
+    const seedVersion = await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) ?? 'null')?._version,
+      SETTINGS_KEY
+    );
+    stage = 'hold-remote-read';
+    if (outcome === 'manual-retry') {
+      await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).click();
+    } else {
+      await page.evaluate(() => window.__ytAcceptanceRemoteRead?.announce());
+    }
+    await page.waitForFunction(() => window.__ytAcceptanceRemoteRead?.waiting);
+    if (outcome !== 'current-failure') {
+      stage = 'accept-form-edit';
+      await openSettings(page);
+      if (outcome === 'manual-retry') {
+        await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('50');
+        await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().opacity === 0.5);
+      } else {
+        await page.locator('#yt-chat-overlay-settings-backdrop input[name="fontSize"]').fill('36');
+        await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 36);
+      }
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => window.__ytAcceptanceRemoteRead?.writes === 1);
+      if (outcome === 'failed-write') {
+        await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).waitFor();
+      } else {
+        await page.waitForFunction(
+          ({ key, manualRetry }) => {
+            const stored = JSON.parse(localStorage.getItem(key) ?? 'null');
+            return manualRetry
+              ? stored?.fontSize === 48 && stored?.opacity === 0.5
+              : stored?.fontSize === 36;
+          },
+          { key: SETTINGS_KEY, manualRetry: outcome === 'manual-retry' }
+        );
+      }
+    }
+    const snapshot = () =>
+      page.evaluate(
+        ({ key, noticeSelector }) => ({
+          memoryFont: window.__ytChatOverlay?.getSettings?.().fontSize,
+          memoryOpacity: window.__ytChatOverlay?.getSettings?.().opacity,
+          durableFont: JSON.parse(localStorage.getItem(key) ?? 'null')?.fontSize,
+          durableOpacity: JSON.parse(localStorage.getItem(key) ?? 'null')?.opacity,
+          reads: window.__ytAcceptanceRemoteRead?.reads,
+          writes: window.__ytAcceptanceRemoteRead?.writes,
+          notices: [...(window.__ytAcceptanceRemoteRead?.notices ?? [])],
+          notice: document.querySelector(noticeSelector)?.textContent ?? null,
+          timeOrigin: performance.timeOrigin,
+        }),
+        { key: SETTINGS_KEY, noticeSelector: NOTICE_SELECTOR }
+      );
+    const beforeRelease = await snapshot();
+    stage = 'settle-older-read';
+    await page.evaluate(async () => {
+      window.__ytAcceptanceRemoteRead?.release();
+      // Observe after the adapter/store/UI promise continuations and mutations.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    const afterRelease = await snapshot();
+    const failed = outcome === 'current-failure' || outcome === 'failed-write';
+    assert.equal(
+      afterRelease.memoryFont,
+      outcome === 'manual-retry' ? 48 : outcome === 'current-failure' ? 32 : 36
+    );
+    assert.equal(afterRelease.durableFont, outcome === 'manual-retry' ? 48 : failed ? 52 : 36);
+    if (outcome === 'manual-retry') {
+      assert.equal(afterRelease.memoryOpacity, 0.5);
+      assert.equal(afterRelease.durableOpacity, 0.5);
+    }
+    assert.equal(afterRelease.reads, outcome === 'manual-retry' ? 3 : 2);
+    assert.equal(afterRelease.writes, outcome === 'current-failure' ? 0 : 1);
+    if (failed) {
+      assert.match(afterRelease.notice ?? '', /were not saved/u);
+      assert.equal(
+        await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).count(),
+        1
+      );
+    } else {
+      if (outcome === 'manual-retry') {
+        assert(!/were not saved|Retry save/u.test(afterRelease.notice ?? ''));
+      } else {
+        assert.equal(afterRelease.notice, null, 'An obsolete read produced failure feedback');
+      }
+      assert(
+        !afterRelease.notices
+          .slice(outcome === 'manual-retry' ? beforeRelease.notices.length : 0)
+          .some((text) => /were not saved|Retry save/u.test(text))
+      );
+    }
+    assert.deepEqual(pageErrors, []);
+    assert.deepEqual(consoleErrors, []);
+    assert.deepEqual(otherWarnings, []);
+    assert.equal(
+      expectedWarnings.length,
+      outcome === 'resolved' ? 0 : outcome === 'failed-write' ? 2 : 1
+    );
+    const screenshot = `settings-remote-read-${outcome}.png`;
+    await page.screenshot({ path: join(output, screenshot) });
+    const result = {
+      outcome,
+      seedVersion,
+      beforeRelease,
+      afterRelease,
+      pageErrors,
+      consoleErrors,
+      expectedWarnings,
+      screenshots: [screenshot],
+    };
+    await writeFile(
+      join(output, `settings-remote-read-${outcome}.json`),
+      `${JSON.stringify(result, null, 2)}\n`
+    );
+    return result;
+  } catch (error: unknown) {
+    await writeFile(
+      join(output, `settings-remote-read-${outcome}-failure.json`),
+      `${JSON.stringify({ stage, error: String(error), pageErrors, consoleErrors, expectedWarnings, otherWarnings }, null, 2)}\n`
+    );
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
 /** Bounded built-userscript fixture selected by a bundle-hashed local input. */
 export async function runSettingsPersistenceFixture({
   browser,
@@ -769,6 +1438,32 @@ export async function runSettingsPersistenceFixture({
       localized.push(await runLocalizedCase({ browser, output, userscript, watchHtml, language }));
     }
     const conflict = await runConflictCase({ browser, output, userscript, watchHtml });
+    const initialReadRecovery = await runInitialReadRecoveryCase({
+      browser,
+      output,
+      userscript,
+      watchHtml,
+    });
+    const queuedInputBeforePreview = await runQueuedInputRecoveryCase({
+      browser,
+      output,
+      userscript,
+      watchHtml,
+      timing: 'before-preview',
+    });
+    const queuedInputAfterPreview = await runQueuedInputRecoveryCase({
+      browser,
+      output,
+      userscript,
+      watchHtml,
+      timing: 'after-preview',
+    });
+    const remoteReadStatus = [];
+    for (const outcome of ['resolved', 'rejected', 'current-failure', 'failed-write'] as const) {
+      remoteReadStatus.push(
+        await runRemoteReadStatusCase({ browser, output, userscript, watchHtml, outcome })
+      );
+    }
     const browserZoom200 = await runChromeZoomCase({
       browser,
       root,
@@ -788,6 +1483,11 @@ export async function runSettingsPersistenceFixture({
         oneDeniedWriteBeforeRetry: true,
         repeatedDenialRemainsRecoverable: true,
         crossTabConflictRequiresDecision: true,
+        deniedInitialReadPreservesPreferences: true,
+        queuedInputSurvivesBeforePreviewRecovery: true,
+        queuedInputSurvivesAfterPreviewRecovery: true,
+        olderReadCannotInvalidateSavedFeedback: true,
+        currentReadAndWriteFailuresRemainVisible: true,
         realBrowserZoom200Observed: true,
         retryPersisted: true,
         reloadReadPersisted: true,
@@ -798,12 +1498,19 @@ export async function runSettingsPersistenceFixture({
         deniedWrites: 2,
         beforeFontSize: JSON.parse(before).fontSize,
         afterFontSize: 44,
-        notice: { unsaved, repeatedUnsaved, saved, localized, conflict },
+        notice: { unsaved, repeatedUnsaved, saved, localized, conflict, initialReadRecovery },
+        queuedInputBeforePreview,
+        queuedInputAfterPreview,
+        remoteReadStatus,
         browserZoom200,
         installedExtension: 'not-run: focused selector exercises the built userscript',
         screenshots: [
           'settings-unsaved.png',
           'settings-saved.png',
+          ...initialReadRecovery.screenshots,
+          ...queuedInputBeforePreview.screenshots,
+          ...queuedInputAfterPreview.screenshots,
+          ...remoteReadStatus.flatMap((item) => item.screenshots),
           ...localized.flatMap((item) => item.screenshots),
           ...conflict.screenshots,
           'settings-zoom-ko-100.png',

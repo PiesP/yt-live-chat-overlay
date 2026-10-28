@@ -4,11 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.45.9] - 2026-10-26
+### Fixed
+
+- **Chat request deadlines** — Preserve request timeouts during internal retry waits so live polling counts the failure and can recover on the next healthy response. Session stop and replay seek still cancel their owned requests.
+
+## [0.45.9] - 2026-10-28
 
 ### Fixed
 
-- **Settings saves** — Keep unsaved edits visible when a browser storage write fails, offer Retry save, and preserve local edits when another tab changes settings. Save my values explicitly resolves the conflict; closing settings does not overwrite that newer decision.
+- **Settings saves** — Keep unsaved edits visible when a browser storage write fails, offer Retry save, and preserve local edits when another tab changes settings. A failed older Retry save cannot replace the saved status of a newer successful edit. Save my values explicitly resolves the conflict; closing settings does not overwrite that newer decision.
 - **Pause and recovery controls** — Add Pause comments beside Enabled so comments can pause independently of the video and keyboard IME shortcuts. Keep automatic recovery feedback beside Reload overlay, show pending and retryable reload states, and preserve pause while native Picture-in-Picture is active.
 - **Translation readiness** — Report whether translation is off, unavailable, preparing, downloading, active, or needs attention. Original comments remain available while setup is pending or fails.
 - **Chat translation lifetime** — Cancel requests when their Main or Worker messages leave the renderer, bound the pending text queue, and let recent and paid messages progress during bursts while retaining oldest-message turns. Keep browser translation work serialized across renderer replacement until its native Promise settles; original comments remain visible if translation stalls.

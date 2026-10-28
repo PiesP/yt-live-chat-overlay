@@ -160,10 +160,26 @@ For a focused settings-persistence run, create the ignored
 The declared `inputs` asset includes and hashes this local selector in the bundle.
 The profile runs the built userscript fixture in the prepared browser: preview a
 font edit, deny and retry settings writes, observe the session-only notice, test
-a real cross-tab storage conflict, and reload the saved value. It records
-computed notice typography, focus, bounds, and screenshots for English and
-narrow Korean/Japanese layouts. A separate owned Chrome profile sets real 200%
-page zoom through Chrome Settings and repeats the affected localized and conflict
+a real cross-tab storage conflict, and reload the saved value. A separate owned
+page denies the initial settings read, edits one form field, confirms zero
+replacement writes while reads fail, then recovers and checks untouched values
+in a fresh document. Two additional pages use the maintained asynchronous Chrome
+storage adapter boundary to hold that recovery read, then release it before or
+after a newly entered font value reaches the 100 ms preview callback. They check
+that the form retains the new value, the earlier accepted opacity edit can save
+without committing the new draft, and the font value persists after close in a
+fresh document. The before-preview case dispatches input and releases the read
+in the same browser task. Each case captures the open form with font `36`, the
+fresh-document time origin, and console diagnostics; the controlled initial-read
+warning is recorded separately from unexpected errors. Four asynchronous remote-read
+cases then accept font `36` before an older read resolves or rejects, and retain
+current-read and failed-write controls. They record the actual form, durable value,
+read/write counts and notice mutations: a successful save must not acquire a false
+Retry save notice, while applicable failures remain visible. The same cases run
+in the maintained E2E suite. The profile also records
+computed notice typography, focus, bounds, and screenshots for English and narrow
+Korean/Japanese layouts. A separate owned Chrome profile sets real 200% page zoom
+through Chrome Settings and repeats the affected localized and conflict
 states, then restores zoom and removes that profile after confirmed closure.
 This is a controlled localStorage boundary, not an installed extension or live
 YouTube result. Remove only this task-owned selector after the run; a normal
@@ -851,3 +867,28 @@ removed from retained diagnostics.
 Run VM packaging and local E2E serially: both build into the same distribution
 directories, and production packaging replaces the development userscript that
 E2E requires.
+
+## Chat retry deadline fixture
+
+Create the ignored `inputs/chat-request-deadline.json` with
+`{"scenario":"chat-request-deadline"}` for a bounded installed Chrome/Edge
+extension run. It is exclusive with other focused selectors. The maintained
+installation profile records package injection provenance, then delays the
+second real polling HTTP response by 19.25 seconds and returns 503. The unchanged
+20-second request deadline expires inside the real first retry sleep. The same
+document, application, source and session generation must count one failure and
+then process healthy chat without a watchdog restart. Stop must retire the loop
+and prevent another request. This uses the acquisition fixtures' controlled
+playback-readiness prerequisite; it does not establish real video playback.
+
+The selector skips unrelated historical fixture campaigns. With `--browser chrome`
+and at least one `--live-url`, the focused run connects to an owned headed Chrome
+through the native tab visibility path. Its public-page checks observe a real
+hidden/visible tab transition after pause/resume, then continue through seek,
+navigation, and settings restoration without mocked responses. Other Chrome/Edge
+short installation runs retain the ordinary launcher and public-page checks;
+those runs do not claim native tab visibility. Remove the task-owned selector
+after collecting the run. Review `chat-request-deadline.json`, its screenshot
+and the central bundle/result/collection/transport receipts together; Browser
+Mode regressions cover pre-abort, fetch/body, all retry waits, reason races and
+replay retirement.
