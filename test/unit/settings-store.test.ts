@@ -138,6 +138,148 @@ describe('Settings persistence', () => {
     await settings.destroy();
   });
 
+  it('keeps saved feedback when an older no-edit retry fails after a newer accepted save', async () => {
+    let stored = JSON.stringify({ fontSize: 48, opacity: 0.75 });
+    let rejectRetry: (() => void) | undefined;
+    let reads = 0;
+    const getItem = vi.fn(() => {
+      reads++;
+      if (reads === 1) return Promise.reject(new Error('initial read denied'));
+      if (reads === 2) {
+        return new Promise<string>((_resolve, reject) => {
+          rejectRetry = () => reject(new Error('older retry denied'));
+        });
+      }
+      return Promise.resolve(stored);
+    });
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({ getItem, setItem });
+    const settings = new Settings();
+    await settings.initialize();
+    const observed: string[] = [];
+    const unsubscribe = settings.subscribePersistence((state) => observed.push(state));
+    const olderRetry = settings.retrySave();
+    await vi.waitFor(() => expect(rejectRetry).toBeTypeOf('function'));
+    settings.set({ opacity: 0.5 });
+    expect(await settings.persistNow()).toBe('saved');
+    expect(settings.get()).toMatchObject({ fontSize: 48, opacity: 0.5 });
+    expect(JSON.parse(stored)).toMatchObject({ fontSize: 48, opacity: 0.5 });
+    const beforeRejection = observed.length;
+    rejectRetry?.();
+    expect(await olderRetry).toBe('saved');
+    expect(settings.persistenceState()).toBe('saved');
+    expect(observed.slice(beforeRejection)).not.toContain('unsaved');
+    expect(await settings.retrySave()).toBe('saved');
+    expect(getItem).toHaveBeenCalledTimes(3);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    await settings.destroy();
+  });
+
+  it('reports a current no-edit retry failure after a reverted preview', async () => {
+    let rejectRetry: (() => void) | undefined;
+    const getItem = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('initial read denied'))
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((_resolve, reject) => {
+            rejectRetry = () => reject(new Error('current retry denied'));
+          })
+      );
+    const setItem = vi.fn(async () => undefined);
+    vi.mocked(getStorageAdapter).mockReturnValue({ getItem, setItem });
+    const settings = new Settings();
+    await settings.initialize();
+    const olderRetry = settings.retrySave();
+    await vi.waitFor(() => expect(rejectRetry).toBeTypeOf('function'));
+    const originalOpacity = settings.get().opacity;
+    settings.preview({ opacity: 0.5 });
+    settings.preview({ opacity: originalOpacity });
+    settings.endPreview();
+    rejectRetry?.();
+    expect(await olderRetry).toBe('unsaved');
+    expect(settings.persistenceState()).toBe('unsaved');
+    expect(setItem).not.toHaveBeenCalled();
+    await settings.destroy();
+  });
+
+  it('retains a newer write failure when the older no-edit retry also fails', async () => {
+    let rejectRetry: (() => void) | undefined;
+    let reads = 0;
+    let stored = JSON.stringify({ fontSize: 48, opacity: 0.75 });
+    const getItem = vi.fn(() => {
+      reads++;
+      if (reads === 1) return Promise.reject(new Error('initial read denied'));
+      if (reads === 2) {
+        return new Promise<string>((_resolve, reject) => {
+          rejectRetry = () => reject(new Error('older retry denied'));
+        });
+      }
+      return Promise.resolve(stored);
+    });
+    let denyWrite = true;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      if (denyWrite) throw new Error('newer write denied');
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({ getItem, setItem });
+    const settings = new Settings();
+    await settings.initialize();
+    const olderRetry = settings.retrySave();
+    await vi.waitFor(() => expect(rejectRetry).toBeTypeOf('function'));
+    settings.set({ opacity: 0.5 });
+    expect(await settings.persistNow()).toBe('unsaved');
+    rejectRetry?.();
+    expect(await olderRetry).toBe('unsaved');
+    expect(settings.persistenceState()).toBe('unsaved');
+    expect(settings.get()).toMatchObject({ fontSize: 48, opacity: 0.5 });
+    expect(JSON.parse(stored)).toMatchObject({ fontSize: 48, opacity: 0.75 });
+    expect(getItem).toHaveBeenCalledTimes(3);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    denyWrite = false;
+    expect(await settings.retrySave()).toBe('saved');
+    expect(JSON.parse(stored).opacity).toBe(0.5);
+    await settings.destroy();
+  });
+
+  it('does not let a retired no-edit retry notify a replacement owner', async () => {
+    const stored = JSON.stringify({ fontSize: 48, opacity: 0.75 });
+    let rejectRetry: (() => void) | undefined;
+    let reads = 0;
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(() => {
+        reads++;
+        if (reads === 1) return Promise.reject(new Error('initial read denied'));
+        if (reads === 2) {
+          return new Promise<string>((_resolve, reject) => {
+            rejectRetry = () => reject(new Error('retired retry denied'));
+          });
+        }
+        return Promise.resolve(stored);
+      }),
+      setItem: vi.fn(async () => undefined),
+    });
+    const old = new Settings();
+    await old.initialize();
+    const observed: string[] = [];
+    old.subscribePersistence((state) => observed.push(state));
+    const olderRetry = old.retrySave();
+    await vi.waitFor(() => expect(rejectRetry).toBeTypeOf('function'));
+    const replacement = new Settings();
+    await replacement.initialize();
+    expect(replacement.get().fontSize).toBe(48);
+    const beforeRejection = observed.length;
+    rejectRetry?.();
+    expect(await olderRetry).toBe('unsaved');
+    expect(observed).toHaveLength(beforeRejection);
+    expect(replacement.persistenceState()).toBe('saved');
+    await old.destroy();
+    await replacement.destroy();
+  });
+
   it('finishes an accepted recovery save while a later form draft awaits preview', async () => {
     const existing = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
     let stored = existing;
