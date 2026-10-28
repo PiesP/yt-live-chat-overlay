@@ -867,3 +867,23 @@ removed from retained diagnostics.
 Run VM packaging and local E2E serially: both build into the same distribution
 directories, and production packaging replaces the development userscript that
 E2E requires.
+
+## Chat retry deadline fixture
+
+Create the ignored `inputs/chat-request-deadline.json` with
+`{"scenario":"chat-request-deadline"}` for a bounded installed Chrome/Edge
+extension run. It is exclusive with other focused selectors. The maintained
+installation profile records package injection provenance, then delays the
+second real polling HTTP response by 19.25 seconds and returns 503. The unchanged
+20-second request deadline expires inside the real first retry sleep. The same
+document, application, source and session generation must count one failure and
+then process healthy chat without a watchdog restart. Stop must retire the loop
+and prevent another request. This uses the acquisition fixtures' controlled
+playback-readiness prerequisite; it does not establish real video playback.
+
+The selector skips unrelated historical fixture campaigns. Optional `--live-url`
+observations still use the normal public-page compatibility checks after this
+fixture, without mocked responses. Remove the task-owned selector after collecting
+the run. Review `chat-request-deadline.json`, its screenshot and the central
+bundle/result/collection/transport receipts together; Browser Mode regressions
+cover pre-abort, fetch/body, all retry waits, reason races and replay retirement.

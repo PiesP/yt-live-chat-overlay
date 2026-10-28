@@ -107,6 +107,78 @@ describe.each(requestCases)('$name chat endpoint retry', ({ path, request }) => 
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each(['before fetch', 'fetch', 'body', 'first wait', 'second wait', 'third wait'])(
+    'preserves a deadline during %s without another attempt',
+    async (phase) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const reason = new DOMException('Request deadline', 'TimeoutError');
+      const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        const signal = init?.signal;
+        if (phase === 'fetch') {
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+          });
+        }
+        if (phase === 'body') {
+          return Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(stream) {
+                  stream.enqueue(new TextEncoder().encode('{'));
+                  signal?.addEventListener('abort', () => stream.error(signal.reason), {
+                    once: true,
+                  });
+                },
+              })
+            )
+          );
+        }
+        return Promise.resolve(new Response('', { status: 503 }));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      if (phase === 'before fetch') controller.abort(reason);
+      const outcome = request(controller.signal).catch((error: unknown) => error);
+      const elapsed = phase === 'second wait' ? 1_000 : phase === 'third wait' ? 3_000 : 0;
+      await vi.advanceTimersByTimeAsync(elapsed);
+      controller.abort(reason);
+      expect(await outcome).toBe(reason);
+      const attempts = fetchMock.mock.calls.length;
+      expect(attempts).toBe(
+        phase === 'before fetch' ? 0 : elapsed === 3_000 ? 3 : elapsed === 1_000 ? 2 : 1
+      );
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    }
+  );
+
+  it.each(['deadline', 'parent'] as const)(
+    'keeps the initiating %s reason when both owners abort during retry wait',
+    async (first) => {
+      vi.useFakeTimers();
+      const deadline = new AbortController();
+      const parent = new AbortController();
+      const timeout = new DOMException('Request deadline', 'TimeoutError');
+      const stopped = new DOMException('Session stopped', 'AbortError');
+      const merged = AbortSignal.any([deadline.signal, parent.signal]);
+      const fetchMock = vi.fn(async () => new Response('', { status: 503 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const outcome = request(merged).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(0);
+      if (first === 'deadline') {
+        deadline.abort(timeout);
+        parent.abort(stopped);
+      } else {
+        parent.abort(stopped);
+        deadline.abort(timeout);
+      }
+      expect(await outcome).toBe(first === 'deadline' ? timeout : stopped);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
   it('propagates cancellation during a request and lets the next request succeed', async () => {
     const controller = new AbortController();
     let attempts = 0;

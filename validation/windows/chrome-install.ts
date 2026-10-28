@@ -21,6 +21,10 @@ import type {
 import { runAcquisitionBoundaries } from './acquisition-boundaries.ts';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import { runCanvasRecoveryFixture } from './canvas-recovery.ts';
+import {
+  readChatRequestDeadlineSelector,
+  runChatRequestDeadline,
+} from './chat-request-deadline.ts';
 import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
@@ -212,6 +216,7 @@ type ChromeResult<Live = LiveObservation> = {
   canvasRecovery?: Awaited<ReturnType<typeof runCanvasRecoveryFixture>> | null;
   nativePlayerBoundaries?: Awaited<ReturnType<typeof runNativePlayerBoundaries>> | null;
   acquisitionBoundaries?: Awaited<ReturnType<typeof runAcquisitionBoundaries>> | null;
+  chatRequestDeadline?: Awaited<ReturnType<typeof runChatRequestDeadline>> | null;
   recoveryContinuity?: Awaited<ReturnType<typeof runRecoveryContinuityFixture>> | null;
   mainImageRecovery?: Awaited<ReturnType<typeof runMainImageRecoveryFixture>> | null;
   userscriptUpgrade?: UpgradeResult | null;
@@ -2257,16 +2262,27 @@ export async function runChromeInstallation({
     Array.isArray(liveUrls) && liveUrls.length <= 3,
     'At most three live URLs can run within the guest deadline'
   );
+  const requestDeadlineSelected = await readChatRequestDeadlineSelector(root);
   const installedViewingSelected = await readInstalledViewingTaskSelector(root);
   const translatorNativeSelected = await readTranslatorNativeSelector(root);
   const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
   assert(
-    Number(installedViewingSelected) +
+    Number(requestDeadlineSelected) +
+      Number(installedViewingSelected) +
       Number(Boolean(translatorNativeSelected)) +
       Number(translationWorkerSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
+  if (requestDeadlineSelected) {
+    assert.equal(
+      await readFocusedScenario(root),
+      null,
+      'Deadline fixture cannot combine selectors'
+    );
+    assert.equal(liveObservation, null, 'Deadline fixture cannot use duration observation');
+    assert.equal(installation, 'extension', 'Deadline fixture requires the installed extension');
+  }
   if (translationWorkerSelected) {
     assert.equal(
       await readFocusedScenario(root),
@@ -2488,117 +2504,128 @@ export async function runChromeInstallation({
       assert.equal(result.installedTranslationWorker.status, 'observed');
       return result;
     }
-    result.fixture = await runFixture({
-      browser,
-      root,
-      output,
-      installedContext: context,
-      installedExtensionId: extensionId,
-      expectedRenderer: installation === 'extension' ? 'worker' : 'main',
-    });
-    assert(
-      !('builtUserscriptFixture' in result.fixture.checks),
-      'The focused settings fixture cannot run in an installation profile'
-    );
-    if (result.userscriptUpgrade) {
-      assert(upgradeInputs && 'candidateUnsafeWindowGrant' in result.userscriptUpgrade);
-      assert('installedApplicationDelivery' in result.fixture.checks);
-      assert('sustainedViewingLifecycle' in result.fixture.checks);
-      assert.equal(result.fixture.checks.installedApplicationDelivery, true);
-      const pageFetch = requireInstalledPageFetchEvidence(result.fixture);
-      result.userscriptUpgrade.effectiveGrantEvidence = {
-        candidateMetadata: result.userscriptUpgrade.candidateUnsafeWindowGrant,
-        exactManagerEditorBytes:
-          (result.userscriptUpgrade.after as { editorSha256?: string } | undefined)
-            ?.editorSha256 === upgradeInputs.candidateSha256,
-        actualPageFetchIngress: pageFetch.callbackAssertionsCompleted,
-        pageFetch,
-      };
-    }
-    if (browserName === 'msedge' && installation === 'extension') {
-      // Exercise document and realm ownership before the longer media campaign.
-      result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
+    if (requestDeadlineSelected) {
+      assert(extensionId, 'Deadline fixture requires an extension ID');
+      result.chatRequestDeadline = await runChatRequestDeadline({
         context,
         root,
         output,
         extensionId,
       });
-      assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
-      result.nativeWorkerRetirement = await runNativeWorkerRetirementFixture({
-        context,
+      assert.equal(result.chatRequestDeadline.status, 'passed');
+    } else {
+      result.fixture = await runFixture({
+        browser,
         root,
         output,
-        extensionId,
+        installedContext: context,
+        installedExtensionId: extensionId,
+        expectedRenderer: installation === 'extension' ? 'worker' : 'main',
       });
-      assert.equal(result.nativeWorkerRetirement.status, 'passed');
-      result.canvasRecovery = await runCanvasRecoveryFixture({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      assert.equal(result.canvasRecovery.status, 'passed');
-      result.recoveryContinuity = await runRecoveryContinuityFixture({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      assert.equal(result.recoveryContinuity.status, 'passed');
-      result.acquisitionBoundaries = await runAcquisitionBoundaries({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      // Late image route cancellation remains explicitly partial evidence.
-      assert.equal(result.acquisitionBoundaries.controlStatus, 'passed');
-      result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
-      assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
-      result.bitmapLifecycle = await runBitmapLifecycleFixture({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      assert.equal(
-        result.bitmapLifecycle.status,
-        'passed',
-        'Installed Edge real bitmap lifecycle fixture failed'
+      assert(
+        !('builtUserscriptFixture' in result.fixture.checks),
+        'The focused settings fixture cannot run in an installation profile'
       );
-      // A baseline-only harness commit can set this to true with the same probe bytes.
-      const comparisonOnly = false;
-      result.placementTiming = await runPlacementTimingFixture({
-        context,
-        root,
-        output,
-        extensionId,
-        comparisonOnly,
-      });
-      assert.equal(
-        result.placementTiming.status,
-        'passed',
-        'Installed Edge placement or replay fixture did not satisfy its observations'
-      );
-      result.mainImageRecovery = await runMainImageRecoveryFixture({
-        context,
-        root,
-        output,
-        extensionId,
-      });
-      assert.equal(result.mainImageRecovery.status, 'passed', 'Installed Main recovery failed');
-      result.nativeTabInstallation = {
-        installation: 'extension',
-        fixture: null,
-        live: [],
-        cleanup: {},
-      };
-      await runNativeTabInstallation({
-        chromium,
-        root,
-        output,
-        result: result.nativeTabInstallation,
-      });
+      if (result.userscriptUpgrade) {
+        assert(upgradeInputs && 'candidateUnsafeWindowGrant' in result.userscriptUpgrade);
+        assert('installedApplicationDelivery' in result.fixture.checks);
+        assert('sustainedViewingLifecycle' in result.fixture.checks);
+        assert.equal(result.fixture.checks.installedApplicationDelivery, true);
+        const pageFetch = requireInstalledPageFetchEvidence(result.fixture);
+        result.userscriptUpgrade.effectiveGrantEvidence = {
+          candidateMetadata: result.userscriptUpgrade.candidateUnsafeWindowGrant,
+          exactManagerEditorBytes:
+            (result.userscriptUpgrade.after as { editorSha256?: string } | undefined)
+              ?.editorSha256 === upgradeInputs.candidateSha256,
+          actualPageFetchIngress: pageFetch.callbackAssertionsCompleted,
+          pageFetch,
+        };
+      }
+      if (browserName === 'msedge' && installation === 'extension') {
+        // Exercise document and realm ownership before the longer media campaign.
+        result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        assert.equal(result.chromiumBootstrapBoundaries.status, 'passed');
+        result.nativeWorkerRetirement = await runNativeWorkerRetirementFixture({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        assert.equal(result.nativeWorkerRetirement.status, 'passed');
+        result.canvasRecovery = await runCanvasRecoveryFixture({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        assert.equal(result.canvasRecovery.status, 'passed');
+        result.recoveryContinuity = await runRecoveryContinuityFixture({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        assert.equal(result.recoveryContinuity.status, 'passed');
+        result.acquisitionBoundaries = await runAcquisitionBoundaries({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        // Late image route cancellation remains explicitly partial evidence.
+        assert.equal(result.acquisitionBoundaries.controlStatus, 'passed');
+        result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
+        assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
+        result.bitmapLifecycle = await runBitmapLifecycleFixture({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        assert.equal(
+          result.bitmapLifecycle.status,
+          'passed',
+          'Installed Edge real bitmap lifecycle fixture failed'
+        );
+        // A baseline-only harness commit can set this to true with the same probe bytes.
+        const comparisonOnly = false;
+        result.placementTiming = await runPlacementTimingFixture({
+          context,
+          root,
+          output,
+          extensionId,
+          comparisonOnly,
+        });
+        assert.equal(
+          result.placementTiming.status,
+          'passed',
+          'Installed Edge placement or replay fixture did not satisfy its observations'
+        );
+        result.mainImageRecovery = await runMainImageRecoveryFixture({
+          context,
+          root,
+          output,
+          extensionId,
+        });
+        assert.equal(result.mainImageRecovery.status, 'passed', 'Installed Main recovery failed');
+        result.nativeTabInstallation = {
+          installation: 'extension',
+          fixture: null,
+          live: [],
+          cleanup: {},
+        };
+        await runNativeTabInstallation({
+          chromium,
+          root,
+          output,
+          result: result.nativeTabInstallation,
+        });
+      }
     }
     const extensionResources =
       installation === 'extension' && liveUrls.length > 0

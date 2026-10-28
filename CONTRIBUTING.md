@@ -297,6 +297,12 @@ rejection handling. Detached
 tasks must instead have a reviewed rejection/cancellation policy. Rule trials
 and decisions belong in the change's validation evidence.
 
+## Chat request ownership
+
+The [request lifetime contract](docs/chat-request-lifetime.md) identifies session,
+deadline, retry, replay serialization and watchdog owners, with their maintained
+regression and distribution verification paths.
+
 ## Browser validation
 
 For user-visible changes, verify the affected distribution on a real YouTube

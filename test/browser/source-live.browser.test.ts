@@ -336,6 +336,74 @@ describe('LiveChatSource empty-response polling', () => {
     expect(source.isActive(1_000)).toBe(true);
   });
 
+  it('counts a retry-wait deadline and continues the same live loop with a healthy poll', async () => {
+    vi.useFakeTimers();
+    const deadlines: AbortController[] = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
+      const deadline = new AbortController();
+      deadlines.push(deadline);
+      return deadline.signal;
+    });
+    const source = new LiveChatSource(makeSettings);
+    const received = vi.fn();
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 2) return new Response('', { status: 503 });
+      return new Response(
+        JSON.stringify({
+          continuationContents: {
+            liveChatContinuation: makePayload(fetchMock.mock.calls.length > 2 ? 'recovered' : null),
+          },
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    source.setInitialBootstrap(makeBootstrap());
+    await expect(source.start(received)).resolves.toBe('started');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(deadlines).toHaveLength(2);
+    deadlines[1]?.abort(new DOMException('Request deadline', 'TimeoutError'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(source.getHealthSnapshot().consecutiveErrors).toBe(1);
+    expect(source.getHealthSnapshot().observerAlive).toBe(true);
+    expect(received).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+    expect(received).toHaveBeenCalledOnce();
+    expect(source.getLatestMessages(10).map((message) => message.id)).toEqual(['recovered']);
+    expect(source.getHealthSnapshot().consecutiveErrors).toBe(0);
+    expect(source.getHealthSnapshot().observerAlive).toBe(true);
+    source.stop();
+    const countAtStop = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(countAtStop);
+    expect(source.getHealthSnapshot().observerAlive).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retires a stopped live retry wait without counting a source failure', async () => {
+    vi.useFakeTimers();
+    const source = new LiveChatSource(makeSettings);
+    const fetchMock = vi.fn(async () =>
+      fetchMock.mock.calls.length === 1
+        ? new Response(
+            JSON.stringify({ continuationContents: { liveChatContinuation: makePayload(null) } })
+          )
+        : new Response('', { status: 503 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    source.setInitialBootstrap(makeBootstrap());
+    await expect(source.start(vi.fn())).resolves.toBe('started');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    source.stop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(source.getHealthSnapshot().consecutiveErrors).toBe(0);
+    expect(source.getHealthSnapshot().observerAlive).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('aborts a stalled live response body on stop and starts a healthy session', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
