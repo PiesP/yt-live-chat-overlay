@@ -11,7 +11,13 @@ import { createMockWatchHtml } from '../../../validation/windows/profile';
 import { runRemoteReadStatusCase } from '../../../validation/windows/settings-persistence';
 import { USERSCRIPT_PATH } from '../fixtures/test-utils';
 
-for (const outcome of ['resolved', 'rejected', 'current-failure', 'failed-write'] as const) {
+for (const outcome of [
+  'resolved',
+  'rejected',
+  'current-failure',
+  'failed-write',
+  'manual-retry',
+] as const) {
   test(`settings remote read feedback: ${outcome}`, async ({ browser }, testInfo) => {
     await mkdir(testInfo.outputDir, { recursive: true });
     const result = await runRemoteReadStatusCase({

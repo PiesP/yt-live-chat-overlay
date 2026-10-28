@@ -1082,7 +1082,7 @@ export async function runRemoteReadStatusCase({
   output: string;
   userscript: string;
   watchHtml: string;
-  outcome: 'resolved' | 'rejected' | 'current-failure' | 'failed-write';
+  outcome: 'resolved' | 'rejected' | 'current-failure' | 'failed-write' | 'manual-retry';
 }) {
   const context = await browser.newContext({
     locale: 'en-US',
@@ -1126,7 +1126,14 @@ export async function runRemoteReadStatusCase({
         };
         // Keep this current-format fixture aligned with the canonical version
         // through the E2E assertion; the packaged VM helper has no source imports.
-        localStorage.setItem(key, JSON.stringify({ fontSize: 32, language: 'en', _version: 2 }));
+        localStorage.setItem(
+          key,
+          JSON.stringify(
+            selectedOutcome === 'manual-retry'
+              ? { fontSize: 48, opacity: 0.75, language: 'en', _version: 2 }
+              : { fontSize: 32, language: 'en', _version: 2 }
+          )
+        );
         const listeners = new Set<(changes: Record<string, unknown>, area: string) => void>();
         let releaseRead: (() => void) | undefined;
         const state = {
@@ -1147,6 +1154,9 @@ export async function runRemoteReadStatusCase({
             if (storageKey !== key) return {};
             state.reads++;
             const captured = localStorage.getItem(key);
+            if (selectedOutcome === 'manual-retry' && state.reads === 1) {
+              throw new Error('Controlled initial settings read denial');
+            }
             if (state.reads === 2) {
               return new Promise<Record<string, unknown>>((resolve, reject) => {
                 state.waiting = true;
@@ -1206,7 +1216,8 @@ export async function runRemoteReadStatusCase({
       if (message.type() !== 'warning') return;
       if (
         text.includes('Controlled older remote read denial') ||
-        text.includes('Controlled newer settings write denial')
+        text.includes('Controlled newer settings write denial') ||
+        text.includes('Controlled initial settings read denial')
       ) {
         expectedWarnings.push(text);
       } else otherWarnings.push(text);
@@ -1218,21 +1229,35 @@ export async function runRemoteReadStatusCase({
       SETTINGS_KEY
     );
     stage = 'hold-remote-read';
-    await page.evaluate(() => window.__ytAcceptanceRemoteRead?.announce());
+    if (outcome === 'manual-retry') {
+      await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).click();
+    } else {
+      await page.evaluate(() => window.__ytAcceptanceRemoteRead?.announce());
+    }
     await page.waitForFunction(() => window.__ytAcceptanceRemoteRead?.waiting);
     if (outcome !== 'current-failure') {
       stage = 'accept-form-edit';
       await openSettings(page);
-      await page.locator('#yt-chat-overlay-settings-backdrop input[name="fontSize"]').fill('36');
-      await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 36);
+      if (outcome === 'manual-retry') {
+        await page.locator('#yt-chat-overlay-settings-backdrop input[name="opacity"]').fill('50');
+        await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().opacity === 0.5);
+      } else {
+        await page.locator('#yt-chat-overlay-settings-backdrop input[name="fontSize"]').fill('36');
+        await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 36);
+      }
       await page.keyboard.press('Escape');
       await page.waitForFunction(() => window.__ytAcceptanceRemoteRead?.writes === 1);
       if (outcome === 'failed-write') {
         await page.locator(NOTICE_SELECTOR).getByRole('button', { name: 'Retry save' }).waitFor();
       } else {
         await page.waitForFunction(
-          (key) => JSON.parse(localStorage.getItem(key) ?? 'null')?.fontSize === 36,
-          SETTINGS_KEY
+          ({ key, manualRetry }) => {
+            const stored = JSON.parse(localStorage.getItem(key) ?? 'null');
+            return manualRetry
+              ? stored?.fontSize === 48 && stored?.opacity === 0.5
+              : stored?.fontSize === 36;
+          },
+          { key: SETTINGS_KEY, manualRetry: outcome === 'manual-retry' }
         );
       }
     }
@@ -1240,7 +1265,9 @@ export async function runRemoteReadStatusCase({
       page.evaluate(
         ({ key, noticeSelector }) => ({
           memoryFont: window.__ytChatOverlay?.getSettings?.().fontSize,
+          memoryOpacity: window.__ytChatOverlay?.getSettings?.().opacity,
           durableFont: JSON.parse(localStorage.getItem(key) ?? 'null')?.fontSize,
+          durableOpacity: JSON.parse(localStorage.getItem(key) ?? 'null')?.opacity,
           reads: window.__ytAcceptanceRemoteRead?.reads,
           writes: window.__ytAcceptanceRemoteRead?.writes,
           notices: [...(window.__ytAcceptanceRemoteRead?.notices ?? [])],
@@ -1258,9 +1285,16 @@ export async function runRemoteReadStatusCase({
     });
     const afterRelease = await snapshot();
     const failed = outcome === 'current-failure' || outcome === 'failed-write';
-    assert.equal(afterRelease.memoryFont, outcome === 'current-failure' ? 32 : 36);
-    assert.equal(afterRelease.durableFont, failed ? 52 : 36);
-    assert.equal(afterRelease.reads, 2);
+    assert.equal(
+      afterRelease.memoryFont,
+      outcome === 'manual-retry' ? 48 : outcome === 'current-failure' ? 32 : 36
+    );
+    assert.equal(afterRelease.durableFont, outcome === 'manual-retry' ? 48 : failed ? 52 : 36);
+    if (outcome === 'manual-retry') {
+      assert.equal(afterRelease.memoryOpacity, 0.5);
+      assert.equal(afterRelease.durableOpacity, 0.5);
+    }
+    assert.equal(afterRelease.reads, outcome === 'manual-retry' ? 3 : 2);
     assert.equal(afterRelease.writes, outcome === 'current-failure' ? 0 : 1);
     if (failed) {
       assert.match(afterRelease.notice ?? '', /were not saved/u);
@@ -1269,8 +1303,16 @@ export async function runRemoteReadStatusCase({
         1
       );
     } else {
-      assert.equal(afterRelease.notice, null, 'An obsolete read produced failure feedback');
-      assert(!afterRelease.notices.some((text) => /were not saved|Retry save/u.test(text)));
+      if (outcome === 'manual-retry') {
+        assert(!/were not saved|Retry save/u.test(afterRelease.notice ?? ''));
+      } else {
+        assert.equal(afterRelease.notice, null, 'An obsolete read produced failure feedback');
+      }
+      assert(
+        !afterRelease.notices
+          .slice(outcome === 'manual-retry' ? beforeRelease.notices.length : 0)
+          .some((text) => /were not saved|Retry save/u.test(text))
+      );
     }
     assert.deepEqual(pageErrors, []);
     assert.deepEqual(consoleErrors, []);

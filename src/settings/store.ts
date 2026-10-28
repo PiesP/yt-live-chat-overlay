@@ -405,6 +405,7 @@ export class Settings {
         activeOwner !== this.owner ||
         revision !== this.localRevision ||
         storageEpochAtStart !== this.storageEpoch ||
+        this.baselineAvailable ||
         this.draftPending
       ) {
         return this.persistenceState();
@@ -415,7 +416,16 @@ export class Settings {
       this.writeFailed = false;
       for (const callback of this.onChangeCallbacks) callback();
     } catch (error: unknown) {
-      if (storageEpochAtStart !== this.storageEpoch) return this.persistenceState();
+      // Another recovery or accepted write may already have made this read
+      // obsolete. A preview alone does not establish a readable baseline.
+      if (
+        this.retired ||
+        activeOwner !== this.owner ||
+        storageEpochAtStart !== this.storageEpoch ||
+        this.baselineAvailable
+      ) {
+        return this.persistenceState();
+      }
       this.writeFailed = true;
       log.warn('settings.store.recovery-failed', { error: String(error) });
     }
