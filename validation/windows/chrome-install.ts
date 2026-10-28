@@ -1840,6 +1840,44 @@ async function inspectLivePage(
         }
         return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
       });
+    observation.phase = 'tab-visibility';
+    const timeOriginBeforeHide = await page.evaluate(() => performance.timeOrigin);
+    const cover = await context.newPage();
+    try {
+      await cover.goto('about:blank');
+      await cover.bringToFront();
+      await page.waitForFunction(() => document.visibilityState === 'hidden', undefined, {
+        timeout: 5_000,
+        polling: 100,
+      });
+      const hidden = await page.evaluate(() => document.visibilityState);
+      await cover.waitForTimeout(1_100);
+      await page.bringToFront();
+      await page.waitForFunction(() => document.visibilityState === 'visible', undefined, {
+        timeout: 5_000,
+        polling: 100,
+      });
+      await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
+      const returned = await page.evaluate(() => ({
+        visibility: document.visibilityState,
+        timeOrigin: performance.timeOrigin,
+        canvasCount: document.querySelectorAll('#yt-live-chat-overlay canvas').length,
+      }));
+      observation.workflow.visibility = {
+        status:
+          hidden === 'hidden' &&
+          returned.visibility === 'visible' &&
+          returned.timeOrigin === timeOriginBeforeHide &&
+          returned.canvasCount === 1
+            ? 'passed'
+            : 'unverified',
+        hidden,
+        returned,
+      };
+    } finally {
+      await cover.close();
+      if (!page.isClosed()) await page.bringToFront();
+    }
     observation.phase = 'seek';
     const seekRange = await page
       .locator('video')
