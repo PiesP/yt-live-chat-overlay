@@ -1640,6 +1640,7 @@ async function inspectLivePage(
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
+  let originalShowDebugOverlay: boolean | undefined;
   const observationStartedAt = performance.now();
   const observedAtMs = () => boundedObservationMs(performance.now() - observationStartedAt);
   const imageProbe = new PublicPageImageProbe(page);
@@ -1761,8 +1762,12 @@ async function inspectLivePage(
     const modal = await openPublicSettingsDialog(page);
     const fontSize = modal.locator('input[name="fontSize"]');
     observation.fontSize = Number(await fontSize.inputValue());
-    await page.keyboard.press('Escape');
-    observation.phase = 'chat';
+    await modal.locator('#tab-advanced').click();
+    const debugOverlay = modal.locator('input[name="showDebugOverlay"]');
+    originalShowDebugOverlay = await debugOverlay.isChecked();
+    if (!originalShowDebugOverlay) await debugOverlay.check();
+    await closePublicSettingsDialog(page, modal);
+    observation.phase = 'chat-messages';
     await page.waitForFunction(
       () => document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
       undefined,
@@ -1772,6 +1777,7 @@ async function inspectLivePage(
       .locator('.yt-live-chat-overlay-live-region > p')
       .count();
     observation.canvasAttached = (await page.locator('#yt-live-chat-overlay canvas').count()) === 1;
+    observation.phase = 'chat-diagnostics';
     const renderer = await page.locator('#yt-chat-overlay-debug').innerText();
     observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
     const bridge = await readExtensionBridgeDiagnostic(page);
@@ -1995,7 +2001,7 @@ async function inspectLivePage(
           : observation.provider.playabilityStatus &&
               observation.provider.playabilityStatus !== 'OK'
             ? 'provider-playability-unavailable'
-            : !observation.provider.chatRendererFound && observation.phase === 'chat'
+            : !observation.provider.chatRendererFound && observation.phase?.startsWith('chat')
               ? 'provider-chat-renderer-unavailable'
               : error instanceof Error && error.name === 'TimeoutError'
                 ? `${observation.phase}-timeout`
@@ -2026,6 +2032,34 @@ async function inspectLivePage(
         },
         () => {}
       );
+    }
+    if (!page.isClosed() && originalShowDebugOverlay === false) {
+      let restored = false;
+      let restoreErrorType: string | null = null;
+      try {
+        const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+        if (await modal.isVisible()) await closePublicSettingsDialog(page, modal);
+        await openPublicSettingsDialog(page);
+        await modal.locator('#tab-advanced').click();
+        const debugOverlay = modal.locator('input[name="showDebugOverlay"]');
+        await debugOverlay.uncheck();
+        await closePublicSettingsDialog(page, modal);
+        await openPublicSettingsDialog(page);
+        await modal.locator('#tab-advanced').click();
+        restored = !(await debugOverlay.isChecked());
+        await closePublicSettingsDialog(page, modal);
+      } catch (error) {
+        restoreErrorType = error instanceof Error ? error.name : 'Error';
+      }
+      observation.debugOverlayRestoration = {
+        status: restored ? 'passed' : 'unverified',
+        originalValue: false,
+        errorType: restoreErrorType,
+      };
+      if (!restored && observation.status === 'passed') {
+        observation.status = 'unverified';
+        observation.reason = 'debug-overlay-restoration-failed';
+      }
     }
     await page.close();
     observation.pageErrorTypes = [...new Set(pageErrors)];
