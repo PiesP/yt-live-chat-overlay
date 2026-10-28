@@ -1636,7 +1636,8 @@ async function inspectLivePage(
   extensionResources: {
     extensionId: string;
     expected: Record<string, ExpectedResource>;
-  } | null = null
+  } | null = null,
+  nativeTabVisibility = false
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -1840,43 +1841,45 @@ async function inspectLivePage(
         }
         return { status: video.paused ? 'unverified' : 'passed', paused: video.paused };
       });
-    observation.phase = 'tab-visibility';
-    const timeOriginBeforeHide = await page.evaluate(() => performance.timeOrigin);
-    const cover = await context.newPage();
-    try {
-      await cover.goto('about:blank');
-      await cover.bringToFront();
-      await page.waitForFunction(() => document.visibilityState === 'hidden', undefined, {
-        timeout: 5_000,
-        polling: 100,
-      });
-      const hidden = await page.evaluate(() => document.visibilityState);
-      await cover.waitForTimeout(1_100);
-      await page.bringToFront();
-      await page.waitForFunction(() => document.visibilityState === 'visible', undefined, {
-        timeout: 5_000,
-        polling: 100,
-      });
-      await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
-      const returned = await page.evaluate(() => ({
-        visibility: document.visibilityState,
-        timeOrigin: performance.timeOrigin,
-        canvasCount: document.querySelectorAll('#yt-live-chat-overlay canvas').length,
-      }));
-      observation.workflow.visibility = {
-        status:
-          hidden === 'hidden' &&
-          returned.visibility === 'visible' &&
-          returned.timeOrigin === timeOriginBeforeHide &&
-          returned.canvasCount === 1
-            ? 'passed'
-            : 'unverified',
-        hidden,
-        returned,
-      };
-    } finally {
-      await cover.close();
-      if (!page.isClosed()) await page.bringToFront();
+    if (nativeTabVisibility) {
+      observation.phase = 'tab-visibility';
+      const timeOriginBeforeHide = await page.evaluate(() => performance.timeOrigin);
+      const cover = await context.newPage();
+      try {
+        await cover.goto('about:blank');
+        await cover.bringToFront();
+        await page.waitForFunction(() => document.visibilityState === 'hidden', undefined, {
+          timeout: 5_000,
+          polling: 100,
+        });
+        const hidden = await page.evaluate(() => document.visibilityState);
+        await cover.waitForTimeout(1_100);
+        await page.bringToFront();
+        await page.waitForFunction(() => document.visibilityState === 'visible', undefined, {
+          timeout: 5_000,
+          polling: 100,
+        });
+        await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
+        const returned = await page.evaluate(() => ({
+          visibility: document.visibilityState,
+          timeOrigin: performance.timeOrigin,
+          canvasCount: document.querySelectorAll('#yt-live-chat-overlay canvas').length,
+        }));
+        observation.workflow.visibility = {
+          status:
+            hidden === 'hidden' &&
+            returned.visibility === 'visible' &&
+            returned.timeOrigin === timeOriginBeforeHide &&
+            returned.canvasCount === 1
+              ? 'passed'
+              : 'unverified',
+          hidden,
+          returned,
+        };
+      } finally {
+        await cover.close();
+        if (!page.isClosed()) await page.bringToFront();
+      }
     }
     observation.phase = 'seek';
     const seekRange = await page
@@ -2355,6 +2358,11 @@ export async function runChromeInstallation({
     assert.equal(liveObservation, null, 'Deadline fixture cannot use duration observation');
     assert.equal(installation, 'extension', 'Deadline fixture requires the installed extension');
   }
+  const nativeDeadlineVisibility =
+    requestDeadlineSelected && browserName === 'chrome' && liveUrls.length > 0;
+  if (nativeDeadlineVisibility) {
+    assert.equal(headless, false, 'Native tab visibility requires headed Chrome');
+  }
   if (translationWorkerSelected) {
     assert.equal(
       await readFocusedScenario(root),
@@ -2409,7 +2417,12 @@ export async function runChromeInstallation({
     });
   }
   const upgradeInputs = installation === 'userscript' ? await loadUpgradeInputs(root) : null;
-  const profile = await mkdtemp(join(root, 'chrome-install-'));
+  let profile: string | undefined = nativeDeadlineVisibility
+    ? undefined
+    : await mkdtemp(join(root, 'chrome-install-'));
+  let ownedChrome:
+    | Awaited<ReturnType<(typeof import('./natural-chrome.ts'))['launchOwnedNaturalChrome']>>
+    | undefined;
   let context: BrowserContext | undefined;
   let cdp: CDPSession | undefined;
   let extensionId: string | undefined;
@@ -2454,20 +2467,37 @@ export async function runChromeInstallation({
           }
         : { status: 'not-requested', transition: 'fresh-candidate-install' };
     }
-    context = await chromium.launchPersistentContext(profile, {
-      channel: browserName,
-      headless,
-      locale: 'en-US',
-      viewport: { width: 1280, height: 720 },
-      ignoreDefaultArgs: ['--disable-extensions'],
-      args: ['--enable-unsafe-extension-debugging', '--mute-audio'],
-    });
+    if (nativeDeadlineVisibility) {
+      const { launchOwnedNaturalChrome } = await import('./natural-chrome.ts');
+      ownedChrome = await launchOwnedNaturalChrome({ chromium, root, output });
+      context = ownedChrome.context;
+      cdp = ownedChrome.browserCdp;
+      profile = ownedChrome.profile;
+      browserProcessId = ownedChrome.browserProcessId;
+      browserProcessIdentity = ownedChrome.browserProcessIdentity;
+      result.naturalChrome = ownedChrome.launchEvidence;
+      assert.equal(ownedChrome.launchEvidence.noDefaults, true);
+    } else {
+      assert(profile);
+      context = await chromium.launchPersistentContext(profile, {
+        channel: browserName,
+        headless,
+        locale: 'en-US',
+        viewport: { width: 1280, height: 720 },
+        ignoreDefaultArgs: ['--disable-extensions'],
+        args: ['--enable-unsafe-extension-debugging', '--mute-audio'],
+      });
+    }
     const browser = context.browser();
     assert(browser);
     result.browserVersion = browser.version();
-    cdp = await browser.newBrowserCDPSession();
-    browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
-    browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
+    if (!ownedChrome) {
+      assert(profile);
+      cdp = await browser.newBrowserCDPSession();
+      browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
+      browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
+    }
+    assert(cdp);
     result.cleanup.browserProcessIdentified = true;
     await enableDeveloperMode(context, browserName);
     if (installation === 'extension') {
@@ -2501,15 +2531,18 @@ export async function runChromeInstallation({
         }
         result.installationMethod = 'same-path-unpacked-extension-upgrade';
       } else {
-        ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
-          path: join(root, 'dist-extension'),
-        })) as { id: string });
+        ({ id: extensionId } = (await (ownedChrome?.cleanupCdp ?? cdp).send(
+          'Extensions.loadUnpacked',
+          { path: join(root, 'dist-extension') }
+        )) as { id: string });
         assert.equal(typeof extensionId, 'string');
         result.extensionUpgrade = {
           status: 'not-requested',
           transition: 'fresh-candidate-install',
         };
-        result.installationMethod = 'cdp-unpacked-extension';
+        result.installationMethod = ownedChrome
+          ? 'cdp-unpacked-extension-natural-visibility'
+          : 'cdp-unpacked-extension';
       }
     } else {
       ({ id: extensionId } = (await cdp.send('Extensions.loadUnpacked', {
@@ -2722,7 +2755,8 @@ export async function runChromeInstallation({
           installation,
           userscriptVersion,
           nextUrl,
-          extensionResources
+          extensionResources,
+          ownedChrome?.launchEvidence.noDefaults === true
         )
       );
     }
@@ -2787,17 +2821,19 @@ export async function runChromeInstallation({
     throw error;
   } finally {
     try {
-      await cleanupChromeInstallation({
-        browserProcessId,
-        browserProcessIdentity,
-        context,
-        cdp,
-        extensionId,
-        profile,
-        output,
-        result,
-        root,
-      });
+      if (profile) {
+        await cleanupChromeInstallation({
+          browserProcessId,
+          browserProcessIdentity,
+          context: ownedChrome?.cleanupContext ?? context,
+          cdp: ownedChrome?.cleanupCdp ?? cdp,
+          extensionId,
+          profile,
+          output,
+          result,
+          root,
+        });
+      }
     } catch (cleanupError) {
       if (primaryError)
         throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');

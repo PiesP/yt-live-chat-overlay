@@ -881,9 +881,14 @@ then process healthy chat without a watchdog restart. Stop must retire the loop
 and prevent another request. This uses the acquisition fixtures' controlled
 playback-readiness prerequisite; it does not establish real video playback.
 
-The selector skips unrelated historical fixture campaigns. Optional `--live-url`
-observations still use the normal public-page compatibility checks after this
-fixture, without mocked responses. Remove the task-owned selector after collecting
-the run. Review `chat-request-deadline.json`, its screenshot and the central
-bundle/result/collection/transport receipts together; Browser Mode regressions
-cover pre-abort, fetch/body, all retry waits, reason races and replay retirement.
+The selector skips unrelated historical fixture campaigns. With `--browser chrome`
+and at least one `--live-url`, the focused run connects to an owned headed Chrome
+through the native tab visibility path. Its public-page checks observe a real
+hidden/visible tab transition after pause/resume, then continue through seek,
+navigation, and settings restoration without mocked responses. Other Chrome/Edge
+short installation runs retain the ordinary launcher and public-page checks;
+those runs do not claim native tab visibility. Remove the task-owned selector
+after collecting the run. Review `chat-request-deadline.json`, its screenshot
+and the central bundle/result/collection/transport receipts together; Browser
+Mode regressions cover pre-abort, fetch/body, all retry waits, reason races and
+replay retirement.
