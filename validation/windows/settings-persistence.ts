@@ -883,6 +883,9 @@ async function runQueuedInputRecoveryCase({
     assert(seed, 'Deferred-recovery fixture did not seed preferences');
     assert.equal(JSON.parse(seed).fontSize, 48);
     await page.waitForFunction(() => window.__ytAcceptanceDeferredRecovery?.reads === 1);
+    // Overlay attachment and the first storage call precede App.start()'s
+    // completion. Observe the exported settings handle before reading it.
+    await page.waitForFunction(() => window.__ytChatOverlay?.getSettings?.().fontSize === 32);
     assert.equal(await page.evaluate(() => window.__ytChatOverlay?.getSettings?.().fontSize), 32);
 
     stage = 'accept-opacity-and-hold-recovery';
