@@ -50,6 +50,8 @@ export class Settings {
   /** Scheduling is distinct from whether the latest intended value was saved. */
   private savePending = false;
   private localRevision = 0;
+  /** A completed write, unlike a preview, can supersede an older remote read. */
+  private lastSavedRevision = -1;
   private previewDirty = false;
   /** Form input queued before its debounced preview reaches this store. */
   private draftPending = false;
@@ -245,12 +247,13 @@ export class Settings {
       this.notifyPersistence();
     } catch (error: unknown) {
       log.warn('settings.store.reload-failed', { error: String(error) });
-      if (storageEpochAtStart !== this.storageEpoch) return;
+      if (this.retired || activeOwner !== this.owner || storageEpochAtStart !== this.storageEpoch)
+        return;
       if (this.draftPending || this.previewDirty) {
         // Failure to inspect the announced remote value must not authorize a
         // stale local write while the user's form still holds a draft.
         this.onCrossTabChange(STORAGE_KEY, announcedRaw);
-      } else if (!this.unsaved) {
+      } else if (!this.unsaved && this.lastSavedRevision <= revisionAtStart) {
         this.baselineAvailable = false;
         this.writeFailed = true;
         this.notifyPersistence();
@@ -315,6 +318,7 @@ export class Settings {
           this.unsaved = null;
           this.pendingPatch = {};
           this.writeFailed = false;
+          this.lastSavedRevision = snapshot.revision;
           if (
             pendingHandoff?.owner === this.owner &&
             pendingHandoff.revision === snapshot.revision

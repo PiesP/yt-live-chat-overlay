@@ -307,6 +307,227 @@ describe('Settings persistence', () => {
     await settings.destroy();
   });
 
+  it.each(['resolved', 'rejected'] as const)(
+    'keeps a successful local save after an older remote read is %s',
+    async (outcome) => {
+      let stored = JSON.stringify({ fontSize: 32 });
+      let releaseRead: (() => void) | undefined;
+      let onRemote: (() => void) | undefined;
+      const getItem = vi
+        .fn()
+        .mockImplementationOnce(async () => stored)
+        .mockImplementationOnce(
+          () =>
+            new Promise<string>((resolve, reject) => {
+              const remoteSnapshot = stored;
+              releaseRead = () => {
+                if (outcome === 'rejected') reject(new Error('older remote read denied'));
+                else resolve(remoteSnapshot);
+              };
+            })
+        );
+      const setItem = vi.fn(async (_key: string, value: string) => {
+        stored = value;
+      });
+      vi.mocked(getStorageAdapter).mockReturnValue({ getItem, setItem });
+      vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+        addListener: vi.fn((callback) => {
+          onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+        }),
+        removeListener: vi.fn(),
+      });
+      const settings = new Settings();
+      await settings.initialize();
+      const observed: string[] = [];
+      const unsubscribe = settings.subscribePersistence((state) => observed.push(state));
+      stored = JSON.stringify({ fontSize: 52 });
+      onRemote?.();
+      await vi.waitFor(() => expect(releaseRead).toBeTypeOf('function'));
+      settings.setDraftPending(true);
+      settings.preview({ fontSize: 36 });
+      settings.set({ fontSize: 36 });
+      expect(await settings.persistNow()).toBe('saved');
+      expect(settings.persistenceState()).toBe('saved');
+      const notificationsBeforeOldRead = observed.length;
+      releaseRead?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(settings.persistenceState()).toBe('saved');
+      expect(observed.slice(notificationsBeforeOldRead)).not.toContain('unsaved');
+      expect(settings.get().fontSize).toBe(36);
+      expect(JSON.parse(stored).fontSize).toBe(36);
+      expect(getItem).toHaveBeenCalledTimes(2);
+      expect(setItem).toHaveBeenCalledTimes(1);
+      unsubscribe();
+      await settings.destroy();
+    }
+  );
+
+  it.each(['no edit', 'reverted preview'] as const)(
+    'reports a current remote read failure after %s',
+    async (phase) => {
+      let stored = JSON.stringify({ fontSize: 32 });
+      let rejectRead: (() => void) | undefined;
+      let onRemote: (() => void) | undefined;
+      const getItem = vi
+        .fn()
+        .mockImplementationOnce(async () => stored)
+        .mockImplementationOnce(
+          () =>
+            new Promise<string>((_resolve, reject) => {
+              rejectRead = () => reject(new Error('current remote read denied'));
+            })
+        );
+      const setItem = vi.fn(async () => undefined);
+      vi.mocked(getStorageAdapter).mockReturnValue({ getItem, setItem });
+      vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+        addListener: vi.fn((callback) => {
+          onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+        }),
+        removeListener: vi.fn(),
+      });
+      const settings = new Settings();
+      await settings.initialize();
+      stored = JSON.stringify({ fontSize: 52 });
+      onRemote?.();
+      await vi.waitFor(() => expect(rejectRead).toBeTypeOf('function'));
+      if (phase === 'reverted preview') {
+        settings.preview({ fontSize: 36 });
+        settings.preview({ fontSize: 32 });
+        settings.endPreview();
+      }
+      rejectRead?.();
+      await vi.waitFor(() => expect(settings.persistenceState()).toBe('unsaved'));
+      expect(settings.get().fontSize).toBe(32);
+      expect(JSON.parse(stored).fontSize).toBe(52);
+      expect(getItem).toHaveBeenCalledTimes(2);
+      expect(setItem).not.toHaveBeenCalled();
+      await settings.destroy();
+    }
+  );
+
+  it('does not hide a failed newer write behind an older remote read failure', async () => {
+    let stored = JSON.stringify({ fontSize: 32 });
+    let rejectRead: (() => void) | undefined;
+    let onRemote: (() => void) | undefined;
+    const getItem = vi
+      .fn()
+      .mockImplementationOnce(async () => stored)
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((_resolve, reject) => {
+            rejectRead = () => reject(new Error('older remote read denied'));
+          })
+      );
+    let denyWrite = true;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      if (denyWrite) throw new Error('newer write denied');
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({ getItem, setItem });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+      }),
+      removeListener: vi.fn(),
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    stored = JSON.stringify({ fontSize: 52 });
+    onRemote?.();
+    await vi.waitFor(() => expect(rejectRead).toBeTypeOf('function'));
+    settings.set({ fontSize: 36 });
+    expect(await settings.persistNow()).toBe('unsaved');
+    rejectRead?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settings.persistenceState()).toBe('unsaved');
+    expect(settings.get().fontSize).toBe(36);
+    expect(JSON.parse(stored).fontSize).toBe(52);
+    expect(getItem).toHaveBeenCalledTimes(2);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    denyWrite = false;
+    expect(await settings.retrySave()).toBe('saved');
+    await settings.destroy();
+  });
+
+  it('keeps the newer remote result when an earlier read later fails', async () => {
+    let stored = JSON.stringify({ fontSize: 32 });
+    let rejectFirst: (() => void) | undefined;
+    let onRemote: (() => void) | undefined;
+    const getItem = vi.fn(() => {
+      if (getItem.mock.calls.length === 2) {
+        return new Promise<string>((_resolve, reject) => {
+          rejectFirst = () => reject(new Error('superseded remote read denied'));
+        });
+      }
+      return Promise.resolve(stored);
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem,
+      setItem: vi.fn(async () => undefined),
+    });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+      }),
+      removeListener: vi.fn(),
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    stored = JSON.stringify({ fontSize: 40 });
+    onRemote?.();
+    await vi.waitFor(() => expect(rejectFirst).toBeTypeOf('function'));
+    stored = JSON.stringify({ fontSize: 42 });
+    onRemote?.();
+    await vi.waitFor(() => expect(settings.get().fontSize).toBe(42));
+    rejectFirst?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settings.persistenceState()).toBe('saved');
+    expect(settings.get().fontSize).toBe(42);
+    expect(getItem).toHaveBeenCalledTimes(3);
+    await settings.destroy();
+  });
+
+  it('does not notify a retired owner when its earlier remote read fails', async () => {
+    let stored = JSON.stringify({ fontSize: 32 });
+    let rejectRead: (() => void) | undefined;
+    let onRemote: (() => void) | undefined;
+    const getItem = vi.fn(() => {
+      if (getItem.mock.calls.length === 2) {
+        return new Promise<string>((_resolve, reject) => {
+          rejectRead = () => reject(new Error('retired remote read denied'));
+        });
+      }
+      return Promise.resolve(stored);
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem,
+      setItem: vi.fn(async () => undefined),
+    });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+      }),
+      removeListener: vi.fn(),
+    });
+    const old = new Settings();
+    await old.initialize();
+    const observed: string[] = [];
+    old.subscribePersistence((state) => observed.push(state));
+    stored = JSON.stringify({ fontSize: 42 });
+    onRemote?.();
+    await vi.waitFor(() => expect(rejectRead).toBeTypeOf('function'));
+    const replacement = new Settings();
+    await replacement.initialize();
+    expect(replacement.get().fontSize).toBe(42);
+    const notificationsBeforeRejection = observed.length;
+    rejectRead?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observed).toHaveLength(notificationsBeforeRejection);
+    expect(replacement.persistenceState()).toBe('saved');
+    await old.destroy();
+    await replacement.destroy();
+  });
+
   it('retains explicit edits across a replacement owner and a denied recovery write', async () => {
     let stored = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
     let denyRead = true;
