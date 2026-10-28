@@ -163,10 +163,18 @@ font edit, deny and retry settings writes, observe the session-only notice, test
 a real cross-tab storage conflict, and reload the saved value. A separate owned
 page denies the initial settings read, edits one form field, confirms zero
 replacement writes while reads fail, then recovers and checks untouched values
-in a fresh document. It records computed notice typography, focus, bounds, and
-screenshots for English and narrow Korean/Japanese layouts. A separate owned
-Chrome profile sets real 200%
-page zoom through Chrome Settings and repeats the affected localized and conflict
+in a fresh document. Two additional pages use the maintained asynchronous Chrome
+storage adapter boundary to hold that recovery read, then release it before or
+after a newly entered font value reaches the 100 ms preview callback. They check
+that the form retains the new value, the earlier accepted opacity edit can save
+without committing the new draft, and the font value persists after close in a
+fresh document. The before-preview case dispatches input and releases the read
+in the same browser task. Each case captures the open form with font `36`, the
+fresh-document time origin, and console diagnostics; the controlled initial-read
+warning is recorded separately from unexpected errors. The profile also records
+computed notice typography, focus, bounds, and screenshots for English and narrow
+Korean/Japanese layouts. A separate owned Chrome profile sets real 200% page zoom
+through Chrome Settings and repeats the affected localized and conflict
 states, then restores zoom and removes that profile after confirmed closure.
 This is a controlled localStorage boundary, not an installed extension or live
 YouTube result. Remove only this task-owned selector after the run; a normal

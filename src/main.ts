@@ -62,7 +62,8 @@ class App {
     },
     () => {
       this.runtimeManager.toggleUserPause();
-    }
+    },
+    (pending) => this.settings.setDraftPending(pending)
   );
   /** Unsubscribe from cross-tab settings sync. */
   private unsubscribeCrossTab: (() => void) | null = null;

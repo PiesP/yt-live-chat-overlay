@@ -51,6 +51,8 @@ export class Settings {
   private savePending = false;
   private localRevision = 0;
   private previewDirty = false;
+  /** Form input queued before its debounced preview reaches this store. */
+  private draftPending = false;
   private unsaved: UnsavedSnapshot | null = null;
   /** Edits made without a readable starting record must survive recovery. */
   private pendingPatch: Partial<OverlaySettings> = {};
@@ -77,7 +79,7 @@ export class Settings {
     )
       return;
     this.storageEpoch++;
-    if (this.unsaved || this.previewDirty || this.saving || this.savePromise) {
+    if (this.unsaved || this.previewDirty || this.draftPending || this.saving || this.savePromise) {
       // A remote decision cannot silently replace this local edit, and an
       // automatic retry cannot silently replace the remote decision.
       if (!this.unsaved) {
@@ -100,7 +102,7 @@ export class Settings {
       return;
     }
     log.debug('settings.store.cross-tab-change');
-    void this.reloadFromStorage();
+    void this.reloadFromStorage(changedRaw);
   };
 
   constructor() {
@@ -218,7 +220,7 @@ export class Settings {
     if (activeOwner === this.owner) activeOwner = null;
   }
 
-  private async reloadFromStorage(): Promise<void> {
+  private async reloadFromStorage(announcedRaw: string | null): Promise<void> {
     const revisionAtStart = this.localRevision;
     const storageEpochAtStart = this.storageEpoch;
     try {
@@ -226,13 +228,14 @@ export class Settings {
       const recovered = this.readSettings(raw);
       if (this.retired || activeOwner !== this.owner || storageEpochAtStart !== this.storageEpoch)
         return;
-      if (
-        revisionAtStart !== this.localRevision ||
-        this.unsaved ||
-        this.previewDirty ||
-        this.saving ||
-        this.savePromise
-      )
+      if (this.draftPending || this.previewDirty) {
+        // The notification arrived before the form established ownership.
+        // A read completing during the draft must still require the existing
+        // explicit remote-conflict choice, even when the read itself succeeds.
+        this.onCrossTabChange(STORAGE_KEY, announcedRaw);
+        return;
+      }
+      if (revisionAtStart !== this.localRevision || this.unsaved || this.saving || this.savePromise)
         return;
       this.settings = recovered;
       this.lastStoredRaw = raw;
@@ -243,7 +246,11 @@ export class Settings {
     } catch (error: unknown) {
       log.warn('settings.store.reload-failed', { error: String(error) });
       if (storageEpochAtStart !== this.storageEpoch) return;
-      if (!this.unsaved && !this.previewDirty) {
+      if (this.draftPending || this.previewDirty) {
+        // Failure to inspect the announced remote value must not authorize a
+        // stale local write while the user's form still holds a draft.
+        this.onCrossTabChange(STORAGE_KEY, announcedRaw);
+      } else if (!this.unsaved) {
         this.baselineAvailable = false;
         this.writeFailed = true;
         this.notifyPersistence();
@@ -378,7 +385,7 @@ export class Settings {
 
   /** Exactly one manual attempt; a denial never starts a retry timer. */
   retrySave(): Promise<PersistenceState> {
-    if (!this.unsaved && !this.baselineAvailable && !this.previewDirty)
+    if (!this.unsaved && !this.baselineAvailable && !this.previewDirty && !this.draftPending)
       return this.recoverWithoutEdits();
     return this.flushSave(true);
   }
@@ -393,7 +400,8 @@ export class Settings {
         this.retired ||
         activeOwner !== this.owner ||
         revision !== this.localRevision ||
-        storageEpochAtStart !== this.storageEpoch
+        storageEpochAtStart !== this.storageEpoch ||
+        this.draftPending
       ) {
         return this.persistenceState();
       }
@@ -422,6 +430,7 @@ export class Settings {
     this.settings = applySettingsPatch(this.settings, partial);
     this.pendingPatch = combineSettingsPatches(this.pendingPatch, partial);
     this.previewDirty = false;
+    this.draftPending = false;
     this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
     pendingHandoff = {
       owner: this.owner,
@@ -436,8 +445,16 @@ export class Settings {
     this.notifyPersistence();
   }
 
+  /** Protect pending form intent from remote replacement without delaying an
+   * already accepted write or applying the draft to memory before debounce. */
+  setDraftPending(pending: boolean): void {
+    if (this.retired || activeOwner !== this.owner) return;
+    this.draftPending = pending;
+  }
+
   preview(partial: Partial<OverlaySettings>): void {
     if (this.retired || activeOwner !== this.owner) return;
+    this.draftPending = false;
     this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
     this.previewDirty = true;
@@ -447,6 +464,7 @@ export class Settings {
   endPreview(): void {
     if (this.retired || activeOwner !== this.owner) return;
     this.previewDirty = false;
+    this.draftPending = false;
     if (this.remoteConflict && this.unsaved) {
       // A remote notice may have captured an earlier preview. The form has
       // now closed, so its restored value becomes the accepted local choice.
@@ -470,6 +488,7 @@ export class Settings {
     this.settings = cloneSettings(DEFAULT_SETTINGS);
     this.pendingPatch = cloneSettings(this.settings);
     this.previewDirty = false;
+    this.draftPending = false;
     this.unsaved = { revision: this.localRevision, settings: cloneSettings(this.settings) };
     pendingHandoff = {
       owner: this.owner,
@@ -487,7 +506,13 @@ export class Settings {
 
   /** Only a direct user choice may replace a known remote decision. */
   chooseLocalAndPersist(): Promise<PersistenceState> {
-    if (!this.unsaved || this.previewDirty || this.retired || activeOwner !== this.owner) {
+    if (
+      !this.unsaved ||
+      this.previewDirty ||
+      this.draftPending ||
+      this.retired ||
+      activeOwner !== this.owner
+    ) {
       return Promise.resolve(this.persistenceState());
     }
     this.remoteConflict = false;

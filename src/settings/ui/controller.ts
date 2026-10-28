@@ -6,6 +6,7 @@ import type { RuntimeRecoveryStatus } from '@app/runtime-manager';
 import { getActiveLanguage, t } from '@i18n/index';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
 import {
+  applySettingsPatch,
   changedSettingsPatch,
   cloneSettings,
   normalizeStoredSettings,
@@ -99,13 +100,25 @@ export class SettingsUi {
 
   /**
    * Re-populate the settings form from current settings.
-   * Called on cross-tab settings sync to keep the form in sync with
-   * changes made in another tab. Only updates when the dialog is open.
+   * Called on storage sync while the form owns an open or native-close-pending
+   * editing session. The queued close event consumes the latter after sync.
    */
   syncForm(): void {
-    if (!this.isDialogOpen()) return;
+    // Native dialog.close() clears `open` before its queued close event
+    // consumes the form. Its baseline still owns the entered draft.
+    if (this.formBaseline === null) return;
+    // A storage read can finish between an input event and its debounced
+    // preview. Rebase only fields actually edited in the form; untouched
+    // controls must adopt the newly recovered values.
+    const queuedChanges = this.queuedFormChanges();
     this.formBaseline = cloneSettings(this.getSettings());
-    this.form.populateForm(this.formBaseline);
+    this.form.populateForm(applySettingsPatch(this.formBaseline, queuedChanges));
+  }
+
+  private queuedFormChanges(): Partial<OverlaySettings> {
+    return this.previewTimer !== null && this.formBaseline !== null
+      ? changedSettingsPatch(this.formBaseline, this.form.collectSettings())
+      : {};
   }
 
   showTranslationStatus(status: TranslationRuntimeStatus | null): void {
@@ -137,7 +150,8 @@ export class SettingsUi {
       retry: () => Promise<PersistenceState>;
       resolveConflict: () => Promise<PersistenceState>;
     },
-    onToggleUserPause?: () => void
+    onToggleUserPause?: () => void,
+    private readonly onDraftChange?: (pending: boolean) => void
   ) {
     this.activeTab = this.defaultTabId;
     this.form = new SettingsUiForm(
@@ -158,6 +172,7 @@ export class SettingsUi {
   private attachAbortController: AbortController | null = null;
 
   private queuePreview(): void {
+    this.onDraftChange?.(Object.keys(this.formChanges()).length > 0);
     this.previewTimer = clearSafeTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
@@ -691,6 +706,7 @@ export class SettingsUi {
         this.suppressNextNativeClose = false;
         return;
       }
+      if (this.formBaseline === null) return;
       if (this.closing) return;
       // Only handle backdrop-initiated closes — our own code sets closing=true
       // before calling modal.close(), which would re-enter here harmlessly.
@@ -709,6 +725,11 @@ export class SettingsUi {
 
   private open(): void {
     if (!this.modal) return;
+    if (!this.modal.open && this.formBaseline !== null) {
+      // A previous native close has not delivered its queued event yet.
+      this.persistCurrentForm();
+      this.suppressNextNativeClose = true;
+    }
 
     // Rebuild modal content when language changed — DOM strings are
     // baked at construction time so a full rebuild is required.
@@ -755,8 +776,9 @@ export class SettingsUi {
     if (this.modalLanguage === getActiveLanguage()) return;
 
     const savedTab = this.activeTab;
+    const queuedChanges = this.queuedFormChanges();
     this.rebuildModalContent();
-    this.form.populateForm(this.getSettings());
+    this.form.populateForm(applySettingsPatch(this.getSettings(), queuedChanges));
     this.switchTab(savedTab);
     this.updateDocumentLangDir();
   }
@@ -858,8 +880,10 @@ export class SettingsUi {
       message: 'reset.confirm',
       confirmLabel: 'Reset',
       onConfirm: () => {
+        this.previewTimer = clearSafeTimeout(this.previewTimer);
         this.resetSettings();
-        this.form.populateForm(this.getSettings());
+        this.formBaseline = cloneSettings(this.getSettings());
+        this.form.populateForm(this.formBaseline);
       },
     });
 
@@ -925,8 +949,10 @@ export class SettingsUi {
           }
 
           const settings = normalizeStoredSettings(sanitized);
+          this.previewTimer = clearSafeTimeout(this.previewTimer);
           this.onChange(settings);
-          this.form.populateForm(this.getSettings());
+          this.formBaseline = cloneSettings(this.getSettings());
+          this.form.populateForm(this.formBaseline);
           this.persistForm(settings);
           this.showToast(t('import.success'));
         } catch (error: unknown) {
@@ -1018,6 +1044,11 @@ export class SettingsUi {
     // if it was open (e.g., SPA navigation while dialog is visible).
     if (this.isDialogOpen()) {
       this.close();
+    } else if (this.formBaseline !== null) {
+      // A native close event may still be queued. Consume its form before
+      // removing the modal, then ignore that delayed event.
+      this.persistCurrentForm();
+      this.suppressNextNativeClose = true;
     }
     if (this.previewTimer !== null) {
       this.previewTimer = clearSafeTimeout(this.previewTimer);

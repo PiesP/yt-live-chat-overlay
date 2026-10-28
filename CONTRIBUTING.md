@@ -328,6 +328,13 @@ final form value before saving, including a pending preview revert. A remote
 conflict cannot be resolved while a preview is still open; after close, the
 explicit conflict choice uses the accepted form value.
 
+Input awaiting the 100 ms preview is already a form draft. Recovery can finish
+saving an earlier accepted edit while only fields changed in that draft are
+rebased onto the recovered form; the new draft is not saved until close. A
+remote notification during this interval retains the explicit conflict choice.
+Native close and owner teardown consume a queued draft once, including when a
+recovery read settles before the native close event.
+
 The dialog records the settings it displayed at open and sends only changed
 fields on preview and close, including nested author/color/outline fields. Reset
 and import remain explicit whole-settings choices. An in-document replacement

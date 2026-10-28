@@ -133,6 +133,180 @@ describe('Settings persistence', () => {
     await settings.destroy();
   });
 
+  it('finishes an accepted recovery save while a later form draft awaits preview', async () => {
+    const existing = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
+    let stored = existing;
+    let reads = 0;
+    let releaseRecovery: (() => void) | undefined;
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(() => {
+        reads++;
+        if (reads === 1) return Promise.reject(new Error('initial read denied'));
+        if (reads === 2) {
+          return new Promise<string>((resolve) => {
+            releaseRecovery = () => resolve(existing);
+          });
+        }
+        return Promise.resolve(stored);
+      }),
+      setItem: vi.fn(async (_key, value) => {
+        stored = value;
+      }),
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    settings.set({ opacity: 0.5 });
+    const priorSave = settings.persistNow();
+    await vi.waitFor(() => expect(releaseRecovery).toBeTypeOf('function'));
+    settings.setDraftPending(true);
+    releaseRecovery?.();
+    expect(await priorSave).toBe('saved');
+    expect(JSON.parse(stored)).toMatchObject({
+      fontSize: 48,
+      speedPxPerSec: 420,
+      opacity: 0.5,
+    });
+    settings.preview({ fontSize: 36 });
+    expect(JSON.parse(stored).fontSize).toBe(48);
+    settings.set({ fontSize: 36 });
+    expect(await settings.persistNow()).toBe('saved');
+    expect(JSON.parse(stored)).toMatchObject({
+      fontSize: 36,
+      speedPxPerSec: 420,
+      opacity: 0.5,
+    });
+    await settings.destroy();
+  });
+
+  it('holds a remote notification during a queued form draft for explicit conflict choice', async () => {
+    let stored = JSON.stringify({ fontSize: 32, opacity: 1 });
+    let onRemote: (() => void) | undefined;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({ getItem: vi.fn(async () => stored), setItem });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+      }),
+      removeListener: vi.fn(),
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    settings.setDraftPending(true);
+    stored = JSON.stringify({ fontSize: 52, opacity: 0.75 });
+    onRemote?.();
+    expect(settings.persistenceState()).toBe('conflict');
+    expect(settings.get().fontSize).toBe(32);
+    expect(await settings.chooseLocalAndPersist()).toBe('conflict');
+    expect(setItem).not.toHaveBeenCalled();
+    settings.set({ fontSize: 36 });
+    expect(await settings.persistNow()).toBe('conflict');
+    expect(await settings.chooseLocalAndPersist()).toBe('saved');
+    expect(JSON.parse(stored).fontSize).toBe(36);
+    await settings.destroy();
+  });
+
+  it.each([
+    { outcome: 'resolved', phase: 'queued' },
+    { outcome: 'rejected', phase: 'queued' },
+    { outcome: 'resolved', phase: 'previewed' },
+    { outcome: 'rejected', phase: 'previewed' },
+  ] as const)(
+    'does not discard a $outcome remote read completed during $phase form input',
+    async ({ outcome, phase }) => {
+      let stored = JSON.stringify({ fontSize: 32, speedPxPerSec: 250, opacity: 1 });
+      let releaseRead: (() => void) | undefined;
+      let onRemote: (() => void) | undefined;
+      const setItem = vi.fn(async (_key: string, value: string) => {
+        stored = value;
+      });
+      vi.mocked(getStorageAdapter).mockReturnValue({
+        getItem: vi
+          .fn()
+          .mockImplementationOnce(async () => stored)
+          .mockImplementationOnce(
+            () =>
+              new Promise<string>((resolve, reject) => {
+                releaseRead = () => {
+                  if (outcome === 'rejected') reject(new Error('remote read denied'));
+                  else resolve(stored);
+                };
+              })
+          )
+          .mockImplementation(async () => stored),
+        setItem,
+      });
+      vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+        addListener: vi.fn((callback) => {
+          onRemote = () => callback('yt-live-chat-overlay-settings', stored);
+        }),
+        removeListener: vi.fn(),
+      });
+      const settings = new Settings();
+      await settings.initialize();
+      stored = JSON.stringify({ fontSize: 52, speedPxPerSec: 420, opacity: 0.75 });
+      onRemote?.();
+      await vi.waitFor(() => expect(releaseRead).toBeTypeOf('function'));
+      settings.setDraftPending(true);
+      if (phase === 'previewed') settings.preview({ fontSize: 36 });
+      releaseRead?.();
+      await vi.waitFor(() => expect(settings.persistenceState()).toBe('conflict'));
+      expect(settings.get()).toMatchObject({
+        fontSize: phase === 'previewed' ? 36 : 32,
+        speedPxPerSec: 250,
+        opacity: 1,
+      });
+      expect(await settings.chooseLocalAndPersist()).toBe('conflict');
+      if (phase === 'queued') settings.preview({ fontSize: 36 });
+      settings.set({ fontSize: 36 });
+      expect(await settings.persistNow()).toBe('conflict');
+      expect(setItem).not.toHaveBeenCalled();
+      expect(await settings.chooseLocalAndPersist()).toBe('saved');
+      expect(JSON.parse(stored).fontSize).toBe(36);
+      await settings.destroy();
+    }
+  );
+
+  it('rejects a remote read begun before a draft that was accepted on close', async () => {
+    let stored = JSON.stringify({ fontSize: 32 });
+    let releaseRead: (() => void) | undefined;
+    let onRemote: (() => void) | undefined;
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi
+        .fn()
+        .mockImplementationOnce(async () => stored)
+        .mockImplementationOnce(
+          () =>
+            new Promise<string>((resolve) => {
+              releaseRead = () => resolve(JSON.stringify({ fontSize: 52 }));
+            })
+        )
+        .mockImplementation(async () => stored),
+      setItem: vi.fn(async (_key, value) => {
+        stored = value;
+      }),
+    });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = () =>
+          callback('yt-live-chat-overlay-settings', JSON.stringify({ fontSize: 52 }));
+      }),
+      removeListener: vi.fn(),
+    });
+    const settings = new Settings();
+    await settings.initialize();
+    onRemote?.();
+    await vi.waitFor(() => expect(releaseRead).toBeTypeOf('function'));
+    settings.setDraftPending(true);
+    settings.set({ fontSize: 36 });
+    expect(await settings.persistNow()).toBe('saved');
+    releaseRead?.();
+    await Promise.resolve();
+    expect(settings.get().fontSize).toBe(36);
+    await settings.destroy();
+  });
+
   it('retains explicit edits across a replacement owner and a denied recovery write', async () => {
     let stored = JSON.stringify({ fontSize: 48, speedPxPerSec: 420, opacity: 0.75 });
     let denyRead = true;
