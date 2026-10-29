@@ -410,6 +410,19 @@ and exact-head CI before merging. Resolve a stale fixture for its specific
 update without closing all independent Actions updates. Automation-only pin
 maintenance does not change the `packages/core` runtime gitlink.
 
+The repository-owned Semgrep SARIF Action is excluded from Dependabot's
+GitHub Actions updates. Its untagged full-SHA reference would otherwise advance
+on unrelated repository commits even when the Action's executable files are
+unchanged. Both calls in `security.yaml` retain the independently reviewed
+full SHA recorded in `semgrep-workflow-composition.test.ts`. When changing this
+Action, review its metadata, entrypoint, relative imports, Node runtime,
+ancestor package module settings, and execution provenance. Land the Action
+source first, then update both workflow references and the independent expected
+SHA together in a reviewed PR after the new commit is reachable. Run the
+Semgrep Action and workflow composition tests, quality, consistency, and
+applicable hosted scanner checks at the final head. If an update fails, restore
+the previous reviewed SHA in both references and the independent expectation.
+
 ## Pull requests
 
 Keep changes focused and describe what changed, why it changed, and how it was

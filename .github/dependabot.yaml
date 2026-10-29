@@ -87,6 +87,11 @@ updates:
       - "automated"
     reviewers:
       - "PiesP"
+    # This repository-owned Action is pinned to reviewed executable bytes.
+    # Untagged repository commits do not constitute Action updates; advance
+    # both workflow references after reviewing its execution closure.
+    ignore:
+      - dependency-name: "PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif"
     groups:
       codeql:
         patterns:
