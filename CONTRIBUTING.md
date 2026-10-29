@@ -131,6 +131,15 @@ spawn raw Node CLIs and Git fixtures where their contracts require them.
 
 Verification success, production files present, and release preparation accepted are separate states. After `verify:full` or standalone E2E, run `vp run build:all:ci` to restore the production userscript and metadata alongside both extension targets, then `vp run check:artifacts`. Only then run `RELEASE_VERSION=<package version> vp run release:prepare` for a local candidate; `prepare.ts` checks source/artifact versions and writes `release-bundle/` without publishing it. A development-only `dist` fails its production-file guard. Rebuild after any source or build-input change, even when old output directories exist.
 
+Preparation admits required version, source, artifact/footprint and nonempty
+changelog inputs before clearing an existing `release-bundle/`. Missing,
+unmatched or empty changelog entries preserve the previous candidate. The
+validated entry is reused for release notes. This preflight keeps the existing
+staging model: a later packaging or I/O failure can leave partial output and
+does not guarantee rollback. A full staging transaction is unnecessary for
+these predictable input errors; validating the existing entry earlier covers
+them without changing archive, metadata or publication contracts.
+
 When reviewing repeated code, check existing module responsibilities and prefer
 small changes that preserve lifecycle and security boundaries; avoid an abstraction
 that hides distinct behavior. Automated clone detection is retired.
