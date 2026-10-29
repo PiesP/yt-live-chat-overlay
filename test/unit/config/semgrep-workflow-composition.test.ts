@@ -1,5 +1,14 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -14,6 +23,35 @@ const action = join(root, '.github/actions/validate-semgrep-sarif/index.mjs');
 const runtime = process.env.SEMGREP_ACTION_NODE ?? process.execPath;
 const actionReference =
   'PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif@a8172948afb80cbb030216ee6bd5f64bb062c489';
+const actionName = 'PiesP/yt-live-chat-overlay/.github/actions/validate-semgrep-sarif';
+const reviewedBlobs = {
+  'action.yaml': '0604c88d2659367d3c1ae7b9263c592a8c85173c',
+  'index.mjs': '371b955c49fb86185e4d1b20d87fe3ff901500e7',
+  'validate.ts': 'ebba808324996bf02c84e171dd1dc45fdadb239f',
+};
+
+function gitBlobId(content: Buffer): string {
+  return createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex');
+}
+
+function reviewedClosure(
+  blobs: Record<keyof typeof reviewedBlobs, string>,
+  moduleSettings: { type?: string; imports?: unknown; exports?: unknown },
+  references: string[],
+  approvedReference = actionReference,
+  approvedBlobs = reviewedBlobs
+): boolean {
+  return (
+    Object.entries(approvedBlobs).every(
+      ([path, sha]) => blobs[path as keyof typeof reviewedBlobs] === sha
+    ) &&
+    moduleSettings.type === 'module' &&
+    moduleSettings.imports === undefined &&
+    moduleSettings.exports === undefined &&
+    references.length === 2 &&
+    references.every((reference) => reference === approvedReference)
+  );
+}
 
 function step(name: string): string {
   const body = section?.split(`      - name: ${name}\n`)[1]?.split('\n      - name: ')[0];
@@ -237,6 +275,82 @@ function condition(
 }
 
 describe('Semgrep workflow composition', () => {
+  it('keeps the complete reviewed Action execution closure and both calls aligned', () => {
+    expect(readdirSync(join(root, '.github/actions/validate-semgrep-sarif')).sort()).toEqual(
+      Object.keys(reviewedBlobs).sort()
+    );
+    const blobs = Object.fromEntries(
+      Object.keys(reviewedBlobs).map((name) => [
+        name,
+        gitBlobId(readFileSync(join(root, '.github/actions/validate-semgrep-sarif', name))),
+      ])
+    ) as Record<keyof typeof reviewedBlobs, string>;
+    const moduleSettings = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+      type?: string;
+      imports?: unknown;
+      exports?: unknown;
+    };
+    for (const parent of ['.github', '.github/actions', '.github/actions/validate-semgrep-sarif']) {
+      expect(existsSync(join(root, parent, 'package.json'))).toBe(false);
+    }
+    const references = [
+      ...section.matchAll(new RegExp(`uses: (${actionName}@[a-f0-9]{40})`, 'g')),
+    ].map((match) => match[1] ?? '');
+    expect(reviewedClosure(blobs, moduleSettings, references)).toBe(true);
+    expect(section).not.toContain('uses: ./.github/actions/validate-semgrep-sarif');
+
+    const changed = { ...blobs, 'index.mjs': gitBlobId(Buffer.from("import './other.ts';\n")) };
+    expect(reviewedClosure(changed, moduleSettings, references)).toBe(false);
+    expect(
+      reviewedClosure(
+        {
+          ...blobs,
+          'validate.ts': gitBlobId(Buffer.from('export function run() { return 0; }\n')),
+        },
+        moduleSettings,
+        references
+      )
+    ).toBe(false);
+    expect(
+      reviewedClosure(
+        { ...blobs, 'action.yaml': gitBlobId(Buffer.from('runs:\n  using: node20\n')) },
+        moduleSettings,
+        references
+      )
+    ).toBe(false);
+    expect(
+      reviewedClosure(blobs, { ...moduleSettings, imports: { '#code': './other.mjs' } }, references)
+    ).toBe(false);
+    expect(
+      reviewedClosure(blobs, moduleSettings, [
+        references[0] ?? '',
+        `${actionName}@${'f'.repeat(40)}`,
+      ])
+    ).toBe(false);
+    expect(
+      reviewedClosure(blobs, moduleSettings, [
+        `${actionName}@${'f'.repeat(40)}`,
+        `${actionName}@${'f'.repeat(40)}`,
+      ])
+    ).toBe(false);
+
+    const nextReference = `${actionName}@${'f'.repeat(40)}`;
+    expect(
+      reviewedClosure(changed, moduleSettings, [nextReference, nextReference], nextReference, {
+        ...reviewedBlobs,
+        'index.mjs': changed['index.mjs'],
+      })
+    ).toBe(true);
+  });
+
+  it('keeps self-Action updates under manual review while other Actions remain scheduled', () => {
+    const dependabot = readFileSync(join(root, '.github/dependabot.yaml'), 'utf8');
+    const actions = dependabot.split('  - package-ecosystem: "github-actions"\n')[1];
+    expect(actions).toContain('    ignore:\n      - dependency-name: "' + actionName + '"');
+    expect(actions).toContain('      actions:\n');
+    expect(actions).toContain('          - "*"');
+  });
+
   it.each([
     ['push', 'semgrep/secrets', ['--config=p/secrets']],
     ['pull_request', 'semgrep/secrets', ['--config=p/secrets']],
