@@ -225,6 +225,10 @@ export async function runOpacityDomains({
     await page.evaluate(async () => {
       await window.__ytChatOverlay?.stop();
     });
+    const previewProof = await page.evaluate(() => window.__ytOpacityProof);
+    // The native probe admits exactly one document. Reload the real packaged
+    // source after observing that first injection, retaining its separate proof.
+    await probe?.restore();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__ytChatOverlay?.getSettings().outline.opacity === 0.2);
     assert.notEqual(await page.evaluate(() => performance.timeOrigin), timeOrigin);
@@ -251,6 +255,7 @@ export async function runOpacityDomains({
       initialTimeOrigin: timeOrigin,
       freshTimeOrigin: await page.evaluate(() => performance.timeOrigin),
       settings: { opacity: settings.opacity, outline: settings.outline },
+      previewProof,
       proof,
       scope: installedContext
         ? 'installed extension / controlled Worker fixture'
@@ -267,10 +272,15 @@ export async function runOpacityDomains({
           await window.__ytChatOverlay?.stop();
         });
       cleanup.settingsRestored = true;
+    } catch (error) {
+      cleanup.error = String(error);
+      failure ??= error;
+    }
+    try {
       await probe?.restore();
       cleanup.probeRetired = true;
     } catch (error) {
-      cleanup.error = String(error);
+      cleanup.probeError = String(error);
       failure ??= error;
     }
     await page.close().catch((error) => {

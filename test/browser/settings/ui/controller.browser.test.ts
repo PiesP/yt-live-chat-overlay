@@ -322,6 +322,116 @@ describe('SettingsUi', () => {
     }
   });
 
+  it('persists imported low outline opacity and resets it through fresh settings owners', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    let stored: string | null = null;
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(async () => stored),
+      setItem: vi.fn(async (_key: string, value: string) => {
+        stored = value;
+      }),
+    });
+    const createOwner = async () => {
+      const settings = new Settings();
+      await settings.initialize();
+      const controller = new SettingsUi(
+        () => settings.get(),
+        (patch) => settings.preview(patch),
+        () => settings.reset(),
+        (patch) => {
+          if (Object.keys(patch).length > 0) settings.set(patch);
+          else settings.endPreview();
+          return settings.persistNow();
+        }
+      );
+      const unsubscribe = settings.subscribe(() => controller.syncForm());
+      await controller.attach();
+      return { settings, controller, unsubscribe };
+    };
+    const first = await createOwner();
+    try {
+      player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+      const createElement = vi.spyOn(document, 'createElement');
+      document.querySelector<HTMLButtonElement>('[data-action="import"]')?.click();
+      const input = createElement.mock.results.findLast(
+        (_result, index) => createElement.mock.calls[index]?.[0] === 'input'
+      )?.value as HTMLInputElement | undefined;
+      expect(input).toBeInstanceOf(HTMLInputElement);
+      Object.defineProperty(input, 'files', {
+        configurable: true,
+        value: [
+          new File(
+            [
+              JSON.stringify({
+                ...DEFAULT_SETTINGS,
+                opacity: 0.75,
+                outline: { ...DEFAULT_SETTINGS.outline, opacity: 0.2 },
+              }),
+            ],
+            'settings.json'
+          ),
+        ],
+      });
+      input?.dispatchEvent(new Event('change'));
+      await vi.waitFor(() =>
+        expect(JSON.parse(stored ?? '{}')).toMatchObject({
+          opacity: 0.75,
+          outline: { opacity: 0.2 },
+        })
+      );
+      expect(document.querySelector<HTMLInputElement>('input[name="outline-opacity"]')?.value).toBe(
+        '20'
+      );
+      first.controller.close();
+      await vi.waitFor(() => expect(JSON.parse(stored ?? '{}').outline?.opacity).toBe(0.2));
+    } finally {
+      first.unsubscribe();
+      first.controller.destroy();
+      await first.settings.destroy();
+    }
+
+    const second = await createOwner();
+    try {
+      expect(second.settings.get()).toMatchObject({ opacity: 0.75, outline: { opacity: 0.2 } });
+      player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+      expect(document.querySelector<HTMLInputElement>('input[name="outline-opacity"]')?.value).toBe(
+        '20'
+      );
+      document.querySelector<HTMLButtonElement>('[data-action="reset"]')?.click();
+      document.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-confirm-ok')?.click();
+      await vi.waitFor(() =>
+        expect(second.settings.get()).toMatchObject({
+          opacity: DEFAULT_SETTINGS.opacity,
+          outline: { opacity: 0.7 },
+        })
+      );
+      second.controller.close();
+      await vi.waitFor(() =>
+        expect(JSON.parse(stored ?? '{}')).toMatchObject({
+          opacity: DEFAULT_SETTINGS.opacity,
+          outline: { opacity: 0.7 },
+        })
+      );
+    } finally {
+      second.unsubscribe();
+      second.controller.destroy();
+      await second.settings.destroy();
+    }
+    const fresh = new Settings();
+    try {
+      await fresh.initialize();
+      expect(fresh.get()).toMatchObject({
+        opacity: DEFAULT_SETTINGS.opacity,
+        outline: { opacity: 0.7 },
+      });
+    } finally {
+      await fresh.destroy();
+    }
+  });
+
   it('keeps an open form preview during a delayed recovery read and saves it on close', async () => {
     const player = document.createElement('div');
     player.id = 'movie_player';

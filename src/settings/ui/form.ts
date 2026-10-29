@@ -1681,6 +1681,7 @@ export class SettingsUiForm {
               this.getSettings().outline[target.key]
             ),
           });
+          if (el instanceof HTMLInputElement) this.showRangeAdjustment(el, numericKey, true);
         }
         continue;
       }
@@ -1724,16 +1725,7 @@ export class SettingsUiForm {
             this.getSettings()[scalarKey] as number
           );
           partial[scalarKey] = clamped;
-          // Show validation feedback when value is clamped
-          const rawNum = Number(el.value);
-          if (Number.isFinite(rawNum)) {
-            const { min, max } = getNumericInputAttributes(scalarKey as RootScalarSettingKey);
-            if (rawNum < min) {
-              this.showFieldError(el, `${t('format.valueAdjusted')} ${min}`);
-            } else if (rawNum > max) {
-              this.showFieldError(el, `${t('format.valueAdjusted')} ${max}`);
-            }
-          }
+          this.showRangeAdjustment(el, scalarKey as RootScalarSettingKey);
         } else {
           partial[scalarKey] = el.value;
         }
@@ -1759,6 +1751,18 @@ export class SettingsUiForm {
   }
 
   // ── Validation error feedback ───────────────────────────────────────────
+
+  private showRangeAdjustment(
+    input: HTMLInputElement,
+    key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>,
+    outline = false
+  ): void {
+    const raw = Number(input.value);
+    if (!Number.isFinite(raw)) return;
+    const { min, max } = getNumericInputAttributes(key, outline);
+    if (raw < min) this.showFieldError(input, `${t('format.valueAdjusted')} ${min}`);
+    else if (raw > max) this.showFieldError(input, `${t('format.valueAdjusted')} ${max}`);
+  }
 
   private showFieldError(input: HTMLInputElement, message: string): void {
     if (!this.modal) return;

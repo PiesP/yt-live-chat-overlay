@@ -29,6 +29,7 @@ import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
+import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   readInstalledViewingTaskSelector,
   requireInstalledViewingTaskSuccess,
@@ -1637,11 +1638,17 @@ async function inspectLivePage(
     extensionId: string;
     expected: Record<string, ExpectedResource>;
   } | null = null,
-  nativeTabVisibility = false
+  nativeTabVisibility = false,
+  opacitySelected = false
 ) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
   let originalShowDebugOverlay: boolean | undefined;
+  let originalOpacitySettings:
+    | ReturnType<NonNullable<Window['__ytChatOverlay']>['getSettings']>
+    | undefined;
+  let opacityTimeOrigin: number | undefined;
+  let opacityReopened: string | undefined;
   const observationStartedAt = performance.now();
   const observedAtMs = () => boundedObservationMs(performance.now() - observationStartedAt);
   const imageProbe = new PublicPageImageProbe(page);
@@ -1760,9 +1767,30 @@ async function inspectLivePage(
         };
       });
     observation.phase = 'settings';
+    if (opacitySelected) {
+      originalOpacitySettings = await page.evaluate(() => {
+        const app = window.__ytChatOverlay;
+        if (!app) throw new Error('Public opacity settings owner is unavailable');
+        return app.getSettings();
+      });
+      opacityTimeOrigin = await page.evaluate(() => performance.timeOrigin);
+    }
     const modal = await openPublicSettingsDialog(page);
     const fontSize = modal.locator('input[name="fontSize"]');
     observation.fontSize = Number(await fontSize.inputValue());
+    if (opacitySelected) {
+      await modal.locator('#tab-colors').click();
+      await modal.locator('input[name="outline-enabled"]').check();
+      await modal.locator('input[name="outline-opacity"]').fill('20');
+      await page.waitForFunction(
+        () => window.__ytChatOverlay?.getSettings().outline.opacity === 0.2
+      );
+      await closePublicSettingsDialog(page, modal);
+      await openPublicSettingsDialog(page);
+      await modal.locator('#tab-colors').click();
+      opacityReopened = await modal.locator('input[name="outline-opacity"]').inputValue();
+      assert.equal(opacityReopened, '20');
+    }
     await modal.locator('#tab-advanced').click();
     const debugOverlay = modal.locator('input[name="showDebugOverlay"]');
     originalShowDebugOverlay = await debugOverlay.isChecked();
@@ -1807,6 +1835,13 @@ async function inspectLivePage(
         renderedMessages: observation.renderedMessages,
       },
     };
+    if (opacitySelected) {
+      observation.workflow.opacity = {
+        status: 'passed',
+        preview: 0.2,
+        reopenedDisplay: opacityReopened,
+      };
+    }
     if (installation === 'userscript') {
       observation.phase = 'public-media';
       const media = await observePublicUserscriptMedia(
@@ -1987,6 +2022,26 @@ async function inspectLivePage(
       { timeout: 30_000 }
     );
     const nextPageState = await readPublicPageState(page);
+    if (opacitySelected) {
+      await page.waitForFunction(
+        () => window.__ytChatOverlay?.getSettings().outline.opacity === 0.2
+      );
+      const freshOrigin = await page.evaluate(() => performance.timeOrigin);
+      assert.notEqual(freshOrigin, opacityTimeOrigin);
+      const freshModal = await openPublicSettingsDialog(page);
+      await freshModal.locator('#tab-colors').click();
+      const freshValue = await freshModal.locator('input[name="outline-opacity"]').inputValue();
+      assert.equal(freshValue, '20');
+      await closePublicSettingsDialog(page, freshModal);
+      observation.workflow.opacity = {
+        status: 'passed',
+        preview: 0.2,
+        reopenedDisplay: opacityReopened,
+        freshDisplay: freshValue,
+        firstTimeOrigin: opacityTimeOrigin,
+        freshTimeOrigin: freshOrigin,
+      };
+    }
     const nextRendererText = await page.locator('#yt-chat-overlay-debug').innerText();
     const nextRenderer = nextRendererText.includes('Render: n/a') ? 'worker' : 'main';
     const nextBridge = await readExtensionBridgeDiagnostic(page);
@@ -2100,6 +2155,31 @@ async function inspectLivePage(
       if (!restored && observation.status === 'passed') {
         observation.status = 'unverified';
         observation.reason = 'debug-overlay-restoration-failed';
+      }
+    }
+    if (originalOpacitySettings) {
+      try {
+        assert(
+          extensionResources && !page.isClosed(),
+          'Public settings restoration owner is unavailable'
+        );
+        await restoreFixtureSettings(
+          context,
+          page,
+          extensionResources.extensionId,
+          originalOpacitySettings
+        );
+        observation.preferenceRestoration = {
+          status: 'passed',
+          scope: 'all known preference values, not raw record bytes',
+        };
+      } catch (error) {
+        observation.preferenceRestoration = {
+          status: 'unverified',
+          errorType: error instanceof Error ? error.name : 'Error',
+        };
+        observation.status = 'unverified';
+        observation.reason = 'opacity-preferences-restoration-failed';
       }
     }
     await page.close();
@@ -2764,7 +2844,8 @@ export async function runChromeInstallation({
           userscriptVersion,
           nextUrl,
           extensionResources,
-          ownedChrome?.launchEvidence.noDefaults === true
+          ownedChrome?.launchEvidence.noDefaults === true,
+          opacitySelected
         )
       );
     }
