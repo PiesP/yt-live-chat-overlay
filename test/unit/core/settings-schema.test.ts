@@ -89,6 +89,24 @@ describe('polling interval normalization', () => {
 });
 
 describe('scalar and nested normalization boundaries', () => {
+  it.each([
+    [-1, 0],
+    [0, 0],
+    [0.2, 0.2],
+    [0.4, 0.4],
+    [0.5, 0.5],
+    [1, 1],
+    [2, 1],
+  ])('keeps root and outline opacity domains distinct for %s', (opacity, expected) => {
+    for (const settings of [
+      normalizeStoredSettings({ opacity, outline: { opacity } }),
+      applySettingsPatch(DEFAULT_SETTINGS, { opacity, outline: { opacity } }),
+    ]) {
+      expect(settings.outline.opacity).toBe(expected);
+      expect(settings.opacity).toBe(Math.max(0.5, expected));
+    }
+  });
+
   it('coerces finite numbers, rounds cache budgets, and swaps inverted duration pairs', () => {
     const result = normalizeStoredSettings({
       speedPxPerSec: '499',
@@ -104,7 +122,7 @@ describe('scalar and nested normalization boundaries', () => {
     expect(result.outline).toEqual({
       enabled: DEFAULT_SETTINGS.outline.enabled,
       widthPx: 8,
-      opacity: 0.5,
+      opacity: 0,
     });
   });
 
@@ -123,7 +141,7 @@ describe('scalar and nested normalization boundaries', () => {
     expect(result.translationMode).toBe(DEFAULT_SETTINGS.translationMode);
     expect(result.opacity).toBe(DEFAULT_SETTINGS.opacity);
     expect(result.outline.widthPx).toBe(DEFAULT_SETTINGS.outline.widthPx);
-    expect(result.outline.opacity).toBe(0.5);
+    expect(result.outline.opacity).toBe(0.4);
     expect(result.showAuthor.normal).toBe(DEFAULT_SETTINGS.showAuthor.normal);
     expect(result.showAuthor.member).toBe(true);
   });

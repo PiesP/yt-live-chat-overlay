@@ -325,6 +325,17 @@ flow and check:
 
 Explain any browser or extension lane that could not be run.
 
+### Settings numeric domains
+
+Root text opacity uses 0.5–1 (50–100%, step 5 in the form); outline opacity uses
+0–1 (0–100%, step 10). Numeric normalization must retain the root/outline
+context, including disabled outline values, stored load, preview, import and
+save. Slider and number attributes use the same declared domain. Reset retains
+the existing defaults. Reusing the outline resolver and field modifier fixes
+the leaf-name collision without a new schema, duplicated limits or a settings
+framework. Both renderers consume the normalized settings through their existing
+configuration owners.
+
 ### Settings read recovery
 
 Storage adapters return `null` only when the settings key is verified absent;

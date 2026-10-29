@@ -926,6 +926,37 @@ describe('SettingsUiForm', () => {
     modal.remove();
   });
 
+  it('uses each opacity domain for slider, number input and adjustment feedback', () => {
+    const settings = makeDefaults();
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(settings);
+
+    for (const [name, min, step] of [
+      ['opacity', '50', '5'],
+      ['outline-opacity', '0', '10'],
+    ]) {
+      for (const suffix of ['', '-slider']) {
+        const input = modal.querySelector<HTMLInputElement>(`input[name="${name}${suffix}"]`);
+        expect(input).not.toBeNull();
+        expect([input?.min, input?.max, input?.step]).toEqual([min, '100', step]);
+      }
+    }
+    const rootOpacity = modal.querySelector<HTMLInputElement>('input[name="opacity"]');
+    expect(rootOpacity).not.toBeNull();
+    rootOpacity!.value = '20';
+    expect(form.collectSettings().opacity).toBe(0.5);
+    expect(rootOpacity?.getAttribute('aria-invalid')).toBe('true');
+    expect(modal.textContent).toContain('50');
+
+    form.destroy();
+    modal.remove();
+  });
+
   it('round-trips outline, author color, and visibility control groups', () => {
     const settings = makeDefaults({
       outline: { enabled: false, widthPx: 3.5, opacity: 0.4 },

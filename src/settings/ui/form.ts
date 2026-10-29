@@ -376,12 +376,12 @@ const normalizeOutlineNumericInputValue = (
 };
 
 const getNumericInputAttributes = (
-  key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
+  key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>,
+  outline = false
 ): Readonly<{ min: number; max: number; step: number }> => {
-  const limits = isOutlineNumericKey(key) ? resolveOutlineLimits(key) : resolveLimits(key);
-  const scale = isOutlineNumericKey(key)
-    ? getOutlineDisplayScale(key)
-    : getRootScale(key as RootScalarSettingKey);
+  const isOutline = outline && isOutlineNumericKey(key);
+  const limits = isOutline ? resolveOutlineLimits(key) : resolveLimits(key);
+  const scale = isOutline ? getOutlineDisplayScale(key) : getRootScale(key as RootScalarSettingKey);
   return {
     min: scaleUiValue(limits.min, scale),
     max: scaleUiValue(limits.max, scale),
@@ -391,9 +391,10 @@ const getNumericInputAttributes = (
 
 const applyNumberInputAttributes = (
   input: HTMLInputElement,
-  key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
+  key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>,
+  outline = false
 ): void => {
-  const { min, max, step } = getNumericInputAttributes(key);
+  const { min, max, step } = getNumericInputAttributes(key, outline);
   input.min = String(min);
   input.max = String(max);
   input.step = String(step);
@@ -872,7 +873,8 @@ export class SettingsUiForm {
         input.setAttribute('aria-required', 'true');
         applyNumberInputAttributes(
           input,
-          def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
+          def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>,
+          def.modifier === 'outline'
         );
         if (def.title) input.title = t(def.title);
         const field = domField(t(def.label), input, inputId);
@@ -908,7 +910,7 @@ export class SettingsUiForm {
         const rangeValueId = `range-value-${this.resolveKey(def)}`;
         const numberInput = domInput({ type: 'number', name: this.resolveKey(def) });
         numberInput.id = rangeValueId;
-        applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey);
+        applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey, isOutline);
         numberInput.classList.add('yt-chat-overlay-settings-range-number');
         numberInput.setAttribute('aria-label', t(def.label));
         slider.setAttribute('aria-describedby', rangeValueId);
