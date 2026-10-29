@@ -2338,17 +2338,23 @@ export async function runChromeInstallation({
     'At most three live URLs can run within the guest deadline'
   );
   const requestDeadlineSelected = await readChatRequestDeadlineSelector(root);
+  const opacitySelected = (await readFocusedScenario(root)) === 'settings-opacity';
   const installedViewingSelected = await readInstalledViewingTaskSelector(root);
   const translatorNativeSelected = await readTranslatorNativeSelector(root);
   const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
   assert(
-    Number(requestDeadlineSelected) +
+    Number(opacitySelected) +
+      Number(requestDeadlineSelected) +
       Number(installedViewingSelected) +
       Number(Boolean(translatorNativeSelected)) +
       Number(translationWorkerSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
+  if (opacitySelected) {
+    assert.equal(liveObservation, null, 'Opacity fixture cannot use duration observation');
+    assert.equal(installation, 'extension', 'Installed opacity fixture requires the extension');
+  }
   if (requestDeadlineSelected) {
     assert.equal(
       await readFocusedScenario(root),
@@ -2451,6 +2457,8 @@ export async function runChromeInstallation({
   try {
     const extensionUpgradeInput =
       installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
+    if (opacitySelected)
+      assert.equal(extensionUpgradeInput, null, 'Opacity fixture cannot run an upgrade');
     if (translatorNativeSelected || translationWorkerSelected) {
       assert.equal(
         extensionUpgradeInput,
@@ -2646,7 +2654,7 @@ export async function runChromeInstallation({
           pageFetch,
         };
       }
-      if (browserName === 'msedge' && installation === 'extension') {
+      if (browserName === 'msedge' && installation === 'extension' && !opacitySelected) {
         // Exercise document and realm ownership before the longer media campaign.
         result.chromiumBootstrapBoundaries = await runChromiumBootstrapBoundaries({
           context,

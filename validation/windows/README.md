@@ -154,6 +154,26 @@ same PiesP custodian route and retention policy above for both addenda.
 
 ## Artifact-only smoke
 
+For the focused root/outline opacity regression, create the ignored
+`validation/windows/inputs/settings-opacity.json` with exactly
+`{"scenario":"settings-opacity"}`. Run once as an artifact-only Main fixture
+and once with the installed extension for Worker configuration and real
+extension storage. The selector admits no duration or upgrade campaign and
+skips unrelated installed fixture suites. Normal explicitly supplied public
+URLs still use the existing live smoke owner.
+
+The bounded fixture checks both input domains, outline 20% through preview,
+disable/re-enable, close and fresh-document reload, then root input 20% clamping
+to 50%. It observes the existing renderer settings call and forwarded Worker
+configuration without changing their results; native installed delivery uses
+the existing insertion-only page-script probe. Those observations establish
+configuration propagation, not raster/pixel equivalence. Screenshots and
+`opacity-domains.json` retain partial failures and cleanup. Fixture media/chat
+prerequisites remain synthetic. Installed settings are restored before the
+owned page closes; only task-created contexts/profiles are retired. Remove
+only this task's selector after collection. A passing fixture does not prove
+actual YouTube behavior, which needs the separate affected live smoke.
+
 For a focused settings-persistence run, create the ignored
 `validation/windows/inputs/settings-persistence.json` with exactly
 `{"scenario":"settings-persistence"}` before bundling the clean committed source.

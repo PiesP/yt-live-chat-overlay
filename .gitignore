@@ -90,5 +90,6 @@ __pycache__/
 # Locally generated, source-bound viewing-experience acceptance footage
 /validation/windows/fixtures/viewing-*.mp4
 /validation/windows/inputs/japanese-ime.json
+/validation/windows/inputs/settings-opacity.json
 /validation/windows/inputs/installed-viewing-tasks.json
 /validation/windows/inputs/translator-native-cancellation.json

@@ -100,7 +100,10 @@ describe('scalar and nested normalization boundaries', () => {
   ])('keeps root and outline opacity domains distinct for %s', (opacity, expected) => {
     for (const settings of [
       normalizeStoredSettings({ opacity, outline: { opacity } }),
-      applySettingsPatch(DEFAULT_SETTINGS, { opacity, outline: { opacity } }),
+      applySettingsPatch(DEFAULT_SETTINGS, {
+        opacity,
+        outline: { ...DEFAULT_SETTINGS.outline, opacity },
+      }),
     ]) {
       expect(settings.outline.opacity).toBe(expected);
       expect(settings.opacity).toBe(Math.max(0.5, expected));

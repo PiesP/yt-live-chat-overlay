@@ -14,7 +14,10 @@
     "validation/windows/fixtures/viewing-bright.mp4",
     "validation/windows/fixtures/viewing-dark.mp4",
     "validation/windows/fixtures/viewing-detailed.mp4",
-    "validation/windows/inputs"
+    "validation/windows/inputs",
+    "validation/windows/opacity-domains.ts",
+    "validation/windows/native-page-script-probe.ts",
+    "validation/windows/fixture-settings.ts"
   ],
   "installation": {
     "entry": "validation/windows/install-profile.ts",
@@ -59,7 +62,8 @@
       "validation/windows/recovery-continuity.ts",
       "validation/windows/live-content-prerequisite.ts",
       "validation/windows/fixture-settings.ts",
-      "validation/windows/fixtures/autoplay-av.webm"
+      "validation/windows/fixtures/autoplay-av.webm",
+      "validation/windows/opacity-domains.ts"
     ],
     "build_commands": [
       ["vp", "run", "build:ci"],

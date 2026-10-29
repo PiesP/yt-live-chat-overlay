@@ -15,6 +15,7 @@ import type {
   Request,
 } from '@playwright/test';
 
+import { runOpacityDomains } from './opacity-domains.ts';
 import { runReloadFeedbackFixture } from './reload-feedback.ts';
 import { runSettingsPersistenceFixture } from './settings-persistence.ts';
 import { runTranslationRuntimeFixture } from './translation-runtime.ts';
@@ -1645,6 +1646,7 @@ async function verifySustainedViewingLifecycle(
 }
 
 type FocusedScenario =
+  | 'settings-opacity'
   | 'settings-persistence'
   | 'reload-feedback'
   | 'translation-runtime'
@@ -1669,13 +1671,15 @@ async function hasScenarioSelector(root: string, scenario: FocusedScenario): Pro
 }
 
 export async function readFocusedScenario(root: string): Promise<FocusedScenario | null> {
+  const opacity = await hasScenarioSelector(root, 'settings-opacity');
   const settings = await hasScenarioSelector(root, 'settings-persistence');
   const reload = await hasScenarioSelector(root, 'reload-feedback');
   const translation = await hasScenarioSelector(root, 'translation-runtime');
   const viewing = await hasScenarioSelector(root, 'viewing-experience');
   const japaneseIme = await hasScenarioSelector(root, 'japanese-ime');
   assert(
-    Number(settings) +
+    Number(opacity) +
+      Number(settings) +
       Number(reload) +
       Number(translation) +
       Number(viewing) +
@@ -1683,6 +1687,7 @@ export async function readFocusedScenario(root: string): Promise<FocusedScenario
       1,
     'Focused Windows scenario selectors are mutually exclusive'
   );
+  if (opacity) return 'settings-opacity';
   if (settings) return 'settings-persistence';
   if (reload) return 'reload-feedback';
   if (translation) return 'translation-runtime';
@@ -1720,6 +1725,18 @@ export async function run({
   ]);
   assert.match(userscript, /==UserScript==/u, 'Production userscript metadata is missing');
   const selectedScenario = await readFocusedScenario(root);
+  if (selectedScenario === 'settings-opacity') {
+    await mkdir(output, { recursive: true });
+    return runOpacityDomains({
+      browser,
+      root,
+      output,
+      userscript,
+      watchHtml: createMockWatchHtml(previewHtml),
+      installedContext,
+      installedExtensionId,
+    });
+  }
   if (selectedScenario !== null) {
     assert(!installedContext, 'Focused fixtures use the production userscript');
     await mkdir(output, { recursive: true });
