@@ -416,9 +416,11 @@ on unrelated repository commits even when the Action's executable files are
 unchanged. Both calls in `security.yaml` retain the independently reviewed
 full SHA recorded in `semgrep-workflow-composition.test.ts`. When changing this
 Action, review its metadata, entrypoint, relative imports, Node runtime,
-ancestor package module settings, and execution provenance. Land the Action
-source first, then update both workflow references and the independent expected
-SHA together in a reviewed PR after the new commit is reachable. Run the
+ancestor package module settings, and execution provenance. Commit the reviewed
+Action source on a work branch and publish that commit so it is reachable.
+In the same protected PR, update both workflow references to that source commit
+and update the independent expected SHA and reviewed blob identities together;
+do not merge a source-only change that contradicts the closure checks. Run the
 Semgrep Action and workflow composition tests, quality, consistency, and
 applicable hosted scanner checks at the final head. If an update fails, restore
 the previous reviewed SHA in both references and the independent expectation.
