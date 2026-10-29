@@ -235,6 +235,7 @@ export async function runOpacityDomains({
     modal = await open();
     await modal.locator('#tab-colors').click();
     assert.equal(await modal.locator('input[name="outline-opacity"]').inputValue(), '20');
+    await modal.locator('input[name="outline-opacity"]').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(output, 'opacity-reloaded-20.png') });
     await modal.locator('#tab-comments').click();
     await modal.locator('input[name="opacity"]').fill('20');
@@ -271,7 +272,8 @@ export async function runOpacityDomains({
         await page.evaluate(async () => {
           await window.__ytChatOverlay?.stop();
         });
-      cleanup.settingsRestored = true;
+      cleanup.settingsRestored =
+        installedExtensionId && previous ? true : 'not-applicable-owned-context';
     } catch (error) {
       cleanup.error = String(error);
       failure ??= error;
