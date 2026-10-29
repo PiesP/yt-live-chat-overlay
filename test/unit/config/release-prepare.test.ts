@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -148,6 +149,37 @@ afterEach(() => {
 });
 
 describe('release preparation artifact versions', () => {
+  it.each([
+    ['missing', undefined, 'CHANGELOG.md'],
+    ['unmatched', '# Changelog\n\n## [1.2.2]\n\n- Old release.\n', 'has no entry'],
+    ['empty', '# Changelog\n\n## [1.2.3]\n\n## [1.2.2]\n\n- Old release.\n', 'is empty'],
+  ])('preserves the prior bundle when the changelog is %s', (_name, changelog, reason) => {
+    const fixtureRoot = createReleaseFixture();
+    const changelogPath = join(fixtureRoot, 'CHANGELOG.md');
+    if (changelog === undefined) rmSync(changelogPath);
+    else writeFileSync(changelogPath, changelog);
+    recordFixtureFootprint(fixtureRoot);
+    const bundleDirectory = join(fixtureRoot, 'release-bundle');
+    mkdirSync(join(bundleDirectory, 'release'), { recursive: true });
+    const oldArchive = Buffer.from([0, 255, 10, 42]);
+    writeFileSync(join(bundleDirectory, 'retained.txt'), 'Previous candidate\n');
+    writeFileSync(join(bundleDirectory, 'release', 'old.zip'), oldArchive);
+
+    const result = runPrepare(fixtureRoot);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(reason);
+    expect(readdirSync(bundleDirectory, { recursive: true }).sort()).toEqual([
+      'release',
+      'release/old.zip',
+      'retained.txt',
+    ]);
+    expect(readFileSync(join(bundleDirectory, 'retained.txt'), 'utf8')).toBe(
+      'Previous candidate\n'
+    );
+    expect(readFileSync(join(bundleDirectory, 'release', 'old.zip'))).toEqual(oldArchive);
+  });
+
   it('packages artifacts whose embedded versions match the release', () => {
     const fixtureRoot = createReleaseFixture();
     execFileSync('git', ['-c', 'tag.gpgSign=false', 'tag', 'v1.2.2'], { cwd: fixtureRoot });
@@ -174,6 +206,16 @@ describe('release preparation artifact versions', () => {
       readFileSync(join(releaseDirectory, 'checksums.txt'), 'utf8').trim().split('\n')
     ).toHaveLength(4);
     const notes = readFileSync(join(releaseDirectory, 'RELEASE_NOTES.md'), 'utf8');
+    expect(readdirSync(releaseDirectory).sort()).toEqual([
+      'RELEASE_NOTES.md',
+      'checksums.txt',
+      'metadata.json',
+      'yt-live-chat-overlay-chrome.zip',
+      'yt-live-chat-overlay-firefox.zip',
+      'yt-live-chat-overlay.meta.js',
+      'yt-live-chat-overlay.user.js',
+    ]);
+    expect(notes).toContain('- Test release.');
     expect(notes).toContain(sourceCommit);
     expect(notes).toContain('/releases/download/v1.2.3/yt-live-chat-overlay.user.js');
     expect(notes).toContain('versioned `@downloadURL`');

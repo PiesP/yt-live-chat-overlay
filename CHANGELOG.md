@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Opacity controls** — Preserve outline opacity across its full 0–100% range through preview, import, save and reload. Text opacity keeps its 50–100% range; each slider and number input now shares its range and adjustment feedback.
+- **Release preparation** — Reject missing or empty version changelog entries before replacing an existing local candidate bundle.
 - **Chat request deadlines** — Preserve request timeouts during internal retry waits so live polling counts the failure and can recover on the next healthy response. Session stop and replay seek still cancel their owned requests.
 
 ## [0.45.9] - 2026-10-28

@@ -15,7 +15,7 @@ import type {
   TranslationTarget,
 } from '@app-types';
 import { AUTHOR_BACKGROUND_ALPHA_HEX, DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
-import { resolveLimits } from '@settings/limits';
+import { resolveLimits, resolveOutlineLimits } from '@settings/limits';
 import {
   AUTHOR_COLOR_KEYS,
   ROOT_SETTING_META,
@@ -246,7 +246,11 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 
   out.outline.enabled = pickBool(settings.outline.enabled, d.outline.enabled);
   for (const key of ['widthPx', 'opacity'] as const) {
-    out.outline[key] = clampNumber(settings.outline[key], d.outline[key], resolveLimits(key));
+    out.outline[key] = clampNumber(
+      settings.outline[key],
+      d.outline[key],
+      resolveOutlineLimits(key)
+    );
   }
 
   // ── Cross-field pair constraints ──────────────────────────────────────────

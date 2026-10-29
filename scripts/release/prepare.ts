@@ -151,6 +151,7 @@ export function prepareRelease(): void {
   validateExtensionVersion('dist-extension', 'Chrome extension', version);
   validateExtensionVersion('dist-extension-firefox', 'Firefox extension', version);
   const measured = verifiedFootprint(releaseCommit, version, expectedCommit !== undefined);
+  const changes = changelogEntry(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version);
 
   rmSync(bundleDir, { force: true, recursive: true });
   mkdirSync(releaseDir, { recursive: true });
@@ -240,7 +241,6 @@ export function prepareRelease(): void {
   const compareUrl = previous
     ? `https://github.com/${repository}/compare/v${previous}...v${version}`
     : `https://github.com/${repository}/releases/tag/v${version}`;
-  const changes = changelogEntry(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version);
   const releaseNotes = `# Release v${version}
 
 ## Installation
