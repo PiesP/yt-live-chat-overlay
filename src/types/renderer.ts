@@ -17,8 +17,10 @@ export interface FrameTimings {
 export interface SessionMetrics {
   totalReceived: number;
   totalRendered: number;
-  /** First eligible frames completed by either renderer, distinct from allocation. */
+  /** Confirmed first eligible frames, distinct from allocation; a recovery timeout can undercount. */
   totalPresented: number;
+  /** Main draws whose first-count ownership could not be proven after Worker recovery. */
+  totalPresentationUnknown: number;
   totalDropped: number;
   dropRate: number;
   queueDepth: number;

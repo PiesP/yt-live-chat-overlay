@@ -552,7 +552,12 @@ export function drawStage(
         msg._lastDrawnFrame = frameId;
         if (!msg.wasPresented) {
           msg.wasPresented = true;
-          ctx.observability.onMessagesPresented(1);
+          if (msg.presentationAccountingUnknown) {
+            ctx.observability.onPresentationAttributionUnknown();
+          } else {
+            ctx.observability.onMessagesPresented(1);
+          }
+          delete msg.presentationAccountingUnknown;
         }
       }
     } finally {

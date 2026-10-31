@@ -913,6 +913,62 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it('treats timed-out retained Worker presentation as unknown for the current epoch', async () => {
+    const { manager, observability, worker } = initializedManager();
+    const original: ChatMessage = {
+      id: 'timed-out-presented',
+      text: 'original',
+      content: [{ type: 'text', content: 'original' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    expect(manager.sendToWorker(original, original.id)).toBe(true);
+    await flushMicrotasks();
+    worker.emitMessage({
+      ...validStats(),
+      activeMessages: 1,
+      pendingQueueDepth: 0,
+      activeMessageIds: [original.id],
+      pendingMessageIds: [],
+      totalRendered: 1,
+      totalPresented: 1,
+      totalDrops: 0,
+      processedBatchSequence: 1,
+    });
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[1]]);
+    const replacement = { ...original, text: 'edited', actionType: 'replace' as const };
+    expect(manager.sendToWorker(replacement, replacement.id, false)).toBe(true);
+    await flushMicrotasks();
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message: replacement, trackDrops: false, presentationAccounting: 'unknown' },
+    ]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('keeps unknown presentation attribution when the snapshot request cannot be posted', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'snapshot-post-failed',
+      text: 'sent',
+      content: [{ type: 'text', content: 'sent' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    expect(manager.sendToWorker(message, message.id)).toBe(true);
+    await flushMicrotasks();
+    worker.postMessage.mockImplementationOnce(() => {
+      throw new Error('Worker unavailable');
+    });
+    await expect(manager.snapshotMessages(1_000)).resolves.toEqual([
+      { message, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
   it('reports reason-specific cumulative deltas without double counting repeats', () => {
     const { manager, observability, worker } = initializedManager();
     const first = {
@@ -1417,7 +1473,7 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.isCurrentMessage(sameBatchOriginal.id, sameBatchOriginal)).toBe(false);
     expect(manager.isCurrentMessage(sameBatchReplacement.id, sameBatchReplacement)).toBe(false);
     await expect(manager.snapshotMessages(0)).resolves.toEqual([
-      { message: original, trackDrops: true },
+      { message: original, trackDrops: true, presentationAccounting: 'unknown' },
     ]);
     manager.destroy();
     worker.acknowledgeDestroy();
@@ -1446,7 +1502,9 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 0,
     });
-    await expect(firstSnapshot).resolves.toEqual([{ message: unacknowledged, trackDrops: true }]);
+    await expect(firstSnapshot).resolves.toEqual([
+      { message: unacknowledged, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
 
     const expired = { ...unacknowledged, id: 'acknowledged-expired' };
     expect(manager.sendToWorker(expired, expired.id)).toBe(true);
@@ -1509,9 +1567,13 @@ describe('Worker renderer state synchronization', () => {
             pendingMessageIds: [],
             processedBatchSequence: 1,
           });
-          await expect(snapshot).resolves.toEqual([{ message, trackDrops: false }]);
+          await expect(snapshot).resolves.toEqual([
+            { message, trackDrops: false, presentationAccounting: 'unknown' },
+          ]);
         } else {
-          await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
+          await expect(snapshot).resolves.toEqual([
+            { message, trackDrops: true, presentationAccounting: 'unknown' },
+          ]);
         }
       } finally {
         manager.destroy();
@@ -1561,7 +1623,9 @@ describe('Worker renderer state synchronization', () => {
       expect(resolved).not.toHaveBeenCalled();
 
       worker.emitMessage(valid);
-      await expect(snapshot).resolves.toEqual([{ message, trackDrops: false }]);
+      await expect(snapshot).resolves.toEqual([
+        { message, trackDrops: false, presentationAccounting: 'unknown' },
+      ]);
       expect(resolved).toHaveBeenCalledTimes(1);
     } finally {
       manager.destroy();
@@ -1600,6 +1664,7 @@ describe('Worker renderer state synchronization', () => {
       startEpochMs: 11_000,
       fadeStartEpochMs: 10_900,
       speedTier: 1,
+      wasPresented: false,
     };
     worker.emitMessage({
       type: 'messageSnapshot',
@@ -1660,7 +1725,9 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 1,
     });
-    await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
+    await expect(snapshot).resolves.toEqual([
+      { message, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1686,7 +1753,9 @@ describe('Worker renderer state synchronization', () => {
       minimumPendingPriority: 0,
     });
 
-    await expect(manager.snapshotMessages(0)).resolves.toEqual([{ message, trackDrops: true }]);
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1854,7 +1923,9 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 2,
     });
-    await expect(activeSnapshot).resolves.toEqual([{ message: active, trackDrops: false }]);
+    await expect(activeSnapshot).resolves.toEqual([
+      { message: active, trackDrops: false, presentationAccounting: 'unknown' },
+    ]);
 
     const unacknowledged = makeChatMessage('snapshot-unacknowledged');
     expect(manager.sendToWorker(unacknowledged, unacknowledged.id, true)).toBe(true);
@@ -1871,7 +1942,7 @@ describe('Worker renderer state synchronization', () => {
       processedBatchSequence: 2,
     });
     await expect(unacknowledgedSnapshot).resolves.toEqual([
-      { message: unacknowledged, trackDrops: true },
+      { message: unacknowledged, trackDrops: true, presentationAccounting: 'unknown' },
     ]);
 
     const activeAtTimeout = makeChatMessage('snapshot-timeout-active');
@@ -1889,7 +1960,7 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
     });
     await expect(manager.snapshotMessages(0)).resolves.toEqual([
-      { message: activeAtTimeout, trackDrops: false },
+      { message: activeAtTimeout, trackDrops: false, presentationAccounting: 'unknown' },
     ]);
     manager.destroy();
     worker.acknowledgeDestroy();
@@ -1963,6 +2034,7 @@ describe('Worker renderer state synchronization', () => {
       {
         message: expect.objectContaining({ id: 'pending-recovery' }),
         trackDrops: true,
+        presentationAccounting: 'unknown',
       },
     ]);
     manager.destroy();

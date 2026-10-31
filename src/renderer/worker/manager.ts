@@ -58,6 +58,8 @@ export interface WorkerRecoveryMessage {
   trackDrops: boolean;
   /** Present only for a validated, current-epoch active Worker message. */
   activeMotion?: WorkerRecoveryMotion;
+  /** A timed-out Worker may have drawn this retained message after its last report. */
+  presentationAccounting?: 'reported' | 'unknown';
 }
 
 export interface WorkerRecoveryMotion
@@ -1493,12 +1495,20 @@ export class RenderWorkerManager {
         retained.batchSequence > processedBatchSequence
       ) {
         const motion = activeIdSet.has(id) ? activeMotionById.get(id) : undefined;
+        const presentationAccounting = activeIdSet.has(id)
+          ? motion?.wasPresented === undefined
+            ? 'unknown'
+            : undefined
+          : !pendingIdSet.has(id)
+            ? 'unknown'
+            : undefined;
         messages.push({
           message: retained.message,
           trackDrops:
             retained.trackDrops &&
             !activeIdSet.has(id) &&
             (pendingIdSet.has(id) || retained.batchSequence > processedBatchSequence),
+          ...(presentationAccounting ? { presentationAccounting } : {}),
           ...(motion && motionSnapshot
             ? {
                 activeMotion: {
@@ -1551,6 +1561,7 @@ export class RenderWorkerManager {
         // A timed-out Worker cannot prove a newer batch was placed. Preserve
         // tracking only for last-known pending or unacknowledged work.
         trackDrops: retained.trackDrops && !wasActive && (wasPending || isUnacknowledged),
+        presentationAccounting: 'unknown',
       });
       this.sentMessages.delete(id);
       this.deps.onMessageReleased?.(retained.message, id);

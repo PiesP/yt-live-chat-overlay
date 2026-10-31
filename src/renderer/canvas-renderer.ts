@@ -139,6 +139,7 @@ let fallbackMessageIdCounter = 0;
 interface FallbackIngressEntry {
   message: ChatMessage;
   trackDrops: boolean;
+  presentationAccounting?: NonNullable<WorkerRecoveryMessage['presentationAccounting']>;
 }
 
 export class CanvasRenderer extends RendererBase {
@@ -174,6 +175,11 @@ export class CanvasRenderer extends RendererBase {
   private readonly pendingQueue = new HighFirstPriorityBucketQueue();
   /** Pending messages whose eventual permanent discard contributes to drop metrics. */
   private readonly trackedPendingMessages = new WeakSet<ChatMessage>();
+  /** Recovery attribution follows only retained ingress objects until placement. */
+  private recoveredPresentationAccounting = new WeakMap<
+    ChatMessage,
+    NonNullable<WorkerRecoveryMessage['presentationAccounting']>
+  >();
   /** Bounded ingress retained while Worker state is being recovered. */
   private readonly fallbackIngressQueue = new HighFirstPriorityBucketQueue<FallbackIngressEntry>();
 
@@ -874,9 +880,11 @@ export class CanvasRenderer extends RendererBase {
 
     const pending = this.pendingQueue.toArray().find((entry) => entry.id === id);
     if (pending) {
+      const presentationAccounting = this.recoveredPresentationAccounting.get(pending);
+      this.recoveredPresentationAccounting.delete(pending);
       this.pendingQueue.removeAll([pending]);
       this.dimensionCache.delete(id);
-      this.enqueueMessage(message, false);
+      this.enqueueMessage(message, false, presentationAccounting);
       return true;
     }
 
@@ -1016,7 +1024,11 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
-  private enqueueMessage(message: ChatMessage, trackDrops: boolean): void {
+  private enqueueMessage(
+    message: ChatMessage,
+    trackDrops: boolean,
+    presentationAccounting?: WorkerRecoveryMessage['presentationAccounting']
+  ): void {
     const priority = CanvasRenderer.getMessagePriority(message);
 
     const result = enqueueWithOverflow(
@@ -1032,6 +1044,8 @@ export class CanvasRenderer extends RendererBase {
       this.settings.queueMaxSize
     );
     if (result === 'dropped') return;
+    if (presentationAccounting)
+      this.recoveredPresentationAccounting.set(message, presentationAccounting);
     if (trackDrops) this.trackedPendingMessages.add(message);
     else this.trackedPendingMessages.delete(message);
     this.imageFetchManager.prefetchImages(message);
@@ -1051,18 +1065,32 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Retain ingress during asynchronous Worker recovery without exceeding queue policy. */
-  private enqueueFallbackIngress(message: ChatMessage, trackDrops: boolean): void {
+  private enqueueFallbackIngress(
+    message: ChatMessage,
+    trackDrops: boolean,
+    presentationAccounting?: WorkerRecoveryMessage['presentationAccounting']
+  ): void {
     const priority = CanvasRenderer.getMessagePriority(message);
+    const entry: FallbackIngressEntry = {
+      message,
+      trackDrops,
+      ...(presentationAccounting ? { presentationAccounting } : {}),
+    };
     if (message.actionType === 'replace' && message.id) {
       const existing = this.fallbackIngressQueue
         .toArray()
         .find((entry) => entry.message.id === message.id);
-      if (existing) this.fallbackIngressQueue.removeAll([existing]);
+      if (existing) {
+        if (!entry.presentationAccounting && existing.presentationAccounting) {
+          entry.presentationAccounting = existing.presentationAccounting;
+        }
+        this.fallbackIngressQueue.removeAll([existing]);
+      }
       if (this.fallbackIngressQueue.size >= this.settings.queueMaxSize) {
         const dropped = this.fallbackIngressQueue.dropLowest();
         if (dropped?.trackDrops) this.observability.onMessageDropped('queue_replaced');
       }
-      this.fallbackIngressQueue.enqueue({ message, trackDrops }, Number.MAX_SAFE_INTEGER);
+      this.fallbackIngressQueue.enqueue(entry, Number.MAX_SAFE_INTEGER);
       return;
     }
 
@@ -1075,7 +1103,7 @@ export class CanvasRenderer extends RendererBase {
       const dropped = this.fallbackIngressQueue.dropLowest();
       if (dropped?.trackDrops) this.observability.onMessageDropped('queue_replaced');
     }
-    this.fallbackIngressQueue.enqueue({ message, trackDrops }, priority);
+    this.fallbackIngressQueue.enqueue(entry, priority);
   }
 
   private drainFallbackIngress(): FallbackIngressEntry[] {
@@ -1098,7 +1126,14 @@ export class CanvasRenderer extends RendererBase {
       const id = entry.message.id;
       const existingIndex = id ? indexById.get(id) : undefined;
       if (existingIndex !== undefined) {
-        merged[existingIndex] = entry;
+        const previous = merged[existingIndex];
+        const inheritedAccounting =
+          previous?.presentationAccounting ??
+          (previous?.activeMotion?.wasPresented ? 'reported' : undefined);
+        merged[existingIndex] =
+          entry.message.actionType === 'replace' && inheritedAccounting
+            ? { ...entry, presentationAccounting: inheritedAccounting }
+            : entry;
       } else {
         if (id) indexById.set(id, merged.length);
         merged.push(entry);
@@ -1166,6 +1201,7 @@ export class CanvasRenderer extends RendererBase {
 
   /** Prepare for a clean restart while preserving decoded-image and bitmap caches. */
   override prepareForRefresh(): void {
+    this.recoveredPresentationAccounting = new WeakMap();
     this.clearActiveMessages();
     this.clearPendingQueue();
     this.fallbackIngressQueue.clear();
@@ -1999,6 +2035,10 @@ export class CanvasRenderer extends RendererBase {
         onActivated: (cm) => {
           cm.motion = motion;
           cm.trackDrops = this.trackedPendingMessages.has(message);
+          const presentationAccounting = this.recoveredPresentationAccounting.get(message);
+          this.recoveredPresentationAccounting.delete(message);
+          if (presentationAccounting === 'reported') cm.wasPresented = true;
+          if (presentationAccounting === 'unknown') cm.presentationAccountingUnknown = true;
           this.activeMessages.push(cm);
           const slotCount = placement.slotCount;
           cm.slotCount = slotCount;
@@ -2427,6 +2467,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected resetState(): void {
+    this.recoveredPresentationAccounting = new WeakMap();
     this.cancelAllTranslationOwners();
     this.entryPacing.clear();
     this.drainCursors.clear();
@@ -2614,6 +2655,7 @@ export class CanvasRenderer extends RendererBase {
           message.trackDrops = saved.trackDrops ?? entry.trackDrops;
           message.fadeStartTime = fadeStartTime;
           message.wasPresented = saved.wasPresented === true;
+          message.presentationAccountingUnknown = entry.presentationAccounting === 'unknown';
           message.slotCount = saved.laneSlotCount;
           this.activeMessages.push(message);
         },
@@ -2714,7 +2756,11 @@ export class CanvasRenderer extends RendererBase {
             this.drainFallbackIngress()
           );
           for (const entry of retainedIngress) {
-            this.enqueueFallbackIngress(entry.message, entry.trackDrops);
+            this.enqueueFallbackIngress(
+              entry.message,
+              entry.trackDrops,
+              entry.presentationAccounting
+            );
           }
           this.fallbackRecoveryFailed = true;
           log.warn('renderer.fallback.failed', {
@@ -2749,7 +2795,7 @@ export class CanvasRenderer extends RendererBase {
 
         for (const entry of this.mergeRecoveredMessages(messages, fallbackIngress)) {
           if (dims && this.restoreWorkerActiveMessage(entry, now)) continue;
-          this.enqueueMessage(entry.message, entry.trackDrops);
+          this.enqueueMessage(entry.message, entry.trackDrops, entry.presentationAccounting);
         }
         if (dims && this.activeMessages.length > 0) this.reflowActiveMessages(dims);
         // Close the transition before yielding to another microtask. Any
@@ -2762,7 +2808,7 @@ export class CanvasRenderer extends RendererBase {
           ) {
             continue;
           }
-          this.enqueueMessage(entry.message, entry.trackDrops);
+          this.enqueueMessage(entry.message, entry.trackDrops, entry.presentationAccounting);
         }
         this.fallbackInProgress = false;
         this.idleSince = null;

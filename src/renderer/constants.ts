@@ -154,6 +154,8 @@ export interface CanvasMessage {
   reflowHidden?: boolean;
   /** Set only after a drawable frame completes; retained across reflow and replacement. */
   wasPresented?: boolean;
+  /** Recovery without a fresh Worker snapshot cannot safely add another first count. */
+  presentationAccountingUnknown?: boolean;
   /** Frame clock of the most recent eligible, completed draw. */
   _lastDrawnFrame?: number;
   message: ChatMessage;

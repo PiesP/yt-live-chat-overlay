@@ -181,6 +181,7 @@ function makeDrainCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderCon
     cachedOpacityConfig: {} as CanvasRenderContext['cachedOpacityConfig'],
     observability: {
       onMessagesPresented: vi.fn(),
+      onPresentationAttributionUnknown: vi.fn(),
     } as unknown as CanvasRenderContext['observability'],
     isReducedMotionActive: false,
     lastLiveRegionUpdate: { value: 0 },
@@ -388,6 +389,59 @@ describe('drawStage', () => {
     drawStage(ctx, renderCtx, buckets as never, 7, dims);
     mirrorVisibleMessages(ctx, 3_000, 7);
     expect(updateLiveRegion).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not attribute a timed-out Worker recovery twice but counts fresh placement', () => {
+    const makeMessage = (id: string) => {
+      const body: ChatMessage = {
+        id,
+        text: id,
+        content: [{ type: 'text', content: id }],
+        timestamp: 1,
+        kind: 'text',
+        authorType: 'normal',
+      };
+      return {
+        message: body,
+        renderMessage: body,
+        duration: 1_000,
+        width: 100,
+        height: 20,
+        x: 20,
+        y: 20,
+        speedTier: 1,
+        _frameElapsed: 100,
+        wasPresented: false,
+        presentationAccountingUnknown: id === 'timeout',
+      };
+    };
+    const timeout = makeMessage('timeout');
+    const fresh = makeMessage('fresh');
+    const presented = vi.fn();
+    const unknown = vi.fn();
+    const ctx = makeDrainCtx({
+      settings: DEFAULT_SETTINGS,
+      observability: {
+        onMessagesPresented: presented,
+        onPresentationAttributionUnknown: unknown,
+      } as unknown as CanvasRenderContext['observability'],
+      imageFetchManager: {
+        emojiCache: { get: vi.fn() },
+        authorPhotoCache: { get: vi.fn() },
+        stickerCache: { get: vi.fn() },
+      } as unknown as CanvasRenderContext['imageFetchManager'],
+    });
+    const buckets = Array.from({ length: 32 }, () => [] as (typeof timeout)[]);
+    buckets[1]!.push(timeout, fresh);
+    drawStage(ctx, { globalAlpha: 1 } as CanvasRenderingContext2D, buckets as never, 1, {
+      width: 640,
+      height: 360,
+    });
+    expect(timeout.wasPresented).toBe(true);
+    expect(timeout.presentationAccountingUnknown).toBeUndefined();
+    expect(fresh.wasPresented).toBe(true);
+    expect(presented).toHaveBeenCalledOnce();
+    expect(unknown).toHaveBeenCalledOnce();
   });
 
   it('passes author background color and unchanged bounds to regular message rendering', () => {

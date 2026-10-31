@@ -106,6 +106,7 @@ describe('MessageActivator', () => {
       cm.renderMessage = makeChatMessage({ id: 'render-test' });
       cm.translatedText = '번역된 텍스트';
       cm.wasPresented = true;
+      cm.presentationAccountingUnknown = true;
       cm._lastDrawnFrame = 42;
       (cm as unknown as Record<string, unknown>).desaturatedUserColor = '#aaa';
 
@@ -115,6 +116,7 @@ describe('MessageActivator', () => {
       expect(cm.renderMessage).toBe(EMPTY_CHAT_MESSAGE);
       expect(cm.translatedText).toBeNull();
       expect(cm.wasPresented).toBeUndefined();
+      expect(cm.presentationAccountingUnknown).toBeUndefined();
       expect(cm._lastDrawnFrame).toBeUndefined();
       expect((cm as unknown as Record<string, unknown>).desaturatedUserColor).toBeUndefined();
     });

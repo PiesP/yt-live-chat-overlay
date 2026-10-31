@@ -80,6 +80,7 @@ export class MessageActivator {
     delete msg.translatedRenderMessage;
     delete msg.desaturatedUserColor;
     delete msg.wasPresented;
+    delete msg.presentationAccountingUnknown;
     delete msg._lastDrawnFrame;
     // Keep numeric fields — they'll be overwritten by Object.assign
     this.messagePool.push(msg);
@@ -132,6 +133,7 @@ export class MessageActivator {
       renderMessage: message,
       ghostText: getDisplayText(message.content),
       wasPresented: false,
+      presentationAccountingUnknown: undefined,
       _lastDrawnFrame: undefined,
     });
 
