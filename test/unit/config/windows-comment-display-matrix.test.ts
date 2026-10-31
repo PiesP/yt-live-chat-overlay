@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { runInNewContext } from 'node:vm';
+import { runInNewContext, Script } from 'node:vm';
 
-import { describe, expect, it } from 'vite-plus/test';
+import type { ChatMessage, OverlaySettings } from '@app-types';
+import { RenderWorkerManager } from '@renderer/worker/manager';
+import type { ObservabilityReporter } from '@util/observability';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 import {
   assertBackend,
@@ -13,10 +16,12 @@ import {
   assertPreviewComparison,
   assertResizeSafeMotion,
   assertRestoredVisibility,
+  attachWorkerManagerProbe,
   bindMatrixIdentity,
   classifyMatrixRuntime,
   classifyPlanProbeCapability,
   flowTrace,
+  instrumentWorkerManagerPageScript,
   MATRIX_BATCHES,
   membershipEffect,
   OVERLOAD_BATCHES,
@@ -33,6 +38,140 @@ const source = MATRIX_BATCHES.content.map(
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('observes the actual Worker Manager without changing sends or receipts', async () => {
+    const id = 'WINDOWS380_LOAD_OVERFLOW_NEW_3';
+    const secondId = 'WINDOWS380_LOAD_OVERFLOW_NEW_2';
+    const message: ChatMessage = {
+      id,
+      kind: 'text',
+      text: `${id} PRIVATE_PAYLOAD`,
+      content: [{ type: 'text', content: `${id} PRIVATE_PAYLOAD` }],
+      timestamp: 0,
+      authorType: 'normal',
+    };
+    const originalSend = RenderWorkerManager.prototype.sendToWorker;
+    const prototype = RenderWorkerManager.prototype as unknown as Record<string, unknown>;
+    const originalReceipt = prototype.applyBatchReceipt;
+    const run = async (probeEnabled: boolean, oldShape = false) => {
+      const posted: unknown[] = [];
+      const worker = {
+        postMessage: (value: unknown) => {
+          posted.push(value);
+        },
+      };
+      const manager = new RenderWorkerManager({
+        settings: { queueMaxSize: 2, maxConcurrentMessages: 1 } as OverlaySettings,
+        observability: {
+          onMessageDropped: vi.fn(),
+          updateActiveMessages: vi.fn(),
+          updateQueueDepth: vi.fn(),
+          updateLaneUtilization: vi.fn(),
+        } as unknown as ObservabilityReporter,
+        estimateDimensions: () => ({ width: 80, height: 20 }),
+        getMessagePriority: () => 0,
+        getEffectiveSpeedPxPerSec: () => 100,
+      });
+      const state = manager as unknown as Record<string, unknown>;
+      state.worker = worker;
+      manager.setActive(true);
+      const originalDeferred = state.deferredIngress;
+      const target: Record<string, unknown> = {};
+      try {
+        if (probeEnabled)
+          attachWorkerManagerProbe(RenderWorkerManager, target, [id, secondId], !oldShape);
+        const accepted = manager.sendToWorker(message, id);
+        const secondAccepted = manager.sendToWorker({ ...message, id: secondId }, secondId);
+        await Promise.resolve();
+        const receipt = {
+          type: 'batchReceipt',
+          batchSequence: 1,
+          epoch: state.currentEpoch,
+          pendingQueueDepth: 2,
+          minimumPendingPriority: 0,
+        };
+        Reflect.apply(state.applyBatchReceipt as Function, manager, [receipt]);
+        if (oldShape) {
+          state.deferredIngress = undefined;
+          state.getProjectedWorkerWork = undefined;
+        }
+        const observed = (
+          target.__ytMatrixManagerProbe as
+            | {
+                read: () => {
+                  probeError: string | null;
+                  manager: Record<string, unknown>;
+                  events: Array<Record<string, unknown>>;
+                };
+              }
+            | undefined
+        )?.read();
+        return {
+          accepted,
+          secondAccepted,
+          posted,
+          depth: state.latestWorkerPendingDepth,
+          observed,
+        };
+      } finally {
+        state.deferredIngress = originalDeferred;
+        delete state.getProjectedWorkerWork;
+        prototype.sendToWorker = originalSend;
+        prototype.applyBatchReceipt = originalReceipt;
+        state.worker = null;
+        manager.destroy();
+      }
+    };
+    const without = await run(false);
+    const withProbe = await run(true);
+    expect(withProbe.accepted).toBe(without.accepted);
+    expect(withProbe.secondAccepted).toBe(without.secondAccepted);
+    expect(withProbe.posted).toEqual(without.posted);
+    expect(withProbe.depth).toBe(without.depth);
+    expect(withProbe.observed?.probeError).toBeNull();
+    expect(withProbe.observed?.manager).toMatchObject({
+      latestWorkerPendingDepth: 2,
+      lastWorkerReceiptSequence: 1,
+      nextBatchSequence: 1,
+      pendingBatchCount: 0,
+      deferredIngressCount: 0,
+      projectedWork: 2,
+    });
+    expect(withProbe.observed?.events.map((event) => event.kind)).toContain('native-post');
+    expect(withProbe.observed?.events.find((event) => event.kind === 'native-post')).toMatchObject({
+      fixtureMessageIds: [id, secondId],
+      messageCount: 2,
+      batchSequence: 1,
+    });
+    expect(withProbe.observed?.events.map((event) => event.kind)).toContain(
+      'manager-receipt-after'
+    );
+    expect(JSON.stringify(withProbe.observed)).not.toContain('PRIVATE_PAYLOAD');
+    const oldBaseline = await run(true, true);
+    expect(oldBaseline.accepted).toBe(without.accepted);
+    expect(oldBaseline.posted).toEqual(without.posted);
+    expect(oldBaseline.observed?.probeError).toBeNull();
+    expect(oldBaseline.observed?.manager).toMatchObject({
+      latestWorkerPendingDepth: 2,
+      deferredIngressCount: null,
+      deferredIngress: null,
+      projectedWork: null,
+    });
+  });
+
+  it('inserts only at the packaged entry and rejects Manager shape drift', () => {
+    const source =
+      'var RenderWorkerManager = class RenderWorkerManager {' +
+      'sendToWorker(message, msgId, trackDrops = true) {}' +
+      'applyBatchReceipt(receipt) {} };\n\tmain();\n';
+    const instrumented = instrumentWorkerManagerPageScript(source, 'candidate');
+    expect(instrumented).not.toBeNull();
+    expect(instrumented?.startsWith(source.split('\n\tmain();\n')[0]!)).toBe(true);
+    expect(instrumented?.endsWith('\n\tmain();\n')).toBe(true);
+    expect(() => new Script(instrumented!)).not.toThrow();
+    expect(
+      instrumentWorkerManagerPageScript(source.replace('applyBatchReceipt', 'renamed'), 'candidate')
+    ).toBeNull();
+  });
   it('keeps the three Unicode boundary inputs and accepted source tails distinct', () => {
     const bodies = source.slice(0, 3).map((item) => {
       if (!item || !('message' in item) || !('runs' in item.message))

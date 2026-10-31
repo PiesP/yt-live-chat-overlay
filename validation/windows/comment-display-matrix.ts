@@ -445,6 +445,301 @@ const OVERLOAD_IDS = Object.values(OVERLOAD_BATCHES).flatMap((batch) =>
   })
 );
 
+type ManagerProbeRead = {
+  installed: boolean;
+  probeError: string | null;
+  ownerCaptured: boolean;
+  workerHooked: boolean;
+  atEpochMs: number;
+  manager: {
+    latestWorkerPendingDepth: number;
+    minimumWorkerPendingPriority: number | null;
+    unacknowledgedBatches: Array<{
+      sequence: number;
+      count: number;
+      epoch: number;
+      saturationProbe: boolean;
+    }> | null;
+    pendingBatchCount: number | null;
+    pendingBatch: Array<{
+      id: string;
+      priority: number;
+      batchSequence: number;
+      epoch: number;
+    }> | null;
+    deferredIngressCount: number | null;
+    deferredIngress: Array<{ id: string; priority: number; epoch: number }> | null;
+    currentEpoch: number;
+    lastWorkerReceiptSequence: number | null;
+    nextBatchSequence: number | null;
+    pendingBatchSequence: number | null;
+    sentMessagesSize: number | null;
+    projectedWork: number | null;
+  } | null;
+  events: Array<Record<string, string | number | boolean | string[] | null>>;
+  omittedEvents: number;
+};
+
+/** Pure entry insertion observes the real manager and native Worker transport. */
+export function attachWorkerManagerProbe(
+  Manager: { prototype: object },
+  target: Record<string, unknown>,
+  ids: readonly string[],
+  requireCurrentState = true
+): void {
+  const knownIds = new Set(ids);
+  const prototype = Manager.prototype as Record<string, unknown>;
+  const nativeSend = prototype.sendToWorker;
+  const nativeReceipt = prototype.applyBatchReceipt;
+  const events: ManagerProbeRead['events'] = [];
+  let omittedEvents = 0;
+  let probeError: string | null = null;
+  let owner: Record<string, unknown> | null = null;
+  let hookedWorker: Record<string, unknown> | null = null;
+  const epochNow = () => performance.timeOrigin + performance.now();
+  const fail = (code: string) => {
+    probeError ??= code;
+  };
+  const observe = (code: string, action: () => void) => {
+    try {
+      action();
+    } catch {
+      fail(code);
+    }
+  };
+  const record = (event: ManagerProbeRead['events'][number]) => {
+    if (events.length === 64) {
+      events.shift();
+      omittedEvents++;
+    }
+    events.push({ ...event, atEpochMs: epochNow() });
+  };
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  const finite = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const captureOwner = (value: unknown) => {
+    const next = asRecord(value);
+    if (!next) fail('manager-instance-unavailable');
+    else if (owner && owner !== next) fail('manager-instance-changed');
+    else owner = next;
+  };
+  const hookWorker = (manager: Record<string, unknown>) => {
+    const worker = asRecord(manager.worker);
+    if (!worker || worker === hookedWorker) return;
+    const originalPost = worker.postMessage;
+    if (typeof originalPost !== 'function') {
+      fail('native-post-unavailable');
+      return;
+    }
+    const recordPost = (value: unknown, outcome: 'returned' | 'threw') => {
+      const message = asRecord(value);
+      if (message?.type !== 'addMessages') return;
+      const rawMessages = Array.isArray(message.messages) ? message.messages : [];
+      const fixtureMessageIds = rawMessages
+        .map((item) => asRecord(item)?.id)
+        .filter((id): id is string => typeof id === 'string' && knownIds.has(id))
+        .slice(0, 128);
+      record({
+        kind: 'native-post',
+        outcome,
+        batchSequence: finite(message.batchSequence),
+        epoch: finite(message.epoch),
+        messageCount: rawMessages.length,
+        fixtureMessageIds,
+      });
+    };
+    const wrappedPost = function (this: unknown, ...args: unknown[]) {
+      try {
+        const result = Reflect.apply(originalPost, this, args);
+        observe('native-post-record', () => recordPost(args[0], 'returned'));
+        return result;
+      } catch (error) {
+        observe('native-post-record', () => recordPost(args[0], 'threw'));
+        throw error;
+      }
+    };
+    observe('native-post-hook', () => {
+      worker.postMessage = wrappedPost;
+      if (worker.postMessage !== wrappedPost) throw new Error('Native post hook unavailable');
+      hookedWorker = worker;
+    });
+  };
+  const read = (): ManagerProbeRead => {
+    let manager: ManagerProbeRead['manager'] = null;
+    observe('manager-state-shape', () => {
+      if (!owner) return;
+      const pending = owner.pendingBatch;
+      const deferred = owner.deferredIngress;
+      const unacknowledged = owner.unacknowledgedBatches;
+      const sent = owner.sentMessages;
+      const projected = owner.getProjectedWorkerWork;
+      const depth = finite(owner.latestWorkerPendingDepth);
+      const epoch = finite(owner.currentEpoch);
+      if (depth === null || epoch === null) throw new Error('Manager counters changed');
+      const projectedWork =
+        typeof projected === 'function' ? finite(Reflect.apply(projected, owner, [])) : null;
+      const currentStateAvailable =
+        Array.isArray(pending) &&
+        Array.isArray(deferred) &&
+        unacknowledged instanceof Map &&
+        sent instanceof Map &&
+        projectedWork !== null &&
+        finite(owner.lastWorkerReceiptSequence) !== null &&
+        finite(owner.nextBatchSequence) !== null &&
+        finite(owner.pendingBatchSequence) !== null;
+      if (requireCurrentState && !currentStateAvailable)
+        throw new Error('Manager state shape changed');
+      const unacknowledgedBatches: NonNullable<
+        ManagerProbeRead['manager']
+      >['unacknowledgedBatches'] = unacknowledged instanceof Map ? [] : null;
+      if (unacknowledgedBatches && unacknowledged instanceof Map) {
+        for (const [sequence, value] of unacknowledged) {
+          const entry = asRecord(value);
+          const count = finite(entry?.count);
+          const batchEpoch = finite(entry?.epoch);
+          if (finite(sequence) === null || count === null || batchEpoch === null)
+            throw new Error('Manager receipt state changed');
+          if (unacknowledgedBatches.length === 128) unacknowledgedBatches.shift();
+          unacknowledgedBatches.push({
+            sequence,
+            count,
+            epoch: batchEpoch,
+            saturationProbe: entry?.saturationProbe === true,
+          });
+        }
+      }
+      const fixtureRows = (rows: unknown[]) =>
+        rows
+          .map(asRecord)
+          .filter((entry): entry is Record<string, unknown> =>
+            Boolean(entry && typeof entry.id === 'string' && knownIds.has(entry.id))
+          )
+          .slice(0, 128);
+      const requiredNumber = (value: unknown): number => {
+        const measured = finite(value);
+        if (measured === null) throw new Error('Manager row shape changed');
+        return measured;
+      };
+      manager = {
+        latestWorkerPendingDepth: depth,
+        minimumWorkerPendingPriority: finite(owner.minimumWorkerPendingPriority),
+        unacknowledgedBatches,
+        pendingBatchCount: Array.isArray(pending) ? pending.length : null,
+        pendingBatch: Array.isArray(pending)
+          ? fixtureRows(pending).map((entry) => ({
+              id: String(entry.id),
+              priority: requiredNumber(entry.priority),
+              batchSequence: requiredNumber(entry.batchSequence),
+              epoch: requiredNumber(entry.epoch),
+            }))
+          : null,
+        deferredIngressCount: Array.isArray(deferred) ? deferred.length : null,
+        deferredIngress: Array.isArray(deferred)
+          ? fixtureRows(deferred).map((entry) => ({
+              id: String(entry.id),
+              priority: requiredNumber(entry.priority),
+              epoch: requiredNumber(entry.epoch),
+            }))
+          : null,
+        currentEpoch: epoch,
+        lastWorkerReceiptSequence: finite(owner.lastWorkerReceiptSequence),
+        nextBatchSequence: finite(owner.nextBatchSequence),
+        pendingBatchSequence: finite(owner.pendingBatchSequence),
+        sentMessagesSize: sent instanceof Map ? sent.size : null,
+        projectedWork,
+      };
+    });
+    return {
+      installed: true,
+      probeError,
+      ownerCaptured: owner !== null,
+      workerHooked: hookedWorker !== null,
+      atEpochMs: epochNow(),
+      manager,
+      events: events.slice(),
+      omittedEvents,
+    };
+  };
+  if (target.__ytMatrixManagerProbe !== undefined) {
+    fail('manager-probe-already-installed');
+    return;
+  }
+  target.__ytMatrixManagerProbe = { read };
+  if (typeof nativeSend !== 'function' || typeof nativeReceipt !== 'function') {
+    fail('manager-prototype-shape');
+    return;
+  }
+  prototype.sendToWorker = function (this: unknown, ...args: unknown[]) {
+    observe('manager-send-before', () => {
+      captureOwner(this);
+      if (owner) hookWorker(owner);
+      const id = typeof args[1] === 'string' ? args[1] : asRecord(args[0])?.id;
+      if (typeof id === 'string' && knownIds.has(id)) record({ kind: 'manager-send-before', id });
+    });
+    try {
+      const result = Reflect.apply(nativeSend, this, args);
+      observe('manager-send-after', () => {
+        const id = typeof args[1] === 'string' ? args[1] : asRecord(args[0])?.id;
+        if (typeof id === 'string' && knownIds.has(id))
+          record({ kind: 'manager-send-after', id, accepted: result === true });
+      });
+      return result;
+    } catch (error) {
+      observe('manager-send-after', () => record({ kind: 'manager-send-threw' }));
+      throw error;
+    }
+  };
+  prototype.applyBatchReceipt = function (this: unknown, ...args: unknown[]) {
+    observe('manager-receipt-before', () => {
+      captureOwner(this);
+      if (owner) hookWorker(owner);
+      const receipt = asRecord(args[0]);
+      record({
+        kind: 'manager-receipt-before',
+        batchSequence: finite(receipt?.batchSequence),
+        epoch: finite(receipt?.epoch),
+        pendingQueueDepth: finite(receipt?.pendingQueueDepth),
+        minimumPendingPriority: finite(receipt?.minimumPendingPriority),
+      });
+    });
+    try {
+      const result = Reflect.apply(nativeReceipt, this, args);
+      observe('manager-receipt-after', () => {
+        const receipt = asRecord(args[0]);
+        record({
+          kind: 'manager-receipt-after',
+          batchSequence: finite(receipt?.batchSequence),
+          epoch: finite(receipt?.epoch),
+          pendingQueueDepth: finite(receipt?.pendingQueueDepth),
+          minimumPendingPriority: finite(receipt?.minimumPendingPriority),
+        });
+      });
+      return result;
+    } catch (error) {
+      observe('manager-receipt-after', () => record({ kind: 'manager-receipt-threw' }));
+      throw error;
+    }
+  };
+}
+
+export function instrumentWorkerManagerPageScript(source: string, mode: MatrixMode): string | null {
+  const marker = '\n\tmain();\n';
+  if (
+    source.split(marker).length !== 2 ||
+    !source.includes('var RenderWorkerManager = class RenderWorkerManager {') ||
+    !source.includes('sendToWorker(message, msgId, trackDrops = true) {') ||
+    !source.includes('applyBatchReceipt(receipt) {') ||
+    source.includes('__ytMatrixManagerProbe')
+  )
+    return null;
+  return source.replace(
+    marker,
+    `\n\t;(${attachWorkerManagerProbe.toString()})(RenderWorkerManager, globalThis, ${JSON.stringify(OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_')))}, ${mode === 'candidate'});` +
+      marker
+  );
+}
+
 export function validateMatrixMode(value: unknown): asserts value is MatrixMode {
   assert(value === 'baseline' || value === 'candidate', 'Matrix mode must be explicit');
 }
@@ -1871,8 +2166,13 @@ async function runBackend(options: {
       )
     );
     await page.evaluate(() => window.__ytPlacementSetPaused(false));
+    const motionHeight = Number(before.frame?.logicalHeight);
+    assert(Number.isFinite(motionHeight) && motionHeight > 0);
+    const motionHeightStyle = await page.addStyleTag({
+      content: `#movie_player { height: ${motionHeight}px !important; aspect-ratio: auto !important; }`,
+    });
     await page.setViewportSize({ width: 720, height: 540 });
-    await waitForProbeConfig(page, backend, { viewportWidth: 720 });
+    await waitForProbeConfig(page, backend, { viewportWidth: 720, playerHeight: motionHeight });
     const resized = await capture('motion-resized');
     assertBackend(resized, backend);
     check(() =>
@@ -1898,6 +2198,7 @@ async function runBackend(options: {
         'Resize changed physical row Y unexpectedly'
       )
     );
+    await motionHeightStyle.evaluate((element) => element.parentNode?.removeChild(element));
 
     const zeroStyle = await page.addStyleTag({
       content: '#movie_player { height: 100px !important; aspect-ratio: auto !important; }',
@@ -2589,9 +2890,11 @@ async function runOverloadBackend(options: {
     stage: string;
     trace: ReturnType<typeof overloadTrace>;
     outcome?: 'ordinary-waiting' | 'ordinary-already-served';
+    managerProbe?: ManagerProbeRead;
   }> = [];
   let currentVacancyService: Record<string, unknown> | null = null;
   let currentOverflowInput: Record<string, unknown> | null = null;
+  let managerProbeProvenance: NativePageScriptProbe['provenance'] | null = null;
   let failureStage = 'setup';
   let replayRequests = 0;
   const cases: Array<Record<string, unknown>> = [];
@@ -2628,6 +2931,23 @@ async function runOverloadBackend(options: {
       await response.json();
     }, key);
     assert(delivered.has(key), `Overload batch ${key} was not delivered`);
+  };
+  const readRawManagerProbe = async (): Promise<ManagerProbeRead | null> =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & { __ytMatrixManagerProbe?: { read: () => ManagerProbeRead } }
+        ).__ytMatrixManagerProbe?.read() ?? null
+    );
+  const readManagerProbe = async (requireOwner: boolean): Promise<ManagerProbeRead> => {
+    const observed = await readRawManagerProbe();
+    assert(observed?.installed && observed.probeError === null, 'Worker manager probe failed');
+    if (requireOwner)
+      assert(
+        observed.ownerCaptured && observed.workerHooked && observed.manager,
+        'Worker manager was not captured from the actual render path'
+      );
+    return observed;
   };
   try {
     await page.setViewportSize({ width: 960, height: 650 });
@@ -2810,6 +3130,7 @@ async function runOverloadBackend(options: {
       currentSnapshots = [];
       currentVacancyService = null;
       currentOverflowInput = null;
+      managerProbeProvenance = null;
       failureStage = `${name}:navigation`;
       replayRequests = 0;
       const caps = OVERLOAD_SETTINGS[name];
@@ -2827,6 +3148,19 @@ async function runOverloadBackend(options: {
           instrumentedSource,
         });
         await nativeProbe.assertReady();
+      } else if (name === 'overflow') {
+        const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
+        const instrumentedSource = instrumentWorkerManagerPageScript(source, mode);
+        assert(instrumentedSource, 'Packaged Worker manager source shape changed');
+        nativeProbe = await installNativePageScriptProbe({
+          context,
+          root,
+          extensionId,
+          fixtureUrl,
+          instrumentedSource,
+        });
+        managerProbeProvenance = nativeProbe.provenance;
+        await nativeProbe.assertReady();
       }
       await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page
@@ -2834,7 +3168,9 @@ async function runOverloadBackend(options: {
         .waitFor({ state: 'attached', timeout: 15_000 });
       if (nativeProbe) {
         await nativeProbe.assertInjected();
-        await page.waitForFunction(() => window.__ytPlacementProbe.canvasSourceHooked === true);
+        if (backend === 'main')
+          await page.waitForFunction(() => window.__ytPlacementProbe.canvasSourceHooked === true);
+        else await readManagerProbe(false);
         await nativeProbe.restore();
         nativeProbe = undefined;
       }
@@ -2890,7 +3226,13 @@ async function runOverloadBackend(options: {
         const measured = await snapshot(page, backend, MAX_OVERLOAD_RECORDS);
         assertBackend(measured, backend);
         const trace = overloadTrace(measured, ids, caps, deliveredIds);
-        snapshots.push({ stage, trace });
+        snapshots.push({
+          stage,
+          trace,
+          ...(backend === 'worker' && name === 'overflow'
+            ? { managerProbe: await readManagerProbe(true) }
+            : {}),
+        });
         return measured;
       };
       if (name === 'vacancy') {
@@ -3023,8 +3365,18 @@ async function runOverloadBackend(options: {
         assert(Number.isFinite(full.frame?.startedAtEpochMs));
         failureStage = 'overflow:late:transport';
         await send('overflowLate');
+        if (backend === 'worker')
+          currentOverflowInput.managerProbeAfterLateTransport = await readManagerProbe(true);
         failureStage = 'overflow:late:ingress';
-        await waitForIngress(page, backend, 'WINDOWS380_LOAD_OVERFLOW_NEW_3');
+        if (mode === 'baseline') {
+          try {
+            await waitForIngress(page, backend, 'WINDOWS380_LOAD_OVERFLOW_NEW_3');
+          } catch (error) {
+            if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+            if (baselineFindings.length < 16)
+              baselineFindings.push('Equal-priority overflow newcomer lacked renderer ingress');
+          }
+        } else await waitForIngress(page, backend, 'WINDOWS380_LOAD_OVERFLOW_NEW_3');
         failureStage = 'overflow:late:observation';
         const end = await observe('equal-priority-newcomers');
         const replacedOldAfterNew = end.dispositions.filter(
@@ -3205,6 +3557,7 @@ async function runOverloadBackend(options: {
         snapshots,
         ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
         ...(currentOverflowInput ? { overflowInput: currentOverflowInput } : {}),
+        ...(managerProbeProvenance ? { managerProbeProvenance } : {}),
         delivered: [...delivered],
         elapsedMs: Date.now() - startedAt,
       });
@@ -3214,9 +3567,12 @@ async function runOverloadBackend(options: {
       const measured = await snapshot(page, backend, MAX_OVERLOAD_RECORDS).catch(() => null);
       if (measured) {
         const ids = OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_'));
+        const managerProbe =
+          backend === 'worker' ? await readRawManagerProbe().catch(() => null) : null;
         currentSnapshots.push({
           stage: `failed-${failureStage}`,
           trace: overloadTrace(measured, ids, OVERLOAD_SETTINGS.overflow, deliveredIds),
+          ...(managerProbe ? { managerProbe } : {}),
         });
       }
     }
@@ -3228,6 +3584,7 @@ async function runOverloadBackend(options: {
         snapshots: currentSnapshots,
         ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
         ...(currentOverflowInput ? { overflowInput: currentOverflowInput } : {}),
+        ...(managerProbeProvenance ? { managerProbeProvenance } : {}),
         delivered: [...delivered],
         partial: true,
         elapsedMs: Date.now() - startedAt,
@@ -3258,6 +3615,14 @@ async function runOverloadBackend(options: {
                 workerReady: Boolean(worker),
                 sourceHooked: probe?.sourceHooked ?? false,
                 canvasSourceHooked: probe?.canvasSourceHooked ?? false,
+                managerProbe:
+                  selectedBackend === 'worker'
+                    ? ((
+                        window as typeof window & {
+                          __ytMatrixManagerProbe?: { read: () => ManagerProbeRead };
+                        }
+                      ).__ytMatrixManagerProbe?.read() ?? null)
+                    : null,
                 workerProbe: worker
                   ? {
                       flushId: worker.flushId ?? null,
