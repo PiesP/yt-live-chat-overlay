@@ -31,6 +31,7 @@ import {
   overflowSeedAdmissionFinding,
   paidRowBudget,
   planRoleVisibilityWait,
+  planVisibleItemWait,
   presentationItem,
   presentationGeometry,
   snapshot,
@@ -583,6 +584,14 @@ describe('Windows comment display matrix contract', () => {
       )
     ).toThrow(/resize-safe/);
     expect(paidRowBudget(sample, id, 4).plan.translationRows).toBe(2);
+    const actual10Restoration = {
+      ...sample,
+      backend: 'main' as const,
+      frame: { ...sample.frame, startedAtEpochMs: 1793454391906.7 },
+      activeNow: [{ id, x: 10, y: 10, width: 160, height: 100, startAtEpochMs: 1793454396124.4 }],
+    };
+    expect(planVisibleItemWait(actual10Restoration, id, 25_000).timeoutMs).toBe(9218);
+    expect(planVisibleItemWait(actual10Restoration, 'MISSING', 25_000).timeoutMs).toBe(5000);
     expect(membershipEffect(sample, member).borderAlpha).toBe(0.75);
     const bodyDraw = sample.frame.draws[0]!;
     const translationDraw = sample.frame.draws[1]!;
@@ -673,7 +682,43 @@ describe('Windows comment display matrix contract', () => {
         ],
       },
     };
+    expect('superChatMaxBodyLines' in minimumPlan.frame.config).toBe(false);
     expect(paidRowBudget(minimumPlan, id, supportedMinimum).translationInk).not.toBeNull();
+    expect(() =>
+      paidRowBudget(
+        {
+          ...minimumPlan,
+          frame: {
+            ...minimumPlan.frame,
+            cardPlans: [{ ...originalPlan, maxBodyLines: 4, bodyRows: 1, translationRows: 1 }],
+          },
+        },
+        id,
+        supportedMinimum
+      )
+    ).toThrow();
+    expect(() =>
+      paidRowBudget(
+        {
+          ...minimumPlan,
+          frame: {
+            ...minimumPlan.frame,
+            draws: minimumPlan.frame.draws.map((draw) =>
+              draw.section === 'translation' ? { ...draw, alpha: 0 } : draw
+            ),
+          },
+        },
+        id,
+        supportedMinimum
+      )
+    ).toThrow();
+    expect(() =>
+      paidRowBudget(
+        { ...minimumPlan, frame: { ...minimumPlan.frame, truncated: true } },
+        id,
+        supportedMinimum
+      )
+    ).toThrow();
     expect(() =>
       paidRowBudget(
         {

@@ -215,6 +215,19 @@ export function planRoleVisibilityWait(
     budgetLimited: requestedMs > remainingMs,
   };
 }
+
+/** Use the retained source reservation for the exact item being observed. */
+export function planVisibleItemWait(
+  snapshot: MatrixSnapshot,
+  id: string,
+  elapsedBackendMs: number
+): RoleWaitBudget {
+  return planRoleVisibilityWait(
+    snapshot.activeNow.find((entry) => entry.id === id)?.startAtEpochMs ?? null,
+    snapshot.frame?.startedAtEpochMs ?? null,
+    elapsedBackendMs
+  );
+}
 type PreviewSample = {
   label: string;
   ariaLabel: string;
@@ -1595,7 +1608,6 @@ async function waitForProbeConfig(
     layout?: 'stacked' | 'wide';
     activeCap?: number;
     queueCap?: number;
-    paidBodyLines?: number;
   }
 ) {
   await page.waitForFunction(
@@ -1621,8 +1633,6 @@ async function waitForProbeConfig(
         (config.layout === undefined || exact?.superChatLayout === config.layout) &&
         (config.activeCap === undefined || exact?.maxConcurrentMessages === config.activeCap) &&
         (config.queueCap === undefined || exact?.queueMaxSize === config.queueCap) &&
-        (config.paidBodyLines === undefined ||
-          exact?.superChatMaxBodyLines === config.paidBodyLines) &&
         (config.reducedMotion === undefined ||
           (exact?.reducedMotion === config.reducedMotion &&
             frame.config.reducedMotion === config.reducedMotion)) &&
@@ -1767,6 +1777,7 @@ async function runBackend(options: {
     presentationObservations: typeof presentationObservations;
     previewObservations: typeof previewObservations;
     rowBudgetObservations: typeof rowBudgetObservations;
+    restorationWaitObservations: typeof restorationWaitObservations;
     effectObservations: typeof effectObservations;
     baselineFindings: typeof baselineFindings;
     cleanupErrors: typeof cleanupErrors;
@@ -1779,6 +1790,7 @@ async function runBackend(options: {
   };
   const startedAt = Date.now();
   let currentRoleWait: RoleWaitObservation | null = null;
+  const restorationWaitObservations: Array<{ id: string; wait: RoleWaitObservation }> = [];
   const check = <T>(predicate: () => T): T | undefined => {
     try {
       return predicate();
@@ -1792,9 +1804,23 @@ async function runBackend(options: {
       return undefined;
     }
   };
-  const observeVisible = async (id: string) => {
+  const observeVisible = async (id: string, usePlannedStart = false) => {
+    let wait: RoleWaitObservation | null = null;
+    if (usePlannedStart) {
+      const planning = await snapshot(page, backend);
+      const budget = planVisibleItemWait(planning, id, Date.now() - startedAt);
+      wait = {
+        ...budget,
+        startedAtEpochMs: Date.now(),
+        outcome: budget.timeoutMs > 0 ? 'failed' : 'budget-exhausted',
+      };
+      currentRoleWait = wait;
+      restorationWaitObservations.push({ id, wait });
+      assert(budget.timeoutMs > 0, `No matrix budget remains for ${id} visibility`);
+    }
     try {
-      await waitForVisible(page, backend, id);
+      await waitForVisible(page, backend, id, undefined, wait?.timeoutMs);
+      if (wait) wait.outcome = 'visible';
     } catch (error) {
       if (mode === 'candidate') throw error;
       if (baselineFindings.length < 24)
@@ -2339,8 +2365,10 @@ async function runBackend(options: {
     await zeroStyle.evaluate((element) => element.parentNode?.removeChild(element));
     await page.evaluate(() => window.__ytChatOverlay?.applySettings({ safeTop: 0, safeBottom: 0 }));
     await send('restored');
-    await observeVisible(IDS[7]);
-    await observeVisible(IDS[8]);
+    failureStage = 'restoration:zero';
+    await observeVisible(IDS[7], true);
+    failureStage = 'restoration:new';
+    await observeVisible(IDS[8], true);
     const restored = await capture('restored');
     check(() => assertRestoredVisibility(restored, IDS[7], IDS[8]));
     // Retain this document and backlog owner; give its existing fixed rows
@@ -2668,11 +2696,6 @@ async function runBackend(options: {
               MIN_PAID_BODY_LINES,
               'Installed paid-line minimum changed'
             );
-            await waitForProbeConfig(page, backend, {
-              viewportWidth: width,
-              playerHeight: PRESENTATION_PLAYER_HEIGHT,
-              paidBodyLines: MIN_PAID_BODY_LINES,
-            });
             await observePlan(paidId, MIN_PAID_BODY_LINES);
             const minimumLines = await snapshot(page, backend);
             rowBudgetObservations.push({
@@ -2702,13 +2725,9 @@ async function runBackend(options: {
         ] as const) {
           failureStage = `presentation:${scene}:${width}:${layout}:${role}`;
           const planning = backend === 'worker' ? await snapshot(page, backend) : null;
-          const plannedStartAtEpochMs =
-            planning?.activeNow.find((entry) => entry.id === id)?.startAtEpochMs ?? null;
-          const waitBudget = planRoleVisibilityWait(
-            plannedStartAtEpochMs,
-            planning?.frame?.startedAtEpochMs ?? null,
-            Date.now() - startedAt
-          );
+          const waitBudget = planning
+            ? planVisibleItemWait(planning, id, Date.now() - startedAt)
+            : planRoleVisibilityWait(null, null, Date.now() - startedAt);
           currentRoleWait = {
             ...waitBudget,
             startedAtEpochMs: Date.now(),
@@ -2960,6 +2979,7 @@ async function runBackend(options: {
       presentationObservations,
       previewObservations,
       rowBudgetObservations,
+      restorationWaitObservations,
       effectObservations,
       baselineFindings,
       cleanupErrors,
@@ -2977,6 +2997,7 @@ async function runBackend(options: {
       presentationObservations,
       previewObservations,
       rowBudgetObservations,
+      restorationWaitObservations,
       effectObservations,
       baselineFindings,
       cleanupErrors,

@@ -14,6 +14,8 @@ motion, and zero-capacity/restoration inputs. Its initial 960-by-1000 viewport
 holds an 800px player so the six simultaneous content rows can be due together.
 It waits for all three canonical accessible tails before the content capture
 and requires the deferred zero-capacity ID itself to draw after restoration.
+Both restoration IDs use their actual source-planned starts for bounded visible
+frame waits on Main and Worker; a reservation alone does not pass.
 The 51-row zero-rate backlog must stay outside renderer ingress, then its first
 row must enter and paint after a same-page positive-rate update. A separate
 fresh page checks the positive cohort with its own distinct first-visible ID.
@@ -83,8 +85,8 @@ cannot infer unknown attribution across fallback and recovery. Exact original-pl
 translation line counts and total-height budget, effect alpha, and overload-policy
 acceptance are recorded separately from the PNG review. The detailed paid card
 records the production `preparePaidCardPlan` output for four total body rows and
-for the supported two-row setting minimum. The effective setting and completed
-frame must agree; original and selected translation rows share the selected
+for the supported two-row setting minimum. The live effective setting and completed
+frame plan must agree; original and selected translation rows share the selected
 total row budget, with positive-alpha ink inside the committed card. The
 separate direct planner unit test retains its one-row fallback boundary. Worker
 role visibility waits use each actual source-planned start plus five seconds,
