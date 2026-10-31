@@ -29,6 +29,7 @@ import {
 import { getRegularContentBounds } from '@renderer/layout/row-geometry';
 import {
   getFontString,
+  getTextMeasurementGeneration,
   measureTextHeight,
   measureTextTopBounds,
   measureTextWidth,
@@ -62,6 +63,7 @@ export interface ImageCacheLike<T = unknown> {
 const MAX_TEXT_BITMAP_DIMENSION = 8192;
 /** Weak metadata follows the cached bitmap's lifetime without retaining it. */
 const bitmapTopInsets = new WeakMap<object, number>();
+const bitmapLeftInsets = new WeakMap<object, number>();
 
 function getCanvasDpr(ctx: AnyCanvasContext): number {
   const dpr = ctx.getTransform().a;
@@ -439,7 +441,81 @@ export interface PreparedWrappedContent {
   above: number;
   height: number;
   width: number;
+  inkLeft: number;
+  inkRight: number;
   truncated: boolean;
+}
+
+const wrappedInkCache = new WeakMap<object, Map<string, { left: number; right: number }>>();
+const MAX_WRAPPED_INK_CACHE_ENTRIES = 512;
+
+/** Reserve the stroke and glyph bearings before wrapping inside a clipped card. */
+function getWrappedInkInsets(
+  segments: readonly SharedContentSegment[],
+  font: string,
+  outlineWidthPx: number,
+  context?: Parameters<typeof measureTextTopBounds>[3]
+): { left: number; right: number } {
+  const strokeInset =
+    outlineWidthPx > 0
+      ? Math.ceil(Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE) / 2) + 1
+      : 0;
+  const texts = segments
+    .map((segment) =>
+      segment.type === 'text' ? (segment.content ?? '') : getRenderableEmojiFallbackText(segment)
+    )
+    .filter((text) => text.length > 0);
+  if (texts.length === 0) return { left: 0, right: 0 };
+  texts.push('\u2026'); // Truncated rows may add this glyph after wrapping.
+  if (!context) return { left: strokeInset, right: strokeInset };
+  let cache = wrappedInkCache.get(context);
+  if (!cache) {
+    cache = new Map();
+    wrappedInkCache.set(context, cache);
+  }
+  const inkContext = context as AnyCanvasContext;
+  const previousFont = context.font;
+  const previousDirection = inkContext.direction;
+  const previousAlign = inkContext.textAlign;
+  const generation = getTextMeasurementGeneration();
+  context.font = font;
+  inkContext.textAlign = 'left';
+  let left = strokeInset;
+  let right = strokeInset;
+  try {
+    for (const text of texts) {
+      const candidates = new Set([text, ...text.split(/\s+/u), ...splitGraphemeClusters(text)]);
+      for (const cluster of candidates) {
+        if (!cluster) continue;
+        const direction = resolveTextDirection(cluster);
+        const key = `${generation}\u0000${font}\u0000${direction}\u0000${cluster}`;
+        let bounds = cache.get(key);
+        if (!bounds) {
+          inkContext.direction = direction;
+          const metrics = context.measureText(cluster);
+          bounds = {
+            left: Number.isFinite(metrics.actualBoundingBoxLeft)
+              ? Math.max(0, metrics.actualBoundingBoxLeft)
+              : 0,
+            right:
+              Number.isFinite(metrics.actualBoundingBoxRight) && Number.isFinite(metrics.width)
+                ? Math.max(0, metrics.actualBoundingBoxRight - metrics.width)
+                : 0,
+          };
+          cache.set(key, bounds);
+          if (cache.size > MAX_WRAPPED_INK_CACHE_ENTRIES)
+            cache.delete(cache.keys().next().value ?? key);
+        }
+        left = Math.max(left, Math.ceil(bounds.left + strokeInset));
+        right = Math.max(right, Math.ceil(bounds.right + strokeInset));
+      }
+    }
+  } finally {
+    context.font = previousFont;
+    inkContext.direction = previousDirection;
+    inkContext.textAlign = previousAlign;
+  }
+  return { left, right };
 }
 
 /** Prepare the same logical and visual rows used by Canvas and OffscreenCanvas. */
@@ -455,7 +531,14 @@ export function prepareWrappedContent(
 ): PreparedWrappedContent {
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const measure = (text: string): number => measureTextFn(text, resolveTextDirection(text));
-  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, measure);
+  const { left: inkLeft, right: inkRight } = getWrappedInkInsets(
+    segments,
+    font,
+    outlineWidthPx,
+    context
+  );
+  const contentWidth = Math.max(0, maxWidth - inkLeft - inkRight);
+  const { lines } = buildWrappedLines(segments, contentWidth, emojiSize, measure);
   const visibleLineCount = Math.min(lines.length, Math.max(0, maxLines));
   const truncated = lines.length > visibleLineCount;
   const spaceWidth = measureTextFn(' ', 'ltr');
@@ -465,13 +548,14 @@ export function prepareWrappedContent(
   const logicalLines = lines.map((sourceLine, lineIndex) => {
     const needsEllipsis = lineIndex === visibleLineCount - 1 && truncated;
     const overflows =
-      lineIndex < visibleLineCount && measureWrappedLineWidth(sourceLine, spaceWidth) > maxWidth;
-    const showEllipsis = (needsEllipsis || overflows) && ellipsisWidth <= maxWidth;
+      lineIndex < visibleLineCount &&
+      measureWrappedLineWidth(sourceLine, spaceWidth) > contentWidth;
+    const showEllipsis = (needsEllipsis || overflows) && ellipsisWidth <= contentWidth;
     const line =
       needsEllipsis || overflows
         ? fitWrappedLineToWidth(
             sourceLine,
-            Math.max(0, maxWidth - (showEllipsis ? ellipsisWidth : 0)),
+            Math.max(0, contentWidth - (showEllipsis ? ellipsisWidth : 0)),
             spaceWidth,
             measure
           )
@@ -532,11 +616,13 @@ export function prepareWrappedContent(
     lineHeight,
     above: above + requiredStrokeInset,
     height: lineHeight * visibleLineCount,
-    width: Math.min(maxWidth, visualWidth),
+    width: Math.min(maxWidth, visualWidth + inkLeft + inkRight),
+    inkLeft,
+    inkRight,
     truncated:
       truncated ||
-      visualWidth > maxWidth ||
-      lines.some((line) => measureWrappedLineWidth(line, spaceWidth) > maxWidth),
+      visualWidth > contentWidth ||
+      lines.some((line) => measureWrappedLineWidth(line, spaceWidth) > contentWidth),
   };
 }
 
@@ -757,7 +843,12 @@ function cacheTextBitmap(
   // prevent the rightmost character from being clipped by the bitmap edge.
   const lsPx = parseFloat(letterSpacing) || 0;
   const lsExtraWidth = lsPx > 0 ? Math.ceil(Math.max(0, [...text].length - 1) * lsPx) : 0;
-  const bitmapPadding = Math.ceil(strokeWidth / 2) + 1;
+  const bitmapPadding =
+    Math.ceil(strokeWidth / 2) +
+    1 +
+    (Number.isFinite(metrics.actualBoundingBoxLeft)
+      ? Math.ceil(Math.max(0, metrics.actualBoundingBoxLeft))
+      : 0);
   const width = Math.ceil(textWidth + bitmapPadding * 2 + lsExtraWidth);
   const above = Number.isFinite(metrics.actualBoundingBoxAscent)
     ? Math.max(0, Math.ceil(metrics.actualBoundingBoxAscent))
@@ -811,6 +902,7 @@ function cacheTextBitmap(
   offCtx.fillText(text, bitmapPadding, bitmapPadding + above);
 
   bitmapTopInsets.set(offscreen, above);
+  bitmapLeftInsets.set(offscreen, bitmapPadding);
   textBitmapCache.set(key, offscreen);
 }
 
@@ -894,7 +986,7 @@ export function renderSegment(
     const key = `${font}|dpr:${dpr}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
-      drawBitmapAtCssSize(ctx, bitmap, x, y, bitmapOriginInset);
+      drawBitmapAtCssSize(ctx, bitmap, x, y, bitmapLeftInsets.get(bitmap) ?? bitmapOriginInset);
       return;
     }
 
@@ -917,7 +1009,13 @@ export function renderSegment(
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
     const freshBitmap = textBitmapCache.get(key);
     if (freshBitmap) {
-      drawBitmapAtCssSize(ctx, freshBitmap, x, y, bitmapOriginInset);
+      drawBitmapAtCssSize(
+        ctx,
+        freshBitmap,
+        x,
+        y,
+        bitmapLeftInsets.get(freshBitmap) ?? bitmapOriginInset
+      );
       return;
     }
   }
@@ -1592,7 +1690,7 @@ export function renderWrappedContentSegments<
   for (let li = 0; li < visibleLineCount; li++) {
     const visualPieces = layout.lines[li];
     if (!visualPieces) continue;
-    let cursorX = x;
+    let cursorX = x + layout.inkLeft;
     const emojiLineY = cursorY + Math.round((layout.lineHeight - emojiSize) / 2);
     const textY = cursorY + layout.above;
 

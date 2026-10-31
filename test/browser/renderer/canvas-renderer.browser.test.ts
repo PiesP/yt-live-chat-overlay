@@ -295,15 +295,16 @@ describe('Canvas reservation safety', () => {
     );
     const internals = renderer as unknown as {
       laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      activeMessagesByLane: Map<number, CanvasMessage[]>;
       estimateDimensions(message: ChatMessage): { width: number; height: number };
-      checkPlacement(
+      placeQueuedMessage(
         message: ChatMessage,
         now: number,
-        dimensions: { width: number; height: number }
-      ): {
-        ok: boolean;
-        placement?: { laneIndex: number; slotCount: number; laneY: number; verticalOffset: number };
-      };
+        dimensions: { width: number; height: number },
+        batchIndex: number,
+        previousStaggerDelayMs: number
+      ): { placed: boolean };
     };
     internals.laneAllocator.restore({
       heap: [
@@ -316,12 +317,19 @@ describe('Canvas reservation safety', () => {
       speedTierLanes: {},
     });
     internals.estimateDimensions = () => ({ width: 100, height: 70 });
-    const result = internals.checkPlacement(makeMessage('partial', 'partial'), 1000, dimensions);
-    expect(result.ok).toBe(true);
-    expect(result.placement?.slotCount).toBe(2);
-    expect(
-      (result.placement?.laneY ?? 0) + (result.placement?.verticalOffset ?? 0) + 70
-    ).toBeLessThanOrEqual(80);
+    const result = internals.placeQueuedMessage(
+      makeMessage('partial', 'partial'),
+      1000,
+      dimensions,
+      0,
+      0
+    );
+    expect(result.placed).toBe(true);
+    const placed = internals.activeMessages[0];
+    expect(placed).toBeDefined();
+    expect(placed?.laneIndex).toBe(0);
+    expect((placed?.y ?? 0) + 70).toBeLessThanOrEqual(80);
+    expect(internals.activeMessagesByLane.get(1)).toContain(placed);
     renderer.destroy();
   });
 

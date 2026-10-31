@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 
 vi.mock('@renderer/text-measure', () => ({
   getFontString: (fontSize: number): string => `bold ${fontSize}px sans-serif`,
+  getTextMeasurementGeneration: (): number => 0,
   measureTextHeight: (): number => 20,
   measureTextTopBounds: (
     _font: string,
@@ -18,10 +19,13 @@ vi.mock('@renderer/text-measure', () => ({
 import {
   type AnyCanvasContext,
   prepareWrappedContent,
+  renderSegment,
   renderWrappedContentSegments,
   type TextBitmapCache,
 } from '@renderer/canvas/shared';
 import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import { estimateMessageDimensions } from '@renderer/shared';
 import { rendererLayout } from '@util/design-tokens';
 
@@ -45,6 +49,146 @@ function createContext(): CanvasRenderingContext2D {
 }
 
 describe('renderWrappedContentSegments', () => {
+  it('keeps a negative-bearing glyph inside its cached outline bitmap', () => {
+    const ctx = createContext();
+    (ctx.measureText as ReturnType<typeof vi.fn>).mockImplementation((text: string) => ({
+      width: text.length * 10,
+      actualBoundingBoxLeft: 3,
+      actualBoundingBoxRight: text.length * 10 + 4,
+      actualBoundingBoxAscent: 16,
+      actualBoundingBoxDescent: 4,
+    }));
+    const bitmapCtx = { ...ctx, scale: vi.fn() };
+    class BitmapCanvas {
+      constructor(
+        public width: number,
+        public height: number
+      ) {}
+      getContext(): typeof bitmapCtx {
+        return bitmapCtx;
+      }
+    }
+    vi.stubGlobal('OffscreenCanvas', BitmapCanvas);
+    try {
+      const cache = new Map<string, CanvasImageSource>();
+      renderSegment(
+        ctx,
+        'ABCD',
+        100,
+        20,
+        '#fff',
+        20,
+        8,
+        1,
+        {
+          get: (key) => cache.get(key),
+          set: (key, image) => {
+            cache.set(key, image);
+          },
+        },
+        () => 'bold 20px sans-serif'
+      );
+      const bitmapTextX = Number(
+        (bitmapCtx.strokeText as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]
+      );
+      const bitmapX = Number((ctx.drawImage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]);
+      const radius = (8 * OUTLINE_STROKE_SCALE) / 2;
+      expect(bitmapTextX - 3 - radius).toBeGreaterThanOrEqual(0);
+      expect(bitmapX + bitmapTextX).toBe(100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    { name: 'fixed regular', content: 'ABCD', maxLines: 3 },
+    { name: 'paid body', content: 'EFGH', maxLines: 2 },
+    { name: 'translated row', content: 'IJKL', maxLines: 3 },
+  ])('keeps $name outline and bearing ink inside the wrapped clip', ({ content, maxLines }) => {
+    const ctx = createContext();
+    const width = (text: string): number => text.length * 10;
+    (ctx.measureText as ReturnType<typeof vi.fn>).mockImplementation((text: string) => ({
+      width: width(text),
+      actualBoundingBoxLeft: 3,
+      actualBoundingBoxRight: width(text) + 4,
+    }));
+    const x = 100;
+    const maxWidth = 40;
+    const strokeRadius = (8 * OUTLINE_STROKE_SCALE) / 2;
+    renderWrappedContentSegments(
+      ctx,
+      [{ type: 'text', content }],
+      x,
+      20,
+      maxWidth,
+      maxLines,
+      '#ffffff',
+      20,
+      8,
+      1,
+      { maxBytes: 0, get: () => undefined, set: vi.fn() },
+      { get: () => undefined },
+      () => 'bold 20px sans-serif',
+      width
+    );
+    const clip = (ctx.rect as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(clip).toEqual([x, 20, maxWidth, expect.any(Number)]);
+    const draws = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls;
+    expect(draws.length).toBeGreaterThan(0);
+    for (const [text, drawX] of draws) {
+      expect(Number(drawX) - 3 - strokeRadius).toBeGreaterThanOrEqual(x);
+      expect(Number(drawX) + width(String(text)) + 4 + strokeRadius).toBeLessThanOrEqual(
+        x + maxWidth
+      );
+    }
+  });
+
+  it('includes horizontal ink in fixed-row dimension preparation', () => {
+    const ctx = createContext();
+    const width = (text: string): number => text.length * 10;
+    (ctx.measureText as ReturnType<typeof vi.fn>).mockImplementation((text: string) => ({
+      width: width(text),
+      actualBoundingBoxLeft: 3,
+      actualBoundingBoxRight: width(text) + 4,
+    }));
+    const text = 'ABCD';
+    const insets = getRegularCardInsets(20, 8, false, false);
+    const prepared = prepareWrappedContent(
+      [{ type: 'text', content: text }],
+      80 - insets.horizontal * 2,
+      3,
+      'bold 20px sans-serif',
+      20,
+      width,
+      ctx,
+      8
+    );
+    const estimated = estimateMessageDimensions(
+      {
+        text,
+        content: [{ type: 'text', content: text }],
+        kind: 'text',
+        authorType: 'normal',
+        timestamp: 0,
+      },
+      20,
+      false,
+      'bold',
+      'sans-serif',
+      undefined,
+      undefined,
+      '0px',
+      8,
+      80,
+      undefined,
+      '#00000000',
+      'top',
+      { width, height: () => 20, context: ctx }
+    );
+    expect(estimated.width).toBe(prepared.width + insets.horizontal * 2);
+    expect(estimated.width).toBeGreaterThan(text.length * 10 + insets.horizontal * 2);
+  });
+
   it('reserves every loaded image emoji row and contains the last image', () => {
     const ctx = createContext();
     const image = { width: 38, height: 38 } as CanvasImageSource;
@@ -82,7 +226,7 @@ describe('renderWrappedContentSegments', () => {
       })),
       24,
       20,
-      42,
+      60,
       3,
       '#ffffff',
       32,
@@ -109,7 +253,7 @@ describe('renderWrappedContentSegments', () => {
     }));
     const prepared = prepareWrappedContent(
       segments,
-      42,
+      60,
       3,
       'bold 32px sans-serif',
       32,

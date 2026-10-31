@@ -113,6 +113,7 @@ import {
 import {
   clearTextMeasurementCaches,
   getFontString,
+  measureTextHeight,
   measureTextWidth,
 } from '@renderer/text-measure';
 import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
@@ -2064,7 +2065,12 @@ export class CanvasRenderer extends RendererBase {
       this.overlay.getDimensions()?.width,
       undefined,
       this.settings.backgroundColors[message.authorType],
-      this.effectiveMotionMode
+      this.effectiveMotionMode,
+      {
+        width: measureTextWidth,
+        height: measureTextHeight,
+        ...(this.ctx ? { context: this.ctx } : {}),
+      }
     );
 
     if (message.id) {
@@ -2107,6 +2113,11 @@ export class CanvasRenderer extends RendererBase {
         backgroundColor: this.settings.backgroundColors[message.authorType],
         mode: this.effectiveMotionMode,
         ...(availableWidth !== undefined ? { availableWidth } : {}),
+        measurement: {
+          width: measureTextWidth,
+          height: measureTextHeight,
+          ...(this.ctx ? { context: this.ctx } : {}),
+        },
       }
     );
   }
