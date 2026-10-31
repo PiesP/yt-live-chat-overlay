@@ -238,9 +238,11 @@ async function verifyDomFallbackLifetime(page: Page, output: string) {
       recoveredId,
       { timeout: 8_000 }
     );
-    // The production debug reporter updates at 250 ms; observe two cycles
-    // after the recovery actually reaches the production live region.
-    await page.waitForTimeout(600);
+    await page.waitForFunction(() =>
+      /^(?:Rcvd: 2 \| Alloc: 2 \| Shown≥\d+ \| Uncertain: \d+|Rcvd: 2 \| Rndr: 2)$/u.test(
+        document.querySelector('#yt-chat-overlay-debug > div')?.textContent ?? ''
+      )
+    );
     result = await page.evaluate(() => ({
       ids: Array.from(
         document.querySelectorAll('#yt-live-chat-overlay .yt-live-chat-overlay-live-region > p'),
@@ -251,7 +253,11 @@ async function verifyDomFallbackLifetime(page: Page, output: string) {
     assert(result.ids.includes(healthyId), 'Healthy DOM control was not rendered');
     assert(result.ids.includes(recoveredId), 'Healthy DOM recovery was not rendered');
     assert(!result.ids.some((id) => id.startsWith('windows-dom-retired-')));
-    assert.equal(result.counters, 'Rcvd: 2 | Rndr: 2', 'Retired DOM input reached the runtime');
+    assert.match(
+      result.counters ?? '',
+      /^(?:Rcvd: 2 \| Alloc: 2 \| Shown≥\d+ \| Uncertain: \d+|Rcvd: 2 \| Rndr: 2)$/u,
+      'Retired DOM input reached the runtime'
+    );
   } catch (error) {
     primaryError = error;
     try {

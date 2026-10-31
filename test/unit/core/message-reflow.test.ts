@@ -47,6 +47,25 @@ const options = {
 };
 
 describe('collision-aware message reflow', () => {
+  it('prefers the closest actual Y when the final partial block changes centering', () => {
+    const motion = computeMessageMotionPlan({ ...input, mode: 'top' });
+    const result = reconcileMessagePlacements(
+      [{ message: 'short', laneIndex: 0, preferredY: 39, height: 20, motion }],
+      {
+        ...options,
+        now: 1000,
+        viewportHeight: 80,
+        laneHeight: 50,
+        laneCount: 2,
+        safeTop: 0,
+        safeBottom: 0,
+      }
+    );
+    expect(result.dropped).toEqual([]);
+    expect(result.placements[0]?.laneIndex).toBe(1);
+    expect(result.placements[0]?.y).toBe(60);
+  });
+
   it('projects actual Y onto the nearest legal grid block across density changes', () => {
     const motion = computeMessageMotionPlan({ ...input, mode: 'top', topBottomDurationMs: 10_000 });
     let priorY = 320;

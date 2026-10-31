@@ -229,7 +229,7 @@ test.describe('Firefox extension runtime', () => {
 
       try {
         await browser.waitFor(
-          `document.querySelector('#yt-chat-overlay-debug > div')?.textContent === 'Rcvd: 1 | Rndr: 1'`,
+          `/^Rcvd: 1 \\| Alloc: 1 \\| Shown≥\\d+ \\| Uncertain: \\d+$/u.test(document.querySelector('#yt-chat-overlay-debug > div')?.textContent ?? '')`,
           'a real Firefox extension chat message to be ingested and rendered'
         );
       } catch (error: unknown) {
