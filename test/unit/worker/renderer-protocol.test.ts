@@ -300,6 +300,52 @@ function prepareGradientPaidCard() {
 }
 
 describe('Worker reservation safety', () => {
+  it('reserves the final partial cell for a row that fits the physical safe zone', () => {
+    const renderer = initializeRenderer({
+      danmakuMode: 'top',
+      safeTop: 0,
+      safeBottom: 0,
+      laneSpacing: 0,
+    });
+    const grid = workerLaneHeight(renderer);
+    const height = grid * 1.6;
+    renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height, dpr: 1 }));
+    const internals = renderer as unknown as {
+      numLanes: number;
+      findPlacement(
+        height: number,
+        speedTier: number,
+        now: number,
+        strategy: 'top'
+      ): {
+        laneIndex: number;
+        laneY: number;
+        verticalOffset: number;
+        slotCount: number;
+        waitMs: number;
+      } | null;
+      commitPlacement(
+        laneIndex: number,
+        slotCount: number,
+        startTime: number,
+        durationMs: number,
+        speedTier: number
+      ): void;
+      collidedLanes: Set<number>;
+    };
+    expect(internals.numLanes).toBe(2);
+    const tall = internals.findPlacement(grid * 1.4, 1, 10_000, 'top');
+    expect(tall?.slotCount).toBe(2);
+    expect((tall?.laneY ?? 0) + (tall?.verticalOffset ?? 0) + grid * 1.4).toBeLessThanOrEqual(
+      height
+    );
+    if (!tall) return;
+    internals.commitPlacement(tall.laneIndex, tall.slotCount, 10_000, 5000, 1);
+    internals.collidedLanes.clear();
+    expect(internals.findPlacement(grid * 0.3, 1, 10_000, 'top')?.waitMs).toBeGreaterThan(0);
+    internals.collidedLanes.clear();
+    expect(internals.findPlacement(grid * 1.7, 1, 10_000, 'top')).toBeNull();
+  });
   it.each([
     {
       name: 'mixed heights with only 1px clearance',

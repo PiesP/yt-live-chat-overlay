@@ -162,10 +162,9 @@ export class LaneAllocator {
     );
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
-    // A partial first slot may still hold a shorter candidate. Its physical
-    // bounds are checked before placement; zero usable pixels means zero lanes.
-    const fullLanes = Math.floor(usableHeight / this.laneHeight);
-    this.state.numLanes = Math.max(0, fullLanes > 0 ? fullLanes : usableHeight > 0 ? 1 : 0);
+    // The final partial slot can be reserved when the candidate's actual
+    // content fits; physical bounds are checked before placement.
+    this.state.numLanes = Math.max(0, Math.ceil(usableHeight / this.laneHeight));
 
     log.debug('Reset', {
       lanes: this.state.numLanes,

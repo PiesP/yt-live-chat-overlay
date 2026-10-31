@@ -1604,8 +1604,7 @@ export class WorkerRenderer {
     );
     this.laneHeight = getRowGridHeight(baseHeight, this.config.laneSpacing, this.laneDensityFactor);
     const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
-    const fullLanes = Math.floor(usableHeight / this.laneHeight);
-    this.numLanes = Math.max(0, fullLanes > 0 ? fullLanes : usableHeight > 0 ? 1 : 0);
+    this.numLanes = Math.max(0, Math.ceil(usableHeight / this.laneHeight));
     const now = performance.now();
     this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
     this.speedTierLanes.clear();

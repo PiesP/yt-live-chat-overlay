@@ -285,6 +285,46 @@ describe('Canvas reservation safety', () => {
     renderer.destroy();
   });
 
+  it('admits a tall row in the final partial grid cell without leaving its neighbor free', () => {
+    const overlay = new Overlay();
+    const dimensions = { width: 640, height: 80 };
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ danmakuMode: 'top', safeTop: 0, safeBottom: 0, laneSpacing: 0 })
+    );
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      checkPlacement(
+        message: ChatMessage,
+        now: number,
+        dimensions: { width: number; height: number }
+      ): {
+        ok: boolean;
+        placement?: { laneIndex: number; slotCount: number; laneY: number; verticalOffset: number };
+      };
+    };
+    internals.laneAllocator.restore({
+      heap: [
+        [0, 0],
+        [1, 0],
+      ],
+      indexMap: { 0: 0, 1: 1 },
+      laneHeight: 50,
+      laneCount: 2,
+      speedTierLanes: {},
+    });
+    internals.estimateDimensions = () => ({ width: 100, height: 70 });
+    const result = internals.checkPlacement(makeMessage('partial', 'partial'), 1000, dimensions);
+    expect(result.ok).toBe(true);
+    expect(result.placement?.slotCount).toBe(2);
+    expect(
+      (result.placement?.laneY ?? 0) + (result.placement?.verticalOffset ?? 0) + 70
+    ).toBeLessThanOrEqual(80);
+    renderer.destroy();
+  });
+
   it.each(['scroll', 'reverse'] as const)(
     'validates future reservations and chooses a safe alternative in %s',
     (mode) => {
