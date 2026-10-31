@@ -14,6 +14,7 @@ import { type GradientCache, getCachedGradient } from '@renderer/canvas/gradient
 import {
   drawAuthorSection,
   drawRoundRect,
+  drawStickerFallback,
   renderSegment,
   renderWrappedContentSegments,
   splitGraphemeClusters,
@@ -474,16 +475,14 @@ export function renderPaidCard(
     const stickerUrl = config.sticker.getUrl(message);
     if (stickerUrl) {
       const cached = stickerCache.get(stickerUrl);
-      const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
-      if (stickerImg) {
-        const maxStickerSize = Math.round(fontSize * config.sticker.sizeScale);
-        const stickerY = y + (plan.stickerY ?? 0);
-        const availableHeight = y + h - padV - stickerY;
-        const stickerSize = Math.max(
-          0,
-          Math.min(maxStickerSize, plan.stickerSize, availableHeight)
-        );
-        if (stickerSize > 0) {
+      const stickerImg =
+        cached?.complete && cached.naturalWidth > 0 && cached.naturalHeight > 0 ? cached : null;
+      const maxStickerSize = Math.round(fontSize * config.sticker.sizeScale);
+      const stickerY = y + (plan.stickerY ?? 0);
+      const availableHeight = y + h - padV - stickerY;
+      const stickerSize = Math.max(0, Math.min(maxStickerSize, plan.stickerSize, availableHeight));
+      if (stickerSize > 0) {
+        if (stickerImg) {
           const scale = Math.min(
             stickerSize / stickerImg.naturalWidth,
             stickerSize / stickerImg.naturalHeight
@@ -495,7 +494,16 @@ export function renderPaidCard(
             stickerImg.naturalWidth * scale,
             stickerImg.naturalHeight * scale
           );
-        }
+        } else
+          drawStickerFallback(
+            ctx,
+            message.superChat?.sticker?.alt ?? '',
+            textX,
+            stickerY,
+            stickerSize,
+            textColor,
+            settings.fontFamily
+          );
       }
     }
   }

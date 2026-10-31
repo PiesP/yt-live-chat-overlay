@@ -193,6 +193,8 @@ export interface WorkerMessage {
   superChatAmount?: string;
   /** Sticker image URL. */
   superChatStickerUrl?: string;
+  /** Original sticker accessibility label for pending or failed image fallback. */
+  superChatStickerAlt?: string;
   /** Membership header text (e.g. member tier/duration). */
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */
@@ -344,6 +346,8 @@ export interface ActiveMessage {
   superChatAmount?: string;
   /** SuperChat sticker image URL. */
   superChatStickerUrl?: string;
+  /** Original sticker accessibility label for pending or failed image fallback. */
+  superChatStickerAlt?: string;
   /** Membership header text. */
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */

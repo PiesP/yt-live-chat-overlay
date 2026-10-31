@@ -58,6 +58,7 @@ import {
 import {
   drawAuthorSection,
   drawRoundRect,
+  drawStickerFallback,
   getDisplayText,
   type RegularMessageRenderConfig,
   renderRegularMessage,
@@ -159,7 +160,6 @@ const PENDING_IMAGE_FETCH_CAP = 1_200;
 const FAILED_IMAGE_FETCH_EVICT_COUNT = 250;
 
 /** Sticker image cache — lazily initialized during worker init. */
-let stickerCache: ResizableByteLimitedCache<ImageBitmap> | null = null;
 
 function isAvailableImage(image: unknown): boolean {
   return image != null;
@@ -190,7 +190,7 @@ function measureTextHeight(
  * All colours, dimensions, and flags are pre-resolved in the CardConfigWorker
  * — no callbacks or settings lookups needed.
  */
-function renderPaidCardWorker(
+export function renderPaidCardWorker(
   ctx: OffscreenCanvasRenderingContext2D,
   message: ActiveMessage,
   content: readonly WorkerContentSegment[],
@@ -208,6 +208,7 @@ function renderPaidCardWorker(
   textBitmapCache: TextBitmapCache,
   authorPhotoCache: ResizableByteLimitedCache<ImageBitmap>,
   emojiCache: ResizableByteLimitedCache<ImageBitmap>,
+  stickerImageCache: { get: (url: string) => ImageBitmap | undefined },
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string, direction?: TextDirection) => number,
   gradientCache: GradientCache,
@@ -483,17 +484,15 @@ function renderPaidCardWorker(
     );
   }
 
-  // ── 9. Sticker (skip if no URL — worker doesn't have sticker cache) ────
+  // ── 9. Sticker ────────────────────────────────────────────────────────
   if (card.stickerEnabled && message.superChatStickerUrl) {
-    // Sticker images are handled via the main thread's imageData transfer.
-    // Render if available in stickerCache.
-    const stickerImg = stickerCache?.get(message.superChatStickerUrl);
-    if (stickerImg) {
-      const maxStickerSize = Math.round(fontSize * card.stickerSizeScale);
-      const stickerY = y + (plan.stickerY ?? 0);
-      const availableHeight = y + h - padV - stickerY;
-      const stickerSize = Math.max(0, Math.min(maxStickerSize, plan.stickerSize, availableHeight));
-      if (stickerSize > 0) {
+    const stickerImg = stickerImageCache.get(message.superChatStickerUrl);
+    const maxStickerSize = Math.round(fontSize * card.stickerSizeScale);
+    const stickerY = y + (plan.stickerY ?? 0);
+    const availableHeight = y + h - padV - stickerY;
+    const stickerSize = Math.max(0, Math.min(maxStickerSize, plan.stickerSize, availableHeight));
+    if (stickerSize > 0) {
+      if (stickerImg && stickerImg.width > 0 && stickerImg.height > 0) {
         const scale = Math.min(stickerSize / stickerImg.width, stickerSize / stickerImg.height);
         ctx.drawImage(
           stickerImg,
@@ -502,7 +501,16 @@ function renderPaidCardWorker(
           stickerImg.width * scale,
           stickerImg.height * scale
         );
-      }
+      } else
+        drawStickerFallback(
+          ctx,
+          message.superChatStickerAlt ?? '',
+          textX,
+          stickerY,
+          stickerSize,
+          textColor,
+          fontFamily
+        );
     }
   }
 }
@@ -671,7 +679,7 @@ export class WorkerRenderer {
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
             );
-            stickerCache = this.stickerCache = new ResizableByteLimitedCache<ImageBitmap>(
+            this.stickerCache = new ResizableByteLimitedCache<ImageBitmap>(
               getStickerCacheBytes(this.config.stickerCacheMb ?? 4),
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
@@ -1184,7 +1192,12 @@ export class WorkerRenderer {
               amount: message.superChatAmount ?? '',
               tier: 'blue' as const,
               ...(message.superChatStickerUrl
-                ? { sticker: { url: message.superChatStickerUrl, alt: '' } }
+                ? {
+                    sticker: {
+                      url: message.superChatStickerUrl,
+                      alt: message.superChatStickerAlt ?? '',
+                    },
+                  }
                 : {}),
             },
           }
@@ -1336,6 +1349,9 @@ export class WorkerRenderer {
     } else {
       delete existing.superChatStickerUrl;
     }
+    if (msg.superChatStickerAlt !== undefined)
+      existing.superChatStickerAlt = msg.superChatStickerAlt;
+    else delete existing.superChatStickerAlt;
     if (msg.membershipHeader !== undefined) existing.membershipHeader = msg.membershipHeader;
     else delete existing.membershipHeader;
     if (msg.cardConfigWorker !== undefined) existing.cardConfigWorker = msg.cardConfigWorker;
@@ -1902,6 +1918,7 @@ export class WorkerRenderer {
     if (msg.authorPhotoUrl !== undefined) am.authorPhotoUrl = msg.authorPhotoUrl;
     if (msg.superChatAmount !== undefined) am.superChatAmount = msg.superChatAmount;
     if (msg.superChatStickerUrl !== undefined) am.superChatStickerUrl = msg.superChatStickerUrl;
+    if (msg.superChatStickerAlt !== undefined) am.superChatStickerAlt = msg.superChatStickerAlt;
     if (msg.membershipHeader !== undefined) am.membershipHeader = msg.membershipHeader;
     if (msg.cardConfigWorker !== undefined) am.cardConfigWorker = msg.cardConfigWorker;
     this.commitPlacement(
@@ -2193,6 +2210,7 @@ export class WorkerRenderer {
                   this.textBitmapCache,
                   this.authorPhotoCache,
                   this.emojiCache,
+                  this.stickerCache,
                   getFont,
                   this.boundMeasureTextCached,
                   this.superChatGradientCache,

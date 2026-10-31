@@ -76,6 +76,7 @@ export function serializeWorkerMessage({
       ? {
           superChatAmount: message.superChat.amount,
           superChatStickerUrl: message.superChat.sticker?.url,
+          superChatStickerAlt: message.superChat.sticker?.alt,
         }
       : {}),
     ...(message.kind === 'membership' ? { membershipHeader: message.membershipHeader } : {}),

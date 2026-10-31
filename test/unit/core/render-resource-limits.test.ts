@@ -65,18 +65,26 @@ describe('render message resource limits', () => {
     );
   });
 
-  it.each(['author', 'translatedText', 'membershipHeader', 'superChatAmount'] as const)(
-    'bounds the displayed %s field independently',
-    (field) => {
-      const exact = 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
-      const over = `${exact}x`;
-      expect(getRenderMessageResourceViolation({ [field]: exact })).toBeNull();
-      expect(getRenderMessageResourceViolation({ [field]: over })).toEqual({
-        field: field === 'superChatAmount' ? 'amount' : field,
-        reason: 'code-point-length',
-      });
-    }
-  );
+  it.each([
+    'author',
+    'translatedText',
+    'membershipHeader',
+    'superChatAmount',
+    'superChatStickerAlt',
+  ] as const)('bounds the displayed %s field independently', (field) => {
+    const exact = 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
+    const over = `${exact}x`;
+    expect(getRenderMessageResourceViolation({ [field]: exact })).toBeNull();
+    expect(getRenderMessageResourceViolation({ [field]: over })).toEqual({
+      field:
+        field === 'superChatAmount'
+          ? 'amount'
+          : field === 'superChatStickerAlt'
+            ? 'stickerAlt'
+            : field,
+      reason: 'code-point-length',
+    });
+  });
 
   it('bounds the nested paid amount when a direct amount is also present', () => {
     expect(
@@ -90,6 +98,15 @@ describe('render message resource limits', () => {
         superChat: { amount: 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS) },
       })
     ).toBeNull();
+  });
+
+  it('bounds a nested sticker label even when the Worker projection is present', () => {
+    expect(
+      getRenderMessageResourceViolation({
+        superChatStickerAlt: 'Cat',
+        superChat: { sticker: { alt: 'x'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1) } },
+      })
+    ).toEqual({ field: 'stickerAlt', reason: 'code-point-length' });
   });
 
   it('uses UTF-16 units for the fast boundary and code points for BMP and astral text', () => {
