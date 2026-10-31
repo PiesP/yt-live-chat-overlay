@@ -11,6 +11,7 @@ import {
   assertRestoredVisibility,
   bindMatrixIdentity,
   classifyMatrixRuntime,
+  classifyPlanProbeCapability,
   flowTrace,
   MATRIX_BATCHES,
   membershipEffect,
@@ -44,6 +45,18 @@ describe('Windows comment display matrix contract', () => {
     expect(() => validateMatrixMode('baseline')).not.toThrow();
     expect(() => validateMatrixMode(undefined)).toThrow();
     expect(() => validateMatrixMode('auto')).toThrow();
+  });
+
+  it('rejects planless legacy collection without labeling it an observed backend', () => {
+    const legacy =
+      'function getRegularCardInsets() {}\n' +
+      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n\tmain();\n})();';
+    expect(classifyPlanProbeCapability('baseline', legacy)).toBe('unsupported-legacy-planless');
+    expect(classifyPlanProbeCapability('candidate', legacy)).toBe('invalid');
+    expect(classifyPlanProbeCapability('baseline', `${legacy} superChatLayout`)).toBe('invalid');
+    expect(classifyPlanProbeCapability('baseline', '')).toBe('invalid');
+    const shared = legacy.replace('main();', 'preparePaidCardPlan({ width: 1 }); main();');
+    expect(classifyPlanProbeCapability('baseline', shared)).toBe('instrumented');
   });
 
   it('classifies transplanted legacy capability from both actual backends, independent of source SHA', () => {

@@ -309,6 +309,7 @@ type WorkerRecord = {
   sample: ProbeSample | null;
   worker: Worker;
   flushId?: string | number;
+  dueFlushAt?: number;
 };
 type ProbeSample = {
   frames: FrameTiming[];
@@ -318,6 +319,7 @@ type ProbeSample = {
   ingress: Record<string, number>;
   exact?: ProbeExact;
   latestRenderFrame: RenderFrame | null;
+  firstCompleteFrames: Record<string, RenderFrame>;
   measuredPlans?: Record<string, { width: number; height: number; maxBodyLines: number }>;
   overflow: number;
 };
@@ -453,6 +455,7 @@ function installProbeRuntime(options: ProbeOptions) {
     videoEntry: {},
     renderFrameId: 0,
     latestRenderFrame: null,
+    firstCompleteFrames: {},
     currentRenderFrame: null,
     currentFrame: null,
     measuredPlans: {},
@@ -566,6 +569,48 @@ function installProbeRuntime(options: ProbeOptions) {
     frame.active = active.slice(0, MAX_SAMPLES);
     delete frame.lastStroke;
     state.latestRenderFrame = frame;
+    const width = frame.logicalWidth;
+    const height = frame.logicalHeight;
+    if (frame.complete && !frame.truncated && width && height) {
+      const layout = frame.config.superChatLayout === 'wide' ? 'wide' : 'stacked';
+      for (const row of frame.active) {
+        if (!row.id.startsWith('WINDOWS380_') || !ids.has(row.id)) continue;
+        if (
+          row.width <= 0 ||
+          row.height <= 0 ||
+          row.x >= width ||
+          row.x + row.width <= 0 ||
+          row.y >= height ||
+          row.y + row.height <= 0
+        )
+          continue;
+        const key = `${row.id}|${layout}`;
+        if (
+          state.firstCompleteFrames[key] ||
+          Object.keys(state.firstCompleteFrames).length >= MAX_SAMPLES
+        )
+          continue;
+        const draws = frame.draws.filter((draw) => draw.id === row.id);
+        if (
+          !draws.some(
+            (draw) =>
+              draw.alpha > 0 &&
+              draw.rect &&
+              draw.rect.left < width &&
+              draw.rect.right > 0 &&
+              draw.rect.top < height &&
+              draw.rect.bottom > 0
+          )
+        )
+          continue;
+        state.firstCompleteFrames[key] = {
+          ...frame,
+          active: [row],
+          draws,
+          cardPlans: frame.cardPlans.filter((plan) => plan.id === row.id),
+        };
+      }
+    }
     if (state.currentRenderFrame === frame) state.currentRenderFrame = null;
   };
   const recordRect = (
@@ -883,6 +928,7 @@ function installProbeRuntime(options: ProbeOptions) {
                 ingress: state.ingress,
                 exact: state.exact,
                 latestRenderFrame: state.latestRenderFrame,
+                firstCompleteFrames: state.firstCompleteFrames,
                 measuredPlans: state.measuredPlans,
                 overflow: state.overflow,
               },
@@ -924,6 +970,7 @@ function installProbeRuntime(options: ProbeOptions) {
             ingress: state.ingress,
             exact: state.exact,
             latestRenderFrame: state.latestRenderFrame,
+            firstCompleteFrames: state.firstCompleteFrames,
             measuredPlans: state.measuredPlans,
             overflow: state.overflow,
           },

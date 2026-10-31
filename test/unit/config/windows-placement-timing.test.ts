@@ -727,6 +727,43 @@ describe('Windows placement timing probe', () => {
     expect(workerProbeSuffix(minified, undefined, true)).toBeNull();
   });
 
+  it('retains only a bounded first complete visible draw with its committed row', () => {
+    const id = 'WINDOWS380_BRIGHT_STICKER';
+    const sandbox = {
+      performance: { timeOrigin: 1000, now: () => 1 },
+      requestAnimationFrame: () => 1,
+      addEventListener: () => {},
+      postMessage: () => {},
+    };
+    const result = runInNewContext(
+      `${workerProbePrelude([id])}
+      const probe = globalThis.__ytPlacementProbe;
+      const ctx = { canvas: { width: 400, height: 200 } };
+      const row = { id: '${id}', x: 10, y: 10, width: 100, height: 30 };
+      function finish({ complete = true, rowX = 10, drawX = 10, layout = 'stacked' } = {}) {
+        const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
+          config: { logicalWidth: 400, logicalHeight: 200, superChatLayout: layout } });
+        frame.cleared = complete;
+        frame.draws.push({ id: '${id}', alpha: 1, backingRatioX: 1, backingRatioY: 1,
+          rect: { left: drawX, right: drawX + 80, top: 10, bottom: 30 } });
+        probe.endRenderFrame(frame, [{ ...row, x: rowX }]);
+        return frame.frameId;
+      }
+      finish({ complete: false });
+      finish({ rowX: 500 });
+      finish({ drawX: 500 });
+      const first = finish();
+      finish({ rowX: 500 });
+      finish({ layout: 'wide' });
+      ({ first, stacked: probe.firstCompleteFrames['${id}|stacked']?.frameId,
+        wide: probe.firstCompleteFrames['${id}|wide']?.frameId,
+        count: Object.keys(probe.firstCompleteFrames).length,
+        retainedRow: probe.firstCompleteFrames['${id}|stacked']?.active[0]?.id });`,
+      sandbox
+    );
+    expect(result).toMatchObject({ first: 4, stacked: 4, wide: 6, count: 2, retainedRow: id });
+  });
+
   it.each([0, 2])(
     'observes Canvas queue, committed motion, and %i actual unknown presentations',
     (unknownPresentations) => {

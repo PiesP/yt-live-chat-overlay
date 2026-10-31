@@ -79,14 +79,15 @@ FPS behavior.
 The original `f7ff6f0d` correctness baseline supports stacked cards only.
 When the current fixture is transplanted into a comparison checkout, the bundle
 source SHA identifies that checkout, not the original product commit. The
-runtime classifies legacy support only when both completed backends report
-stacked-only behavior; mixed or unavailable capability fails, and candidates
-require actual wide transport/rendering. The legacy envelope skips overload
-comparison and records wide as unsupported without a five-second wait. A
-wide-capable baseline may be compared with the final candidate only after the
-corrected pre-#387 product tree is bound separately. Do not pool that policy
-comparison with the older correctness baseline. All runtime observations still
-require source-bound execution and visual review before acceptance.
+original source lacks the shared paid plan required by this matrix. A planless
+packaged script produces an `unsupported` whole-matrix receipt with no Worker or
+Canvas observation; stacked-only support is a source-capability diagnostic, not
+a completed runtime tier. A missing plan in a candidate or wide-capable baseline
+fails closed. The mandatory policy comparison uses the corrected pre-#387
+wide-capable baseline and the final candidate after their product trees are
+bound separately. Do not pool that comparison with the older correctness
+baseline. All runtime observations still require source-bound execution and
+visual review before acceptance.
 
 The caller selects `candidate` by default. An explicitly prepared private
 comparison branch may select `baseline` through the existing `comparisonOnly`

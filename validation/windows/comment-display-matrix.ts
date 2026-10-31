@@ -14,6 +14,7 @@ import {
 } from './native-page-script-probe.ts';
 import {
   canvasProbePrelude,
+  instrumentCardPlanCalls,
   instrumentCanvasPageScript,
   workerProbePrelude,
 } from './placement-timing.ts';
@@ -420,6 +421,18 @@ export function validateMatrixMode(value: unknown): asserts value is MatrixMode 
   assert(value === 'baseline' || value === 'candidate', 'Matrix mode must be explicit');
 }
 
+export function classifyPlanProbeCapability(mode: MatrixMode, pageScript: string) {
+  if (instrumentCardPlanCalls(pageScript)) return 'instrumented' as const;
+  if (
+    mode === 'baseline' &&
+    instrumentCanvasPageScript(pageScript) !== null &&
+    !pageScript.includes('preparePaidCardPlan') &&
+    !pageScript.includes('superChatLayout')
+  )
+    return 'unsupported-legacy-planless' as const;
+  return 'invalid' as const;
+}
+
 /** Source SHA remains provenance; both observed backends decide runtime capability. */
 export function classifyMatrixRuntime(
   mode: MatrixMode,
@@ -574,7 +587,8 @@ function assertBackend(snapshot: MatrixSnapshot, backend: Backend) {
 async function snapshot(
   page: Page,
   backend: Backend,
-  maxRecords = MAX_RECORDS
+  maxRecords = MAX_RECORDS,
+  dueFrame?: { id: string; layout: 'stacked' | 'wide' }
 ): Promise<MatrixSnapshot> {
   if (backend === 'worker') {
     const requestId = await page.evaluate(() => {
@@ -593,11 +607,14 @@ async function snapshot(
     );
   }
   const observed = await page.evaluate(
-    ({ selectedBackend, recordLimit }) => {
+    ({ selectedBackend, recordLimit, requestedFrame }) => {
       const probe = window.__ytPlacementProbe;
       const worker = probe.workers.find((record) => record.ready);
       const selected = selectedBackend === 'worker' ? worker?.sample : probe;
       const exact = selected?.exact;
+      const frame = requestedFrame
+        ? selected?.firstCompleteFrames?.[`${requestedFrame.id}|${requestedFrame.layout}`]
+        : selected?.latestRenderFrame;
       const overlay = document
         .querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas')
         ?.getBoundingClientRect();
@@ -620,30 +637,30 @@ async function snapshot(
         overlay: overlay
           ? { width: overlay.width, height: overlay.height, left: overlay.left, top: overlay.top }
           : null,
-        frame: selected?.latestRenderFrame
+        frame: frame
           ? {
-              frameId: selected.latestRenderFrame.frameId,
-              startedAtEpochMs: selected.latestRenderFrame.startedAtEpochMs,
-              complete: selected.latestRenderFrame.complete,
-              cleared: selected.latestRenderFrame.cleared,
-              truncated: selected.latestRenderFrame.truncated,
-              logicalWidth: selected.latestRenderFrame.logicalWidth,
-              logicalHeight: selected.latestRenderFrame.logicalHeight,
-              backingRatioX: selected.latestRenderFrame.backingRatioX,
-              backingRatioY: selected.latestRenderFrame.backingRatioY,
-              active: selected.latestRenderFrame.active
+              frameId: frame.frameId,
+              startedAtEpochMs: frame.startedAtEpochMs,
+              complete: frame.complete,
+              cleared: frame.cleared,
+              truncated: frame.truncated,
+              logicalWidth: frame.logicalWidth,
+              logicalHeight: frame.logicalHeight,
+              backingRatioX: frame.backingRatioX,
+              backingRatioY: frame.backingRatioY,
+              active: frame.active
                 .filter((entry) => entry.id.startsWith('WINDOWS380_'))
                 .slice(0, recordLimit),
-              draws: selected.latestRenderFrame.draws
+              draws: frame.draws
                 .filter((entry) => entry.id.startsWith('WINDOWS380_'))
                 .slice(0, recordLimit),
               cardPlans:
-                selected.latestRenderFrame.cardPlans
+                frame.cardPlans
                   ?.filter((entry) => entry.id.startsWith('WINDOWS380_'))
                   .slice(0, 24) ?? [],
               config: {
-                reducedMotion: selected.latestRenderFrame.config?.reducedMotion ?? null,
-                ignoreReducedMotion: selected.latestRenderFrame.config?.ignoreReducedMotion ?? null,
+                reducedMotion: frame.config?.reducedMotion ?? null,
+                ignoreReducedMotion: frame.config?.ignoreReducedMotion ?? null,
               },
             }
           : null,
@@ -664,7 +681,9 @@ async function snapshot(
         pendingNow: exact?.pendingNow?.slice(0, recordLimit) ?? [],
         queuedNow: exact?.queuedNow?.slice(0, recordLimit) ?? [],
         retained: exact?.retained ?? null,
-        activeNow: exact?.activeNow?.slice(0, recordLimit) ?? [],
+        activeNow: requestedFrame
+          ? (frame?.active.slice(0, recordLimit) ?? [])
+          : (exact?.activeNow?.slice(0, recordLimit) ?? []),
         frames:
           (selectedBackend === 'worker' && exact?.frames?.length
             ? exact.frames
@@ -706,7 +725,7 @@ async function snapshot(
         overflow: (selected?.overflow ?? 0) + (exact?.overflow ?? 0),
       };
     },
-    { selectedBackend: backend, recordLimit: maxRecords }
+    { selectedBackend: backend, recordLimit: maxRecords, requestedFrame: dueFrame }
   );
   return observed as MatrixSnapshot;
 }
@@ -1018,17 +1037,25 @@ export function overloadTrace(
   };
 }
 
-async function waitForVisible(page: Page, backend: Backend, id: string) {
+async function waitForVisible(
+  page: Page,
+  backend: Backend,
+  id: string,
+  layout?: 'stacked' | 'wide'
+) {
   await page.waitForFunction(
-    ({ selectedBackend, messageId }) => {
+    ({ selectedBackend, messageId, requestedLayout }) => {
       const probe = window.__ytPlacementProbe;
-      const selected =
-        selectedBackend === 'worker'
-          ? probe?.workers.find((record) => record.ready)?.sample
-          : probe;
-      const frame = selected?.latestRenderFrame;
-      return (
+      const worker = probe?.workers.find((record) => record.ready);
+      const selected = selectedBackend === 'worker' ? worker?.sample : probe;
+      const frame = requestedLayout
+        ? selected?.firstCompleteFrames?.[`${messageId}|${requestedLayout}`]
+        : selected?.latestRenderFrame;
+      const visible = Boolean(
         frame?.complete &&
+        frame.cleared &&
+        !frame.truncated &&
+        frame.active.some((row) => row.id === messageId) &&
         Number.isFinite(frame.logicalWidth) &&
         Number.isFinite(frame.logicalHeight) &&
         frame.draws.some(
@@ -1042,9 +1069,19 @@ async function waitForVisible(page: Page, backend: Backend, id: string) {
             draw.rect.bottom > 0
         )
       );
+      if (!visible && selectedBackend === 'worker' && worker && probe) {
+        const now = performance.now();
+        if (now - (worker.dueFlushAt ?? -Infinity) >= 100) {
+          const requestId = (probe.flushSequence ?? 0) + 1;
+          probe.flushSequence = requestId;
+          worker.dueFlushAt = now;
+          worker.worker.postMessage({ type: 'ytPlacementFlush', requestId });
+        }
+      }
+      return visible;
     },
-    { selectedBackend: backend, messageId: id },
-    { timeout: 5000 }
+    { selectedBackend: backend, messageId: id, requestedLayout: layout },
+    { polling: 100, timeout: 5000 }
   );
 }
 
@@ -1913,16 +1950,19 @@ async function runBackend(options: {
           ['membership', PRESENTATION_IDS[scene].membership],
           ['ordinary', ordinaryId],
         ] as const) {
-          let itemFrame = observed;
-          if (!observed.frame?.draws.some((entry) => entry.id === id && entry.alpha > 0)) {
-            await observeVisible(id);
-            itemFrame = await snapshot(page, backend);
+          try {
+            await waitForVisible(page, backend, id, layout);
+          } catch (error) {
+            if (mode === 'candidate') throw error;
+            if (baselineFindings.length < 24)
+              baselineFindings.push(`No complete retained ${layout} frame for ${id}`);
           }
+          const itemFrame = await snapshot(page, backend, MAX_RECORDS, { id, layout });
           itemObservations.push({
             role,
             id,
             proof: check(() => presentationItem(itemFrame, id, role)),
-            jsonOnlyDueFrame: itemFrame !== observed,
+            jsonOnlyDueFrame: itemFrame.frame?.frameId !== observed.frame?.frameId,
           });
         }
         const ordinary = itemObservations.find((entry) => entry.role === 'ordinary')?.proof;
@@ -2769,6 +2809,35 @@ export async function runCommentDisplayMatrix(options: {
     bundleSha256: createHash('sha256').update(bundle).digest('hex'),
     mode: options.mode,
   };
+  const planProbeCapability = classifyPlanProbeCapability(
+    options.mode,
+    pageScript.toString('utf8')
+  );
+  if (planProbeCapability !== 'instrumented') {
+    const legacyPlanless = planProbeCapability === 'unsupported-legacy-planless';
+    const result = {
+      status: legacyPlanless ? 'unsupported' : 'failed',
+      identity,
+      runtime: {
+        kind: legacyPlanless ? 'unsupported-legacy-planless' : 'invalid-plan-instrumentation',
+        sourceSha: identity.sourceSha,
+        runtimeCapability: 'unavailable',
+        sourceWideLayout: legacyPlanless ? 'absent' : 'unqualified',
+      },
+      cases: [],
+      overload: { status: 'not-run', cases: [] },
+      visualReview: 'not-run',
+      comparisonScope: legacyPlanless
+        ? 'Planless stacked-only packaged source; whole matrix unsupported'
+        : 'Required shared paid plan could not be instrumented; no matrix observation',
+      errorMessage: 'No Worker or Canvas observation was collected',
+    } as const;
+    await writeFile(
+      join(options.output, 'comment-display-matrix.json'),
+      JSON.stringify(result, null, 2)
+    );
+    return result;
+  }
   const html = buildVisibleWatchHtml(preview, 'Comment display matrix video');
   const media = Object.fromEntries(
     SCENES.map((scene, index) => {
