@@ -4306,14 +4306,17 @@ async function runOverloadBackend(options: {
         await waitForIngress(page, backend, MANAGER_FIFO_IDS.bootstrap);
         await readManagerProbe(true);
         await page.waitForFunction((id) => {
-          const worker = window.__ytPlacementProbe?.workers.find((record) => record.ready);
+          const probe = window.__ytPlacementProbe;
+          const worker = probe?.workers.find((record) => record.ready);
           const manager = (
             window as typeof window & {
               __ytMatrixManagerProbe?: { read: () => ManagerProbeRead };
             }
           ).__ytMatrixManagerProbe?.read().manager;
+          const presented = Number.isFinite(worker?.sample?.firstEntry?.[id]);
+          if (!presented && worker) probe.requestFlushIfDue(worker);
           return (
-            Number.isFinite(worker?.sample?.firstEntry?.[id]) &&
+            presented &&
             manager?.latestWorkerPendingDepth === 0 &&
             manager.unacknowledgedBatches?.length === 0
           );
