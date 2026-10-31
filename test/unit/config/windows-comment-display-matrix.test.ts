@@ -169,7 +169,7 @@ describe('Windows comment display matrix contract', () => {
       const browserMatches = (candidate: typeof partial, viewportWidth: number) => {
         const selected = {
           latestRenderFrame: candidate.frame,
-          exact: { config: { superChatLayout: 'stacked' } },
+          exact: { config: { superChatLayout: 'stacked' }, activeNow: candidate.activeNow },
         };
         const probe = {
           workers: backend === 'worker' ? [{ ready: true, sample: selected }] : [],
@@ -184,10 +184,36 @@ describe('Windows comment display matrix contract', () => {
       await waitForPaidCapture(page, backend, id, 'stacked', fullWait, true);
       expect(browserMatches(partial, 960)).toBe(false);
       expect(browserMatches(full, 960)).toBe(true);
-      const renewedEpoch = makeSample(backend, 960, 858, 598, 200, 0.10373333333333333);
-      renewedEpoch.frame.active[0]!.startAtEpochMs = 2000;
-      expect(browserMatches(renewedEpoch, 960)).toBe(false);
-      expect(() => assertPaidCaptureFrame(renewedEpoch, id, 'stacked', fullWait, true)).toThrow();
+      for (const shift of [1.7, 5.1]) {
+        const renewedEpoch = makeSample(backend, 960, 858, 598, 200, 0.10373333333333333);
+        renewedEpoch.frame.active[0]!.startAtEpochMs += shift;
+        renewedEpoch.frame.active[0]!.endAtEpochMs += shift;
+        expect(browserMatches(renewedEpoch, 960)).toBe(true);
+        expect(() => assertPaidCaptureFrame(renewedEpoch, id, 'stacked', fullWait, true)).toThrow();
+        const settled = planPaidCaptureWait(renewedEpoch, id, 20_000);
+        expect(settled.plannedStartAtEpochMs - fullWait.plannedStartAtEpochMs).toBeCloseTo(shift);
+        expect(assertPaidCaptureFrame(renewedEpoch, id, 'stacked', settled, true)).toBeTruthy();
+        const postPngReplan = makeSample(backend, 960, 858, 598, 180, 0.10373333333333333);
+        postPngReplan.frame.active[0]!.startAtEpochMs += shift + 1;
+        postPngReplan.frame.active[0]!.endAtEpochMs += shift + 1;
+        expect(() => assertPaidCaptureFrame(postPngReplan, id, 'stacked', settled, true)).toThrow();
+        const staleExact = {
+          ...renewedEpoch,
+          activeNow: [{ ...renewedEpoch.activeNow[0]!, startAtEpochMs: 1000 }],
+        };
+        expect(browserMatches(staleExact, 960)).toBe(false);
+        expect(() => planPaidCaptureWait(staleExact, id, 20_000)).toThrow();
+        const staleFrameAfterPng = {
+          ...renewedEpoch,
+          frame: {
+            ...renewedEpoch.frame,
+            active: [{ ...renewedEpoch.frame.active[0]!, startAtEpochMs: 1000 }],
+          },
+        };
+        expect(() =>
+          assertPaidCaptureFrame(staleFrameAfterPng, id, 'stacked', settled, true, true)
+        ).toThrow();
+      }
       expect(() =>
         assertPaidCaptureFrame(
           makeSample(backend, 960, 858, 598, -1, 0.10373333333333333),

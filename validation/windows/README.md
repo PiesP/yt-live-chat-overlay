@@ -91,8 +91,14 @@ wait for a current complete paid frame: the entire card at 960 pixels, or at
 least 95% on the entering side at 400 pixels where full-card exposure is zero.
 The before and after frame proofs bracket each PNG; the narrow after proof may
 be on the exiting side while still showing at least 95%. Each layout uses its
-own observed start, end, position, and velocity after the settings transition;
-the planned wait fails when that window or the backend deadline has passed.
+own observed start, end, position, and velocity after the settings transition.
+The initial plan bounds the wait without treating its start time as immutable:
+the renderer may revise the current paid motion plan while the card approaches
+the capture window. A completed frame and its current active row must agree on
+the layout, width, start, and end during that wait. Immediately before the PNG,
+the fixture records a settled plan and any start/end revision from the initial
+plan; the before and after frame proofs must match the settled start/end exactly.
+The wait fails when the source-measured window or backend deadline has passed.
 Exact original-plus-
 translation line counts and total-height budget, effect alpha, and overload-policy
 acceptance are recorded separately from the PNG review. The detailed paid card

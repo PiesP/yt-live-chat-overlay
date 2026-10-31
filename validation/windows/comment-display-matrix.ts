@@ -1354,7 +1354,10 @@ export function assertPaidCaptureFrame(
   assert(frame);
   assert.equal(snapshot.layout, layout);
   assert.equal(frame.config.superChatLayout, layout);
-  assert(frame.active.some((entry) => entry.id === id));
+  const frameRow = frame.active.find((entry) => entry.id === id);
+  assert(frameRow, `${id} lacks current frame ownership`);
+  for (const key of ['x', 'y', 'width', 'height', 'startAtEpochMs', 'endAtEpochMs'] as const)
+    assert.equal(frameRow[key], row[key], `${id} changed ${key} between frame and active row`);
   assert(
     frame.cardPlans.some((plan) => plan.id === id),
     `${id} lacks a current paid card plan`
@@ -1921,8 +1924,8 @@ export async function waitForPaidCapture(
       selectedBackend,
       messageId,
       expectedLayout,
-      expectedStart,
-      expectedEnd,
+      expectedWidth,
+      logicalWidth,
       nearFullNarrow,
       translationRequired,
     }) => {
@@ -1933,6 +1936,7 @@ export async function waitForPaidCapture(
       const width = Number(frame?.logicalWidth);
       const height = Number(frame?.logicalHeight);
       const row = frame?.active.find((entry) => entry.id === messageId);
+      const currentRow = selected?.exact?.activeNow?.find((entry) => entry.id === messageId);
       const visibleWidth = row
         ? Math.max(0, Math.min(width, row.x + row.width) - Math.max(0, row.x))
         : 0;
@@ -1959,10 +1963,14 @@ export async function waitForPaidCapture(
         !frame.truncated &&
         frame.config.superChatLayout === expectedLayout &&
         selected?.exact?.config?.superChatLayout === expectedLayout &&
+        width === logicalWidth &&
         frame.cardPlans.some((plan) => plan.id === messageId) &&
         row &&
-        row.startAtEpochMs === expectedStart &&
-        row.endAtEpochMs === expectedEnd &&
+        currentRow &&
+        row.width === expectedWidth &&
+        currentRow.width === row.width &&
+        row.startAtEpochMs === currentRow.startAtEpochMs &&
+        row.endAtEpochMs === currentRow.endAtEpochMs &&
         row.x >= 0 &&
         row.y >= 0 &&
         row.y + row.height <= height &&
@@ -1980,8 +1988,8 @@ export async function waitForPaidCapture(
       selectedBackend: backend,
       messageId: id,
       expectedLayout: layout,
-      expectedStart: target.plannedStartAtEpochMs,
-      expectedEnd: target.plannedEndAtEpochMs,
+      expectedWidth: target.observedWidth,
+      logicalWidth: target.logicalWidth,
       nearFullNarrow: target.zeroFullExposureWindow,
       translationRequired: requireTranslation,
     },
@@ -2185,6 +2193,7 @@ async function runBackend(options: {
     currentRoleWait?: RoleWaitObservation | null;
     minimumLineWait?: RoleWaitObservation | null;
     currentCaptureWait?: PaidCaptureWait | null;
+    currentSettledCapturePlan?: PaidCaptureWait | null;
     errorType?: string;
     errorMessage?: string;
   };
@@ -2192,6 +2201,7 @@ async function runBackend(options: {
   let currentRoleWait: RoleWaitObservation | null = null;
   let minimumLineWait: RoleWaitObservation | null = null;
   let currentCaptureWait: PaidCaptureWait | null = null;
+  let currentSettledCapturePlan: PaidCaptureWait | null = null;
   const restorationWaitObservations: Array<{ id: string; wait: RoleWaitObservation }> = [];
   let restorationProof: ReturnType<typeof assertRestoredVisibility> | null = null;
   const check = <T>(predicate: () => T): T | undefined => {
@@ -3112,23 +3122,33 @@ async function runBackend(options: {
         const capturePlanning = await snapshot(page, backend);
         const captureWait = planPaidCaptureWait(capturePlanning, paidId, Date.now() - startedAt);
         currentCaptureWait = captureWait;
+        currentSettledCapturePlan = null;
         assert(captureWait.timeoutMs > 0, `${name} has no bounded paid capture window`);
         await waitForPaidCapture(page, backend, paidId, layout, captureWait, scene === 'detailed');
+        const settledState: { plan: PaidCaptureWait | null } = { plan: null };
         const observed = await capture(name, true, (sample) => {
-          assertPaidCaptureFrame(sample, paidId, layout, captureWait, scene === 'detailed');
+          const settled = planPaidCaptureWait(sample, paidId, Date.now() - startedAt);
+          assert.equal(settled.observedWidth, captureWait.observedWidth);
+          assert.equal(settled.logicalWidth, captureWait.logicalWidth);
+          assert(settled.timeoutMs > 0, `${name} has no bounded settled capture plan`);
+          assertPaidCaptureFrame(sample, paidId, layout, settled, scene === 'detailed');
+          settledState.plan = settled;
+          currentSettledCapturePlan = settled;
         });
+        const settledCapturePlan = settledState.plan;
+        assert(settledCapturePlan, `${name} did not settle a capture plan`);
         const captureProofBefore = assertPaidCaptureFrame(
           observed,
           paidId,
           layout,
-          captureWait,
+          settledCapturePlan,
           scene === 'detailed'
         );
         const captureProofAfter = assertPaidCaptureFrame(
           await snapshot(page, backend),
           paidId,
           layout,
-          captureWait,
+          settledCapturePlan,
           scene === 'detailed',
           true
         );
@@ -3137,6 +3157,7 @@ async function runBackend(options: {
           `${name} changed motion during the PNG capture`
         );
         captureWait.outcome = 'visible';
+        settledCapturePlan.outcome = 'visible';
         assertBackend(observed, backend);
         const paid = check(() => presentationGeometry(observed, paidId));
         const translatedDraw = observed.frame?.draws.some(
@@ -3241,6 +3262,12 @@ async function runBackend(options: {
           logicalHeight: observed.frame?.logicalHeight ?? null,
           paid,
           captureWait,
+          settledCapturePlan,
+          capturePlanRevision: {
+            startDeltaMs:
+              settledCapturePlan.plannedStartAtEpochMs - captureWait.plannedStartAtEpochMs,
+            endDeltaMs: settledCapturePlan.plannedEndAtEpochMs - captureWait.plannedEndAtEpochMs,
+          },
           captureProofBefore,
           captureProofAfter,
           items: itemObservations,
@@ -3463,6 +3490,7 @@ async function runBackend(options: {
       restorationProof,
       minimumLineWait,
       currentCaptureWait,
+      currentSettledCapturePlan,
       effectObservations,
       baselineFindings,
       cleanupErrors,
@@ -3491,6 +3519,7 @@ async function runBackend(options: {
       currentRoleWait,
       minimumLineWait,
       currentCaptureWait,
+      currentSettledCapturePlan,
       errorType: error instanceof Error ? error.name : typeof error,
       errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 400),
     };
