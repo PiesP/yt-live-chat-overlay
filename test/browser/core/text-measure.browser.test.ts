@@ -2,7 +2,9 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage } from '@app-types';
+import { renderRegularMessage } from '@renderer/canvas/shared';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
+import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
 import {
   clearTextMeasurementCaches,
   getFontString,
@@ -279,5 +281,93 @@ describe('text measurement caches', () => {
       measureTextSpy.mockRestore();
       clearTextMeasurementCaches();
     }
+  });
+});
+
+describe('fixed comment width geometry', () => {
+  it('fits a long author and wrapped body inside a narrow viewport', () => {
+    clearTextMeasurementCaches();
+    const body = '한글 English 👨‍👩‍👧‍👦 مرحبا 123 '.repeat(10);
+    const message = {
+      text: body,
+      content: [{ type: 'text', content: body }],
+      kind: 'text',
+      timestamp: 0,
+      authorType: 'normal',
+      author: 'Long author 👩‍💻 '.repeat(10),
+    } satisfies ChatMessage;
+    const font = getFontString(32, 'bold', DEFAULT_FONT_FAMILY);
+    const fixed = estimateMessageDimensions(
+      message,
+      32,
+      true,
+      'bold',
+      DEFAULT_FONT_FAMILY,
+      undefined,
+      undefined,
+      '0px',
+      0,
+      320,
+      undefined,
+      '#00000000',
+      'top'
+    );
+    const scrolling = estimateMessageDimensions(message, 32, true);
+    const dual = estimateTranslatedMessageDimensions(
+      message,
+      '번역 translated '.repeat(12),
+      'dual',
+      {
+        fontSize: 32,
+        showAuthor: true,
+        availableWidth: 320,
+        mode: 'top',
+      }
+    );
+    expect(fixed.width).toBeLessThanOrEqual(320);
+    expect(scrolling.width).toBeGreaterThan(320);
+    expect(dual.width).toBeLessThanOrEqual(320);
+    expect(dual.height).toBeGreaterThan(fixed.height);
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    expect(ctx).not.toBeNull();
+    if (!ctx) return;
+    const drawn: Array<{ x: number; y: number; width: number }> = [];
+    const originalFill = ctx.fillText.bind(ctx);
+    vi.spyOn(ctx, 'fillText').mockImplementation((text, x, y) => {
+      drawn.push({ x, y, width: ctx.measureText(text).width });
+      originalFill(text, x, y);
+    });
+    renderRegularMessage(
+      ctx,
+      message,
+      0,
+      0,
+      {
+        showAuthor: true,
+        fontSize: 32,
+        fontWeight: 'bold',
+        fontFamily: DEFAULT_FONT_FAMILY,
+        color: '#fff',
+        outlineWidthPx: 0,
+        outlineOpacity: 0,
+        backgroundColor: '#00000000',
+        messageWidth: fixed.width,
+        messageHeight: fixed.height,
+        mode: 'top',
+      },
+      { maxBytes: 0, get: () => undefined, set: () => false },
+      { get: () => undefined },
+      () => false,
+      { get: () => undefined },
+      () => false,
+      (size) => getFontString(size, 'bold', DEFAULT_FONT_FAMILY),
+      (text, direction) => measureTextWidth(text, font, direction)
+    );
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.every(({ x, width }) => x >= 0 && x + width <= fixed.width + 1)).toBe(true);
+    expect(drawn.every(({ y }) => y <= fixed.height)).toBe(true);
+    expect(drawn.some(({ width }) => width > 0)).toBe(true);
   });
 });

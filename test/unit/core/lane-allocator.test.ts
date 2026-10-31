@@ -132,6 +132,52 @@ describe('LaneAllocator', () => {
       tiny.reset({ width: 1, height: 1 });
       expect(tiny.getLaneCount()).toBeGreaterThanOrEqual(1);
     });
+
+    it('admits only physically fitting candidates in a partial safe-zone slot', () => {
+      const tiny = new LaneAllocator({
+        ...defaultOptions,
+        safeTop: 0.25,
+        safeBottom: 0.5,
+        fontSize: 32,
+      });
+      const viewport = { width: 320, height: 100 };
+      tiny.reset(viewport, now);
+      expect(tiny.getLaneCount()).toBe(1);
+      expect(tiny.findPlacement(47, viewport, SPEED_TIER.MID, now, 'top')).toBeNull();
+      tiny.clearCandidateExclusions();
+      const smaller = tiny.findPlacement(20, viewport, SPEED_TIER.MID, now, 'top');
+      expect(smaller).not.toBeNull();
+      if (!smaller) return;
+      expect(smaller.laneY + smaller.verticalOffset).toBeGreaterThanOrEqual(25);
+      expect(smaller.laneY + smaller.verticalOffset + 20).toBeLessThanOrEqual(50);
+      tiny.reset({ width: 320, height: 400 }, now);
+      expect(
+        tiny.findPlacement(47, { width: 320, height: 400 }, SPEED_TIER.MID, now, 'top')
+      ).not.toBeNull();
+    });
+
+    it('reserves a physically fitting row across the final partial grid cell', () => {
+      const partial = new LaneAllocator({ ...defaultOptions, laneSpacing: 0 });
+      partial.reset(defaultDimensions, now);
+      const grid = partial.getLaneHeight();
+      const dimensions = { width: 320, height: grid * 1.6 };
+      partial.reset(dimensions, now);
+      expect(partial.getLaneCount()).toBe(2);
+
+      const tall = partial.findPlacement(grid * 1.4, dimensions, SPEED_TIER.MID, now, 'top');
+      expect(tall).not.toBeNull();
+      if (!tall) return;
+      expect(tall.slotCount).toBe(2);
+      expect(tall.laneY + tall.verticalOffset + grid * 1.4).toBeLessThanOrEqual(dimensions.height);
+      partial.commitPlacement(tall, now, 5000);
+      partial.clearCandidateExclusions();
+      expect(
+        partial.findPlacement(grid * 0.3, dimensions, SPEED_TIER.MID, now, 'top')?.waitMs
+      ).toBeGreaterThan(0);
+
+      partial.reset(dimensions, now);
+      expect(partial.findPlacement(grid * 1.7, dimensions, SPEED_TIER.MID, now, 'top')).toBeNull();
+    });
   });
 
   // ── getLaneY ──────────────────────────────────────────────────────────
@@ -252,6 +298,13 @@ describe('LaneAllocator', () => {
     it('matches shared state through tiered, multi-slot, and excluded placements', () => {
       allocator.reset(defaultDimensions, now);
       const laneHeight = allocator.getLaneHeight();
+      // Keep this parity fixture on a complete grid. Partial final cells
+      // additionally require physical safe-zone validation by LaneAllocator.
+      const parityDimensions = {
+        ...defaultDimensions,
+        height: (laneHeight * 30) / (1 - defaultOptions.safeTop - defaultOptions.safeBottom),
+      };
+      allocator.reset(parityDimensions, now);
       const shared = stateFromSnapshot(allocator.snapshot());
       const cases: {
         height: number;
@@ -280,7 +333,7 @@ describe('LaneAllocator', () => {
         }
         const placement = allocator.findPlacement(
           scenario.height,
-          defaultDimensions,
+          parityDimensions,
           scenario.tier,
           now,
           scenario.strategy,

@@ -110,6 +110,19 @@ export function getRowContentOffset(height: number, gridHeight: number, gap = 0)
   );
 }
 
+/** Return a physical offset only when the candidate fits inside the safe zone. */
+export function getSafeRowContentOffset(
+  height: number,
+  gridHeight: number,
+  gap: number,
+  laneIndex: number,
+  usableHeight: number
+): number | null {
+  const remaining = usableHeight - laneIndex * gridHeight - height;
+  if (!Number.isFinite(remaining) || remaining < -1e-9) return null;
+  return Math.min(getRowContentOffset(height, gridHeight, gap), Math.max(0, remaining));
+}
+
 /** Content rectangles need motion separation until the configured gap fits between them. */
 export function rowsNeedVerticalClearance(
   firstTop: number,

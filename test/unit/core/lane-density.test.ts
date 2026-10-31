@@ -28,11 +28,29 @@ describe('production density grid', () => {
     });
     const normal = lanes[0];
     if (!normal) throw new Error('normal grid missing');
+    const capacities: number[] = [];
     for (const allocator of lanes) {
       const slots = getRowSlotCount(height, allocator.getLaneHeight(), 6);
       expect(slots * allocator.getLaneHeight()).toBeCloseTo(height + 6);
-      expect(Math.floor(allocator.getLaneCount() / slots)).toBe(normal.getLaneCount());
+      let placed = 0;
+      for (let attempt = 0; attempt < allocator.getLaneCount(); attempt++) {
+        allocator.clearCandidateExclusions();
+        const placement = allocator.findPlacement(
+          height,
+          { width: 1920, height: 1080 },
+          1,
+          0,
+          'top'
+        );
+        if (!placement || placement.waitMs > 0) break;
+        expect(placement.laneY + placement.verticalOffset + height).toBeLessThanOrEqual(1080);
+        allocator.commitPlacement(placement, 0, 5000);
+        placed++;
+      }
+      capacities.push(placed);
     }
+    expect(capacities[0]).toBeGreaterThan(0);
+    expect(capacities).toEqual([capacities[0], capacities[0], capacities[0]]);
     expect(lanes[1]?.getLaneHeight()).toBeCloseTo(normal.getLaneHeight() / 2);
     expect(lanes[2]?.getLaneHeight()).toBeCloseTo(normal.getLaneHeight() / 4);
   });

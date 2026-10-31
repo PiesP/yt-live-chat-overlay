@@ -156,17 +156,24 @@ function findBidiSequence(events: readonly BidiCanvasEvent[]): {
 } | null {
   for (let index = 0; index <= events.length - 4; index++) {
     const hello = events[index];
-    const emoji = events[index + 1];
-    const world = events[index + 2];
-    const arabic = events[index + 3];
+    if (hello?.kind !== 'text' || hello.text.trim() !== 'Hello') continue;
+    let cursor = index + 1;
+    // Prepared wrapping can paint boundary whitespace as its own bidi run.
+    const beforeEmoji = events[cursor];
+    if (beforeEmoji?.kind === 'text' && beforeEmoji.text === ' ') cursor++;
+    const emoji = events[cursor++];
+    const world = events[cursor++];
+    const beforeArabic = events[cursor];
+    if (beforeArabic?.kind === 'text' && beforeArabic.text === ' ') cursor++;
+    const arabic = events[cursor];
     if (
-      hello?.kind === 'text' &&
-      hello.text === 'Hello ' &&
       emoji?.kind === 'image' &&
       world?.kind === 'text' &&
-      world.text === ' World' &&
+      world.text.trim() === 'World' &&
       arabic?.kind === 'text' &&
-      arabic.text === 'مرحبا '
+      arabic.text.trim() === 'مرحبا' &&
+      hello.y === world.y &&
+      world.y === arabic.y
     ) {
       return { hello, emoji, world, arabic };
     }

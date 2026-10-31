@@ -16,7 +16,7 @@ vi.hoisted(() => {
 const mockCtx = {
   setTransform: vi.fn(),
   clearRect: vi.fn(),
-  measureText: vi.fn(() => ({
+  measureText: vi.fn((_text: string) => ({
     width: 100,
     actualBoundingBoxAscent: 16,
     actualBoundingBoxDescent: 4,
@@ -29,6 +29,7 @@ const mockCtx = {
   restore: vi.fn(),
   translate: vi.fn(),
   beginPath: vi.fn(),
+  rect: vi.fn(),
   closePath: vi.fn(),
   moveTo: vi.fn(),
   lineTo: vi.fn(),
@@ -103,6 +104,7 @@ import type { CardConfigWorker } from '@renderer/card-config';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { clearTextMeasurementCaches } from '@renderer/text-measure';
 import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
 import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
 import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
@@ -299,6 +301,52 @@ function prepareGradientPaidCard() {
 }
 
 describe('Worker reservation safety', () => {
+  it('reserves the final partial cell for a row that fits the physical safe zone', () => {
+    const renderer = initializeRenderer({
+      danmakuMode: 'top',
+      safeTop: 0,
+      safeBottom: 0,
+      laneSpacing: 0,
+    });
+    const grid = workerLaneHeight(renderer);
+    const height = grid * 1.6;
+    renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height, dpr: 1 }));
+    const internals = renderer as unknown as {
+      numLanes: number;
+      findPlacement(
+        height: number,
+        speedTier: number,
+        now: number,
+        strategy: 'top'
+      ): {
+        laneIndex: number;
+        laneY: number;
+        verticalOffset: number;
+        slotCount: number;
+        waitMs: number;
+      } | null;
+      commitPlacement(
+        laneIndex: number,
+        slotCount: number,
+        startTime: number,
+        durationMs: number,
+        speedTier: number
+      ): void;
+      collidedLanes: Set<number>;
+    };
+    expect(internals.numLanes).toBe(2);
+    const tall = internals.findPlacement(grid * 1.4, 1, 10_000, 'top');
+    expect(tall?.slotCount).toBe(2);
+    expect((tall?.laneY ?? 0) + (tall?.verticalOffset ?? 0) + grid * 1.4).toBeLessThanOrEqual(
+      height
+    );
+    if (!tall) return;
+    internals.commitPlacement(tall.laneIndex, tall.slotCount, 10_000, 5000, 1);
+    internals.collidedLanes.clear();
+    expect(internals.findPlacement(grid * 0.3, 1, 10_000, 'top')?.waitMs).toBeGreaterThan(0);
+    internals.collidedLanes.clear();
+    expect(internals.findPlacement(grid * 1.7, 1, 10_000, 'top')).toBeNull();
+  });
   it.each([
     {
       name: 'mixed heights with only 1px clearance',
@@ -480,6 +528,8 @@ describe('Worker reservation safety', () => {
       scrollDurationMaxMs: 30000,
       outlineWidthPx: 0,
       outlineOpacity: 0,
+      safeTop: 0,
+      safeBottom: 0,
     });
     const internals = renderer as unknown as {
       laneHeap: [number, number][];
@@ -520,6 +570,79 @@ describe('Worker reservation safety', () => {
     }
     return { renderer, internals };
   }
+
+  it('uses local Worker canvas metrics before admitting transferred fixed geometry', () => {
+    (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> }).canvas =
+      new MockOffscreenCanvas();
+    try {
+      const renderer = initializeRenderer({ danmakuMode: 'top', safeTop: 0, safeBottom: 0 });
+      const internals = renderer as unknown as { pendingQueue: WorkerMessage[] };
+      const text = 'long content '.repeat(12);
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [
+            makeWorkerMessage({
+              id: 'local-geometry',
+              text,
+              content: [{ type: 'text', content: text }],
+              width: 2000,
+              height: 1,
+            }),
+          ],
+        })
+      );
+      expect(internals.pendingQueue[0]?.width).toBeLessThanOrEqual(640);
+      expect(internals.pendingQueue[0]?.height).toBeGreaterThan(1);
+    } finally {
+      delete (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> })
+        .canvas;
+    }
+  });
+
+  it('reserves local fallback ink in Worker prepared emoji rows', () => {
+    const originalMeasure = mockCtx.measureText.getMockImplementation();
+    mockCtx.measureText.mockImplementation((text: string) => ({
+      width: text.length * 10,
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: text.length * 10,
+      actualBoundingBoxAscent: 16,
+      actualBoundingBoxDescent: text === 'Á한' ? 37 : 4,
+    }));
+    (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> }).canvas =
+      new MockOffscreenCanvas();
+    try {
+      clearTextMeasurementCaches();
+      const renderer = initializeRenderer({ danmakuMode: 'top', fontSize: 32, outlineWidthPx: 8 });
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 100, height: 400, dpr: 1 }));
+      const internals = renderer as unknown as { pendingQueue: WorkerMessage[] };
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [
+            makeWorkerMessage({
+              id: 'worker-fallback-ink',
+              content: [1, 2, 3].map((index) => ({
+                type: 'emoji',
+                content: '',
+                emojiUrl: `emoji://missing-${index}`,
+                emojiFallbackText: 'Á한',
+              })),
+              width: 1,
+              height: 1,
+            }),
+          ],
+        })
+      );
+      expect(internals.pendingQueue[0]?.width).toBeLessThanOrEqual(100);
+      expect(internals.pendingQueue[0]?.height).toBeGreaterThanOrEqual(114);
+    } finally {
+      if (originalMeasure) mockCtx.measureText.mockImplementation(originalMeasure);
+      delete (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> })
+        .canvas;
+      clearTextMeasurementCaches();
+    }
+  });
 
   it.each(['scroll', 'reverse'] as const)(
     'checks future reservations and uses an alternative lane in %s',
@@ -1450,21 +1573,43 @@ describe('Worker message protocol', () => {
       expect(internals.activeMessages[0]?.translatedContent).toBeUndefined();
     });
 
-    it('drops messages that require more lanes than the viewport has', () => {
-      const renderer = initializeRenderer();
+    it('defers an unfit message without repeated attempts, then admits it after viewport recovery', () => {
+      const renderer = initializeRenderer({ fontSize: 32, safeTop: 0.25, safeBottom: 0.5 });
       const internals = renderer as unknown as {
         drainQueue: (now: number, width: number, height: number) => void;
         pendingQueue: WorkerMessage[];
         totalDrops: number;
         dropReasons: { oversized: number };
       };
-      const oversized = makeWorkerMessage({ height: 10_000 });
+      const deferred = makeWorkerMessage({ height: 47 });
 
-      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [oversized] }));
-      internals.drainQueue(10_000, 640, 360);
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height: 60, dpr: 1 }));
 
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [deferred] }));
+      internals.drainQueue(10_000, 640, 60);
+
+      expect(internals.pendingQueue).toHaveLength(1);
+      expect(internals.totalDrops).toBe(0);
+      internals.drainQueue(10_016, 640, 60);
+      expect(internals.pendingQueue).toHaveLength(1);
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height: 400, dpr: 1 }));
+      internals.drainQueue(10_032, 640, 400);
       expect(internals.pendingQueue).toHaveLength(0);
-      expect(internals.totalDrops).toBe(1);
+      expect(internals.totalDrops).toBe(0);
+    });
+
+    it('drops a permanently oversized message in a normal viewport', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        drainQueue: (now: number, width: number, height: number) => void;
+        pendingQueue: WorkerMessage[];
+        dropReasons: { oversized: number };
+      };
+      renderer.handleMessage(
+        makeEvent({ type: 'addMessages', messages: [makeWorkerMessage({ height: 10_000 })] })
+      );
+      internals.drainQueue(10_000, 640, 360);
+      expect(internals.pendingQueue).toHaveLength(0);
       expect(internals.dropReasons.oversized).toBe(1);
     });
 
