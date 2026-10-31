@@ -1286,7 +1286,10 @@ export class WorkerRenderer {
         const evicted = this.pendingQueue[minIdx];
         if (evicted) this.recordDrop(evicted, 'queue_replaced');
         if (evicted) this.messageById.delete(evicted.id);
-        this.pendingQueue[minIdx] = msg;
+        // Append after eviction so equal-priority overflow removes the next
+        // oldest pending message instead of repeatedly replacing this newcomer.
+        this.pendingQueue.splice(minIdx, 1);
+        this.pendingQueue.push(msg);
         this.messageById.set(msg.id, msg);
         this.pendingQueueSortNeeded = true;
         return true;
