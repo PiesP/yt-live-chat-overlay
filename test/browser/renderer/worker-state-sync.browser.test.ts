@@ -35,6 +35,7 @@ const context = {
   restore: vi.fn(),
   translate: vi.fn(),
   beginPath: vi.fn(),
+  rect: vi.fn(),
   closePath: vi.fn(),
   moveTo: vi.fn(),
   lineTo: vi.fn(),
