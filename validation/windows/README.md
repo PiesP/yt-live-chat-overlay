@@ -111,7 +111,12 @@ For the overflow case, a source-bound insertion immediately before the packaged
 page-script entry observes the actual Worker Manager instance. Its bounded ring
 records fixture-ID sends, native `addMessages` posts, and batch receipts with
 timestamps and sequence numbers; snapshots include Manager queue and receipt
-state before and after the late arrivals. Missing pre-#387 Manager fields are
+state before and after the late arrivals. Each four-row source response waits
+for the last row's actual Manager send result or renderer ingress before the
+next response. The candidate requires all 80 old rows to enter the Worker;
+the baseline records any smaller ingress count with the measured Manager
+deferred count and recent rejected sends while still requiring a full pending
+queue. Missing pre-#387 Manager fields are
 recorded as `null` in the baseline. The candidate still requires late renderer
 ingress and older-row replacement; a baseline without late ingress records a
 policy finding. Neither HTTP delivery nor a Manager send is counted as Worker

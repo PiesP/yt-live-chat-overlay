@@ -1593,6 +1593,47 @@ export async function waitForIngress(page: Page, backend: Backend, id: string) {
   );
 }
 
+/** Keep source-response cadence tied to actual Manager processing on Worker. */
+export async function waitForOverflowSeedProcessed(page: Page, backend: Backend, id: string) {
+  if (backend === 'main') return waitForIngress(page, backend, id);
+  await page.waitForFunction(
+    (messageId) => {
+      const probe = window.__ytPlacementProbe;
+      const worker = probe?.workers.find((record) => record.ready);
+      const manager = (
+        window as typeof window & { __ytMatrixManagerProbe?: { read: () => ManagerProbeRead } }
+      ).__ytMatrixManagerProbe?.read();
+      if (manager?.probeError)
+        throw new Error(`Worker Manager probe failed: ${manager.probeError}`);
+      const ingressed = Number.isFinite(worker?.sample?.ingress?.[messageId]);
+      const processed = manager?.events.some(
+        (event) => event.kind === 'manager-send-after' && event.id === messageId
+      );
+      if (!ingressed && !processed && worker) probe.requestFlushIfDue(worker);
+      return ingressed || processed;
+    },
+    id,
+    { polling: 100, timeout: 5000 }
+  );
+}
+
+export function overflowSeedAdmissionFinding(
+  mode: MatrixMode,
+  backend: Backend,
+  oldRendererIngress: number,
+  managerAtFull?: { deferredCount: number | null; recentRejectedSends: number }
+): string | null {
+  assert(
+    Number.isSafeInteger(oldRendererIngress) && oldRendererIngress >= 0 && oldRendererIngress <= 80
+  );
+  if (oldRendererIngress === 80) return null;
+  assert(
+    mode === 'baseline' && backend === 'worker',
+    `Overflow seed lacked renderer ingress for all 80 old rows (${oldRendererIngress}/80)`
+  );
+  return `Worker baseline renderer ingress covered ${oldRendererIngress}/80 old rows; Manager deferred ${managerAtFull?.deferredCount ?? 'unavailable'}, rejected sends in recent ring ${managerAtFull?.recentRejectedSends ?? 'unavailable'}`;
+}
+
 async function setScene(page: Page, scene: Scene) {
   await page.evaluate(async (name) => {
     const video = document.querySelector<HTMLVideoElement>('#movie_player video');
@@ -3366,25 +3407,58 @@ async function runOverloadBackend(options: {
         for (let batch = 0; batch < 20; batch++) {
           failureStage = `overflow:old-${batch}:transport`;
           await send(`overflowSeed${batch}`);
-          failureStage = `overflow:old-${batch}:ingress`;
-          await waitForIngress(page, backend, `WINDOWS380_LOAD_OVERFLOW_OLD_${batch * 4 + 3}`);
+          failureStage = `overflow:old-${batch}:manager-or-ingress`;
+          await waitForOverflowSeedProcessed(
+            page,
+            backend,
+            `WINDOWS380_LOAD_OVERFLOW_OLD_${batch * 4 + 3}`
+          );
+        }
+        if (backend === 'worker' && mode === 'candidate') {
+          failureStage = 'overflow:old-candidate-ingress';
+          await waitForIngress(page, backend, 'WINDOWS380_LOAD_OVERFLOW_OLD_79');
         }
         failureStage = 'overflow:queue-full';
         const full = await observe('queue-full');
         const oldRendererIngress = Array.from({ length: 80 }, (_, index) =>
           Number.isFinite(full.ingress[`WINDOWS380_LOAD_OVERFLOW_OLD_${index}`])
         ).filter(Boolean).length;
+        const managerAtFull = backend === 'worker' ? snapshots.at(-1)?.managerProbe : null;
+        const recentRejectedSends =
+          managerAtFull?.events.filter(
+            (event) =>
+              event.kind === 'manager-send-after' &&
+              event.accepted === false &&
+              typeof event.id === 'string' &&
+              event.id.startsWith('WINDOWS380_LOAD_OVERFLOW_OLD_')
+          ).length ?? 0;
         currentOverflowInput = {
           oldResponses: 20,
           oldMessages: 80,
           newerMessages: 4,
           oldRendererIngress,
           fullPending: full.pendingNow.length,
+          ...(managerAtFull
+            ? {
+                oldManagerDeferredCount: managerAtFull.manager?.deferredIngressCount ?? null,
+                oldManagerRecentRejectedSends: recentRejectedSends,
+                oldManagerOmittedEvents: managerAtFull.omittedEvents,
+              }
+            : {}),
         };
-        assert(
-          oldRendererIngress === 80,
-          'Overflow seed lacked renderer ingress for all 80 old rows'
+        const admissionFinding = overflowSeedAdmissionFinding(
+          mode,
+          backend,
+          oldRendererIngress,
+          managerAtFull
+            ? {
+                deferredCount: managerAtFull.manager?.deferredIngressCount ?? null,
+                recentRejectedSends,
+              }
+            : undefined
         );
+        if (admissionFinding && baselineFindings.length < 16)
+          baselineFindings.push(admissionFinding);
         assert.equal(
           full.pendingNow.length,
           caps.queue,

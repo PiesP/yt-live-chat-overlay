@@ -26,12 +26,14 @@ import {
   membershipEffect,
   OVERLOAD_BATCHES,
   overloadTrace,
+  overflowSeedAdmissionFinding,
   paidRowBudget,
   presentationItem,
   presentationGeometry,
   snapshot,
   validateMatrixMode,
   waitForIngress,
+  waitForOverflowSeedProcessed,
 } from '../../../validation/windows/comment-display-matrix.ts';
 import { canvasProbePrelude } from '../../../validation/windows/placement-timing.ts';
 
@@ -223,6 +225,35 @@ describe('Windows comment display matrix contract', () => {
       deferredIngress: null,
       projectedWork: null,
     });
+    if (!withProbe.observed) throw new Error('Actual Manager probe was not captured');
+    const probeWindow = {
+      __ytPlacementProbe: {
+        workers: [{ ready: true, sample: { ingress: {} as Record<string, number> } }],
+        requestFlushIfDue: vi.fn(),
+      },
+      __ytMatrixManagerProbe: { read: () => withProbe.observed },
+    };
+    const page = {
+      waitForFunction: async (callback: (value: unknown) => boolean, value: unknown) => {
+        expect(
+          runInNewContext(`(${callback.toString()})(${JSON.stringify(value)})`, {
+            window: probeWindow,
+          })
+        ).toBe(true);
+      },
+    } as unknown as Parameters<typeof waitForOverflowSeedProcessed>[0];
+    await waitForOverflowSeedProcessed(page, 'worker', id);
+    expect(probeWindow.__ytPlacementProbe.workers[0]?.sample.ingress[id]).toBeUndefined();
+    expect(overflowSeedAdmissionFinding('baseline', 'worker', 52)).toContain('52/80');
+    expect(
+      overflowSeedAdmissionFinding('baseline', 'worker', 52, {
+        deferredCount: 28,
+        recentRejectedSends: 1,
+      })
+    ).toContain('Manager deferred 28, rejected sends in recent ring 1');
+    expect(() => overflowSeedAdmissionFinding('candidate', 'worker', 52)).toThrow();
+    expect(() => overflowSeedAdmissionFinding('baseline', 'main', 52)).toThrow();
+    expect(overflowSeedAdmissionFinding('candidate', 'worker', 80)).toBeNull();
   });
 
   it('inserts only at the packaged entry and rejects Manager shape drift', () => {
