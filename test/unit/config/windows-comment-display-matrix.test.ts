@@ -37,6 +37,7 @@ import {
   planVisibleItemWait,
   presentationItem,
   presentationGeometry,
+  scrollCurrentPreviewCanvasIntoView,
   snapshot,
   waitForPaidPlan,
   waitForPaidCapture,
@@ -740,6 +741,41 @@ describe('Windows comment display matrix contract', () => {
         stacked[2]!,
       ])
     ).toThrow();
+  });
+
+  it('scrolls a current readable preview after a detached canvas is replaced', () => {
+    const makeCanvas = (connected: boolean, width: number, height: number) => ({
+      isConnected: connected,
+      width,
+      height,
+      getBoundingClientRect: () => ({ width, height }),
+      getContext: () => ({
+        getImageData: () => ({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
+      }),
+      scrollIntoView: vi.fn(),
+    });
+    const detached = makeCanvas(false, 300, 120);
+    const replacement = makeCanvas(true, 300, 120);
+    let current: ReturnType<typeof makeCanvas> | null = detached;
+    let visibility = 'visible';
+    const root = {
+      querySelector: () => current,
+      defaultView: { getComputedStyle: () => ({ visibility }) },
+    } as unknown as Document;
+
+    expect(scrollCurrentPreviewCanvasIntoView(root)).toBe(false);
+    expect(detached.scrollIntoView).not.toHaveBeenCalled();
+    current = replacement;
+    expect(scrollCurrentPreviewCanvasIntoView(root)).toBe(true);
+    expect(replacement.scrollIntoView).toHaveBeenCalledOnce();
+    expect(replacement.getContext().getImageData().data[3]).toBe(255);
+
+    current = null;
+    expect(scrollCurrentPreviewCanvasIntoView(root)).toBe(false);
+    current = replacement;
+    visibility = 'hidden';
+    expect(scrollCurrentPreviewCanvasIntoView(root)).toBe(false);
+    expect(replacement.scrollIntoView).toHaveBeenCalledOnce();
   });
 
   it('keeps matched presentation inputs bounded and distinct by scene', () => {

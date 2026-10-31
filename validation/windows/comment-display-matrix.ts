@@ -367,6 +367,24 @@ export function assertPreviewComparison(stacked: PreviewSample[], wide: PreviewS
   );
 }
 
+/** Scroll the currently rendered preview, which settings may replace between observations. */
+export function scrollCurrentPreviewCanvasIntoView(root: Document = document): boolean {
+  const selector = '#yt-chat-overlay-settings-backdrop [data-card-preview] canvas';
+  const canvas = root.querySelector<HTMLCanvasElement>(selector);
+  if (!canvas?.isConnected || !root.defaultView) return false;
+  const rect = canvas.getBoundingClientRect();
+  if (
+    rect.width <= 0 ||
+    rect.height <= 0 ||
+    root.defaultView.getComputedStyle(canvas).visibility !== 'visible'
+  )
+    return false;
+  canvas.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  const current = root.querySelector<HTMLCanvasElement>(selector);
+  const scrolled = canvas.getBoundingClientRect();
+  return current === canvas && canvas.isConnected && scrolled.width > 0 && scrolled.height > 0;
+}
+
 function textAction(id: string, body: string) {
   return {
     addChatItemAction: {
@@ -3429,7 +3447,7 @@ async function runBackend(options: {
         );
       };
       previewObservations.push({ layout: 'wide', samples: await readPreview() });
-      await preview.first().scrollIntoViewIfNeeded();
+      await page.waitForFunction(scrollCurrentPreviewCanvasIntoView, undefined, { timeout: 5000 });
       await capture('preview-wide');
       await modal.locator('#tab-colors').click();
       await layoutControl.selectOption('stacked');
@@ -3452,7 +3470,7 @@ async function runBackend(options: {
         { timeout: 5000 }
       );
       previewObservations.push({ layout: 'stacked', samples: await readPreview() });
-      await preview.first().scrollIntoViewIfNeeded();
+      await page.waitForFunction(scrollCurrentPreviewCanvasIntoView, undefined, { timeout: 5000 });
       await capture('preview-stacked');
       check(() =>
         assertPreviewComparison(
