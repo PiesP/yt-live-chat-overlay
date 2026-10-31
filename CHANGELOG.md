@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Burst and Backlog settings** — Interpret burst thresholds as messages per elapsed second, cover both ends of the admitted Backlog range when sampling, and pause Backlog injection at a zero maximum. Existing saved numbers remain compatible; labels explain sampling limits and randomized target rates.
 - **Opacity controls** — Preserve outline opacity across its full 0–100% range through preview, import, save and reload. Text opacity keeps its 50–100% range; each slider and number input now shares its range and adjustment feedback.
 - **Release preparation** — Reject missing or empty version changelog entries before replacing an existing local candidate bundle.
 - **Chat request deadlines** — Preserve request timeouts during internal retry waits so live polling counts the failure and can recover on the next healthy response. Session stop and replay seek still cancel their owned requests.
