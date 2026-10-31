@@ -143,6 +143,10 @@ export const KO: Record<string, string> = {
     '댓글 행 사이에 추가할 세로 간격입니다. 0은 글자와 외곽선이 겹치지 않는 최소 간격을 사용합니다.',
   'danmaku.fontCustomDesc':
     'CSS font-family 값. 예: "Noto Sans KR", sans-serif. 글꼴이 없으면 시스템 기본값을 사용합니다.',
+  'appearance.superchatLayout': '슈퍼챗 배치',
+  'appearance.superchatLayoutStacked': '세로형',
+  'appearance.superchatLayoutWide': '가로형',
+  'appearance.superchatLayoutDesc': '가로형은 공간이 충분하면 작성자와 금액을 한 줄에 표시합니다.',
   'appearance.superchatOpacityDesc': '슈퍼챗 카드의 배경 불투명도',
   'appearance.superchatMaxLinesDesc': '본문 텍스트 최대 줄 수, 초과 시 잘림 (2-10)',
   'appearance.membershipMaxLinesDesc': '멤버십 메시지 본문 최대 줄 수 (1-5)',
@@ -337,7 +341,7 @@ export const KO: Record<string, string> = {
 
   // ── Author grid ──
   Color: '색상',
-  'appearance.authorsNameColor': '이름 색상',
+  'appearance.authorsNameColor': '글자색',
   'appearance.authorsBackground': '배경',
   Show: '표시',
   'appearance.authorsShowName': '이름 표시',

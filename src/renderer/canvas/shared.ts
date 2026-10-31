@@ -774,6 +774,64 @@ export function drawRoundRect(
   ctx.closePath();
 }
 
+/** Draw an identifiable sticker placeholder while its bitmap is pending or unavailable. */
+export function drawStickerFallback(
+  ctx: AnyCanvasContext,
+  label: string,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+  fontFamily: string
+): void {
+  if (size <= 0) return;
+  ctx.save();
+  drawRoundRect(ctx, x, y, size, size, Math.min(8, size / 6));
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const fontSize = Math.max(10, Math.min(16, Math.round(size * 0.2)));
+  ctx.font = getFontString(fontSize, 'bold', fontFamily);
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const maxWidth = Math.max(1, size - 8);
+  const visibleLabel = label.trim().replace(/\s+/gu, ' ') || 'Sticker';
+  ctx.direction = resolveTextDirection(visibleLabel);
+  const clusters = splitGraphemeClusters(visibleLabel);
+  const lines: string[] = [];
+  let index = 0;
+  for (let row = 0; row < 2 && index < clusters.length; row++) {
+    let line = '';
+    while (index < clusters.length && ctx.measureText(line + clusters[index]).width <= maxWidth) {
+      line += clusters[index];
+      index++;
+    }
+    if (row === 1 && index < clusters.length) {
+      while (line && ctx.measureText(`${line}…`).width > maxWidth) {
+        line = splitGraphemeClusters(line).slice(0, -1).join('');
+      }
+      if (ctx.measureText(`${line}…`).width <= maxWidth) line += '…';
+    }
+    if (line) lines.push(line);
+    else if (ctx.measureText('…').width <= maxWidth) lines.push('…');
+  }
+  const lineHeight = fontSize * 1.2;
+  for (const [lineIndex, line] of lines.entries()) {
+    ctx.direction = resolveTextDirection(line);
+    ctx.fillText(
+      line,
+      x + size / 2,
+      y + size / 2 + (lineIndex - (lines.length - 1) / 2) * lineHeight,
+      maxWidth
+    );
+  }
+  ctx.restore();
+}
+
 /**
  * Fill the existing bounds of a regular message with a single solid color.
  *

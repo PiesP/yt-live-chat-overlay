@@ -108,13 +108,16 @@ export function toRgba(color: string, alpha: number): string {
 
 /**
  * Choose a readable text color (black or white) for a given background color.
- * Uses WCAG 2.0 relative luminance: returns '#000000' for light backgrounds,
- * '#ffffff' for dark backgrounds.
+ * Compare black and white contrast against the supplied RGB background.
+ * Translucent card compositing over video needs a separate assessment.
  */
 export function computeReadableTextColor(backgroundColor: string): string {
   const rgb = parseAnyColor(backgroundColor);
   if (!rgb) return '#ffffff';
-  return relativeLuminance(rgb) > 0.5 ? '#000000' : '#ffffff';
+  const luminance = relativeLuminance(rgb);
+  const blackContrast = (luminance + 0.05) / 0.05;
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  return blackContrast >= whiteContrast ? '#000000' : '#ffffff';
 }
 
 /**

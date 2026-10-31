@@ -59,6 +59,11 @@ const VALID_DANMAKU_MODES = [
   'bottom',
 ] as const satisfies readonly DanmakuMode[];
 
+const VALID_SUPERCHAT_LAYOUTS = [
+  'stacked',
+  'wide',
+] as const satisfies readonly OverlaySettings['superChatLayout'][];
+
 const MAX_FONT_FAMILY_LENGTH = 256;
 const UNSAFE_FONT_FAMILY_CHARS = /[;{}\u0000-\u001f\u007f]/;
 
@@ -175,6 +180,8 @@ export function normalizeBackgroundColor(value: unknown, fallback: string): stri
 const STRING_VALIDATORS: Record<ScalarKeyOf<string>, (v: string) => boolean> = {
   backlogMode: (v) => VALID_BACKLOG_MODES.includes(v as (typeof VALID_BACKLOG_MODES)[number]),
   danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
+  superChatLayout: (v) =>
+    VALID_SUPERCHAT_LAYOUTS.includes(v as (typeof VALID_SUPERCHAT_LAYOUTS)[number]),
   logLevel: (v) => isLogLevel(v),
   fontWeight: (v) => FONT_WEIGHT_VALUES.includes(v as FontWeight),
   fontFamily: (v) => isSafeFontFamily(v),

@@ -167,6 +167,10 @@ export const AR: Record<string, string> = {
   'danmaku.weightBold': 'عريض',
   'danmaku.weightRegular': 'عادي',
   'danmaku.fontFamilyDesc': 'خط نص التعليق',
+  'appearance.superchatLayout': 'تخطيط الرسائل المميزة',
+  'appearance.superchatLayoutStacked': 'عمودي',
+  'appearance.superchatLayoutWide': 'عريض',
+  'appearance.superchatLayoutDesc': 'يعرض التخطيط العريض الكاتب والمبلغ في صف واحد عند توفر مساحة.',
   'appearance.superchatOpacityDesc': 'شفافية خلفية بطاقات الرسائل المميزة',
   'appearance.superchatMaxLinesDesc': 'الحد الأقصى لأسطر النص قبل الاقتطاع (2-10)',
   'appearance.membershipMaxLinesDesc': 'الحد الأقصى لأسطر رسائل العضوية (1-5)',
@@ -343,7 +347,7 @@ export const AR: Record<string, string> = {
 
   // ── Author grid ──
   Color: 'اللون',
-  'appearance.authorsNameColor': 'لون الاسم',
+  'appearance.authorsNameColor': 'لون النص',
   'appearance.authorsBackground': 'الخلفية',
   Show: 'إظهار',
   'appearance.authorsShowName': 'إظهار الاسم',

@@ -113,6 +113,7 @@ const ROOT_SETTING_META = {
     displayPrecision: 1,
   },
   showSuperChatAmount: { type: 'boolean', visual: true },
+  superChatLayout: { type: 'string', visual: true },
   translationEnabled: { type: 'boolean', visual: false },
   translationService: { type: 'string', visual: false },
   translationSource: { type: 'string', visual: false },

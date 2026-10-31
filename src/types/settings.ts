@@ -72,6 +72,7 @@ export interface OverlaySettings {
   motionBlurAlpha: number;
   modOwnerDurationMultiplier: number;
   showSuperChatAmount: boolean;
+  superChatLayout: 'stacked' | 'wide';
   preserveUserColor: boolean;
   superChatMaxBodyLines: number;
   membershipMaxBodyLines: number;

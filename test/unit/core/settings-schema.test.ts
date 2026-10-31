@@ -35,6 +35,19 @@ describe('STORAGE_KEY', () => {
 });
 
 describe('settings form intent', () => {
+  it('preserves stacked defaults and the explicit wide choice without migration', () => {
+    expect(DEFAULT_SETTINGS.superChatLayout).toBe('stacked');
+    expect(normalizeStoredSettings({ fontSize: 48 })).toMatchObject({
+      fontSize: 48,
+      superChatLayout: 'stacked',
+    });
+    expect(normalizeStoredSettings({ superChatLayout: 'ribbon' }).superChatLayout).toBe('stacked');
+    const wide = applySettingsPatch(DEFAULT_SETTINGS, { superChatLayout: 'wide' });
+    expect(normalizeStoredSettings(JSON.parse(JSON.stringify(wide))).superChatLayout).toBe('wide');
+    expect(changedSettingsPatch(DEFAULT_SETTINGS, wide)).toEqual({ superChatLayout: 'wide' });
+    expect(shouldResetRendererForSettingsChange(DEFAULT_SETTINGS, wide)).toBe(true);
+  });
+
   it('does not mistake browser color-input casing for a user edit', () => {
     const displayed = cloneSettings(DEFAULT_SETTINGS);
     displayed.colors.normal = displayed.colors.normal.toLowerCase();

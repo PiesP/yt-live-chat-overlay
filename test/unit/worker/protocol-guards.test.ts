@@ -525,6 +525,19 @@ describe('renderer worker protocol guards', () => {
     expect(isValidControlMessage({ type: 'updateConfig', config: { prototype: {} } })).toBe(false);
   });
 
+  it('accepts only the two card layouts when an update includes the preference', () => {
+    for (const superChatLayout of ['stacked', 'wide']) {
+      expect(isValidControlMessage({ type: 'updateConfig', config: { superChatLayout } })).toBe(
+        true
+      );
+    }
+    for (const superChatLayout of ['ribbon', '', null, false, 1, {}]) {
+      expect(isValidControlMessage({ type: 'updateConfig', config: { superChatLayout } })).toBe(
+        false
+      );
+    }
+  });
+
   it('rejects non-finite and out-of-policy resource settings', () => {
     expect(isValidControlMessage({ type: 'updateConfig', config: { opacity: 0.75 } })).toBe(true);
     expect(

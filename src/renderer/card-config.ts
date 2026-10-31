@@ -9,6 +9,7 @@
  */
 
 import type { ChatMessage, OverlaySettings, RgbColor } from '@app-types';
+import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import { computeReadableTextColor, resolveSuperChatRgb } from '@renderer/color-utils';
 import {
   DEFAULT_TEXT_COLOR,
@@ -21,6 +22,17 @@ import {
 
 type BackgroundMode = 'gradient' | 'solid';
 type DecorationMode = 'accentBar' | 'pulsingBorder' | 'none';
+
+/** Membership borders stay visible without animation under effective reduced motion. */
+export function resolveCardBorderAlpha(
+  elapsed: number,
+  border: { baseAlpha: number; amplitude: number },
+  reducedMotion: boolean
+): number {
+  return reducedMotion
+    ? border.baseAlpha
+    : computePulseAlpha(elapsed, border.baseAlpha, border.amplitude);
+}
 
 /**
  * Worker-safe CardConfig — no callbacks, all pre-computed values for structured clone.

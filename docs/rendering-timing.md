@@ -22,6 +22,40 @@ for canonical fields. If grapheme segmentation is unavailable, truncation treats
 each text segment as indivisible and uses an ellipsis when it cannot fit. This
 can retain less text, while preserving the compact limit and whole characters.
 
+## Paid cards and preview
+
+`superChatLayout` selects `stacked` or `wide`. Both existing and new settings
+default to `stacked`; load, import, export, preview, reset and synchronization
+retain the selected value. Wide cards allocate the original localized amount
+before flexible author text. When the metadata cannot share a row, the amount
+uses a separate row. Author shortening respects graphemes. An exceptionally long
+amount fits its bounded badge through horizontal text fitting, which can reduce
+its apparent width; this is not a reading-time guarantee.
+
+Estimation, Main, Worker and the production settings preview use the same paid
+card plan and prepared paragraph rows. Original and dual translation share the
+configured total body-line budget. With a one-line budget, the original keeps
+that line; a dual translation has no additional visual row. Accessible text
+alternatives retain the bounded original and selected translation, as described
+below, and can be more complete than the Canvas projection. Replace mode uses
+the translation as the body. Amount-only and empty-body cases add no body gap.
+
+Sticker rows retain a fixed bounded reservation while images load. Loaded images
+preserve their aspect ratio; pending or failed images use the same visible alt
+placeholder in both renderers. Keeping the reservation avoids an asynchronous
+height change. Ordinary member-authored comments keep the regular layout;
+membership events keep their event card.
+
+Paid body, amount, metadata and translation share the card foreground. Automatic
+black/white selection compares RGB contrast on the selected card color; opacity
+and arbitrary video backgrounds still affect the final composite. Membership
+uses a shared border treatment, static under effective reduced motion. The old
+Main-only blurred glow is retired so decoration follows the same availability
+and content opacity in both renderers. Appearance preview includes paid,
+membership, author, emoji, translation and narrow-card samples using actual
+settings and the production drawing path. Text Color also controls ordinary
+body text, matching its label.
+
 ## Motion and geometry
 
 Canvas and OffscreenCanvas Worker rendering use the shared motion planner in

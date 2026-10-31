@@ -8,7 +8,7 @@
  * the boundary between type definitions and rendering logic.
  */
 
-import type { DanmakuMode, DropReason, FontWeight } from '@app-types';
+import type { DanmakuMode, DropReason, FontWeight, OverlaySettings } from '@app-types';
 import type { CardConfigWorker } from '@renderer/card-config';
 import type { MessageMotionPlan } from '@renderer/layout/motion-types';
 
@@ -71,6 +71,7 @@ export interface WorkerConfig {
   outlineOpacity: number;
   /** SuperChat color opacity (0.35–1.0). */
   superChatOpacity: number;
+  superChatLayout: OverlaySettings['superChatLayout'];
   /** Maximum body text lines for SuperChat cards. */
   superChatMaxBodyLines: number;
   /** Maximum body text lines for Membership messages. */
@@ -192,6 +193,8 @@ export interface WorkerMessage {
   superChatAmount?: string;
   /** Sticker image URL. */
   superChatStickerUrl?: string;
+  /** Original sticker accessibility label for pending or failed image fallback. */
+  superChatStickerAlt?: string;
   /** Membership header text (e.g. member tier/duration). */
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */
@@ -343,6 +346,8 @@ export interface ActiveMessage {
   superChatAmount?: string;
   /** SuperChat sticker image URL. */
   superChatStickerUrl?: string;
+  /** Original sticker accessibility label for pending or failed image fallback. */
+  superChatStickerAlt?: string;
   /** Membership header text. */
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */

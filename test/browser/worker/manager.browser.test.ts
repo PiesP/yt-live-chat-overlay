@@ -92,6 +92,17 @@ describe('RenderWorkerManager', () => {
   });
 
   describe('worker configuration', () => {
+    it('transfers the explicit wide card preference instead of its stacked default', () => {
+      const config = RenderWorkerManager.buildWorkerConfig({
+        ...DEFAULT_SETTINGS,
+        superChatLayout: 'wide',
+      });
+      expect(config.superChatLayout).toBe('wide');
+      expect(RenderWorkerManager.buildWorkerConfig(DEFAULT_SETTINGS).superChatLayout).toBe(
+        'stacked'
+      );
+    });
+
     it('copies every selected setting and derives the initial wire fields', () => {
       const settings = {
         ...DEFAULT_SETTINGS,

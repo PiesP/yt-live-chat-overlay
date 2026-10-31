@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Super Chat layout** — Add an opt-in wide card with an adaptive author-and-amount header, bounded translated body, sticker fallback, and production card previews. Existing stacked defaults and saved settings remain compatible. Paid text colors and reduced-motion membership decoration agree across Canvas and Worker.
+
 ### Fixed
 
 - **Comment bounds** — Share measured wrapping and emoji/outline ink bounds across Canvas, Worker and preview. Fixed and reduced-motion comments fit the available width; partial safe-zone rows reserve their actual space, and transient zero capacity defers comments until geometry changes.

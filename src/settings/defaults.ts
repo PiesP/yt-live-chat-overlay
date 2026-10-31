@@ -72,6 +72,7 @@ export const DEFAULT_SETTINGS = {
   motionBlurAlpha: 0.03,
   modOwnerDurationMultiplier: 1.5,
   showSuperChatAmount: true,
+  superChatLayout: 'stacked',
   fontWeight: 'bold',
   fontFamily: DEFAULT_FONT_FAMILY,
   preserveUserColor: true,

@@ -95,6 +95,7 @@ describe('serializeWorkerMessage', () => {
         kind: 'superchat',
         superChatAmount: '$5.00',
         superChatStickerUrl: 'https://yt3.ggpht.com/sticker.png',
+        superChatStickerAlt: 'sticker',
         cardConfigWorker: expect.objectContaining({
           badgeEnabled: true,
           showBadgeAmount: settings.showSuperChatAmount,
