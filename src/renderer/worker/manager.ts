@@ -889,7 +889,8 @@ export class RenderWorkerManager {
       const replaced = this.deferredIngress[replaceIndex];
       if (replaced) {
         if (replaced.trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
-        this.deferredIngress[replaceIndex] = entry;
+        this.deferredIngress.splice(replaceIndex, 1);
+        this.deferredIngress.push(entry);
         return true;
       }
     }
@@ -911,7 +912,8 @@ export class RenderWorkerManager {
       return false;
     }
     if (lowest.trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
-    this.deferredIngress[lowestIndex] = entry;
+    this.deferredIngress.splice(lowestIndex, 1);
+    this.deferredIngress.push(entry);
     return true;
   }
 
