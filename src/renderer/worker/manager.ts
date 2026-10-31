@@ -119,6 +119,7 @@ export class RenderWorkerManager {
     'fadeDurationMs',
     'modOwnerDurationMultiplier',
     'superChatOpacity',
+    'superChatLayout',
     'superChatMaxBodyLines',
     'membershipMaxBodyLines',
     'showAuthor',
@@ -174,6 +175,7 @@ export class RenderWorkerManager {
       fadeDurationMs: settings.fadeDurationMs,
       modOwnerDurationMultiplier: settings.modOwnerDurationMultiplier,
       superChatOpacity: settings.superChatOpacity,
+      superChatLayout: settings.superChatLayout,
       superChatMaxBodyLines: settings.superChatMaxBodyLines,
       membershipMaxBodyLines: settings.membershipMaxBodyLines,
       showAuthor: settings.showAuthor,
@@ -1053,6 +1055,7 @@ export class RenderWorkerManager {
       settings.outline.enabled !== previous.outline.enabled ||
       settings.outline.widthPx !== previous.outline.widthPx ||
       settings.superChatMaxBodyLines !== previous.superChatMaxBodyLines ||
+      settings.superChatLayout !== previous.superChatLayout ||
       settings.membershipMaxBodyLines !== previous.membershipMaxBodyLines ||
       settings.showSuperChatAmount !== previous.showSuperChatAmount ||
       settings.translationMode !== previous.translationMode ||

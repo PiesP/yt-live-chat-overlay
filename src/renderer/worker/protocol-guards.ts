@@ -88,6 +88,13 @@ function isSafeConfig(value: unknown): value is Record<string, unknown> {
 
   if (BLOCKED_CONFIG_KEYS.some((key) => hasOwn(value, key))) return false;
 
+  if (
+    hasOwn(value, 'superChatLayout') &&
+    value.superChatLayout !== 'stacked' &&
+    value.superChatLayout !== 'wide'
+  )
+    return false;
+
   for (const configValue of Object.values(value)) {
     if (typeof configValue === 'number' && (!Number.isFinite(configValue) || configValue < 0)) {
       return false;
