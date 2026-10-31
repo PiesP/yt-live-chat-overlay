@@ -20,8 +20,9 @@ detailed videos at 400px and 960px viewport widths; recorded player bounds are
 the actual overlay size. The presentation workload includes a
 localized long amount, mixed RTL/CJK author, sticker, membership event, and
 ordinary comment. The videos must decode and advance before capture. Each backend
-is limited to 16 recorded phases, 12 PNG captures, 48 records per snapshot, and
-60 seconds; the total PNG ceiling is 24. Reduced-motion fixed, pre-pause motion,
+is limited to 16 recorded phases, 12 PNG captures, 48 non-draw records per
+snapshot, 240 actual frame draws, and 60 seconds; the total PNG ceiling is 24.
+Reduced-motion fixed, pre-pause motion,
 paused motion, and zero-capacity phases retain their complete JSON observations
 without an additional PNG. This leaves room for the existing full-profile
 artifacts under the controller's unchanged 64-file collection limit.
@@ -31,8 +32,10 @@ probe requires its positive-alpha draw in the same complete frame. The fixture
 binds paid body and translation draws to the actual prepared plan row passed to
 the shared text painter, so fragmented text and reused glyph bitmaps retain the
 source card ID and section. A plan allocation alone never counts as a draw.
-Ordinary wrapped ink uses the active row's content-array identity in the current
-frame; ambiguous shared arrays are rejected.
+Ordinary ink is bound at the actual regular painter call to its current active
+message, covering wrapped fixed rows and inline scrolling rows. Ambiguous shared
+content arrays are rejected. A snapshot that omits required active rows, plan
+rows, or frame draws is marked truncated and cannot establish complete-frame ink.
 The fixture also opens the actual settings dialog and reads three drawn production Canvas
 preview samples under wide and stacked selections. `comment-display-matrix.json` binds the controller's exact
 source, core, build-log, bundle, profile, packaged page-script, fixture sources,

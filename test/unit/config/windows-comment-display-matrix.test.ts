@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { runInNewContext } from 'node:vm';
+
 import { describe, expect, it } from 'vite-plus/test';
 
 import {
@@ -20,6 +22,7 @@ import {
   paidRowBudget,
   presentationItem,
   presentationGeometry,
+  snapshot,
   validateMatrixMode,
 } from '../../../validation/windows/comment-display-matrix.ts';
 
@@ -302,6 +305,21 @@ describe('Windows comment display matrix contract', () => {
         4
       )
     ).toThrow(/bounds/);
+    for (const spill of [
+      { ...sample.frame.draws[0]!, rect: { ...rect, left: 130, right: 180 } },
+      { ...sample.frame.draws[1]!, rect: { ...rect, top: 100, bottom: 120 } },
+    ]) {
+      expect(() =>
+        paidRowBudget(
+          {
+            ...sample,
+            frame: { ...sample.frame, draws: [...sample.frame.draws, spill] },
+          },
+          id,
+          4
+        )
+      ).toThrow(/bounds/);
+    }
     const oneLine = {
       ...sample,
       frame: {
@@ -354,6 +372,100 @@ describe('Windows comment display matrix contract', () => {
     );
     expect(trace.byKind.paid).toMatchObject({ reserved: 1, firstVisible: 1 });
     expect(trace.byKind.ordinary).toMatchObject({ reserved: 0, firstVisible: 0 });
+  });
+
+  it('retains late source-owned ink beyond 48 records and rejects omitted frame draws', async () => {
+    const id = 'WINDOWS380_DETAILED_PAID';
+    const body = {
+      id,
+      section: 'body',
+      alpha: 1,
+      rect: { left: 20, top: 30, right: 120, bottom: 42 },
+    };
+    const translation = {
+      id,
+      section: 'translation',
+      alpha: 1,
+      rect: { left: 20, top: 65, right: 120, bottom: 77 },
+    };
+    const spill = { ...body, rect: { left: 130, top: 30, right: 180, bottom: 42 } };
+    const frame = {
+      frameId: 1,
+      startedAtEpochMs: 1000,
+      complete: true,
+      cleared: true,
+      truncated: false,
+      logicalWidth: 960,
+      logicalHeight: 540,
+      backingRatioX: 1,
+      backingRatioY: 1,
+      config: { reducedMotion: false, ignoreReducedMotion: false },
+      active: [{ id, x: 10, y: 10, width: 160, height: 100 }],
+      draws: [...Array.from({ length: 48 }, () => body), translation, spill],
+      cardPlans: [
+        {
+          id,
+          kind: 'superchat',
+          height: 100,
+          maxBodyLines: 4,
+          bodyRows: 2,
+          bodyY: 20,
+          bodyHeight: 30,
+          translationRows: 2,
+          translationY: 55,
+          translationHeight: 30,
+          borderAlpha: null,
+          borderStyle: null,
+        },
+      ],
+    };
+    const probe = {
+      workers: [],
+      latestRenderFrame: frame,
+      exact: { activeNow: frame.active },
+      firstEntry: { [id]: 1001 },
+      ingress: {},
+    };
+    const sandbox = {
+      window: { __ytPlacementProbe: probe },
+      document: {
+        querySelector: () => ({
+          getBoundingClientRect: () => ({ width: 960, height: 540, left: 0, top: 0 }),
+        }),
+        querySelectorAll: () => [],
+      },
+      innerWidth: 960,
+      innerHeight: 540,
+      devicePixelRatio: 1,
+    };
+    const page = {
+      evaluate: async (callback: (input: unknown) => unknown, input: unknown) =>
+        runInNewContext(`(${callback.toString()})(${JSON.stringify(input)})`, sandbox),
+    } as unknown as Parameters<typeof snapshot>[0];
+    const observed = await snapshot(page, 'main');
+    expect(observed.frame?.truncated).toBe(false);
+    expect(observed.frame?.draws).toHaveLength(50);
+    expect(observed.frame?.draws.at(-2)?.section).toBe('translation');
+    expect(observed.frame?.draws.at(-1)?.rect?.right).toBe(180);
+    expect(() => paidRowBudget(observed, id, 4)).toThrow(/bounds/);
+    probe.latestRenderFrame = { ...frame, draws: Array.from({ length: 241 }, () => body) };
+    const capped = await snapshot(page, 'main');
+    expect(capped.frame?.draws).toHaveLength(240);
+    expect(capped.frame?.truncated).toBe(true);
+    probe.latestRenderFrame = {
+      ...frame,
+      active: Array.from({ length: 49 }, () => frame.active[0]!),
+    };
+    const activeCapped = await snapshot(page, 'main');
+    expect(activeCapped.frame?.active).toHaveLength(48);
+    expect(activeCapped.frame?.truncated).toBe(true);
+    probe.latestRenderFrame = {
+      ...frame,
+      cardPlans: Array.from({ length: 25 }, () => frame.cardPlans[0]!),
+    };
+    const plansCapped = await snapshot(page, 'main');
+    expect(plansCapped.frame?.cardPlans).toHaveLength(24);
+    expect(plansCapped.frame?.truncated).toBe(true);
   });
 
   it('binds both packaged files to the controller source, core, and build identities', () => {

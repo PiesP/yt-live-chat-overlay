@@ -62,6 +62,7 @@ const PRESENTATION_IDS = Object.fromEntries(
 ) as Record<Scene, { paid: string; sticker: string; membership: string; ordinary: string }>;
 const PROBE_IDS = [...IDS, ...Object.values(PRESENTATION_IDS).flatMap(Object.values)];
 const MAX_RECORDS = 48;
+const MAX_FRAME_DRAWS = 240;
 // Extra translated-frame and production-preview waits remain under a hard backend deadline.
 const MAX_RUN_MS = 60_000;
 const MAX_PHASES_PER_BACKEND = 16;
@@ -586,7 +587,7 @@ function assertBackend(snapshot: MatrixSnapshot, backend: Backend) {
   }
 }
 
-async function snapshot(
+export async function snapshot(
   page: Page,
   backend: Backend,
   maxRecords = MAX_RECORDS,
@@ -609,7 +610,7 @@ async function snapshot(
     );
   }
   const observed = await page.evaluate(
-    ({ selectedBackend, recordLimit, requestedFrame }) => {
+    ({ selectedBackend, recordLimit, frameDrawLimit, requestedFrame }) => {
       const probe = window.__ytPlacementProbe;
       const worker = probe.workers.find((record) => record.ready);
       const selected = selectedBackend === 'worker' ? worker?.sample : probe;
@@ -617,6 +618,10 @@ async function snapshot(
       const frame = requestedFrame
         ? selected?.firstCompleteFrames?.[`${requestedFrame.id}|${requestedFrame.layout}`]
         : selected?.latestRenderFrame;
+      const active = frame?.active.filter((entry) => entry.id.startsWith('WINDOWS380_')) ?? [];
+      const draws = frame?.draws.filter((entry) => entry.id.startsWith('WINDOWS380_')) ?? [];
+      const cardPlans =
+        frame?.cardPlans?.filter((entry) => entry.id.startsWith('WINDOWS380_')) ?? [];
       const overlay = document
         .querySelector<HTMLCanvasElement>('#yt-live-chat-overlay canvas')
         ?.getBoundingClientRect();
@@ -645,21 +650,18 @@ async function snapshot(
               startedAtEpochMs: frame.startedAtEpochMs,
               complete: frame.complete,
               cleared: frame.cleared,
-              truncated: frame.truncated,
+              truncated:
+                frame.truncated ||
+                active.length > recordLimit ||
+                draws.length > frameDrawLimit ||
+                cardPlans.length > 24,
               logicalWidth: frame.logicalWidth,
               logicalHeight: frame.logicalHeight,
               backingRatioX: frame.backingRatioX,
               backingRatioY: frame.backingRatioY,
-              active: frame.active
-                .filter((entry) => entry.id.startsWith('WINDOWS380_'))
-                .slice(0, recordLimit),
-              draws: frame.draws
-                .filter((entry) => entry.id.startsWith('WINDOWS380_'))
-                .slice(0, recordLimit),
-              cardPlans:
-                frame.cardPlans
-                  ?.filter((entry) => entry.id.startsWith('WINDOWS380_'))
-                  .slice(0, 24) ?? [],
+              active: active.slice(0, recordLimit),
+              draws: draws.slice(0, frameDrawLimit),
+              cardPlans: cardPlans.slice(0, 24),
               config: {
                 reducedMotion: frame.config?.reducedMotion ?? null,
                 ignoreReducedMotion: frame.config?.ignoreReducedMotion ?? null,
@@ -727,7 +729,12 @@ async function snapshot(
         overflow: (selected?.overflow ?? 0) + (exact?.overflow ?? 0),
       };
     },
-    { selectedBackend: backend, recordLimit: maxRecords, requestedFrame: dueFrame }
+    {
+      selectedBackend: backend,
+      recordLimit: maxRecords,
+      frameDrawLimit: MAX_FRAME_DRAWS,
+      requestedFrame: dueFrame,
+    }
   );
   return observed as MatrixSnapshot;
 }
@@ -811,30 +818,31 @@ export function paidRowBudget(snapshot: MatrixSnapshot, id: string, expectedLine
   const row = snapshot.activeNow.find((entry) => entry.id === id);
   assert(row, `${id} lacks committed card geometry`);
   assert(plan.height <= row.height + 2, 'Measured plan exceeds committed card height');
-  const visibleSection = (entry: MatrixDraw, section: 'body' | 'translation') =>
-    entry.id === id &&
-    entry.section === section &&
-    entry.alpha > 0 &&
+  const visibleInk = (entry: MatrixDraw) =>
     entry.rect &&
     entry.rect.left < Number(frame.logicalWidth) &&
     entry.rect.right > 0 &&
     entry.rect.top < Number(frame.logicalHeight) &&
     entry.rect.bottom > 0;
-  const original = frame.draws.find((entry) => visibleSection(entry, 'body'));
+  const originalDraws = frame.draws.filter(
+    (entry) => entry.id === id && entry.section === 'body' && entry.alpha > 0
+  );
+  const translatedDraws = frame.draws.filter(
+    (entry) => entry.id === id && entry.section === 'translation' && entry.alpha > 0
+  );
+  const original = originalDraws.find(visibleInk);
   assert(original?.rect, 'Canonical body lacks positive-alpha ink in the completed frame');
-  const translated = frame.draws.find((entry) => visibleSection(entry, 'translation'));
+  const translated = translatedDraws.find(visibleInk);
   if (expectedLines > 1) assert(translated?.rect, 'Translated body lacks positive-alpha ink');
   else
     assert(
-      !frame.draws.some(
-        (entry) => entry.id === id && entry.section === 'translation' && entry.alpha > 0
-      ),
+      !frame.draws.some((entry) => entry.id === id && entry.section === 'translation'),
       'One-line fallback unexpectedly drew translated ink'
     );
-  for (const draw of [original, translated]) {
-    if (!draw?.rect) continue;
+  for (const draw of [...originalDraws, ...translatedDraws]) {
     assert(
-      draw.rect.left >= row.x - 2 &&
+      draw.rect &&
+        draw.rect.left >= row.x - 2 &&
         draw.rect.right <= row.x + row.width + 2 &&
         draw.rect.top >= row.y - 2 &&
         draw.rect.bottom <= row.y + row.height + 2,
@@ -2837,6 +2845,7 @@ async function runOverloadBackend(options: {
     durationMs: Date.now() - startedAt,
     maxBackendMs: MAX_OVERLOAD_MS,
     maxRecordsPerSnapshot: MAX_OVERLOAD_RECORDS,
+    maxFrameDraws: MAX_FRAME_DRAWS,
     screenshotCount: 0,
     hiddenState: 'controlled Document visibility getter and visibilitychange event',
   };
@@ -2971,6 +2980,7 @@ export async function runCommentDisplayMatrix(options: {
       limits: {
         maxBackendMs: MAX_OVERLOAD_MS,
         maxRecordsPerSnapshot: MAX_OVERLOAD_RECORDS,
+        maxFrameDraws: MAX_FRAME_DRAWS,
         maxScreenshots: 0,
       },
     },
@@ -2985,6 +2995,7 @@ export async function runCommentDisplayMatrix(options: {
       maxPhasesPerBackend: MAX_PHASES_PER_BACKEND,
       maxCapturesPerBackend: MAX_CAPTURES_PER_BACKEND,
       maxRecordsPerSnapshot: MAX_RECORDS,
+      maxFrameDraws: MAX_FRAME_DRAWS,
       maxBackendMs: MAX_RUN_MS,
     },
   };

@@ -342,8 +342,10 @@ type ProbeState = ProbeSample & {
   currentFrame: { startedAt: number; preClearMs: number | null } | null;
   measuredPlans: Record<string, { width: number; height: number; maxBodyLines: number }>;
   registerPlanSections: (plan: object, id: string, context: CanvasContext) => void;
-  registerActiveContent: (rows: unknown[], context: CanvasContext) => void;
   wrapWrappedContent: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
+  wrapRegularMessage: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
+  wrapAuthorSection: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
+  setActiveRowsReader: (reader: (() => unknown[]) | null) => (() => unknown[]) | null;
   requestAtEpochMs?: number;
   flushSequence?: number;
   canvasSourceHooked?: boolean;
@@ -444,15 +446,13 @@ function installProbeRuntime(options: ProbeOptions) {
     object,
     { id: string; section: 'body' | 'translation'; context: CanvasContext }
   >();
-  let activeContent = new WeakMap<
-    object,
-    { id: string; section: 'regular'; context: CanvasContext } | null
-  >();
+  let activeRowsReader: (() => unknown[]) | null = null;
   let textOwner: {
     id: string;
     section: 'body' | 'translation' | 'regular';
     context: CanvasContext;
   } | null = null;
+  let drawingAuthor = false;
   const frameContexts = new WeakMap<RenderFrame, CanvasContext>();
   const state = {
     frames: [],
@@ -485,41 +485,73 @@ function installProbeRuntime(options: ProbeOptions) {
     if (rows.translation)
       planSections.set(rows.translation, { id, section: 'translation', context });
   };
-  state.registerActiveContent = (rows, context) => {
-    activeContent = new WeakMap();
-    for (const candidate of rows) {
-      if (!candidate || typeof candidate !== 'object') continue;
-      const row = candidate as {
-        id?: string;
-        content?: object;
-        message?: { id?: string; content?: object };
-        renderMessage?: { content?: object };
-      };
-      const id = row.id ?? row.message?.id;
-      const content = row.renderMessage?.content ?? row.content ?? row.message?.content;
-      if (!id || !ids.has(id) || !Array.isArray(content) || !content.length) continue;
-      const previous = activeContent.get(content);
-      activeContent.set(
-        content,
-        activeContent.has(content) && (!previous || previous.id !== id)
-          ? null
-          : { id, section: 'regular', context }
-      );
-    }
+  state.setActiveRowsReader = (reader) => {
+    const previous = activeRowsReader;
+    activeRowsReader = reader;
+    return previous;
   };
+  state.wrapRegularMessage = (render) =>
+    function (this: unknown, ...args: unknown[]) {
+      const context = args[0] as CanvasContext;
+      const message = args[1] as { id?: string; content?: object } | null;
+      const rows = activeRowsReader?.();
+      let owner: { id: string; section: 'regular'; context: CanvasContext } | null = null;
+      if (message && rows && rows.length <= MAX_SAMPLES && state.currentRenderFrame) {
+        const matching = rows.filter((candidate) => {
+          if (!candidate || typeof candidate !== 'object') return false;
+          const row = candidate as { message?: object; renderMessage?: object };
+          return candidate === message || row.message === message || row.renderMessage === message;
+        });
+        if (matching.length === 1) {
+          const row = matching[0] as { id?: string; message?: { id?: string } };
+          const id = row.id ?? row.message?.id;
+          const content = message.content;
+          const ambiguous =
+            Array.isArray(content) &&
+            rows.some((candidate) => {
+              if (!candidate || typeof candidate !== 'object' || candidate === row) return false;
+              const other = candidate as {
+                id?: string;
+                content?: object;
+                message?: { id?: string; content?: object };
+                renderMessage?: { content?: object };
+              };
+              const otherId = other.id ?? other.message?.id;
+              return (
+                otherId !== id &&
+                (other.renderMessage?.content ?? other.content ?? other.message?.content) ===
+                  content
+              );
+            });
+          if (id && ids.has(id) && (!message.id || message.id === id) && !ambiguous)
+            owner = { id, section: 'regular', context };
+        }
+      }
+      const previous = textOwner;
+      textOwner = owner;
+      try {
+        return Reflect.apply(render, this, args);
+      } finally {
+        textOwner = previous;
+      }
+    };
+  state.wrapAuthorSection = (render) =>
+    function (this: unknown, ...args: unknown[]) {
+      const previous = drawingAuthor;
+      drawingAuthor = true;
+      try {
+        return Reflect.apply(render, this, args);
+      } finally {
+        drawingAuthor = previous;
+      }
+    };
   state.wrapWrappedContent = (render) =>
     function (this: unknown, ...args: unknown[]) {
       const context = args[0] as CanvasContext;
       const prepared = args.at(-1);
-      const segments = args[1];
-      const owner =
-        prepared && typeof prepared === 'object'
-          ? planSections.get(prepared)
-          : segments && typeof segments === 'object'
-            ? activeContent.get(segments)
-            : null;
+      const owner = prepared && typeof prepared === 'object' ? planSections.get(prepared) : null;
       const previous = textOwner;
-      textOwner = owner?.context === context && state.currentRenderFrame ? owner : null;
+      if (owner) textOwner = owner.context === context && state.currentRenderFrame ? owner : null;
       try {
         return Reflect.apply(render, this, args);
       } finally {
@@ -766,7 +798,7 @@ function installProbeRuntime(options: ProbeOptions) {
     } as CanvasRenderingContext2D['stroke'];
     const nativeFillText = prototype.fillText;
     prototype.fillText = function (text, x, y, ...rest) {
-      const id = textOwner?.id ?? tokenIn(text);
+      const id = drawingAuthor ? undefined : (textOwner?.id ?? tokenIn(text));
       const result = nativeFillText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
         if (!textOwner) bitmapIds.set(this.canvas, id);
@@ -825,7 +857,7 @@ function installProbeRuntime(options: ProbeOptions) {
     };
     const nativeStrokeText = prototype.strokeText;
     prototype.strokeText = function (text, x, y, ...rest) {
-      const id = textOwner?.id ?? tokenIn(text);
+      const id = drawingAuthor ? undefined : (textOwner?.id ?? tokenIn(text));
       const result = nativeStrokeText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
         if (!textOwner) bitmapIds.set(this.canvas, id);
@@ -904,7 +936,11 @@ function installProbeRuntime(options: ProbeOptions) {
                 ids.has(entry) && /^WINDOWS380_(BRIGHT|DARK|DETAILED)_STICKER$/u.test(entry)
             )
           : undefined;
-      const id = textOwner?.context === this ? textOwner.id : (bitmapIds.get(image) ?? stickerId);
+      const id = drawingAuthor
+        ? undefined
+        : textOwner?.context === this
+          ? textOwner.id
+          : (bitmapIds.get(image) ?? stickerId);
       const result = Reflect.apply(nativeDrawImage, this, [image, ...args]);
       if (
         id &&
@@ -1779,6 +1815,8 @@ export function canvasProbePrelude({
     `const observePaidPlan = ${observePaidPlan.toString()};\n` +
     `const cardPlanFunctionName = ${cardPlanFunctionName.toString()};\n` +
     `const wrappedContentFunctionName = ${wrappedContentFunctionName.toString()};\n` +
+    `const regularMessageFunctionName = ${regularMessageFunctionName.toString()};\n` +
+    `const authorSectionFunctionName = ${authorSectionFunctionName.toString()};\n` +
     `const instrumentCardPlanCalls = ${instrumentCardPlanCalls.toString()};\n` +
     `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
     `;(${installProbeRuntime.toString()})(${JSON.stringify({
@@ -1807,11 +1845,18 @@ export function workerProbeSuffix(
   if (observeCardPlans && !source.includes('__ytObservePaidPlan(')) return null;
   const wrappedName = observeCardPlans ? wrappedContentFunctionName(source) : null;
   if (observeCardPlans && !wrappedName) return null;
+  const regularName = observeCardPlans ? regularMessageFunctionName(source) : null;
+  if (observeCardPlans && !regularName) return null;
+  const authorName =
+    observeCardPlans && regularName ? authorSectionFunctionName(source, regularName) : null;
+  if (observeCardPlans && !authorName) return null;
   return (
     `\n;(${attachProbeSource})(${handler[2]});\n` +
     (observeCardPlans
       ? `\nvar __ytObservePaidPlan = ${observePaidPlan.toString()};\n` +
-        `${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});\n`
+        `${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});\n` +
+        `${regularName} = globalThis.__ytPlacementProbe.wrapRegularMessage(${regularName});\n` +
+        `${authorName} = globalThis.__ytPlacementProbe.wrapAuthorSection(${authorName});\n`
       : '')
   );
 }
@@ -1852,6 +1897,7 @@ function observePaidPlan<
       height: plan.height,
       maxBodyLines: input.maxBodyLines ?? 0,
     };
+  if (frame && id && frame.cardPlans.length >= 24) frame.truncated = true;
   if (frame && id && frame.cardPlans.length < 24) {
     const border = frame.lastStroke?.context === input.context ? frame.lastStroke : null;
     if (border) delete frame.lastStroke;
@@ -1914,6 +1960,25 @@ function wrappedContentFunctionName(source: string): string | null {
     Boolean(name && translation.has(name) && source.includes(`function ${name}(`))
   );
   return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
+/** The shared regular painter is the source owner for both wrapped and inline text. */
+function regularMessageFunctionName(source: string): string | null {
+  if (source.includes('function renderRegularMessage(')) return 'renderRegularMessage';
+  const matches = [
+    ...source.matchAll(/function ([A-Za-z_$][\w$]*)\(e,t,n,r,i,a,o,s,c,l,u,d,f,p=`0px`\)\{/gu),
+  ]
+    .filter((match) => source.slice(match.index, match.index + 1800).includes('t.content.length>0'))
+    .map((match) => match[1]);
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
+function authorSectionFunctionName(source: string, regularName: string): string | null {
+  if (source.includes('function drawAuthorSection(')) return 'drawAuthorSection';
+  const start = source.indexOf(`function ${regularName}(`);
+  if (start < 0) return null;
+  const name = /D=([A-Za-z_$][\w$]*)\(e,t,E,D,v,w\?/u.exec(source.slice(start, start + 1600))?.[1];
+  return name && source.includes(`function ${name}(`) ? name : null;
 }
 
 export function instrumentCardPlanCalls(source: string): string | null {
@@ -2150,13 +2215,14 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
         laneSpacing: this.config?.laneSpacing ?? null,
       },
     });
-    state.registerActiveContent(this.activeMessages, this.ctx);
+    const previousRows = state.setActiveRowsReader(() => this.activeMessages);
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
       successful = true;
       return result;
     } finally {
+      state.setActiveRowsReader(previousRows);
       bounded(exact.frames, { atEpochMs: epochNow(), workMs: performance.now() - startedAt });
       exact.config = {
         mode: this.config?.danmakuMode ?? null,
@@ -2264,6 +2330,11 @@ export function instrumentCanvasPageScript(
   if (observeCardPlans && !cardPlanName) return null;
   const wrappedName = observeCardPlans ? wrappedContentFunctionName(source) : null;
   if (observeCardPlans && !wrappedName) return null;
+  const regularName = observeCardPlans ? regularMessageFunctionName(source) : null;
+  if (observeCardPlans && !regularName) return null;
+  const authorName =
+    observeCardPlans && regularName ? authorSectionFunctionName(source, regularName) : null;
+  if (observeCardPlans && !authorName) return null;
   return source.replace(
     marker,
     `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);` +
@@ -2271,7 +2342,9 @@ export function instrumentCanvasPageScript(
         ? `\n\tvar __ytOriginalPaidPlan = ${cardPlanName};` +
           `\n\tvar __ytObservePaidPlan = ${observePaidPlan.toString()};` +
           `\n\t${cardPlanName} = function(input) { return __ytObservePaidPlan(__ytOriginalPaidPlan, input); };` +
-          `\n\t${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});`
+          `\n\t${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});` +
+          `\n\t${regularName} = globalThis.__ytPlacementProbe.wrapRegularMessage(${regularName});` +
+          `\n\t${authorName} = globalThis.__ytPlacementProbe.wrapAuthorSection(${authorName});`
         : '') +
       marker
   );
@@ -2493,13 +2566,14 @@ function attachCanvasRendererProbe(
         laneSpacing: this.settings.laneSpacing,
       },
     });
-    state.registerActiveContent(this.activeMessages, this.ctx);
+    const previousRows = state.setActiveRowsReader(() => this.activeMessages);
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
       successful = true;
       return result;
     } finally {
+      state.setActiveRowsReader(previousRows);
       exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
       exact.peaks.active = Math.max(exact.peaks.active, this.activeMessages.length);
       const dims = this.overlay.getDimensions();

@@ -4,6 +4,7 @@
 import { runInNewContext } from 'node:vm';
 
 import type { BrowserContext } from '@playwright/test';
+import { renderRegularMessage } from '@renderer/canvas/shared';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
@@ -730,6 +731,8 @@ describe('Windows placement timing probe', () => {
     const readable =
       'function preparePaidCardPlan(input) { return { height: 1 }; }\n' +
       'function renderWrappedContentSegments() {}\n' +
+      'function renderRegularMessage(ctx, message) {}\n' +
+      'function drawAuthorSection() {}\n' +
       'function paint() { const plan = preparePaidCardPlan({ width: 1 }); ' +
       'renderWrappedContentSegments(ctx, plan.body); renderWrappedContentSegments(ctx, plan.translation); }\n' +
       'function getRegularCardInsets() {}\n' +
@@ -741,7 +744,11 @@ describe('Windows placement timing probe', () => {
     expect(canvas).toContain('var __ytObservePaidPlan = function observePaidPlan');
     const minified =
       'function Mn(e){let t=Math.max(1,e.width-e.paddingH*2),n=e.showAuthor&&!!e.author;' +
-      'return {height:t}};function Zt(e,t){};function paint(){let p=Mn({width:1,paddingH:0});' +
+      'return {height:t}};function Zt(e,t){};' +
+      'function Yt(e,t){};' +
+      'function Xt(e,t,n,r,i,a,o,s,c,l,u,d,f,p=`0px`){let D=0,v=0,w=false,E=0;' +
+      'D=Yt(e,t,E,D,v,w?0:0);return t.content.length>0}' +
+      'function paint(){let p=Mn({width:1,paddingH:0});' +
       'Zt(ctx,p.body);Zt(ctx,p.translation)}' +
       'self.onmessage=e=>{xr.handleMessage(e)};';
     const worker = instrumentCardPlanCalls(minified);
@@ -750,11 +757,19 @@ describe('Windows placement timing probe', () => {
     expect(worker && workerProbeSuffix(worker, undefined, true)).toContain(
       'wrapWrappedContent(Zt)'
     );
+    expect(worker && workerProbeSuffix(worker, undefined, true)).toContain(
+      'wrapRegularMessage(Xt)'
+    );
+    expect(worker && workerProbeSuffix(worker, undefined, true)).toContain('wrapAuthorSection(Yt)');
     expect(() =>
       runInNewContext(worker + workerProbeSuffix(worker!, undefined, true)!, {
         self: {},
         xr: { handleMessage() {} },
-        __ytPlacementProbe: { wrapWrappedContent: (render: unknown) => render },
+        __ytPlacementProbe: {
+          wrapWrappedContent: (render: unknown) => render,
+          wrapRegularMessage: (render: unknown) => render,
+          wrapAuthorSection: (render: unknown) => render,
+        },
       })
     ).not.toThrow();
     expect(instrumentCardPlanCalls(minified.replace('e.showAuthor', 'e.showName'))).toBeNull();
@@ -786,6 +801,8 @@ describe('Windows placement timing probe', () => {
     expect(blobParts).toHaveLength(3);
     expect(String(blobParts[1])).toContain('__ytObservePaidPlan(Mn,');
     expect(String(blobParts[2])).toContain('wrapWrappedContent(Zt)');
+    expect(String(blobParts[2])).toContain('wrapRegularMessage(Xt)');
+    expect(String(blobParts[2])).toContain('wrapAuthorSection(Yt)');
   });
 
   it('keeps the original paid-plan result and call count through an additive Canvas wrapper', () => {
@@ -793,6 +810,8 @@ describe('Windows placement timing probe', () => {
       '(() => { function preparePaidCardPlan(input) {' +
       'globalThis.planCalls++; return input; }\n' +
       'function renderWrappedContentSegments() {}\n' +
+      'function renderRegularMessage(ctx, message) {}\n' +
+      'function drawAuthorSection() {}\n' +
       'function paint(input) { const plan = preparePaidCardPlan({ width: input }); ' +
       'renderWrappedContentSegments(ctx, plan.body); renderWrappedContentSegments(ctx, plan.translation); return plan; }\n' +
       'function getRegularCardInsets() {}\n' +
@@ -805,7 +824,11 @@ describe('Windows placement timing probe', () => {
       ctx: {},
       planCalls: 0,
       planResult: null,
-      __ytPlacementProbe: { wrapWrappedContent: (render: unknown) => render },
+      __ytPlacementProbe: {
+        wrapWrappedContent: (render: unknown) => render,
+        wrapRegularMessage: (render: unknown) => render,
+        wrapAuthorSection: (render: unknown) => render,
+      },
     };
     runInNewContext(instrumented, sandbox);
     expect(sandbox.planCalls).toBe(1);
@@ -816,8 +839,6 @@ describe('Windows placement timing probe', () => {
   it('attributes fragmented paid rows and reused bitmap ink to the actual plan section', () => {
     const first = 'WINDOWS380_DETAILED_PAID';
     const second = 'WINDOWS380_DARK_PAID';
-    const ordinary = 'WINDOWS380_DETAILED_ORDINARY';
-    const mainOrdinary = 'WINDOWS380_DARK_ORDINARY';
     const overlay = { width: 400, height: 200, closest: () => ({}) };
     const glyph = { width: 40, height: 25, closest: () => null };
     let nativeDraws = 0;
@@ -866,10 +887,8 @@ describe('Windows placement timing probe', () => {
         if (prepared === globalThis.lastPlan.body) {
           if (globalThis.ownerId === '${first}') new FakeContext(glyph).fillText('WIND', 0, 20);
           ctx.drawImage(glyph, 20, y, 40, 25);
-        } else if (prepared) {
-          ctx.fillText('한국어', 20, y);
         } else {
-          ctx.fillText('ORD', x, y);
+          ctx.fillText('한국어', 20, y);
         }
       }
       function paint(id, y) {
@@ -884,29 +903,21 @@ describe('Windows placement timing probe', () => {
           plan.translation);
         return plan;
       }
+      function renderRegularMessage(ctx, message) {}
+      function drawAuthorSection() {}
       function getRegularCardInsets() {}
       var CanvasRenderer = class CanvasRenderer extends RendererBase {};
       function main() {
         const probe = globalThis.__ytPlacementProbe;
         const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
           config: { logicalWidth: 400, logicalHeight: 200, superChatLayout: 'stacked' } });
-        probe.registerActiveContent([
-          { id: '${ordinary}', content: regularSegments },
-          { message: { id: '${mainOrdinary}' }, renderMessage: { content: mainSegments } }
-        ], ctx);
         ctx.clearRect(0, 0, 400, 200);
         globalThis.firstPlan = paint('${first}', 10);
         globalThis.secondPlan = paint('${second}', 100);
-        renderWrappedContentSegments(ctx, regularSegments, 20, 175, 200, 1,
-          '', 20, 0, 0, null, null, null, null);
-        renderWrappedContentSegments(ctx, mainSegments, 120, 175, 200, 1,
-          '', 20, 0, 0, null, null, null, null);
         ctx.drawImage(glyph, 300, 170, 40, 25);
         probe.endRenderFrame(frame, [
           { id: '${first}', x: 10, y: 10, width: 200, height: 70 },
-          { id: '${second}', x: 10, y: 100, width: 200, height: 70 },
-          { id: '${ordinary}', x: 10, y: 170, width: 200, height: 30 },
-          { id: '${mainOrdinary}', x: 110, y: 170, width: 200, height: 30 }
+          { id: '${second}', x: 10, y: 100, width: 200, height: 70 }
         ]);
       }
 \tmain();
@@ -919,8 +930,6 @@ describe('Windows placement timing probe', () => {
       RendererBase: class {},
       overlay,
       glyph,
-      regularSegments: [{ type: 'text', content: `${ordinary} original` }],
-      mainSegments: [{ type: 'text', content: `${mainOrdinary} original` }],
       ctx: new FakeContext(overlay),
       planCalls: 0,
       ownerId: '',
@@ -941,7 +950,7 @@ describe('Windows placement timing probe', () => {
       HTMLCanvasElement: class {},
     };
     runInNewContext(
-      `${canvasProbePrelude({ tokens: [first, second, ordinary, mainOrdinary], observeCardPlans: true })}\n${instrumented}`,
+      `${canvasProbePrelude({ tokens: [first, second], observeCardPlans: true })}\n${instrumented}`,
       sandbox
     );
     const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
@@ -953,8 +962,6 @@ describe('Windows placement timing probe', () => {
       [first, 'body'],
       [first, 'translation'],
       [second, 'body'],
-      [ordinary, 'regular'],
-      [mainOrdinary, 'regular'],
     ]);
     expect(
       frame.draws.every(
@@ -964,23 +971,233 @@ describe('Windows placement timing probe', () => {
     ).toBe(true);
     expect(nativeDraws).toBeGreaterThan(frame.draws.length);
     expect(sandbox.firstPlan).not.toBe(sandbox.secondPlan);
-    const ambiguous = runInNewContext(
-      `(() => { const probe = __ytPlacementProbe;
+  });
+
+  it.each(['scroll-rich', 'scroll-plain', 'top'] as const)(
+    'owns the first native-frame %s draw through the real regular painter',
+    (mode) => {
+      const id = 'WINDOWS380_DETAILED_ORDINARY';
+      const overlay = { width: 400, height: 200, closest: () => ({}) };
+      class FakeContext {
+        canvas = overlay;
+        globalAlpha = 1;
+        font = '20px sans-serif';
+        lineWidth = 1;
+        save() {}
+        restore() {}
+        beginPath() {}
+        rect() {}
+        clip() {}
+        stroke() {}
+        strokeText() {}
+        fillText() {}
+        drawImage() {}
+        clearRect() {}
+        measureText(text: string) {
+          return {
+            width: text.length * 8,
+            actualBoundingBoxLeft: 0,
+            actualBoundingBoxRight: text.length * 8,
+            actualBoundingBoxAscent: 18,
+            actualBoundingBoxDescent: 4,
+          };
+        }
+        getTransform() {
+          return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        }
+      }
+      const content =
+        mode === 'scroll-plain'
+          ? []
+          : [
+              { type: 'text', content: 'first fragment' },
+              { type: 'text', content: ' later fragment' },
+            ];
+      const message = { id, kind: 'text', author: '', text: 'plain fallback', content };
+      const source = `(() => {
+        function preparePaidCardPlan(input) { return { height: 1 }; }
+        function renderWrappedContentSegments() {}
+        function planAnchor() { const plan = preparePaidCardPlan({width:1});
+          renderWrappedContentSegments(ctx,plan.body);
+          renderWrappedContentSegments(ctx,plan.translation); }
+        function renderRegularMessage(...args) { return globalThis.realRegular(...args); }
+        function drawAuthorSection() {}
+        function getRegularCardInsets() { return { vertical: 1 }; }
+        var CanvasRenderer = class CanvasRenderer extends RendererBase {
+          constructor() {
+            super(); this.ctx = ctx; this.activeMessages = [];
+            this.settings = { fontSize: 20, laneSpacing: 0, danmakuMode: '${mode === 'top' ? 'top' : 'scroll'}',
+              safeTop: 0, safeBottom: 0, speedPxPerSec: 100, backlogSpeedMultiplier: 1,
+              outline: { enabled: false }, backgroundColors: {} };
+            this.pendingQueue = { items: [], get size() { return this.items.length; },
+              toArray() { return this.items; } };
+            this.overlay = { getDimensions: () => ({ width: 400, height: 200 }) };
+            this.laneAllocator = { getLaneHeight: () => 30, getLaneCount: () => 5 };
+            this.currentLaneDensityFactor = 1;
+          }
+          enqueueMessage(message) { this.pendingQueue.items.push(message); }
+          placeQueuedMessage(message) {
+            this.pendingQueue.items.shift();
+            this.activeMessages.push({ message, renderMessage: message, x: 10, y: 10,
+              width: 200, height: 60, laneIndex: 0, slotCount: 1,
+              startTime: 0, pausedDuration: 0, duration: 1000 });
+            return { placed: true };
+          }
+          drainQueue() { if (this.pendingQueue.items.length) this.placeQueuedMessage(this.pendingQueue.items[0]); }
+          renderFrame() {
+            this.ctx.clearRect(0, 0, 400, 200);
+            this.drainQueue();
+            for (const row of this.activeMessages)
+              renderRegularMessage(this.ctx, row.renderMessage, row.x, row.y,
+                { showAuthor: false, fontSize: 20, fontWeight: 'normal', fontFamily: 'sans-serif',
+                  color: '#fff', outlineWidthPx: 0, outlineOpacity: 0,
+                  backgroundColor: '#00000000', messageWidth: 200, messageHeight: 60,
+                  mode: '${mode === 'top' ? 'top' : 'scroll'}' },
+                null, new Map(), () => false, new Map(), () => false,
+                (size) => size + 'px sans-serif', (text) => text.length * 8);
+          }
+        };
+        function main() { const renderer = new CanvasRenderer();
+          globalThis.fixtureRenderer = renderer;
+          renderer.enqueueMessage(fixtureMessage); renderer.renderFrame(); }
+\tmain();
+      })();`;
+      const instrumented = instrumentCanvasPageScript(source, undefined, true);
+      expect(instrumented).not.toBeNull();
+      expect(() => assertInstrumentedPageScript(source, instrumented!)).not.toThrow();
+      const sandbox = {
+        ctx: new FakeContext(),
+        fixtureMessage: message,
+        realRegular: (...args: unknown[]) => Reflect.apply(renderRegularMessage, null, args),
+        RendererBase: class {},
+        CanvasRenderingContext2D: FakeContext,
+        performance: { timeOrigin: 1000, now: () => 1 },
+        requestAnimationFrame: () => 1,
+        addEventListener: () => {},
+        postMessage: () => {},
+        MutationObserver: class {
+          observe() {}
+        },
+        document: { querySelectorAll: () => [] },
+        Blob: class {},
+        Worker: class {},
+        HTMLCanvasElement: class {},
+      };
+      runInNewContext(
+        `${canvasProbePrelude({ tokens: [id, 'WINDOWS380_DARK_ORDINARY'], observeCardPlans: true })}\n${instrumented}`,
+        sandbox
+      );
+      const proof = runInNewContext(
+        `({ frame: __ytPlacementProbe.latestRenderFrame,
+        first: __ytPlacementProbe.firstEntry['${id}'],
+        active: __ytPlacementProbe.exact.activeNow })`,
+        sandbox
+      );
+      expect(proof.frame).toMatchObject({ frameId: 1, complete: true, cleared: true });
+      expect(proof.active[0]?.id).toBe(id);
+      expect(
+        proof.frame.draws.some(
+          (draw: { id: string; section?: string; alpha: number; rect: unknown }) =>
+            draw.id === id && draw.section === 'regular' && draw.alpha > 0 && Boolean(draw.rect)
+        )
+      ).toBe(true);
+      expect(proof.first).toBe(1001);
+      expect(
+        proof.frame.draws.every((draw: { textSnippet?: string }) => !draw.textSnippet?.includes(id))
+      ).toBe(true);
+      if (mode === 'scroll-rich') {
+        const collision = runInNewContext(
+          `(() => {
+          fixtureRenderer.enqueueMessage({ ...fixtureMessage, id: 'WINDOWS380_DARK_ORDINARY' });
+          fixtureRenderer.renderFrame();
+          return { frame: __ytPlacementProbe.latestRenderFrame,
+            otherFirst: __ytPlacementProbe.firstEntry.WINDOWS380_DARK_ORDINARY };
+        })()`,
+          sandbox
+        );
+        expect(collision.frame).toMatchObject({ frameId: 2, complete: true, cleared: true });
+        expect(collision.frame.draws).toHaveLength(0);
+        expect(collision.otherFirst).toBeUndefined();
+      }
+    }
+  );
+
+  it('does not count source author ink or an unowned regular call as ordinary body ink', () => {
+    const id = 'WINDOWS380_DETAILED_ORDINARY';
+    const overlay = { width: 400, height: 200, closest: () => ({}) };
+    class FakeContext {
+      canvas = overlay;
+      globalAlpha = 1;
+      font = '20px sans-serif';
+      lineWidth = 1;
+      fillText() {}
+      strokeText() {}
+      drawImage() {}
+      clearRect() {}
+      stroke() {}
+      measureText(text: string) {
+        return {
+          width: text.length * 8,
+          actualBoundingBoxLeft: 0,
+          actualBoundingBoxRight: text.length * 8,
+          actualBoundingBoxAscent: 18,
+          actualBoundingBoxDescent: 4,
+        };
+      }
+      getTransform() {
+        return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+      }
+    }
+    const source = `(() => {
+      function preparePaidCardPlan(input) { return { height: 1 }; }
+      function renderWrappedContentSegments() {}
+      function planAnchor() { const plan = preparePaidCardPlan({width:1});
+        renderWrappedContentSegments(ctx,plan.body);
+        renderWrappedContentSegments(ctx,plan.translation); }
+      function drawAuthorSection(ctx) { ctx.fillText('source author', 20, 25); }
+      function renderRegularMessage(ctx, message) {
+        drawAuthorSection(ctx); ctx.fillText('body piece', 20, 45);
+      }
+      function getRegularCardInsets() {}
+      var CanvasRenderer = class CanvasRenderer extends RendererBase {};
+      function main() {
+        const probe = __ytPlacementProbe;
         const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
           config: { logicalWidth: 400, logicalHeight: 200 } });
-        probe.registerActiveContent([
-          { id: '${ordinary}', content: regularSegments },
-          { id: '${first}', content: regularSegments }
-        ], ctx);
+        const owned = { id: '${id}', content: [{ type: 'text', content: 'body piece' }] };
+        probe.setActiveRowsReader(() => [{ message: owned, renderMessage: owned }]);
         ctx.clearRect(0, 0, 400, 200);
-        probe.wrapWrappedContent((surface) => surface.fillText('ORD', 20, 30))(
-          ctx, regularSegments);
-        probe.endRenderFrame(frame, []);
-        return frame.draws.length;
-      })()`,
+        renderRegularMessage(ctx, owned);
+        renderRegularMessage(ctx, { id: '${id}', content: owned.content });
+        probe.endRenderFrame(frame, [{ id: '${id}', x: 10, y: 10, width: 150, height: 70 }]);
+      }
+\tmain();
+    })();`;
+    const instrumented = instrumentCanvasPageScript(source, 'function probe() {}', true);
+    expect(instrumented).not.toBeNull();
+    const sandbox = {
+      ctx: new FakeContext(),
+      RendererBase: class {},
+      CanvasRenderingContext2D: FakeContext,
+      performance: { timeOrigin: 1000, now: () => 1 },
+      requestAnimationFrame: () => 1,
+      addEventListener: () => {},
+      postMessage: () => {},
+      MutationObserver: class {
+        observe() {}
+      },
+      document: { querySelectorAll: () => [] },
+      Blob: class {},
+      Worker: class {},
+      HTMLCanvasElement: class {},
+    };
+    runInNewContext(
+      `${canvasProbePrelude({ tokens: [id], observeCardPlans: true })}\n${instrumented}`,
       sandbox
     );
-    expect(ambiguous).toBe(0);
+    const draws = runInNewContext('__ytPlacementProbe.latestRenderFrame.draws', sandbox);
+    expect(draws).toHaveLength(1);
+    expect(draws[0]).toMatchObject({ id, section: 'regular', textSnippet: 'body piece' });
   });
 
   it('retains only a bounded first complete visible draw with its committed row', () => {
@@ -1060,7 +1277,7 @@ describe('Windows placement timing probe', () => {
     })();`;
       const state: Record<string, unknown> = {
         beginRenderFrame: () => ({ frameId: 1, cleared: true }),
-        registerActiveContent: () => {},
+        setActiveRowsReader: () => null,
         endRenderFrame: () => {},
       };
       const script = instrumentCanvasPageScript(source.replace('      main();', '\tmain();'));
