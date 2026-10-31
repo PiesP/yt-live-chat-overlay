@@ -108,6 +108,23 @@ describe('HighFirstPriorityBucketQueue', () => {
       expect(queue.dropLowest()).toBeUndefined();
       expect(queue.size).toBe(0);
     });
+
+    it('clears consumed object references before the amortized prefix compaction', () => {
+      const items = Array.from({ length: 10 }, (_, id) => ({ id }));
+      const objectQueue = new HighFirstPriorityBucketQueue<(typeof items)[number]>();
+      for (const item of items) objectQueue.enqueue(item, 0);
+      expect(objectQueue.dropLowest()).toBe(items[0]);
+      expect(objectQueue.dequeue()).toBe(items[1]);
+      const buckets = Reflect.get(objectQueue, 'buckets') as Map<
+        number,
+        { msgs: ((typeof items)[number] | undefined)[]; offset: number }
+      >;
+      const bucket = buckets.get(0);
+      expect(bucket?.offset).toBe(2);
+      expect(bucket?.msgs[0]).toBeUndefined();
+      expect(bucket?.msgs[1]).toBeUndefined();
+      expect(objectQueue.toArray()).toEqual(items.slice(2));
+    });
   });
 
   describe('removeAll', () => {

@@ -19,13 +19,15 @@ import type { ChatMessage } from '@app-types';
  * Replaces the previous binary-search + splice() approach which
  * was O(n) per insert due to splice's array element shifting.
  *
- * Each bucket uses an internal offset for O(1) shift-free dequeue.
- * Buckets are compacted when the offset exceeds half the array
- * length, preventing unbounded memory growth.
+ * Each bucket uses an internal offset for O(1) shift-free head removal.
+ * Consumed slots are cleared immediately. An empty bucket resets its array;
+ * otherwise the consumed prefix is compacted once it reaches half the array.
+ * Thus a nonempty bucket retains fewer than twice its live slots between
+ * compactions, independent of cumulative traffic.
  */
 export class HighFirstPriorityBucketQueue<T = ChatMessage> {
   /** Priority → { messages array, read offset } */
-  private readonly buckets = new Map<number, { msgs: T[]; offset: number }>();
+  private readonly buckets = new Map<number, { msgs: (T | undefined)[]; offset: number }>();
   /** Known priority levels sorted descending for efficient dequeue scan. */
   private priorityLevels: number[] = [];
   private _size = 0;
@@ -38,6 +40,27 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
   /** Whether the queue has any messages. */
   get isEmpty(): boolean {
     return this._size === 0;
+  }
+
+  private reclaimConsumed(entry: { msgs: (T | undefined)[]; offset: number }): void {
+    const { msgs, offset } = entry;
+    if (offset === msgs.length) {
+      entry.msgs = [];
+      entry.offset = 0;
+    } else if (offset > 0 && offset >= msgs.length / 2) {
+      entry.msgs = msgs.slice(offset);
+      entry.offset = 0;
+    }
+  }
+
+  private consumeHead(entry: { msgs: (T | undefined)[]; offset: number }): T | undefined {
+    const index = entry.offset;
+    const message = entry.msgs[index];
+    entry.msgs[index] = undefined;
+    entry.offset = index + 1;
+    this._size--;
+    this.reclaimConsumed(entry);
+    return message;
   }
 
   /**
@@ -69,14 +92,7 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
       if (entry.offset < msgs.length) {
         const msg = msgs[entry.offset];
         if (!msg) continue;
-        entry.offset++;
-        this._size--;
-        // Compact when more than half the array is consumed
-        if (entry.offset > 0 && entry.offset >= msgs.length / 2) {
-          entry.msgs = msgs.slice(entry.offset);
-          entry.offset = 0;
-        }
-        return msg;
+        return this.consumeHead(entry);
       }
     }
     return undefined;
@@ -127,13 +143,9 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
       const entry = this.buckets.get(prio);
       if (!entry) continue;
       if (entry.offset < entry.msgs.length) {
-        const dropped = entry.msgs[entry.offset];
         // Remove the oldest unconsumed message at this priority level (FIFO)
-        // by advancing the read offset instead of shifting the array,
-        // matching dequeue() semantics and avoiding O(n) shift cost.
-        entry.offset++;
-        this._size--;
-        return dropped;
+        // without shifting the remaining active suffix.
+        return this.consumeHead(entry);
       }
     }
     return undefined;
@@ -159,7 +171,9 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
       const { msgs } = entry;
       if (entry.offset >= msgs.length) continue;
 
-      let writeIdx = entry.offset;
+      // The scan already visits every live item, so compact the active suffix
+      // in place rather than retaining a previously consumed prefix.
+      let writeIdx = 0;
       for (let i = entry.offset; i < msgs.length; i++) {
         const msg = msgs[i];
         if (msg !== undefined && !toRemove.has(msg)) {
@@ -169,6 +183,7 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
         }
       }
       msgs.length = writeIdx;
+      entry.offset = 0;
     }
 
     this._size -= removed;
@@ -218,6 +233,7 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
         entry.msgs.length -= removeCount;
         this._size -= removeCount;
         toRemove -= removeCount;
+        this.reclaimConsumed(entry);
       }
     }
   }
