@@ -167,6 +167,61 @@ type WorkflowStep = {
   reason?: string | null;
   [key: string]: unknown;
 };
+
+/** Start the native public video and retain the observed state, not just the play request. */
+export async function preparePublicVideoPlayback(page: Page): Promise<WorkflowStep> {
+  return page
+    .locator('video')
+    .first()
+    .evaluate(async (element) => {
+      const video = element as HTMLVideoElement;
+      video.muted = true;
+      let playResult: 'already-playing' | 'resolved' | 'rejected' | 'timeout';
+      if (!video.paused && video.readyState >= 2) {
+        playResult = 'already-playing';
+      } else {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const playback = Promise.resolve()
+          .then(() => video.play())
+          .then(
+            () => 'resolved' as const,
+            () => 'rejected' as const
+          );
+        playResult = await Promise.race([
+          playback,
+          new Promise<'timeout'>((resolve) => {
+            timer = setTimeout(() => resolve('timeout'), 5_000);
+          }),
+        ]);
+        if (timer !== undefined) clearTimeout(timer);
+      }
+      const paused = video.paused;
+      const readyState = video.readyState;
+      const errorCode = video.error?.code ?? null;
+      const status =
+        playResult !== 'rejected' &&
+        playResult !== 'timeout' &&
+        !paused &&
+        readyState >= 2 &&
+        errorCode === null
+          ? 'passed'
+          : 'unverified';
+      return {
+        status,
+        reason:
+          status === 'passed'
+            ? null
+            : playResult === 'rejected' || playResult === 'timeout'
+              ? `play-${playResult}`
+              : 'playback-not-ready',
+        playResult,
+        paused,
+        readyState,
+        errorCode,
+        currentTime: video.currentTime,
+      };
+    });
+}
 type LiveObservation = {
   url: string;
   status: string;
@@ -175,7 +230,7 @@ type LiveObservation = {
   screenshot?: string;
   finalUrl?: string;
   title?: string;
-  video?: unknown;
+  video?: WorkflowStep;
   fontSize?: number;
   renderedMessages?: number;
   canvasAttached?: boolean;
@@ -1753,19 +1808,12 @@ async function inspectLivePage(
     if (await rejectConsent.isVisible().catch(() => false)) await rejectConsent.click();
     observation.phase = 'player';
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
-    observation.video = await page
-      .locator('video')
-      .first()
-      .evaluate((element) => {
-        const video = element as HTMLVideoElement;
-        video.muted = true;
-        void video.play().catch(() => {});
-        return {
-          paused: video.paused,
-          readyState: video.readyState,
-          errorCode: video.error?.code ?? null,
-        };
-      });
+    observation.video = await preparePublicVideoPlayback(page);
+    if (observation.video.status !== 'passed') {
+      observation.status = 'unverified';
+      observation.reason = `player-${observation.video.reason ?? 'playback-not-ready'}`;
+      return observation;
+    }
     observation.phase = 'settings';
     if (opacitySelected) {
       originalOpacitySettings = await page.evaluate(() => {
@@ -2013,6 +2061,13 @@ async function inspectLivePage(
     const diagnosticStart = workerDiagnostics.length;
     await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
+    const navigationVideo = await preparePublicVideoPlayback(page);
+    observation.navigationVideo = navigationVideo;
+    if (navigationVideo.status !== 'passed') {
+      observation.status = 'unverified';
+      observation.reason = `navigation-${navigationVideo.reason ?? 'playback-not-ready'}`;
+      return observation;
+    }
     await page
       .locator('#yt-live-chat-overlay canvas')
       .waitFor({ state: 'attached', timeout: 20_000 });

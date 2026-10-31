@@ -35,6 +35,7 @@ const {
   requireLiveSuccess,
   requireManagerUiLabels,
   selectPublicSeekTarget,
+  preparePublicVideoPlayback,
   ownedExtensionResourcePath,
   diagnoseUnsafeOriginConsole,
   redactChromeDiagnosticText,
@@ -47,6 +48,89 @@ const {
   readBoundedPackagedResource,
   readBundledUserscriptVersion,
 } = chromeInstallModule;
+
+function playbackPage(video: {
+  muted: boolean;
+  paused: boolean;
+  readyState: number;
+  currentTime: number;
+  error: { code: number } | null;
+  play: () => Promise<void>;
+}) {
+  const evaluate = vi.fn(async (read: (element: typeof video) => unknown) => read(video));
+  const first = vi.fn(() => ({ evaluate }));
+  const locator = vi.fn(() => ({ first }));
+  return { page: { locator } as unknown as Page, evaluate, locator };
+}
+
+describe('native public video preparation', () => {
+  it('mutes and observes playback after the native play request settles', async () => {
+    const video = {
+      muted: false,
+      paused: true,
+      readyState: 0,
+      currentTime: 4,
+      error: null,
+      play: vi.fn(async () => {
+        video.paused = false;
+        video.readyState = 3;
+      }),
+    };
+    const { page, locator } = playbackPage(video);
+    expect(await preparePublicVideoPlayback(page)).toMatchObject({
+      status: 'passed',
+      playResult: 'resolved',
+      paused: false,
+      readyState: 3,
+      errorCode: null,
+      currentTime: 4,
+    });
+    expect(video.muted).toBe(true);
+    expect(video.play).toHaveBeenCalledOnce();
+    expect(locator).toHaveBeenCalledWith('video');
+  });
+
+  it('accepts an already playing native video without a second play request', async () => {
+    const video = {
+      muted: false,
+      paused: false,
+      readyState: 4,
+      currentTime: 12,
+      error: null,
+      play: vi.fn(async () => {}),
+    };
+    const { page } = playbackPage(video);
+    expect(await preparePublicVideoPlayback(page)).toMatchObject({
+      status: 'passed',
+      playResult: 'already-playing',
+      paused: false,
+      readyState: 4,
+    });
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  it('retains a rejected play request as unverified with the native state', async () => {
+    const video = {
+      muted: false,
+      paused: true,
+      readyState: 2,
+      currentTime: 0,
+      error: { code: 4 },
+      play: vi.fn(async () => {
+        throw new Error('blocked');
+      }),
+    };
+    const { page } = playbackPage(video);
+    expect(await preparePublicVideoPlayback(page)).toMatchObject({
+      status: 'unverified',
+      reason: 'play-rejected',
+      playResult: 'rejected',
+      paused: true,
+      readyState: 2,
+      errorCode: 4,
+    });
+  });
+});
 
 const roots: string[] = [];
 afterEach(async () => {
