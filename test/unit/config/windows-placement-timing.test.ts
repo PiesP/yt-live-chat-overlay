@@ -152,7 +152,9 @@ describe('Windows placement timing probe', () => {
       }
     };
     try {
-      expect(levelAfterPressure(16)).not.toBe('extreme');
+      // Three 500ms windows span 1.5s; only rates above 10 msg/s are extreme.
+      expect(levelAfterPressure(15)).toBe('high');
+      expect(levelAfterPressure(16)).toBe('extreme');
       expect(levelAfterPressure(MIXED_PRESSURE_COUNT)).toBe('extreme');
     } finally {
       clock.mockRestore();
