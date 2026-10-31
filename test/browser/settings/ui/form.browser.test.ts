@@ -2,6 +2,14 @@
 
 import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage, t } from '@i18n/index';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
+import { estimateMessageDimensions } from '@renderer/shared';
+import {
+  clearTextMeasurementCaches,
+  getFontString,
+  measureTextHeight,
+  measureTextWidth,
+} from '@renderer/text-measure';
 import { BACKDROP_ID, SettingsUiForm } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import type { TranslationRuntimeStatus } from '@translation/service';
@@ -431,6 +439,86 @@ describe('SettingsUiForm', () => {
 
     form.destroy();
     modal.remove();
+  });
+
+  it('uses actual outline and bearing ink when sizing fixed Canvas preview rows', () => {
+    const settings = makeDefaults({
+      danmakuMode: 'top',
+      fontSize: 20,
+      outline: { enabled: true, widthPx: 8, opacity: 1 },
+    });
+    const originalMeasure = CanvasRenderingContext2D.prototype.measureText;
+    const measure = vi.spyOn(CanvasRenderingContext2D.prototype, 'measureText');
+    measure.mockImplementation(function (this: CanvasRenderingContext2D, text: string) {
+      const raw = originalMeasure.call(this, text);
+      return new Proxy(raw, {
+        get(target, property) {
+          if (property === 'actualBoundingBoxLeft') return 30;
+          if (property === 'actualBoundingBoxRight') return target.width + 30;
+          return Reflect.get(target, property, target);
+        },
+      });
+    });
+    clearTextMeasurementCaches();
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    modal.showModal();
+    const previewText = modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-text'
+    )!;
+    const previewFont = getFontString(settings.fontSize, settings.fontWeight, settings.fontFamily);
+    const previewWords = t('danmaku.previewMessage').split(' ');
+    const previewWidth = Math.ceil(
+      previewWords.reduce((width, word) => width + measureTextWidth(word, previewFont), 0) +
+        (previewWords.length - 1) * measureTextWidth(' ', previewFont) +
+        getRegularCardInsets(settings.fontSize, 8).horizontal * 2 +
+        10
+    );
+    previewText.parentElement!.style.width = `${previewWidth}px`;
+    previewText.style.display = 'block';
+    try {
+      form.setModal(modal);
+      form.populateForm(settings);
+      const canvas = previewText.querySelector('canvas')!;
+      const ctx = canvas.getContext('2d')!;
+      const message = {
+        text: t('danmaku.previewMessage'),
+        content: [{ type: 'text' as const, content: t('danmaku.previewMessage') }],
+        kind: 'text' as const,
+        authorType: 'normal' as const,
+        timestamp: 0,
+      };
+      const argumentsBeforeMeasurement = [
+        message,
+        settings.fontSize,
+        false,
+        settings.fontWeight,
+        settings.fontFamily,
+        undefined,
+        undefined,
+        '0px',
+        8,
+        previewWidth,
+        undefined,
+        settings.backgroundColors.normal,
+        'top',
+      ] as const;
+      const expected = estimateMessageDimensions(...argumentsBeforeMeasurement, {
+        width: measureTextWidth,
+        height: measureTextHeight,
+        context: ctx,
+      });
+      const withoutInk = estimateMessageDimensions(...argumentsBeforeMeasurement);
+      expect(Number(previewText.dataset.previewRowHeight)).toBe(expected.height);
+      expect(expected.height).toBeGreaterThan(withoutInk.height);
+    } finally {
+      form.destroy();
+      modal.remove();
+      measure.mockRestore();
+      clearTextMeasurementCaches();
+    }
   });
 
   it('grows the preview stage from real layout and disconnects its observer', async () => {

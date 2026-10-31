@@ -11,6 +11,7 @@ import {
 } from '@renderer/layout/message-schedule';
 import {
   getRowContentOffset,
+  getSafeRowContentOffset,
   getRowSlotCount,
   rowsNeedVerticalClearance,
 } from '@renderer/layout/row-geometry';
@@ -152,6 +153,7 @@ export function reconcileMessagePlacements<T>(
     laneSpacing?: number;
     viewportHeight: number;
     safeTop: number;
+    safeBottom?: number;
     mode: DanmakuMode;
     headwayGapRatio: number;
     now: number;
@@ -185,9 +187,16 @@ export function reconcileMessagePlacements<T>(
     slotCount: number
   ): boolean => {
     if (laneIndex < 0 || laneIndex + slotCount > options.laneCount) return false;
+    const offset = getSafeRowContentOffset(
+      candidate.height,
+      options.laneHeight,
+      options.laneSpacing ?? 0,
+      laneIndex,
+      options.viewportHeight * (1 - options.safeTop - (options.safeBottom ?? 0))
+    );
+    if (offset === null) return false;
     const y =
-      computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) +
-      getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
+      computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) + offset;
     scratch.clear();
     // Every content rectangle plus its gap fits inside its reserved slot block.
     // Thus a clearance conflict must share a slot; the adjacent lanes also

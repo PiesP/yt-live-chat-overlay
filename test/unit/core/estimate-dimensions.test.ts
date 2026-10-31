@@ -20,38 +20,6 @@ vi.mock('@renderer/text-measure', () => ({
   setTextMeasureCallback: vi.fn(),
 }));
 
-vi.mock('@renderer/canvas/shared', () => ({
-  buildWrappedLines: vi.fn(
-    (segments: Array<{ type: string; content: string }>, maxWidth: number) => {
-      let totalWidth = 0;
-      for (const seg of segments) {
-        totalWidth += seg.type === 'text' ? seg.content.length * 8 : 16;
-      }
-      const linesPerRow = Math.max(1, Math.floor(maxWidth / 8));
-      const lineCount = Math.max(1, Math.ceil(totalWidth / 8 / linesPerRow));
-      return {
-        lines: Array.from({ length: lineCount }, () => []),
-        maxLineWidth: Math.min(maxWidth, totalWidth),
-      };
-    }
-  ),
-  measureEmojiAdvanceWidth: vi.fn(
-    (
-      segment: { emojiFallbackText?: string; emoji?: { fallbackText?: string } },
-      emojiSize: number,
-      measureText: (text: string) => number
-    ) => {
-      const fallbackText = segment.emojiFallbackText ?? segment.emoji?.fallbackText ?? '';
-      return Math.max(emojiSize, fallbackText ? measureText(fallbackText) : 0) + 4;
-    }
-  ),
-  measureTextAdvanceWidth: vi.fn(
-    (text: string, measureText: (value: string) => number, letterSpacing = '0px') =>
-      measureText(text) + Math.max(0, text.length - 1) * (Number.parseFloat(letterSpacing) || 0)
-  ),
-  toSharedContentSegments: vi.fn((c: unknown) => c),
-}));
-
 import type { ChatMessage } from '@app-types';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
