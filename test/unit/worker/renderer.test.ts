@@ -85,8 +85,35 @@ describe('WorkerRenderer', () => {
     expect(internals.enqueueMessage(message('paid-1', 200))).toBe(true);
     expect(internals.enqueueMessage(message('paid-2', 200))).toBe(false);
     expect(internals.enqueueMessage(message('ordinary-new', 0))).toBe(true);
-    expect(internals.pendingQueue.map((entry) => entry.id)).toEqual(['ordinary-new', 'paid-1']);
+    expect(internals.pendingQueue.map((entry) => entry.id)).toEqual(['paid-1', 'ordinary-new']);
     expect(internals.messageById.has('ordinary-old')).toBe(false);
+  });
+
+  it('preserves the waiting order when an ordinary pending message is edited', () => {
+    const internals = wr as unknown as {
+      config: { queueMaxSize: number };
+      pendingQueue: WorkerMessage[];
+      animFrameId: number | null;
+      measureMessageGeometry: ReturnType<typeof vi.fn>;
+      enqueueMessage(message: WorkerMessage): boolean;
+    };
+    internals.config = { queueMaxSize: 2 };
+    internals.animFrameId = 1;
+    internals.measureMessageGeometry = vi.fn(() => ({ width: 80, height: 20 }));
+    const message = (id: string, actionType?: WorkerMessage['actionType']): WorkerMessage => ({
+      id,
+      ...(actionType ? { actionType } : {}),
+      priority: 0,
+      text: id,
+      width: 80,
+      height: 20,
+      isBacklog: false,
+    });
+    expect(internals.enqueueMessage(message('old-0'))).toBe(true);
+    expect(internals.enqueueMessage(message('old-1'))).toBe(true);
+    expect(internals.enqueueMessage(message('old-0', 'replace'))).toBe(true);
+    expect(internals.enqueueMessage(message('new-0'))).toBe(true);
+    expect(internals.pendingQueue.map((entry) => entry.id)).toEqual(['old-1', 'new-0']);
   });
 
   it('gives an admitted ordinary successful service after two paid Worker admissions', () => {
