@@ -35,6 +35,7 @@ import {
   presentationItem,
   presentationGeometry,
   snapshot,
+  waitForPaidPlan,
   validateMatrixMode,
   waitForIngress,
   waitForOverflowSeedProcessed,
@@ -46,6 +47,63 @@ const source = MATRIX_BATCHES.content.map(
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('waits for current-frame minimum paid body and translation viewport ink', async () => {
+    const id = 'WINDOWS380_DETAILED_PAID';
+    const makeDraw = (section: 'body' | 'translation', left: number, alpha = 0.65) => ({
+      id,
+      section,
+      alpha,
+      rect: { left, top: 555, right: left + 100, bottom: 593 },
+    });
+    const frame = {
+      complete: true,
+      cleared: true,
+      truncated: false,
+      logicalWidth: 858,
+      logicalHeight: 898,
+      cardPlans: [{ id, maxBodyLines: 2, bodyRows: 1, translationRows: 1, height: 200 }],
+      active: [{ id, x: 845, y: 450, width: 628, height: 200 }],
+      draws: [makeDraw('body', 869), makeDraw('translation', 872)],
+    };
+    for (const backend of ['main', 'worker'] as const) {
+      let predicate = '';
+      let input: unknown;
+      const page = {
+        waitForFunction: async (
+          callback: (arg: unknown) => unknown,
+          arg: unknown,
+          options: { timeout: number }
+        ) => {
+          predicate = callback.toString();
+          input = arg;
+          expect(options.timeout).toBe(5801);
+        },
+      } as unknown as Parameters<typeof waitForPaidPlan>[0];
+      await waitForPaidPlan(page, backend, id, 2, true, 5801);
+      const matches = (candidate: typeof frame) => {
+        const probe = {
+          workers:
+            backend === 'worker' ? [{ ready: true, sample: { latestRenderFrame: candidate } }] : [],
+          latestRenderFrame: candidate,
+          requestFlushIfDue: () => {},
+        };
+        return runInNewContext(`(${predicate})(${JSON.stringify(input)})`, {
+          window: { __ytPlacementProbe: probe },
+        });
+      };
+      expect(matches(frame)).toBe(false);
+      const visible = { ...frame, draws: [makeDraw('body', 849), makeDraw('translation', 852)] };
+      expect(matches(visible)).toBe(true);
+      expect(
+        matches({ ...visible, draws: [visible.draws[0]!, makeDraw('translation', 852, 0)] })
+      ).toBe(false);
+      expect(
+        matches({ ...visible, cardPlans: [{ ...frame.cardPlans[0]!, maxBodyLines: 4 }] })
+      ).toBe(false);
+      expect(matches({ ...visible, truncated: true })).toBe(false);
+    }
+  });
+
   it('budgets source-planned role visibility inside the unchanged backend deadline', () => {
     const planned = planRoleVisibilityWait(1793452736488.9, 1793452735688, 25_000);
     expect(planned.plannedDelayMs).toBeCloseTo(800.9, 1);

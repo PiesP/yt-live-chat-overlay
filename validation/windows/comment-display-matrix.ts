@@ -1598,9 +1598,16 @@ async function waitForAccessibleTails(page: Page, ids: readonly string[]) {
   );
 }
 
-async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: number) {
+export async function waitForPaidPlan(
+  page: Page,
+  backend: Backend,
+  id: string,
+  lines: number,
+  requireVisibleBoth = false,
+  timeoutMs = 5000
+): Promise<void> {
   await page.waitForFunction(
-    ({ selectedBackend, messageId, expectedLines }) => {
+    ({ selectedBackend, messageId, expectedLines, visibleBoth }) => {
       const probe = window.__ytPlacementProbe;
       const sample =
         selectedBackend === 'worker'
@@ -1611,6 +1618,18 @@ async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: 
         (entry) => entry.id === messageId && entry.maxBodyLines === expectedLines
       );
       const row = frame?.active.find((entry) => entry.id === messageId);
+      const visibleSection = (section: 'body' | 'translation') =>
+        frame?.draws.some(
+          (draw) =>
+            draw.id === messageId &&
+            draw.section === section &&
+            draw.alpha > 0 &&
+            draw.rect &&
+            draw.rect.left < Number(frame.logicalWidth) &&
+            draw.rect.right > 0 &&
+            draw.rect.top < Number(frame.logicalHeight) &&
+            draw.rect.bottom > 0
+        ) === true;
       const matched = Boolean(
         frame?.complete &&
         frame.cleared &&
@@ -1618,7 +1637,13 @@ async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: 
         plan &&
         row &&
         plan.height <= row.height + 2 &&
-        frame.draws.some((draw) => draw.id === messageId && draw.alpha > 0)
+        frame.draws.some((draw) => draw.id === messageId && draw.alpha > 0) &&
+        (!visibleBoth ||
+          (plan.bodyRows > 0 &&
+            plan.translationRows > 0 &&
+            plan.bodyRows + plan.translationRows <= expectedLines &&
+            visibleSection('body') &&
+            visibleSection('translation')))
       );
       if (!matched && selectedBackend === 'worker') {
         const worker = probe?.workers.find((record) => record.ready);
@@ -1626,8 +1651,13 @@ async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: 
       }
       return matched;
     },
-    { selectedBackend: backend, messageId: id, expectedLines: lines },
-    { timeout: 5000 }
+    {
+      selectedBackend: backend,
+      messageId: id,
+      expectedLines: lines,
+      visibleBoth: requireVisibleBoth,
+    },
+    { polling: 100, timeout: timeoutMs }
   );
 }
 
@@ -1825,11 +1855,13 @@ async function runBackend(options: {
     diagnostic?: MatrixSnapshot | null;
     failureStage?: string;
     currentRoleWait?: RoleWaitObservation | null;
+    minimumLineWait?: RoleWaitObservation | null;
     errorType?: string;
     errorMessage?: string;
   };
   const startedAt = Date.now();
   let currentRoleWait: RoleWaitObservation | null = null;
+  let minimumLineWait: RoleWaitObservation | null = null;
   const restorationWaitObservations: Array<{ id: string; wait: RoleWaitObservation }> = [];
   let restorationProof: ReturnType<typeof assertRestoredVisibility> | null = null;
   const check = <T>(predicate: () => T): T | undefined => {
@@ -1900,9 +1932,22 @@ async function runBackend(options: {
         baselineFindings.push(`No complete visible translation frame for ${id}`);
     }
   };
-  const observePlan = async (id: string, lines: number) => {
+  const observePlan = async (id: string, lines: number, requireVisibleBoth = false) => {
+    let timeoutMs = 5000;
+    if (requireVisibleBoth) {
+      const planning = await snapshot(page, backend);
+      const budget = planVisibleItemWait(planning, id, Date.now() - startedAt);
+      minimumLineWait = {
+        ...budget,
+        startedAtEpochMs: Date.now(),
+        outcome: budget.timeoutMs > 0 ? 'failed' : 'budget-exhausted',
+      };
+      assert(budget.timeoutMs > 0, `No matrix budget remains for ${id} paid ink`);
+      timeoutMs = budget.timeoutMs;
+    }
     try {
-      await waitForPaidPlan(page, backend, id, lines);
+      await waitForPaidPlan(page, backend, id, lines, requireVisibleBoth, timeoutMs);
+      if (requireVisibleBoth && minimumLineWait) minimumLineWait.outcome = 'visible';
     } catch (error) {
       if (mode === 'candidate') throw error;
       if (baselineFindings.length < 24)
@@ -2753,7 +2798,7 @@ async function runBackend(options: {
               MIN_PAID_BODY_LINES,
               'Installed paid-line minimum changed'
             );
-            await observePlan(paidId, MIN_PAID_BODY_LINES);
+            await observePlan(paidId, MIN_PAID_BODY_LINES, true);
             const minimumLines = await snapshot(page, backend);
             rowBudgetObservations.push({
               name: `${name}-minimum-lines`,
@@ -3036,6 +3081,7 @@ async function runBackend(options: {
       rowBudgetObservations,
       restorationWaitObservations,
       restorationProof,
+      minimumLineWait,
       effectObservations,
       baselineFindings,
       cleanupErrors,
@@ -3062,6 +3108,7 @@ async function runBackend(options: {
       diagnostic,
       failureStage,
       currentRoleWait,
+      minimumLineWait,
       errorType: error instanceof Error ? error.name : typeof error,
       errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 400),
     };

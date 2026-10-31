@@ -89,8 +89,9 @@ translation line counts and total-height budget, effect alpha, and overload-poli
 acceptance are recorded separately from the PNG review. The detailed paid card
 records the production `preparePaidCardPlan` output for four total body rows and
 for the supported two-row setting minimum. The live effective setting and completed
-frame plan must agree; original and selected translation rows share the selected
-total row budget, with positive-alpha ink inside the committed card. The
+frame plan must agree; the minimum case waits until both original and selected
+translation have positive-alpha viewport ink in one current frame. Their rows
+share the selected total row budget and stay inside the committed card. The
 separate direct planner unit test retains its one-row fallback boundary. Main
 and Worker role visibility waits use each actual source-planned start plus five seconds,
 bounded by the unchanged 60-second backend deadline, and record the planned
