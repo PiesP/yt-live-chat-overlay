@@ -393,7 +393,8 @@ describe('Windows comment display matrix contract', () => {
         ],
       },
       [id, 'WINDOWS380_LOAD_VACANCY_ORDINARY'],
-      { active: 30, queue: 50 }
+      { active: 30, queue: 50 },
+      new Set([id])
     );
     expect(trace.byKind.paid).toMatchObject({ reserved: 1, firstVisible: 1 });
     expect(trace.byKind.ordinary).toMatchObject({ reserved: 0, firstVisible: 0 });
@@ -444,7 +445,8 @@ describe('Windows comment display matrix contract', () => {
         ],
       },
       [lateId, laterPaidId],
-      { active: 30, queue: 50 }
+      { active: 30, queue: 50 },
+      new Set([lateId, laterPaidId])
     );
     expect(repeated.records).toMatchObject([
       {
@@ -468,6 +470,33 @@ describe('Windows comment display matrix contract', () => {
       paid: { firstVisible: 1 },
       ordinary: { firstVisible: 1 },
     });
+    const seedId = 'WINDOWS380_LOAD_VACANCY_ORDINARY';
+    const futureId = 'WINDOWS380_LOAD_FUTURE_MEMBERSHIP';
+    const newOverflowId = 'WINDOWS380_LOAD_OVERFLOW_NEW_0';
+    const stageIds = [seedId, lateId, laterPaidId, futureId, newOverflowId];
+    const stage = (delivered: string[]) =>
+      overloadTrace(sample, stageIds, { active: 30, queue: 50 }, new Set(delivered));
+    expect(stage([seedId]).records.map((record) => record.delivered)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(stage([seedId, lateId]).byKind.ordinary).toMatchObject({ delivered: 2 });
+    expect(stage([seedId, lateId, laterPaidId]).byKind.paid).toMatchObject({ delivered: 1 });
+    expect(stage([seedId, lateId, laterPaidId, futureId]).byKind.membership).toMatchObject({
+      delivered: 1,
+      rendererIngress: 0,
+      firstVisible: 0,
+    });
+    const overflowBeforeLate = overloadTrace(
+      sample,
+      ['WINDOWS380_LOAD_OVERFLOW_OLD_0', newOverflowId],
+      { active: 30, queue: 50 },
+      new Set(['WINDOWS380_LOAD_OVERFLOW_OLD_0'])
+    );
+    expect(overflowBeforeLate.records.map((record) => record.delivered)).toEqual([true, false]);
   });
 
   it('retains late source-owned ink beyond 48 records and rejects omitted frame draws', async () => {

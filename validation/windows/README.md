@@ -14,6 +14,9 @@ motion, and zero-capacity/restoration inputs. Its initial 960-by-1000 viewport
 holds an 800px player so the six simultaneous content rows can be due together.
 It waits for all three canonical accessible tails before the content capture
 and requires the deferred zero-capacity ID itself to draw after restoration.
+The 51-row zero-rate backlog must stay outside renderer ingress, then its first
+row must enter and paint after a same-page positive-rate update. A separate
+fresh page checks the positive cohort with its own distinct first-visible ID.
 It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
 detailed videos at 400px and 960px viewport widths; recorded player bounds are

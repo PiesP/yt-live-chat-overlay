@@ -997,7 +997,8 @@ export function overloadTrace(
   caps: {
     active: number;
     queue: number;
-  }
+  },
+  deliveredIds: ReadonlySet<string>
 ) {
   const records = ids.map((id) => {
     const events = snapshot.dispositions.filter((entry) => entry.id === id);
@@ -1011,7 +1012,7 @@ export function overloadTrace(
     return {
       id,
       kind: id.includes('_PAID') ? 'paid' : id.includes('_MEMBERSHIP') ? 'membership' : 'ordinary',
-      delivered: true,
+      delivered: deliveredIds.has(id),
       rendererIngressAtEpochMs: ingressAt,
       pendingNow: snapshot.pendingNow.includes(id),
       queuedAtEpochMs:
@@ -1041,7 +1042,7 @@ export function overloadTrace(
       return [
         kind,
         {
-          delivered: group.length,
+          delivered: group.filter((entry) => entry.delivered).length,
           rendererIngress: group.filter((entry) => entry.rendererIngressAtEpochMs !== null).length,
           queuedNow: group.filter((entry) => entry.pendingNow).length,
           reserved: group.filter((entry) => entry.reservedAtEpochMs !== null).length,
@@ -1911,6 +1912,30 @@ async function runBackend(options: {
         'Zero maximum admitted a marked backlog row to the renderer'
       )
     );
+    await page.evaluate(() => window.__ytChatOverlay?.applySettings({ backlogMaxRate: 20 }));
+    const resumedSettings = await page.evaluate(() => {
+      const settings = window.__ytChatOverlay?.getSettings();
+      return { maximum: settings?.backlogMaxRate, minimum: settings?.backlogInjectionRateMin };
+    });
+    check(() => assert.deepEqual(resumedSettings, { maximum: 20, minimum: 4 }));
+    const resumedStarted = Date.now();
+    await waitForIngress(page, backend, IDS[10]);
+    await observeVisible(IDS[10]);
+    const resumedRate = await snapshot(page, backend);
+    rateObservations.push({
+      name: 'zero-to-positive-same-owner',
+      elapsedMs: Date.now() - resumedStarted,
+      settings: resumedSettings,
+      snapshot: resumedRate,
+    });
+    check(() => {
+      assert(Number.isFinite(resumedRate.ingress[IDS[10]]));
+      assertCoherentVisibleFrame(resumedRate, IDS[10]);
+      assert(
+        resumedRate.dispositions.some((entry) => entry.id === IDS[10] && entry.isBacklog === true),
+        'Held zero-rate row did not resume through the backlog pipeline'
+      );
+    });
     // A fresh owned document keeps the positive cohort independent of the 51
     // held zero-rate rows, so old eventual service cannot satisfy its proof.
     await openFresh();
@@ -2496,6 +2521,17 @@ async function runOverloadBackend(options: {
   const { context, root, extensionId, backend, mode, html, media } = options;
   const page = await context.newPage();
   const delivered = new Set<string>();
+  const deliveredIds = new Set<string>();
+  const markDelivered = (key: keyof typeof OVERLOAD_BATCHES) => {
+    delivered.add(key);
+    for (const action of OVERLOAD_BATCHES[key]) {
+      const renderer = Object.values(action.addChatItemAction.item)[0] as
+        | { id?: string }
+        | undefined;
+      assert(renderer?.id && OVERLOAD_IDS.includes(renderer.id));
+      deliveredIds.add(renderer.id);
+    }
+  };
   let currentCase: OverloadCase | null = null;
   let currentSnapshots: Array<{
     stage: string;
@@ -2575,7 +2611,7 @@ async function runOverloadBackend(options: {
                 },
               ]
             : [];
-        if (actions.length) delivered.add('future');
+        if (actions.length) markDelivered('future');
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -2604,7 +2640,7 @@ async function runOverloadBackend(options: {
           key && Object.hasOwn(OVERLOAD_BATCHES, key) && !delivered.has(key)
             ? OVERLOAD_BATCHES[key as keyof typeof OVERLOAD_BATCHES]
             : [];
-        if (actions.length && key) delivered.add(key);
+        if (actions.length && key) markDelivered(key as keyof typeof OVERLOAD_BATCHES);
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -2799,7 +2835,7 @@ async function runOverloadBackend(options: {
       const observe = async (stage: string) => {
         const measured = await snapshot(page, backend, MAX_OVERLOAD_RECORDS);
         assertBackend(measured, backend);
-        const trace = overloadTrace(measured, ids, caps);
+        const trace = overloadTrace(measured, ids, caps, deliveredIds);
         snapshots.push({ stage, trace });
         return measured;
       };
