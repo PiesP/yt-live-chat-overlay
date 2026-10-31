@@ -1755,8 +1755,8 @@ export class WorkerRenderer {
     for (const bucket of this.farOpacityBuckets) bucket.length = 0;
     for (const bucket of this.midOpacityBuckets) bucket.length = 0;
     for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
-    const mode = this.config.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const isScrolling =
+      this.effectiveMotionMode === 'scroll' || this.effectiveMotionMode === 'reverse';
     const strokeWidth =
       this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0
         ? this.config.outlineWidthPx
@@ -1801,7 +1801,8 @@ export class WorkerRenderer {
             msg.duration,
             isScrolling,
             msg.speedTier,
-            this.opacityConfig
+            this.opacityConfig,
+            elapsed
           )
         : 0;
       if (opacity <= 0) continue;

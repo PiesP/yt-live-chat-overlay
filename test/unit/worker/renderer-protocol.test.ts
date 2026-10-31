@@ -616,6 +616,50 @@ beforeEach(() => {
   resetWorkerForTests();
 });
 
+describe('Worker committed-motion fade', () => {
+  it.each([
+    ['scroll', false, 0],
+    ['top', false, 0],
+    ['scroll', true, 300],
+  ] as const)(
+    'keeps a reflowed %s message visible with reduced motion=%s and pause=%s',
+    (mode, reducedMotion, pausedDuration) => {
+      const renderer = initializeRenderer({ danmakuMode: mode, reducedMotion });
+      const internals = renderer as unknown as {
+        activeMessages: ActiveMessage[];
+        midOpacityBuckets: ActiveMessage[][];
+        renderFrame(): void;
+      };
+      const message: ActiveMessage = {
+        id: 'reflow-fade',
+        x: 640,
+        y: 20,
+        startX: 640,
+        width: 100,
+        height: 20,
+        startTime: 7736 - pausedDuration,
+        fadeStartTime: 4000 - pausedDuration,
+        duration: 4000,
+        invDuration: 1 / 4000,
+        pausedDuration,
+        laneIndex: 0,
+        laneSlotCount: 1,
+        laneArrayIndices: [],
+        speedTier: 1,
+        text: '',
+        color: '#fff',
+        content: [],
+        ghostText: '',
+      };
+      internals.activeMessages.push(message);
+      internals.renderFrame();
+      expect(internals.midOpacityBuckets.slice(1).some((bucket) => bucket.includes(message))).toBe(
+        true
+      );
+    }
+  );
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
