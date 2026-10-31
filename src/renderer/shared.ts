@@ -119,7 +119,8 @@ export function estimateMessageDimensions(
       showSuperChatAmount,
       availableWidth,
       minimumPaidCardWidth,
-      measurement
+      measurement,
+      outlineWidthPx
     );
   }
   if (message.kind === 'membership') {
@@ -132,7 +133,8 @@ export function estimateMessageDimensions(
       fontFamily,
       availableWidth,
       minimumPaidCardWidth,
-      measurement
+      measurement,
+      outlineWidthPx
     );
   }
   return estimateRegularMessageDimensions(
@@ -183,7 +185,8 @@ function estimateRegularMessageDimensions(
         font,
         fontSize,
         (text, direction) => measurement.width(text, font, direction),
-        measurement.context
+        measurement.context,
+        outlineWidthPx
       )
     : null;
   const textWidth =
@@ -236,7 +239,8 @@ function estimateSuperChatDimensions(
   showSuperChatAmount: boolean = true,
   availableWidth?: number,
   minimumWidth?: number,
-  measurement: DimensionMeasurement = defaultMeasurement
+  measurement: DimensionMeasurement = defaultMeasurement,
+  outlineWidthPx = 0
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
@@ -296,7 +300,8 @@ function estimateSuperChatDimensions(
     font,
     fontSize,
     (text, direction) => measurement.width(text, font, direction),
-    measurement.context
+    measurement.context,
+    outlineWidthPx
   );
   const lineCount = bodyLayout.lines.length;
   const textHeight = bodyLayout.height;
@@ -325,7 +330,8 @@ function estimateMembershipDimensions(
   fontFamily: string,
   availableWidth?: number,
   minimumWidth?: number,
-  measurement: DimensionMeasurement = defaultMeasurement
+  measurement: DimensionMeasurement = defaultMeasurement,
+  outlineWidthPx = 0
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.membership;
   const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
@@ -387,7 +393,8 @@ function estimateMembershipDimensions(
     font,
     fontSize,
     (text, direction) => measurement.width(text, font, direction),
-    measurement.context
+    measurement.context,
+    outlineWidthPx
   );
   const bodyLineCount = bodyLayout.lines.length;
   const textHeight = bodyLayout.height;
@@ -509,7 +516,8 @@ export function estimateTranslatedMessageDimensions(
           translationFont,
           translationFontSize,
           (text, direction) => measurement.width(text, translationFont, direction),
-          measurement.context
+          measurement.context,
+          outlineWidthPx
         )
       : null;
   const translationLineHeight =
@@ -561,7 +569,8 @@ export function estimateTranslatedMessageDimensions(
     translationFont,
     translationFontSize,
     (text, direction) => measurement.width(text, translationFont, direction),
-    measurement.context
+    measurement.context,
+    outlineWidthPx
   );
   const translationHeight = wrapped.height;
 

@@ -450,7 +450,8 @@ export function prepareWrappedContent(
   font: string,
   fontSize: number,
   measureTextFn: (text: string, direction?: TextDirection) => number,
-  context?: Parameters<typeof measureTextTopBounds>[3]
+  context?: Parameters<typeof measureTextTopBounds>[3],
+  outlineWidthPx = 0
 ): PreparedWrappedContent {
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const measure = (text: string): number => measureTextFn(text, resolveTextDirection(text));
@@ -509,22 +510,27 @@ export function prepareWrappedContent(
   let below = base.below;
   for (const line of visualLines) {
     for (const piece of line) {
-      if (piece.type !== 'text') continue;
-      const bounds = measureTextTopBounds(font, fontSize, piece.text, context);
+      const text = piece.type === 'text' ? piece.text : getRenderableEmojiFallbackText(piece.value);
+      if (!text) continue;
+      // An image may fail after preparation, so reserve the visible fallback's
+      // ink even while the bitmap is currently available in one renderer.
+      const bounds = measureTextTopBounds(font, fontSize, text, context);
       above = Math.max(above, bounds.above);
       below = Math.max(below, bounds.below);
     }
   }
-  const lineHeight = Math.max(
+  const requiredStrokeInset = Math.ceil(Math.max(0, outlineWidthPx) / 2);
+  const contentLineHeight = Math.max(
     1,
     Math.ceil(measureTextHeight(font, fontSize)),
     above + below,
     emojiSize
   );
+  const lineHeight = contentLineHeight + requiredStrokeInset * 2;
   return {
     lines: visualLines,
     lineHeight,
-    above,
+    above: above + requiredStrokeInset,
     height: lineHeight * visibleLineCount,
     width: Math.min(maxWidth, visualWidth),
     truncated:
@@ -1563,7 +1569,16 @@ export function renderWrappedContentSegments<
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const layout =
     prepared ??
-    prepareWrappedContent(segments, maxWidth, maxLines, font, fontSize, measureWrappedText, ctx);
+    prepareWrappedContent(
+      segments,
+      maxWidth,
+      maxLines,
+      font,
+      fontSize,
+      measureWrappedText,
+      ctx,
+      outlineWidthPx
+    );
   const visibleLineCount = layout.lines.length;
   if (visibleLineCount === 0) {
     ctx.restore();

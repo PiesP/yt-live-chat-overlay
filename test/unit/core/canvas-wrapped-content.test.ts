@@ -6,15 +6,24 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 vi.mock('@renderer/text-measure', () => ({
   getFontString: (fontSize: number): string => `bold ${fontSize}px sans-serif`,
   measureTextHeight: (): number => 20,
-  measureTextTopBounds: (): { above: number; below: number } => ({ above: 0, below: 20 }),
+  measureTextTopBounds: (
+    _font: string,
+    _size: number,
+    text?: string
+  ): { above: number; below: number } =>
+    text === 'Á한' ? { above: 7, below: 37 } : { above: 0, below: 20 },
   measureTextWidth: (text: string): number => (text === 'i' ? 4 : text.length * 10),
 }));
 
 import {
   type AnyCanvasContext,
+  prepareWrappedContent,
   renderWrappedContentSegments,
   type TextBitmapCache,
 } from '@renderer/canvas/shared';
+import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { estimateMessageDimensions } from '@renderer/shared';
+import { rendererLayout } from '@util/design-tokens';
 
 function createContext(): CanvasRenderingContext2D {
   return {
@@ -60,6 +69,80 @@ describe('renderWrappedContentSegments', () => {
     expect(Number(draws[1]?.[2]) - Number(draws[0]?.[2])).toBeGreaterThanOrEqual(38);
     expect(Number(draws[2]?.[2]) - Number(draws[1]?.[2])).toBeGreaterThanOrEqual(38);
     expect(bottom).toBeGreaterThanOrEqual(imageBottoms.at(-1) ?? Infinity);
+  });
+
+  it('reserves failed-image fallback ink across multiline CJK and diacritics', () => {
+    const ctx = createContext();
+    const bottom = renderWrappedContentSegments(
+      ctx,
+      [1, 2, 3].map((index) => ({
+        type: 'emoji',
+        emojiUrl: `emoji://missing-${index}`,
+        emojiFallbackText: 'Á한',
+      })),
+      24,
+      20,
+      42,
+      3,
+      '#ffffff',
+      32,
+      8,
+      1,
+      { maxBytes: 0, get: () => undefined, set: vi.fn() },
+      { get: () => undefined },
+      () => 'bold 32px sans-serif'
+    );
+    const draws = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([text]) => text === 'Á한'
+    );
+    expect(draws).toHaveLength(3);
+    const tops = draws.map(([, , y]) => Number(y) - 7 - 4);
+    const bottoms = draws.map(([, , y]) => Number(y) + 37 + 4);
+    expect(tops[1]! - tops[0]!).toBeGreaterThanOrEqual(52);
+    expect(tops[2]! - tops[1]!).toBeGreaterThanOrEqual(52);
+    expect(bottom).toBeGreaterThanOrEqual(bottoms.at(-1) ?? Infinity);
+    expect(ctx.drawImage).not.toHaveBeenCalled();
+    const segments = [1, 2, 3].map((index) => ({
+      type: 'emoji' as const,
+      emojiUrl: `emoji://missing-${index}`,
+      emojiFallbackText: 'Á한',
+    }));
+    const prepared = prepareWrappedContent(
+      segments,
+      42,
+      3,
+      'bold 32px sans-serif',
+      32,
+      (text) => text.length * 10,
+      ctx,
+      8
+    );
+    expect(prepared.height).toBe(bottom - 20);
+    const card = estimateMessageDimensions(
+      {
+        text: 'Á한Á한Á한',
+        content: segments.map((segment) => ({
+          type: 'emoji',
+          emoji: { url: segment.emojiUrl, alt: '', fallbackText: segment.emojiFallbackText },
+        })),
+        kind: 'superchat',
+        authorType: 'normal',
+        timestamp: 0,
+        superChat: { amount: '', tier: 'blue' },
+      },
+      32,
+      false,
+      'bold',
+      'sans-serif',
+      { superchat: 3 },
+      false,
+      '0px',
+      8,
+      100
+    );
+    expect(card.height).toBe(
+      rendererLayout.superchat.paddingV * 2 + SUPERCHAT_CARD_CONFIG.body.marginTop + prepared.height
+    );
   });
 
   it('keeps separately measured CJK word gaps inside the wrapped line width', () => {

@@ -16,7 +16,7 @@ vi.hoisted(() => {
 const mockCtx = {
   setTransform: vi.fn(),
   clearRect: vi.fn(),
-  measureText: vi.fn(() => ({
+  measureText: vi.fn((_text: string) => ({
     width: 100,
     actualBoundingBoxAscent: 16,
     actualBoundingBoxDescent: 4,
@@ -103,6 +103,7 @@ import type { CardConfigWorker } from '@renderer/card-config';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
 import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { clearTextMeasurementCaches } from '@renderer/text-measure';
 import { isValidWorkerMessageSnapshot } from '@renderer/worker/protocol-guards';
 import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
 import type { ActiveMessage, WorkerMessage } from '@renderer/worker/types';
@@ -549,6 +550,50 @@ describe('Worker reservation safety', () => {
     } finally {
       delete (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> })
         .canvas;
+    }
+  });
+
+  it('reserves local fallback ink in Worker prepared emoji rows', () => {
+    const originalMeasure = mockCtx.measureText.getMockImplementation();
+    mockCtx.measureText.mockImplementation((text: string) => ({
+      width: text.length * 10,
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: text.length * 10,
+      actualBoundingBoxAscent: 16,
+      actualBoundingBoxDescent: text === 'Á한' ? 37 : 4,
+    }));
+    (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> }).canvas =
+      new MockOffscreenCanvas();
+    try {
+      clearTextMeasurementCaches();
+      const renderer = initializeRenderer({ danmakuMode: 'top', fontSize: 32, outlineWidthPx: 8 });
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 100, height: 400, dpr: 1 }));
+      const internals = renderer as unknown as { pendingQueue: WorkerMessage[] };
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [
+            makeWorkerMessage({
+              id: 'worker-fallback-ink',
+              content: [1, 2, 3].map((index) => ({
+                type: 'emoji',
+                content: '',
+                emojiUrl: `emoji://missing-${index}`,
+                emojiFallbackText: 'Á한',
+              })),
+              width: 1,
+              height: 1,
+            }),
+          ],
+        })
+      );
+      expect(internals.pendingQueue[0]?.width).toBeLessThanOrEqual(100);
+      expect(internals.pendingQueue[0]?.height).toBeGreaterThanOrEqual(114);
+    } finally {
+      if (originalMeasure) mockCtx.measureText.mockImplementation(originalMeasure);
+      delete (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> })
+        .canvas;
+      clearTextMeasurementCaches();
     }
   });
 
