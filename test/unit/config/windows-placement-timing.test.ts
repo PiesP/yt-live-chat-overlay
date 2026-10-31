@@ -11,6 +11,7 @@ import { assertInstrumentedPageScript } from '../../../validation/windows/native
 import {
   assertBacklogMotion,
   assertBacklogReflow,
+  assertCompactRegularRows,
   assertSpacingPhase,
   canvasProbePrelude,
   findOverlappingActivePair,
@@ -173,6 +174,29 @@ describe('Windows placement timing probe', () => {
     ];
     expect(measureAllocationRowPitch(messages)).toBe(38);
     expect(measureAllocationRowPitch(messages.slice(0, 1))).toBeNull();
+  });
+
+  it('measures compact row reservation across adaptive grid epochs', () => {
+    const row = (id: string, slotCount: number, laneHeight: number, height = 44) => ({
+      id,
+      kind: 'activated',
+      slotCount,
+      laneHeight,
+      height,
+      laneSpacing: 0,
+    });
+    const full = row('WINDOWS196_GAP0_A', 1, 44);
+    const subdivided = row('WINDOWS196_GAP0_B', 2, 22);
+    expect(() => assertCompactRegularRows([full, subdivided])).not.toThrow();
+    for (const invalid of [
+      row(subdivided.id, 2, 44),
+      row(subdivided.id, 1, 22),
+      row(subdivided.id, 0, 22),
+      row(subdivided.id, 2, Number.NaN),
+    ]) {
+      expect(() => assertCompactRegularRows([full, invalid])).toThrow(/extra baseline rows/);
+    }
+    expect(() => assertCompactRegularRows([full])).toThrow(/extra baseline rows/);
   });
 
   it.each(['main', 'worker'])(
@@ -524,7 +548,7 @@ describe('Windows placement timing probe', () => {
         rect: { left: x, top: y, right: x + 100, bottom: y + height },
       });
       const regular = row('WINDOWS204_MIX_REGULAR', 10, 5, 46);
-      const paid = row('WINDOWS204_MIX_PAID', 10, 59, 44);
+      const paid = row('W204P', 10, 59, 44);
       const frame = {
         frameId: 11,
         complete: true,
@@ -1155,7 +1179,12 @@ describe('Windows placement timing probe', () => {
     });
   });
 
-  it.each([1, 2])('associates a cached bitmap with viewport bounds at scale %s', (scale) => {
+  it.each([
+    [1, 'WINDOWS193_SHORT'],
+    [2, 'WINDOWS193_SHORT'],
+    [1, 'W193P'],
+    [1, 'W204P'],
+  ] as const)('associates cached %s bitmap marker %s with viewport bounds', (scale, id) => {
     const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
     const messages: Array<{
       type: string;
@@ -1209,16 +1238,16 @@ describe('Windows placement timing probe', () => {
         messages.push(message);
       },
     };
-    runInNewContext(workerProbePrelude(['WINDOWS193_SHORT']), sandbox);
+    runInNewContext(workerProbePrelude([id]), sandbox);
     listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
     listeners.message?.({
       origin: '',
-      data: { type: 'addMessages', messages: [{ id: 'WINDOWS193_SHORT' }] },
+      data: { type: 'addMessages', messages: [{ id }] },
     });
     sandbox.requestAnimationFrame(() => {
       const cache = new FakeContext(bitmap);
-      cache.fillText('WINDOWS193_SHORT', 0, 0);
-      cache.strokeText('WINDOWS193_SHORT', 0, 0);
+      cache.fillText(id, 0, 0);
+      cache.strokeText(id, 0, 0);
       const display = new FakeContext(overlay);
       display.clearRect(0, 0, 640, 360);
       display.globalAlpha = 0;
@@ -1231,10 +1260,10 @@ describe('Windows placement timing probe', () => {
     listeners.message?.({ origin: '', data: { type: 'ytPlacementFlush' } });
 
     const sample = messages.at(-1)?.sample;
-    expect(sample?.firstEntry.WINDOWS193_SHORT).toBeGreaterThan(1000);
+    expect(sample?.firstEntry[id]).toBeGreaterThan(1000);
     expect(sample?.bounds).toHaveLength(1);
     expect(sample?.bounds[0]).toMatchObject({
-      id: 'WINDOWS193_SHORT',
+      id,
       left: 500 * scale,
       top: 20 * scale,
       right: 600 * scale,

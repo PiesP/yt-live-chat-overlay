@@ -365,7 +365,7 @@ declare global {
 }
 
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows193Placement';
-const MIXED_IDS: [string, string] = ['WINDOWS204_MIX_REGULAR', 'WINDOWS204_MIX_PAID'];
+const MIXED_IDS: [string, string] = ['WINDOWS204_MIX_REGULAR', 'W204P'];
 const TOKENS = [
   'WINDOWS193_SHORT',
   'WINDOWS193_LONG',
@@ -379,7 +379,7 @@ const TOKENS = [
   'WINDOWS193_EXPANDED',
   'WINDOWS193_OVERRIDE_OFF',
   'WINDOWS193_SYSTEM_OFF',
-  'WINDOWS193_PAID',
+  'W193P',
   'WINDOWS196_GAP0_A',
   'WINDOWS196_GAP0_B',
   'WINDOWS196_GAP8_A',
@@ -1575,6 +1575,46 @@ export function assertSpacingPhase(
   return { allocationPitchPx, visibleRowPitch };
 }
 
+/** A regular row may span multiple smaller grid cells after adaptive subdivision. */
+export function assertCompactRegularRows(
+  dispositions: readonly {
+    id: string;
+    kind: string;
+    slotCount?: number | null;
+    laneHeight?: number | null;
+    height?: number | null;
+    laneSpacing?: number | null;
+  }[],
+  prefix = 'WINDOWS196_GAP0_'
+) {
+  const regular = dispositions.filter(
+    (entry) => entry.kind === 'activated' && entry.id.startsWith(prefix)
+  );
+  assert(
+    regular.length >= 2 &&
+      regular.every((entry) => {
+        const slotCount = entry.slotCount;
+        const laneHeight = entry.laneHeight;
+        const height = entry.height;
+        const laneSpacing = entry.laneSpacing;
+        return (
+          Number.isInteger(slotCount) &&
+          Number(slotCount) > 0 &&
+          Number.isFinite(laneHeight) &&
+          Number(laneHeight) > 0 &&
+          Number.isFinite(height) &&
+          Number(height) > 0 &&
+          Number.isFinite(laneSpacing) &&
+          Number(laneSpacing) >= 0 &&
+          Math.abs(
+            Number(slotCount) * Number(laneHeight) - (Number(height) + Number(laneSpacing))
+          ) < 0.01
+        );
+      }),
+    'Compact transparent regular comments reserved extra baseline rows'
+  );
+}
+
 export function assertBacklogMotion(
   disposition: unknown,
   renderer: string,
@@ -2544,7 +2584,7 @@ async function runScenario({
         : mode === 'reverse'
           ? [TOKENS[2]]
           : TOKENS.slice(0, 2);
-  const paidId = mixedGap ? MIXED_IDS[1] : 'WINDOWS193_PAID';
+  const paidId = mixedGap ? MIXED_IDS[1] : 'W193P';
   assert(
     ids.every((id): id is string => typeof id === 'string') && typeof paidId === 'string',
     'Placement fixture token is unavailable'
@@ -3348,13 +3388,7 @@ async function runScenario({
         animations: 'disabled',
       });
       if (!comparisonOnly) {
-        const regular = gap0.exact.dispositions.filter(
-          (entry) => entry.kind === 'activated' && entry.id.startsWith('WINDOWS196_GAP0_')
-        );
-        assert(
-          regular.length >= 2 && regular.every((entry) => entry.slotCount === 1),
-          'Compact transparent regular comments reserved extra baseline rows'
-        );
+        assertCompactRegularRows(gap0.exact.dispositions);
       }
       phaseObservations.push({
         phase: 'gap8',
