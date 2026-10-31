@@ -30,7 +30,9 @@ paused motion, and zero-capacity phases retain their complete JSON observations
 without an additional PNG. This leaves room for the existing full-profile
 artifacts under the controller's unchanged 64-file collection limit.
 The motion row must enter the inner half of its current viewport before the
-same-ID pause and narrower reflow comparison. The horizontal resize holds the
+same-ID pause and narrower reflow comparison. Pause motion is compared from a
+post-command snapshot after an ordered Worker flush, so movement before the
+command is excluded from the hold measurement. The horizontal resize holds the
 measured player height constant so its physical-row Y comparison has the same
 vertical geometry on both sides.
 On the detailed scene, a page-owned Translator stub records
@@ -113,8 +115,12 @@ state before and after the late arrivals. Missing pre-#387 Manager fields are
 recorded as `null` in the baseline. The candidate still requires late renderer
 ingress and older-row replacement; a baseline without late ingress records a
 policy finding. Neither HTTP delivery nor a Manager send is counted as Worker
-renderer ingress. Probe errors fail the case and failed partial observations
-remain in the receipt.
+renderer ingress. Worker waiters request the existing bounded probe flush at
+most once per 100ms after passive reports stop, while still requiring actual
+renderer ingress or positive frame ink. The replay clock holds at 9.999 seconds
+through future-case setup and releases to 10 seconds only after the due and
+future source responses arrive, so the due row cannot expire during setup.
+Probe errors fail the case and failed partial observations remain in the receipt.
 
 The original `f7ff6f0d` correctness baseline supports stacked cards only.
 When the current fixture is transplanted into a comparison checkout, the bundle

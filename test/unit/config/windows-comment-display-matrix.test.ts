@@ -31,13 +31,80 @@ import {
   presentationGeometry,
   snapshot,
   validateMatrixMode,
+  waitForIngress,
 } from '../../../validation/windows/comment-display-matrix.ts';
+import { canvasProbePrelude } from '../../../validation/windows/placement-timing.ts';
 
 const source = MATRIX_BATCHES.content.map(
   (action) => Object.values(action.addChatItemAction.item)[0]
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('refreshes capped Worker samples while waiting for actual renderer ingress', async () => {
+    const id = 'WINDOWS380_LOAD_OVERFLOW_NEW_3';
+    let now = 0;
+    let flushes = 0;
+    const sandbox: Record<string, unknown> = {
+      performance: { timeOrigin: 1000, now: () => now },
+      requestAnimationFrame: () => 0,
+      HTMLCanvasElement: class {},
+      Worker: class {},
+      MutationObserver: class {
+        observe() {}
+      },
+      document: { querySelectorAll: () => [] },
+    };
+    sandbox.window = sandbox;
+    runInNewContext(canvasProbePrelude({ forceFallback: true, tokens: [id] }), sandbox);
+    const probe = sandbox.__ytPlacementProbe as {
+      workers: Array<{
+        ready: boolean;
+        sample: { ingress: Record<string, number> };
+        worker: object;
+      }>;
+      requestFlushIfDue: (worker: object) => void;
+      flushSequence?: number;
+    };
+    const sample = { ingress: {} as Record<string, number> };
+    const worker = {
+      ready: true,
+      sample,
+      worker: {
+        postMessage: (message: { type: string; requestId: number }) => {
+          expect(message.type).toBe('ytPlacementFlush');
+          flushes++;
+          queueMicrotask(() => {
+            sample.ingress[id] = 1001;
+          });
+        },
+      },
+    };
+    probe.workers.push(worker);
+    const page = {
+      waitForFunction: async (callback: (input: unknown) => boolean, input: unknown) => {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const matched = runInNewContext(
+            `(${callback.toString()})(${JSON.stringify(input)})`,
+            sandbox
+          );
+          if (matched) return;
+          await Promise.resolve();
+        }
+        throw new Error('Ingress did not become visible to the waiter');
+      },
+    } as unknown as Parameters<typeof waitForIngress>[0];
+    await waitForIngress(page, 'worker', id);
+    expect(flushes).toBe(1);
+    expect(sample.ingress[id]).toBe(1001);
+    probe.requestFlushIfDue(worker);
+    now = 99;
+    probe.requestFlushIfDue(worker);
+    expect(flushes).toBe(1);
+    now = 100;
+    probe.requestFlushIfDue(worker);
+    expect(flushes).toBe(2);
+  });
+
   it('observes the actual Worker Manager without changing sends or receipts', async () => {
     const id = 'WINDOWS380_LOAD_OVERFLOW_NEW_3';
     const secondId = 'WINDOWS380_LOAD_OVERFLOW_NEW_2';

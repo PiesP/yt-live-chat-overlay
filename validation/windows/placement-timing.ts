@@ -351,6 +351,7 @@ type ProbeState = ProbeSample & {
   setActiveRowsReader: (reader: (() => unknown[]) | null) => (() => unknown[]) | null;
   requestAtEpochMs?: number;
   flushSequence?: number;
+  requestFlushIfDue: (record: WorkerRecord) => void;
   canvasSourceHooked?: boolean;
   readRegularInsets?: (
     fontSize: number,
@@ -482,6 +483,14 @@ function installProbeRuntime(options: ProbeOptions) {
     measuredPlans: {},
   } as unknown as ProbeState;
   scope.__ytPlacementProbe = state;
+  state.requestFlushIfDue = (record) => {
+    const now = performance.now();
+    if (now - (record.dueFlushAt ?? -Infinity) < 100) return;
+    const requestId = (state.flushSequence ?? 0) + 1;
+    state.flushSequence = requestId;
+    record.dueFlushAt = now;
+    record.worker.postMessage({ type: 'ytPlacementFlush', requestId });
+  };
   state.registerPlanSections = (plan, id, context) => {
     if (!ids.has(id)) return;
     const rows = plan as { body?: object; translation?: object };

@@ -1432,15 +1432,7 @@ async function waitForVisible(
             draw.rect.bottom > 0
         )
       );
-      if (!visible && selectedBackend === 'worker' && worker && probe) {
-        const now = performance.now();
-        if (now - (worker.dueFlushAt ?? -Infinity) >= 100) {
-          const requestId = (probe.flushSequence ?? 0) + 1;
-          probe.flushSequence = requestId;
-          worker.dueFlushAt = now;
-          worker.worker.postMessage({ type: 'ytPlacementFlush', requestId });
-        }
-      }
+      if (!visible && selectedBackend === 'worker' && worker) probe.requestFlushIfDue(worker);
       return visible;
     },
     { selectedBackend: backend, messageId: id, requestedLayout: layout },
@@ -1457,7 +1449,7 @@ async function waitForTranslationDraw(page: Page, backend: Backend, id: string) 
           ? probe?.workers.find((record) => record.ready)?.sample
           : probe;
       const frame = selected?.latestRenderFrame;
-      return Boolean(
+      const matched = Boolean(
         frame?.complete &&
         !frame.truncated &&
         frame.draws.some(
@@ -1472,6 +1464,11 @@ async function waitForTranslationDraw(page: Page, backend: Backend, id: string) 
             draw.rect.bottom > 0
         )
       );
+      if (!matched && selectedBackend === 'worker') {
+        const worker = probe?.workers.find((record) => record.ready);
+        if (worker) probe.requestFlushIfDue(worker);
+      }
+      return matched;
     },
     { selectedBackend: backend, messageId: id },
     { timeout: 5000 }
@@ -1505,7 +1502,7 @@ async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: 
         (entry) => entry.id === messageId && entry.maxBodyLines === expectedLines
       );
       const row = frame?.active.find((entry) => entry.id === messageId);
-      return Boolean(
+      const matched = Boolean(
         frame?.complete &&
         frame.cleared &&
         !frame.truncated &&
@@ -1514,6 +1511,11 @@ async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: 
         plan.height <= row.height + 2 &&
         frame.draws.some((draw) => draw.id === messageId && draw.alpha > 0)
       );
+      if (!matched && selectedBackend === 'worker') {
+        const worker = probe?.workers.find((record) => record.ready);
+        if (worker) probe.requestFlushIfDue(worker);
+      }
+      return matched;
     },
     { selectedBackend: backend, messageId: id, expectedLines: lines },
     { timeout: 5000 }
@@ -1568,15 +1570,7 @@ async function waitForProbeConfig(
           (exact?.ignoreReducedMotion === config.ignoreReducedMotion &&
             frame.config.ignoreReducedMotion === config.ignoreReducedMotion))
       );
-      if (!matches && selectedBackend === 'worker' && worker && probe) {
-        const now = performance.now();
-        if (now - (worker.dueFlushAt ?? -Infinity) >= 100) {
-          const requestId = (probe.flushSequence ?? 0) + 1;
-          probe.flushSequence = requestId;
-          worker.dueFlushAt = now;
-          worker.worker.postMessage({ type: 'ytPlacementFlush', requestId });
-        }
-      }
+      if (!matches && selectedBackend === 'worker' && worker) probe.requestFlushIfDue(worker);
       return matches;
     },
     { selectedBackend: backend, config: expected },
@@ -1584,18 +1578,18 @@ async function waitForProbeConfig(
   );
 }
 
-async function waitForIngress(page: Page, backend: Backend, id: string) {
+export async function waitForIngress(page: Page, backend: Backend, id: string) {
   await page.waitForFunction(
     ({ selectedBackend, messageId }) => {
       const probe = window.__ytPlacementProbe;
-      const selected =
-        selectedBackend === 'worker'
-          ? probe?.workers.find((record) => record.ready)?.sample
-          : probe;
-      return Number.isFinite(selected?.ingress?.[messageId]);
+      const worker = probe?.workers.find((record) => record.ready);
+      const selected = selectedBackend === 'worker' ? worker?.sample : probe;
+      const ingressed = Number.isFinite(selected?.ingress?.[messageId]);
+      if (!ingressed && selectedBackend === 'worker' && worker) probe.requestFlushIfDue(worker);
+      return ingressed;
     },
     { selectedBackend: backend, messageId: id },
-    { timeout: 5000 }
+    { polling: 100, timeout: 5000 }
   );
 }
 
@@ -2109,7 +2103,7 @@ async function runBackend(options: {
             : probe;
         const frame = selected?.latestRenderFrame;
         const row = frame?.active.find((entry) => entry.id === messageId);
-        return Boolean(
+        const safe = Boolean(
           frame?.complete &&
           frame.cleared &&
           !frame.truncated &&
@@ -2127,6 +2121,11 @@ async function runBackend(options: {
               draw.rect.bottom > 0
           )
         );
+        if (!safe && selectedBackend === 'worker') {
+          const worker = probe?.workers.find((record) => record.ready);
+          if (worker) probe.requestFlushIfDue(worker);
+        }
+        return safe;
       },
       { selectedBackend: backend, messageId: IDS[6] },
       { polling: 100, timeout: 5000 }
@@ -2141,10 +2140,14 @@ async function runBackend(options: {
       )
     );
     await page.evaluate(() => window.__ytPlacementSetPaused(true));
+    // The preceding moving frame may advance before the pause event is handled.
+    // A Worker flush is ordered after that event; Main reads its settled state.
+    const pausedBaseline = await snapshot(page, backend);
+    assertBackend(pausedBaseline, backend);
     await page.waitForTimeout(300);
     const paused = await capture('paused', false);
     const pausedRow = paused.activeNow.find((entry) => entry.id === IDS[6]);
-    const beforeRow = before.activeNow.find((entry) => entry.id === IDS[6]);
+    const pausedBaselineRow = pausedBaseline.activeNow.find((entry) => entry.id === IDS[6]);
     check(() =>
       assert.deepEqual(
         Object.keys(paused.firstEntry).sort(),
@@ -2154,15 +2157,25 @@ async function runBackend(options: {
     );
     check(() =>
       assert(
-        pausedRow && beforeRow && Math.abs(pausedRow.x - beforeRow.x) < 3,
+        pausedRow &&
+          pausedBaselineRow &&
+          Math.abs(pausedRow.x - pausedBaselineRow.x) < 3 &&
+          Math.abs(pausedRow.y - pausedBaselineRow.y) < 1,
         'Paused motion advanced unexpectedly'
       )
     );
     check(() =>
       assert.equal(
         paused.presentationCount,
-        before.presentationCount,
+        pausedBaseline.presentationCount,
         'Pause double-counted the placement epoch'
+      )
+    );
+    check(() =>
+      assert.equal(
+        paused.presentationCount,
+        before.presentationCount,
+        'Pause changed presentation count'
       )
     );
     await page.evaluate(() => window.__ytPlacementSetPaused(false));
@@ -2461,7 +2474,12 @@ async function runBackend(options: {
                 selectedBackend === 'worker'
                   ? probe?.workers.find((record) => record.ready)?.sample
                   : probe;
-              return selected?.exact?.config?.superChatLayout === expectedLayout;
+              const matched = selected?.exact?.config?.superChatLayout === expectedLayout;
+              if (!matched && selectedBackend === 'worker') {
+                const worker = probe?.workers.find((record) => record.ready);
+                if (worker) probe.requestFlushIfDue(worker);
+              }
+              return matched;
             },
             { selectedBackend: backend, expectedLayout: layout },
             { timeout: 5000 }
@@ -2604,13 +2622,18 @@ async function runBackend(options: {
                     ? probe?.workers.find((entry) => entry.ready)?.sample
                     : probe;
                 const frame = sample?.latestRenderFrame;
-                return Boolean(
+                const matched = Boolean(
                   frame?.complete &&
                   frame.config.reducedMotion === true &&
                   frame.config.ignoreReducedMotion === false &&
                   frame.cardPlans?.some((plan) => plan.id === messageId) &&
                   frame.draws.some((draw) => draw.id === messageId && draw.alpha > 0)
                 );
+                if (!matched && selectedBackend === 'worker') {
+                  const worker = probe?.workers.find((record) => record.ready);
+                  if (worker) probe.requestFlushIfDue(worker);
+                }
+                return matched;
               },
               { selectedBackend: backend, messageId: memberId },
               { timeout: 5000 }
@@ -2624,11 +2647,16 @@ async function runBackend(options: {
                     ? probe?.workers.find((entry) => entry.ready)?.sample
                     : probe;
                 const frame = sample?.latestRenderFrame;
-                return Boolean(
+                const advanced = Boolean(
                   frame?.complete &&
                   frame.frameId > priorFrame &&
                   frame.startedAtEpochMs - priorTime >= 250
                 );
+                if (!advanced && selectedBackend === 'worker') {
+                  const worker = probe?.workers.find((record) => record.ready);
+                  if (worker) probe.requestFlushIfDue(worker);
+                }
+                return advanced;
               },
               {
                 selectedBackend: backend,
@@ -3052,8 +3080,8 @@ async function runOverloadBackend(options: {
       }),
     });
     await page.addInitScript(() => {
-      const state = { paused: false, hidden: false, time: 10 };
       const isReplay = new URL(location.href).searchParams.has('matrixReplay');
+      const state = { paused: false, hidden: false, time: isReplay ? 9.999 : 10 };
       Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
         configurable: true,
         get: () => state.time,
@@ -3404,16 +3432,23 @@ async function runOverloadBackend(options: {
         );
       } else if (name === 'future-membership') {
         const futureId = 'WINDOWS380_LOAD_FUTURE_MEMBERSHIP';
-        await waitForVisible(page, backend, 'WINDOWS380_LOAD_FUTURE_DUE');
+        failureStage = 'future-membership:source-delivery';
+        const deliveryDeadline = Date.now() + 5000;
+        while ((replayRequests < 2 || !delivered.has('future')) && Date.now() < deliveryDeadline)
+          await page.waitForTimeout(50);
         assert(
           replayRequests >= 2 && delivered.has('future'),
           'Future membership was not delivered by the replay source'
         );
+        failureStage = 'future-membership:due-at-10';
+        await page.evaluate(() => window.__ytPlacementSetVideoTime(10));
+        await waitForVisible(page, backend, 'WINDOWS380_LOAD_FUTURE_DUE');
         const held = await observe('replay-time-10000');
         check(() => {
           assertNoVisibleCardInk(held, futureId);
           assert(!Number.isFinite(held.ingress[futureId]) && !held.pendingNow.includes(futureId));
         });
+        failureStage = 'future-membership:held-at-10.001';
         await page.evaluate(() => window.__ytPlacementSetVideoTime(10.001));
         await page.waitForTimeout(200);
         const stillHeld = await observe('replay-time-10001');
@@ -3424,6 +3459,7 @@ async function runOverloadBackend(options: {
               !stillHeld.pendingNow.includes(futureId)
           );
         });
+        failureStage = 'future-membership:released-at-11.5';
         await page.evaluate(() => window.__ytPlacementSetVideoTime(11.5));
         await waitForVisible(page, backend, futureId);
         const due = await observe('replay-time-11500');
@@ -3526,15 +3562,7 @@ async function runOverloadBackend(options: {
                   )
               )
             );
-            if (!visible && selectedBackend === 'worker' && worker && probe) {
-              const now = performance.now();
-              if (now - (worker.dueFlushAt ?? -Infinity) >= 100) {
-                const requestId = (probe.flushSequence ?? 0) + 1;
-                probe.flushSequence = requestId;
-                worker.dueFlushAt = now;
-                worker.worker.postMessage({ type: 'ytPlacementFlush', requestId });
-              }
-            }
+            if (!visible && selectedBackend === 'worker' && worker) probe.requestFlushIfDue(worker);
             return visible;
           },
           { selectedBackend: backend, expectedIds: ids, priorFrame: held.frame?.frameId ?? -1 },
