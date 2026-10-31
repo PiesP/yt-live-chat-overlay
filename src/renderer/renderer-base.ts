@@ -344,6 +344,11 @@ export abstract class RendererBase {
       settings.laneSpacing,
       settings.outline.enabled ? settings.outline.widthPx : 0
     );
+    this.laneAllocator.updatePlacementPolicy(
+      settings.headwayGapRatio,
+      settings.exitPaddingPx,
+      settings.scrollDurationMaxMs
+    );
 
     if (fontChanged) {
       clearTextMeasurementCaches();

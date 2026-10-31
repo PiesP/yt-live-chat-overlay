@@ -116,6 +116,17 @@ export class LaneAllocator {
     this.options.safeBottom = safeBottom;
   }
 
+  /** Apply current placement policy without discarding committed lane reservations. */
+  updatePlacementPolicy(
+    headwayGapRatio: number,
+    exitPaddingPx: number,
+    scrollDurationMaxMs: number
+  ): void {
+    this.options.headwayGapRatio = headwayGapRatio;
+    this.options.exitPaddingPx = exitPaddingPx;
+    this.options.scrollDurationMaxMs = scrollDurationMaxMs;
+  }
+
   /** Update font metrics — caller must call `reset()` afterwards to apply. */
   updateFontMetrics(
     fontSize: number,

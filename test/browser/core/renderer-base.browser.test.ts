@@ -1,5 +1,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { Overlay } from '@app/overlay';
+import { SPEED_TIER } from '@renderer/constants';
+import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -29,6 +31,10 @@ class TestRenderer extends RendererBase {
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
+  }
+
+  get placementAllocator(): LaneAllocator {
+    return this.laneAllocator;
   }
 
   get effectiveFontSize(): number {
@@ -155,6 +161,91 @@ function createRenderer(settings = defaultSettings): TestRenderer {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('RendererBase', () => {
+  it.each([
+    { before: 30_000, after: 5_000, expectedWait: null },
+    { before: 5_000, after: 30_000, expectedWait: 9_200 },
+  ])(
+    'uses the updated $after ms placement wait limit with an occupied lane',
+    ({ before, after, expectedWait }) => {
+      const dimensions = { width: 640, height: 34 };
+      vi.spyOn(overlay, 'getDimensions').mockReturnValue(dimensions);
+      const initial = {
+        ...defaultSettings,
+        safeTop: 0,
+        safeBottom: 0,
+        laneSpacing: 0,
+        topBottomDurationMs: 8_000,
+        scrollDurationMaxMs: before,
+      };
+      const renderer = createRenderer(initial);
+      const allocator = renderer.placementAllocator;
+      dimensions.height = allocator.getLaneHeight();
+      allocator.reset(dimensions, 0);
+      expect(allocator.getLaneCount()).toBe(1);
+      const first = allocator.findPlacement(
+        10,
+        dimensions,
+        SPEED_TIER.MID,
+        0,
+        'top',
+        () => 0,
+        true
+      );
+      expect(first?.laneIndex).toBe(0);
+      if (!first) return;
+      allocator.commitPlacement(first, 0, 8_000, undefined, undefined, SPEED_TIER.MID);
+      const occupiedLanes = allocator.snapshot().heap;
+
+      renderer.updateSettings({ ...initial, scrollDurationMaxMs: after });
+
+      expect(allocator.snapshot().heap).toEqual(occupiedLanes);
+      expect(
+        allocator.findPlacement(10, dimensions, SPEED_TIER.MID, 0, 'top', () => 0, true)?.waitMs ??
+          null
+      ).toBe(expectedWait);
+    }
+  );
+
+  it.each([
+    { label: 'headway', updates: { headwayGapRatio: 0.3 }, expectedOccupancy: 2_766 },
+    { label: 'exit padding', updates: { exitPaddingPx: 250 }, expectedOccupancy: 1_982 },
+  ])('uses updated $label for subsequent lane occupancy', ({ updates, expectedOccupancy }) => {
+    const dimensions = { width: 640, height: 34 };
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue(dimensions);
+    const initial = {
+      ...defaultSettings,
+      safeTop: 0,
+      safeBottom: 0,
+      laneSpacing: 0,
+    };
+    const renderer = createRenderer(initial);
+    const allocator = renderer.placementAllocator;
+    dimensions.height = allocator.getLaneHeight();
+    allocator.reset(dimensions, 0);
+    const first = allocator.findPlacement(10, dimensions, SPEED_TIER.MID, 0, 'top', () => 0, true);
+    expect(first?.laneIndex).toBe(0);
+    if (!first) return;
+    allocator.commitPlacement(first, 0, 10_000, 200, dimensions.width, SPEED_TIER.MID);
+    const priorReservation = allocator.snapshot().heap;
+
+    renderer.updateSettings({ ...initial, ...updates });
+
+    expect(allocator.snapshot().heap).toEqual(priorReservation);
+    const next = allocator.findPlacement(
+      10,
+      dimensions,
+      SPEED_TIER.MID,
+      3_000,
+      'top',
+      () => 0,
+      true
+    );
+    expect(next?.waitMs).toBe(0);
+    if (!next) return;
+    allocator.commitPlacement(next, 3_000, 10_000, 200, dimensions.width, SPEED_TIER.MID);
+    expect(allocator.snapshot().heap).toEqual([[0, 3_000 + expectedOccupancy]]);
+  });
+
   it.each([
     { height: 720, expected: 20 },
     { height: 1440, expected: 20 },
