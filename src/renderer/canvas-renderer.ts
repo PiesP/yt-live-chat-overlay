@@ -575,7 +575,7 @@ export class CanvasRenderer extends RendererBase {
       this.reducedMotion = e.matches;
       if (!this.workerManager.isActive) {
         const dimensions = this.overlay.getDimensions();
-        if (dimensions) this.reflowActiveMessages(dimensions);
+        if (dimensions) this.reflowActiveMessages(dimensions, 'policy');
       }
       // Relay OS preference change to the Worker (workers lack matchMedia).
       if (this.workerManager.isActive) {
@@ -590,20 +590,38 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Reflow visible messages and restore lane reservations after a resize. */
-  private reflowActiveMessages(dimensions: OverlayDimensions): void {
+  private reflowActiveMessages(
+    dimensions: OverlayDimensions,
+    reason: 'geometry' | 'policy' = 'geometry'
+  ): void {
     const laneCount = this.laneAllocator.getLaneCount();
     const laneHeight = this.laneAllocator.getLaneHeight();
-    if (laneCount <= 0 || laneHeight <= 0) return;
+    if (laneCount <= 0 || laneHeight <= 0) {
+      this.laneAllocator.reset(dimensions, this.pausedAt ?? performance.now());
+      this.activeMessagesByLane.clear();
+      this.entryPacing.clear();
+      for (const message of this.activeMessages) {
+        message.reflowHidden = true;
+        message.slotCount = 0;
+        message.laneArrayIndices.length = 0;
+      }
+      return;
+    }
     // A preference/geometry change during a pause uses the frozen animation clock.
     const now = this.pausedAt ?? performance.now();
     const mode = this.effectiveMotionMode;
-    const candidates = this.activeMessages.map((message) => {
+    const expiredAtReflow: CanvasMessage[] = [];
+    const candidates = this.activeMessages.flatMap((message) => {
       const previous = previousMotionPlan(
         message,
         mode,
         dimensions.width,
         this.settings.exitPaddingPx
       );
+      if (previous.endTime <= now) {
+        expiredAtReflow.push(message);
+        return [];
+      }
       const next = computeMessageMotionPlan({
         mode,
         now,
@@ -626,12 +644,15 @@ export class CanvasRenderer extends RendererBase {
             ? this.settings.modOwnerDurationMultiplier
             : 1,
       });
-      return {
-        message,
-        laneIndex: message.laneIndex,
-        height: message.height,
-        motion: reflowMotionPlan(previous, next, now, this.settings.exitPaddingPx),
-      };
+      return [
+        {
+          message,
+          laneIndex: message.laneIndex,
+          preferredY: message.y,
+          height: message.height,
+          motion: reflowMotionPlan(previous, next, now, this.settings.exitPaddingPx, reason),
+        },
+      ];
     });
     const reconciled = reconcileMessagePlacements(candidates, {
       laneCount,
@@ -649,6 +670,7 @@ export class CanvasRenderer extends RendererBase {
     this.entryPacing.clear();
     for (const placement of reconciled.placements) {
       const message = placement.message;
+      delete message.reflowHidden;
       applyReflowMotion(message, placement.motion, now);
       message.motion = placement.motion;
       this.entryPacing.commit(
@@ -681,10 +703,17 @@ export class CanvasRenderer extends RendererBase {
       );
     }
     for (const dropped of reconciled.dropped) {
-      this.messageActivator.releaseMessage(dropped.message);
-      if (dropped.message.trackDrops !== false) {
-        this.observability.onMessagesDropped(1, dropped.reason);
-      }
+      // Keep the committed clock alive while no legal safe-zone lane fits.
+      dropped.message.reflowHidden = true;
+      dropped.message.slotCount = 0;
+      dropped.message.laneArrayIndices.length = 0;
+      this.activeMessages.push(dropped.message);
+    }
+    for (const message of expiredAtReflow) {
+      message.reflowHidden = true;
+      message.slotCount = 0;
+      message.laneArrayIndices.length = 0;
+      this.activeMessages.push(message);
     }
   }
 
@@ -2291,7 +2320,7 @@ export class CanvasRenderer extends RendererBase {
       const dimensions = this.overlay.getDimensions();
       if (dimensions) {
         this.laneAllocator.reset(dimensions);
-        this.reflowActiveMessages(dimensions);
+        this.reflowActiveMessages(dimensions, motionPolicyChanged ? 'policy' : 'geometry');
       }
     }
 

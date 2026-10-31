@@ -286,6 +286,8 @@ export interface ActiveMessage {
   isBacklog?: boolean;
   /** Last committed geometry, retained for resize and mode transitions. */
   motion?: MessageMotionPlan;
+  /** No legal safe-zone lane currently fits; retain the clock until expiry. */
+  reflowHidden?: boolean;
   id: string;
   x: number;
   y: number;

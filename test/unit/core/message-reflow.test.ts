@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-import { reconcileMessagePlacements, reflowMotionPlan } from '@renderer/layout/message-reflow';
-import { computeMessageMotionPlan, motionPlansCollide } from '@renderer/layout/message-schedule';
+import {
+  previousMotionPlan,
+  reconcileMessagePlacements,
+  reflowMotionPlan,
+} from '@renderer/layout/message-reflow';
+import {
+  computeMessageMotionPlan,
+  messageXAtTime,
+  motionPlansCollide,
+} from '@renderer/layout/message-schedule';
 import {
   getRowGridHeight,
   getRowSlotCount,
@@ -39,6 +47,172 @@ const options = {
 };
 
 describe('collision-aware message reflow', () => {
+  it('projects actual Y onto the nearest legal grid block across density changes', () => {
+    const motion = computeMessageMotionPlan({ ...input, mode: 'top', topBottomDurationMs: 10_000 });
+    let priorY = 320;
+    let priorLane = 8;
+    for (const [gridHeight, laneCount, expectedLane] of [
+      [40, 10, 8],
+      [20, 20, 16],
+      [10, 40, 32],
+    ] as const) {
+      const result = reconcileMessagePlacements(
+        [{ message: 'visible', laneIndex: priorLane, preferredY: priorY, height: 40, motion }],
+        {
+          ...options,
+          now: 3000,
+          viewportHeight: 400,
+          laneHeight: gridHeight,
+          laneCount,
+          safeTop: 0,
+        }
+      );
+      expect(result.dropped).toEqual([]);
+      expect(result.placements[0]?.laneIndex).toBe(expectedLane);
+      expect(result.placements[0]?.y).toBe(320);
+      priorLane = result.placements[0]?.laneIndex ?? 0;
+      priorY = result.placements[0]?.y ?? 0;
+    }
+  });
+
+  it('chooses the closer legal neighboring block after a collision at the anchor', () => {
+    const motion = computeMessageMotionPlan({ ...input, mode: 'top', topBottomDurationMs: 10_000 });
+    const result = reconcileMessagePlacements(
+      [
+        { message: 'occupant', laneIndex: 8, preferredY: 160, height: 20, motion },
+        { message: 'moved', laneIndex: 8, preferredY: 169.8, height: 20, motion },
+      ],
+      {
+        ...options,
+        now: 1000,
+        viewportHeight: 400,
+        laneHeight: 20,
+        laneCount: 20,
+        safeTop: 0,
+      }
+    );
+    expect(result.placements.map(({ message, laneIndex }) => [message, laneIndex])).toEqual([
+      ['occupant', 8],
+      ['moved', 9],
+    ]);
+  });
+
+  it.each(['scroll', 'reverse'] as const)(
+    'anchors current %s X and expiry through a 300-to-600px width change',
+    (mode) => {
+      const previous = computeMessageMotionPlan({
+        ...input,
+        mode,
+        screenWidth: 1280,
+        messageWidth: 300,
+        velocityPxPerSec: 250,
+        scrollDurationMinMs: 1000,
+      });
+      const now = 3000;
+      const next = computeMessageMotionPlan({
+        ...input,
+        mode,
+        now,
+        screenWidth: 1280,
+        messageWidth: 600,
+        velocityPxPerSec: 250,
+        scrollDurationMinMs: 1000,
+      });
+      const oldX = messageXAtTime(previous, now);
+      const reconciled = reflowMotionPlan(previous, next, now, 100);
+      expect(messageXAtTime(reconciled, now)).toBeCloseTo(oldX);
+      expect(reconciled.endTime).toBeCloseTo(previous.endTime);
+      if (mode === 'scroll') expect(oldX).toBeCloseTo(530);
+      const repeated = reflowMotionPlan(reconciled, next, now + 100, 100);
+      expect(repeated).toEqual(reconciled);
+    }
+  );
+
+  it('keeps the paused motion position and shifted expiry on translation reflow', () => {
+    const saved = computeMessageMotionPlan({
+      ...input,
+      mode: 'scroll',
+      screenWidth: 1280,
+      messageWidth: 300,
+      velocityPxPerSec: 250,
+      scrollDurationMinMs: 1000,
+    });
+    const previous = previousMotionPlan(
+      {
+        motion: saved,
+        startTime: saved.startTime,
+        pausedDuration: 500,
+        startX: saved.startX,
+        width: 600,
+        duration: saved.durationMs,
+      },
+      'scroll',
+      1280,
+      100
+    );
+    const now = 3500;
+    const next = computeMessageMotionPlan({
+      ...input,
+      mode: 'scroll',
+      now,
+      screenWidth: 1280,
+      messageWidth: 600,
+      velocityPxPerSec: 250,
+      scrollDurationMinMs: 1000,
+    });
+    const reconciled = reflowMotionPlan(previous, next, now, 100);
+    expect(messageXAtTime(reconciled, now)).toBeCloseTo(messageXAtTime(saved, 3000));
+    expect(reconciled.endTime).toBeCloseTo(saved.endTime + 500);
+  });
+
+  it('uses one new deadline for a deliberate speed change without moving current X', () => {
+    const previous = computeMessageMotionPlan({
+      ...input,
+      mode: 'scroll',
+      screenWidth: 1280,
+      messageWidth: 300,
+      velocityPxPerSec: 250,
+      scrollDurationMinMs: 1000,
+    });
+    const now = 3000;
+    const next = computeMessageMotionPlan({
+      ...input,
+      mode: 'scroll',
+      now,
+      screenWidth: 1280,
+      messageWidth: 300,
+      velocityPxPerSec: 500,
+      scrollDurationMinMs: 1000,
+    });
+    const changed = reflowMotionPlan(previous, next, now, 100, 'policy');
+    expect(messageXAtTime(changed, now)).toBeCloseTo(messageXAtTime(previous, now));
+    expect(changed.endTime).toBeLessThan(previous.endTime);
+    expect(reflowMotionPlan(changed, next, now + 100, 100).endTime).toBeCloseTo(changed.endTime);
+  });
+
+  it('recenters on fixed-mode policy change and never revives an expired message', () => {
+    const previous = computeMessageMotionPlan({ ...input, mode: 'scroll' });
+    const now = 1000;
+    const next = computeMessageMotionPlan({ ...input, mode: 'top', now });
+    const fixed = reflowMotionPlan(previous, next, now, 100, 'policy');
+    expect(messageXAtTime(fixed, now)).toBe(270);
+    expect(fixed.endTime).toBe(now + next.durationMs);
+    const restored = reflowMotionPlan(previous, next, now, 100);
+    expect(restored.mode).toBe('top');
+    expect(restored.endTime).toBe(previous.endTime);
+    expect(reflowMotionPlan(previous, next, previous.endTime + 1, 100, 'policy')).toBe(previous);
+  });
+
+  it('does not restart an unchanged fixed-mode clock on an unrelated speed update', () => {
+    const previous = computeMessageMotionPlan({ ...input, mode: 'top' });
+    const next = computeMessageMotionPlan({
+      ...input,
+      mode: 'top',
+      now: 1000,
+      velocityPxPerSec: 900,
+    });
+    expect(reflowMotionPlan(previous, next, 1000, 100, 'policy')).toBe(previous);
+  });
   it.each([
     ['top', 1000],
     ['scroll', 200],
