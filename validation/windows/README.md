@@ -29,6 +29,10 @@ Reduced-motion fixed, pre-pause motion,
 paused motion, and zero-capacity phases retain their complete JSON observations
 without an additional PNG. This leaves room for the existing full-profile
 artifacts under the controller's unchanged 64-file collection limit.
+The motion row must enter the inner half of its current viewport before the
+same-ID pause and narrower reflow comparison. The horizontal resize holds the
+measured player height constant so its physical-row Y comparison has the same
+vertical geometry on both sides.
 On the detailed scene, a page-owned Translator stub records
 the accepted canonical tail and supplies a distinct selected translation; the
 probe requires its positive-alpha draw in the same complete frame. The fixture
@@ -89,6 +93,9 @@ and IDs each into a measured full pending queue under the 30/50 caps, controlled
 pause/hidden/resume, and future replay
 buffering, plus a separate zero-row membership deferral. Active/queue caps
 cover 30/50, 300/200 (the default caps), and 300/1000 settings.
+The pause case admits and paints both source IDs before hiding, checks their
+first-visible times and positions during the hold, then requires a later
+complete-frame draw of those same IDs after resume.
 Records separate fixture delivery, renderer ingress, pending queue, reservation,
 first positive-alpha draw, completion, and attributed discard reasons. Per-kind
 delay/residence summaries, active/pending occupancy, frame/drain work, and
@@ -98,6 +105,16 @@ switch. Worker Manager backpressure before worker ingress may be unattributed
 per ID; compare delivered and renderer-ingress counts rather than assigning a
 reason. These timing samples do not isolate probe overhead or establish GPU or
 FPS behavior.
+For the overflow case, a source-bound insertion immediately before the packaged
+page-script entry observes the actual Worker Manager instance. Its bounded ring
+records fixture-ID sends, native `addMessages` posts, and batch receipts with
+timestamps and sequence numbers; snapshots include Manager queue and receipt
+state before and after the late arrivals. Missing pre-#387 Manager fields are
+recorded as `null` in the baseline. The candidate still requires late renderer
+ingress and older-row replacement; a baseline without late ingress records a
+policy finding. Neither HTTP delivery nor a Manager send is counted as Worker
+renderer ingress. Probe errors fail the case and failed partial observations
+remain in the receipt.
 
 The original `f7ff6f0d` correctness baseline supports stacked cards only.
 When the current fixture is transplanted into a comparison checkout, the bundle
