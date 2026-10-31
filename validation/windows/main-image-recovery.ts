@@ -985,6 +985,8 @@ export async function runMainImageRecoveryFixture({
       app.applySettings({
         danmakuMode: 'top',
         topBottomDurationMs: 2_000,
+        safeTop: 0,
+        safeBottom: 0,
         showAuthor: { ...settings.showAuthor, normal: true, superChat: true },
         showDebugOverlay: true,
         allowShortTextMessages: true,
@@ -996,8 +998,28 @@ export async function runMainImageRecoveryFixture({
     });
     await page.waitForFunction(
       () => {
-        const settings = window.__ytMainImageRecovery?.renderer?.settings;
-        return settings?.danmakuMode === 'top' && settings.topBottomDurationMs === 2_000;
+        const renderer = window.__ytMainImageRecovery?.renderer;
+        const settings = renderer?.settings;
+        const dimensions = renderer?.overlay.getDimensions();
+        if (!renderer || !settings || !dimensions) return false;
+        const usableHeight = dimensions.height * (1 - settings.safeTop - settings.safeBottom);
+        const laneHeight = renderer.laneAllocator.getLaneHeight();
+        // Candidate 15 measured the sticker row at 197px; keep the fixture's
+        // actual allocator geometry large enough before sending any case.
+        return (
+          settings.danmakuMode === 'top' &&
+          settings.topBottomDurationMs === 2_000 &&
+          settings.safeTop === 0 &&
+          settings.safeBottom === 0 &&
+          Number.isFinite(dimensions.width) &&
+          dimensions.width > 0 &&
+          Number.isFinite(usableHeight) &&
+          usableHeight > 197 &&
+          usableHeight === dimensions.height &&
+          Number.isFinite(laneHeight) &&
+          laneHeight > 0 &&
+          renderer.laneAllocator.getLaneCount() === Math.ceil(usableHeight / laneHeight)
+        );
       },
       undefined,
       { timeout: 5_000 }
