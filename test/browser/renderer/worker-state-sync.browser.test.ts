@@ -759,7 +759,13 @@ describe('Worker renderer state synchronization', () => {
     for (let frame = 0; frame < 60; frame++) internals.renderFrame();
 
     expect(latestStats()?.totalDrops).toBe(1);
-    expect(latestStats()?.dropReasons).toMatchObject({ queue_priority: 1, queue_replaced: 0 });
+    expect(latestStats()?.dropReasons).toMatchObject({ queue_priority: 0, queue_replaced: 1 });
+    expect(
+      (renderer as unknown as { messageById: Map<string, unknown> }).messageById.has('queued-0')
+    ).toBe(false);
+    expect(
+      (renderer as unknown as { messageById: Map<string, unknown> }).messageById.has('queued-50')
+    ).toBe(true);
   });
 
   it('does not report replay overflow or oversized work as observed drops', () => {
@@ -1046,14 +1052,16 @@ describe('Worker renderer state synchronization', () => {
       renderer as unknown as { pendingQueue: Array<{ id: string; priority: number }> }
     ).pendingQueue;
     expect(pending).toHaveLength(50);
-    expect(pending.every((message) => message.priority === 100)).toBe(true);
+    expect(pending.filter((message) => message.priority === 0)).toHaveLength(1);
+    expect(pending.filter((message) => message.priority === 100)).toHaveLength(49);
+    expect(pending.some((message) => message.id === 'normal-49')).toBe(true);
     expect(estimateDimensions).toHaveBeenCalledTimes(100);
 
     for (let index = 0; index < 50; index++)
       manager.sendToWorker(makeIngress(`extra-${index}`, true));
     await flushMicrotasks(60);
-    expect(estimateDimensions).toHaveBeenCalledTimes(100);
-    expect(dispatched).toHaveBeenCalledTimes(100);
+    expect(estimateDimensions).toHaveBeenCalledTimes(150);
+    expect(dispatched).toHaveBeenCalledTimes(150);
     expect(
       worker.postMessage.mock.calls
         .map(([message]) => message as { type?: string; messages?: unknown[] })
@@ -1122,7 +1130,13 @@ describe('Worker renderer state synchronization', () => {
     });
     for (let index = 0; index < 50; index++) manager.sendToWorker(makeIngress(`queued-${index}`));
     await flushMicrotasks();
-    expect(manager.sendToWorker(makeIngress('blocked'))).toBe(false);
+    expect(manager.sendToWorker(makeIngress('newest-before-drain'))).toBe(true);
+    await flushMicrotasks();
+    expect(
+      (renderer as unknown as { messageById: Map<string, unknown> }).messageById.has(
+        'newest-before-drain'
+      )
+    ).toBe(true);
 
     scheduledAnimationFrames.shift()?.(performance.now());
 
@@ -1313,8 +1327,19 @@ describe('Worker renderer state synchronization', () => {
     (manager as unknown as { latestWorkerPendingDepth: number }).latestWorkerPendingDepth =
       DEFAULT_SETTINGS.queueMaxSize;
     expect(manager.sendToWorker({ ...replay, id: 'replay-backpressure-2' }, undefined, false)).toBe(
-      false
+      true
     );
+    await Promise.resolve();
+    const replayBatch = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; messages?: WorkerMessage[] })
+      .find(
+        (message) =>
+          message.type === 'addMessages' &&
+          message.messages?.some(({ id }) => id === 'replay-backpressure-2')
+      );
+    expect(
+      replayBatch?.messages?.find(({ id }) => id === 'replay-backpressure-2')?.trackDrops
+    ).toBe(false);
     expect(observability.onMessageDropped).not.toHaveBeenCalled();
     manager.destroy();
     worker.acknowledgeDestroy();

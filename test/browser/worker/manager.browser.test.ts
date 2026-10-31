@@ -679,7 +679,7 @@ describe('RenderWorkerManager', () => {
       );
     });
 
-    it('applies worker backpressure to a replacement with an unseen id', async () => {
+    it('sends one saturation probe for an unseen replacement under worker backpressure', async () => {
       const postMessage = vi.fn();
       (manager as any).worker = {
         postMessage,
@@ -702,12 +702,18 @@ describe('RenderWorkerManager', () => {
           } as any,
           'fresh-replacement'
         )
-      ).toBe(false);
+      ).toBe(true);
       await Promise.resolve();
 
-      expect(deps.observability.onMessageDropped).toHaveBeenCalledWith('worker_backpressure');
-      expect(postMessage).not.toHaveBeenCalled();
-      expect((manager as any).sentMessages.has('fresh-replacement')).toBe(false);
+      expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'addMessages',
+          messages: [expect.objectContaining({ id: 'fresh-replacement', actionType: 'replace' })],
+        })
+      );
+      expect((manager as any).sentMessages.has('fresh-replacement')).toBe(true);
+      expect((manager as any).deferredIngress).toHaveLength(0);
     });
   });
 
