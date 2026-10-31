@@ -1750,7 +1750,7 @@ function observePaidPlan<
   return plan;
 }
 
-export function instrumentCardPlanCalls(source: string): string | null {
+function cardPlanFunctionName(source: string): string | null {
   const minified =
     /function ([A-Za-z_$][\w$]*)\(e\)\{let t=Math\.max\(1,e\.width-e\.paddingH\*2\),n=e\.showAuthor/u.exec(
       source
@@ -1759,7 +1759,20 @@ export function instrumentCardPlanCalls(source: string): string | null {
   if (!name) return null;
   const call = `${name}({`;
   const count = source.split(call).length - 1;
-  if (count < 1 || count > 6 || source.includes('__ytObservePaidPlan')) return null;
+  if (
+    count < 1 ||
+    count > 6 ||
+    source.includes('__ytObservePaidPlan') ||
+    source.includes('__ytOriginalPaidPlan')
+  )
+    return null;
+  return name;
+}
+
+export function instrumentCardPlanCalls(source: string): string | null {
+  const name = cardPlanFunctionName(source);
+  if (!name) return null;
+  const call = `${name}({`;
   return source.replaceAll(call, `__ytObservePaidPlan(${name}, {`);
 }
 
@@ -2098,12 +2111,16 @@ export function instrumentCanvasPageScript(
     source.split(marker).length !== 2
   )
     return null;
-  const cardSource = observeCardPlans ? instrumentCardPlanCalls(source) : source;
-  if (!cardSource) return null;
-  return cardSource.replace(
+  const cardPlanName = observeCardPlans ? cardPlanFunctionName(source) : null;
+  if (observeCardPlans && !cardPlanName) return null;
+  return source.replace(
     marker,
     `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);` +
-      (observeCardPlans ? `\n\tvar __ytObservePaidPlan = ${observePaidPlan.toString()};` : '') +
+      (observeCardPlans
+        ? `\n\tvar __ytOriginalPaidPlan = ${cardPlanName};` +
+          `\n\tvar __ytObservePaidPlan = ${observePaidPlan.toString()};` +
+          `\n\t${cardPlanName} = function(input) { return __ytObservePaidPlan(__ytOriginalPaidPlan, input); };`
+        : '') +
       marker
   );
 }

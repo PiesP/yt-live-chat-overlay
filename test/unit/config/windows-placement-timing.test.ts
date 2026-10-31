@@ -7,6 +7,7 @@ import type { BrowserContext } from '@playwright/test';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
+import { assertInstrumentedPageScript } from '../../../validation/windows/native-page-script-probe.ts';
 import {
   assertBacklogMotion,
   assertBacklogReflow,
@@ -708,7 +709,9 @@ describe('Windows placement timing probe', () => {
       'function getRegularCardInsets() {}\n' +
       'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n\tmain();\n})();';
     const canvas = instrumentCanvasPageScript(readable, 'function probe() {}', true);
-    expect(canvas).toContain('__ytObservePaidPlan(preparePaidCardPlan, { width: 1 })');
+    expect(() => assertInstrumentedPageScript(readable, canvas!)).not.toThrow();
+    expect(canvas).toContain('var __ytOriginalPaidPlan = preparePaidCardPlan;');
+    expect(canvas).toContain('return __ytObservePaidPlan(__ytOriginalPaidPlan, input);');
     expect(canvas).toContain('var __ytObservePaidPlan = function observePaidPlan');
     const minified =
       'function Mn(e){let t=Math.max(1,e.width-e.paddingH*2),n=e.showAuthor&&!!e.author;' +
@@ -725,6 +728,23 @@ describe('Windows placement timing probe', () => {
     ).not.toThrow();
     expect(instrumentCardPlanCalls(minified.replace('e.showAuthor', 'e.showName'))).toBeNull();
     expect(workerProbeSuffix(minified, undefined, true)).toBeNull();
+  });
+
+  it('keeps the original paid-plan result and call count through an additive Canvas wrapper', () => {
+    const source =
+      '(() => { function preparePaidCardPlan(input) {' +
+      'globalThis.planCalls++; return input; }\n' +
+      'function paint(input) { return preparePaidCardPlan({ width: input }); }\n' +
+      'function getRegularCardInsets() {}\n' +
+      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n' +
+      'function main() { globalThis.planResult = paint(123); }\n\tmain();\n})();';
+    const instrumented = instrumentCanvasPageScript(source, 'function probe() {}', true)!;
+    expect(() => assertInstrumentedPageScript(source, instrumented)).not.toThrow();
+    const sandbox = { RendererBase: class {}, planCalls: 0, planResult: null };
+    runInNewContext(instrumented, sandbox);
+    expect(sandbox.planCalls).toBe(1);
+    expect(sandbox.planResult).toEqual({ width: 123 });
+    expect(instrumentCanvasPageScript(instrumented, undefined, true)).toBeNull();
   });
 
   it('retains only a bounded first complete visible draw with its committed row', () => {
