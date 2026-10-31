@@ -17,6 +17,35 @@ import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 describe('scrolling motion on the main Canvas path', () => {
+  it('keeps a hidden active clock until expiry without sending it to a draw bucket', () => {
+    const message = {
+      message: { id: 'hidden', text: 'hidden', kind: 'text', content: [] },
+      reflowHidden: true,
+      startTime: 0,
+      fadeStartTime: 0,
+      pausedDuration: 0,
+      duration: 1000,
+      x: 100,
+      y: 100,
+      width: 100,
+      height: 20,
+      speedTier: 1,
+    };
+    const releaseMessage = vi.fn();
+    const ctx = makeDrainCtx({
+      settings: DEFAULT_SETTINGS,
+      activeMessages: [message] as never[],
+      messageActivator: { releaseMessage } as never,
+      farOpacityBuckets: Array.from({ length: 32 }, () => []),
+      midOpacityBuckets: Array.from({ length: 32 }, () => []),
+      nearOpacityBuckets: Array.from({ length: 32 }, () => []),
+    });
+    cleanupAndBucketStage(ctx, 500, { width: 640, height: 360 }, 'scroll');
+    expect(ctx.midOpacityBuckets.every((bucket) => bucket.length === 0)).toBe(true);
+    expect(releaseMessage).not.toHaveBeenCalled();
+    cleanupAndBucketStage(ctx, 1000, { width: 640, height: 360 }, 'scroll');
+    expect(releaseMessage).toHaveBeenCalledWith(message);
+  });
   it.each([
     ['scroll', false, 0],
     ['top', false, 0],

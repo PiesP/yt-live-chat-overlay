@@ -227,7 +227,7 @@ export function cleanupAndBucketStage(
     writeIdx++;
 
     // Still in stagger delay — keep in array but skip rendering
-    if (elapsed < 0) continue;
+    if (elapsed < 0 || msg.reflowHidden) continue;
 
     // ── Render pre-compute ──
     // Save previous position for temporal frame blending (FAR-tier motion blur)
