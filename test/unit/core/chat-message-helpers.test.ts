@@ -76,6 +76,9 @@ describe('normalizeInlineText', () => {
 // ── truncateForKind ───────────────────────────────────────────────────
 
 describe('truncateForKind', () => {
+  it.each(['e\u0301', '👍🏽', '👨‍👩‍👧‍👦'])('does not split %s at the code-point limit', (cluster) => {
+    expect(truncateForKind(`${'A'.repeat(78)}${cluster}ZZ`, 'text')).toBe(`${'A'.repeat(78)}…`);
+  });
   it('truncates text kind messages longer than 80 chars', () => {
     const longText = 'a'.repeat(100);
     const result = truncateForKind(longText, 'text');

@@ -160,6 +160,8 @@ export interface WorkerMessage {
   actionType?: 'add' | 'replace';
   /** Plain text content (pre-extracted). */
   text: string;
+  /** Accepted regular-message body for accessible alternatives. */
+  canonicalText?: string;
   /** Width/height estimates (computed on main thread). */
   width: number;
   height: number;
@@ -304,6 +306,8 @@ export interface ActiveMessage {
   laneArrayIndices: number[];
   speedTier: number;
   text: string;
+  /** Accepted regular-message body for accessible alternatives. */
+  canonicalText?: string;
   /** Per-author color CSS string. */
   color: string;
   /** Author type for stats/desaturation. */

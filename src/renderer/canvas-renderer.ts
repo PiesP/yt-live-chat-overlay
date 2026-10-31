@@ -2436,12 +2436,12 @@ export class CanvasRenderer extends RendererBase {
       this.settings.translationSource !== 'auto' ||
       this.sourceDetectionDone ||
       this.sourceDetectionRun !== null ||
-      !message.text.trim()
+      !(message.canonicalText ?? message.text).trim()
     ) {
       return;
     }
 
-    this.sourceSampleBuffer.push(message.text);
+    this.sourceSampleBuffer.push(message.canonicalText ?? message.text);
     if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
       void this.performSourceDetection();
     }

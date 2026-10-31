@@ -22,6 +22,23 @@ function textMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 }
 
 describe('serializeWorkerMessage', () => {
+  it('sends only the bounded canonical plain text needed for Worker accessibility', () => {
+    const message = textMessage({
+      canonicalText: 'accepted message',
+      canonicalContent: [{ type: 'text', content: 'accepted message' }],
+    });
+    const serialized = serializeWorkerMessage({
+      message,
+      id: 'canonical',
+      dimensions,
+      priority: 0,
+      burstSpeedMultiplier: 1,
+      settings,
+    });
+    expect(serialized.canonicalText).toBe('accepted message');
+    expect(serialized).not.toHaveProperty('canonicalContent');
+    expect(serialized.text).toBe('hello');
+  });
   it.each([
     {
       label: 'regular text',

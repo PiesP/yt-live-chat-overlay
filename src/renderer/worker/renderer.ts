@@ -1604,6 +1604,7 @@ export class WorkerRenderer {
       laneArrayIndices: [],
       speedTier,
       text: msg.text,
+      ...(msg.canonicalText !== undefined ? { canonicalText: msg.canonicalText } : {}),
       color: authorColor,
       ghostText: getDisplayText(msg.content ?? []),
       content: msg.content ?? [],
@@ -2052,7 +2053,7 @@ export class WorkerRenderer {
           const kind = msg.kind === 'superchat' || msg.kind === 'membership' ? msg.kind : 'text';
           messages.push({
             id: msg.id,
-            text: msg.text,
+            text: msg.canonicalText ?? msg.text,
             kind,
             ...(msg.author !== undefined ? { author: msg.author } : {}),
             ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),

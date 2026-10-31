@@ -10,6 +10,26 @@ import {
 import { describe, expect, it } from 'vite-plus/test';
 
 describe('render message resource limits', () => {
+  it('counts accepted canonical content for the aggregate without counting display twice', () => {
+    const message = {
+      text: `${'a'.repeat(79)}…`,
+      content: [{ type: 'text', content: `${'a'.repeat(79)}…` }],
+      canonicalText: 'a'.repeat(4000),
+      canonicalContent: [{ type: 'text', content: 'a'.repeat(4000) }],
+      author: 'a'.repeat(96),
+    };
+    expect(getRenderMessageResourceViolation(message)).toBeNull();
+    expect(getRenderMessageResourceViolation({ ...message, author: 'a'.repeat(97) })).toEqual({
+      field: 'aggregate',
+      reason: 'aggregate-code-points',
+    });
+    expect(
+      getRenderMessageResourceViolation({
+        ...message,
+        canonicalContent: [{ type: 'text', content: 'a'.repeat(4097) }],
+      })
+    ).toEqual({ field: 'body', reason: 'code-point-length' });
+  });
   it('accepts the exact BMP and astral code-point boundaries', () => {
     expect(inspectBoundedRenderText('a'.repeat(MAX_RENDER_FIELD_CODE_POINTS), 'body')).toEqual({
       codePoints: MAX_RENDER_FIELD_CODE_POINTS,

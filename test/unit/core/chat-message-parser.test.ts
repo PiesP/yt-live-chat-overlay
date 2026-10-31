@@ -1,4 +1,5 @@
 import type { ContentSegment, OverlaySettings } from '@app-types';
+import { getTranslatableText } from '@chat/message-helpers';
 import {
   classifyAuthorBadge,
   countCodePoints,
@@ -497,6 +498,60 @@ describe('extractChatEvents message-boundary normalization', () => {
       kind: 'text',
     });
     expect(getVisibleContentLength(message?.content ?? [])).toBe(80);
+    expect(message?.canonicalText).toBe('a'.repeat(90));
+    expect(message?.canonicalContent).toEqual([{ type: 'text', content: 'a'.repeat(90) }]);
+    if (message) expect(getTranslatableText(message)).toBe('a'.repeat(90));
+  });
+
+  it.each([
+    ['combining mark', `${'A'.repeat(78)}e\u0301ZZZ`, `${'A'.repeat(78)}…`],
+    ['skin tone', `${'A'.repeat(78)}👍🏽Z`, `${'A'.repeat(78)}…`],
+    ['family ZWJ', `${'A'.repeat(77)}👨‍👩‍👧‍👦Z`, `${'A'.repeat(77)}…`],
+    ['CJK', `${'A'.repeat(79)}界Z`, `${'A'.repeat(79)}…`],
+    ['mixed direction', `${'A'.repeat(78)}שָZ`, `${'A'.repeat(78)}…`],
+  ])('keeps the %s grapheme whole at the display boundary', (_label, source, display) => {
+    const message = parseRenderer('liveChatTextMessageRenderer', {
+      id: 'grapheme-boundary',
+      authorName: { simpleText: 'Viewer' },
+      message: { simpleText: source },
+    });
+    expect(message?.text).toBe(display);
+    expect(message?.canonicalText).toBe(source);
+    expect(message?.content).toEqual([{ type: 'text', content: display }]);
+  });
+
+  it('keeps a cluster that ends exactly at the code-point boundary', () => {
+    const source = `${'A'.repeat(77)}👍🏽Z`;
+    const message = parseRenderer('liveChatTextMessageRenderer', {
+      id: 'exact-grapheme',
+      authorName: { simpleText: 'Viewer' },
+      message: { simpleText: source },
+    });
+    expect(message?.text).toBe(source);
+    expect(message?.canonicalText).toBeUndefined();
+  });
+
+  it('does not retain an emoji image that cannot fit in the visible projection', () => {
+    const message = parseRenderer('liveChatTextMessageRenderer', {
+      id: 'rich-boundary',
+      authorName: { simpleText: 'Viewer' },
+      message: {
+        runs: [
+          { text: 'A'.repeat(78) },
+          {
+            emoji: {
+              shortcuts: ['👨‍👩‍👧‍👦'],
+              image: { thumbnails: [{ url: 'https://yt3.ggpht.com/family.png' }] },
+            },
+          },
+          { text: 'Z' },
+        ],
+      },
+    });
+    expect(message?.text).toBe(`${'A'.repeat(78)}…`);
+    expect(message?.content).toEqual([{ type: 'text', content: `${'A'.repeat(78)}…` }]);
+    expect(message?.canonicalContent?.some((segment) => segment.type === 'emoji')).toBe(true);
+    if (message) expect(getTranslatableText(message)).toBe(`${'A'.repeat(78)}Z`);
   });
 
   it('keeps mixed text and emoji segments within the same regular-message boundary', () => {
@@ -520,6 +575,9 @@ describe('extractChatEvents message-boundary normalization', () => {
     });
 
     expect(message?.text).toBe(`${'a'.repeat(70)}👋${'b'.repeat(8)}\u2026`);
+    expect(message?.canonicalText).toBe(`${'a'.repeat(70)}👋${'b'.repeat(20)}`);
+    expect(message?.canonicalContent?.at(1)).toMatchObject({ type: 'emoji' });
+    if (message) expect(getTranslatableText(message)).toBe(`${'a'.repeat(70)}${'b'.repeat(20)}`);
     expect(message?.content).toEqual([
       { type: 'text', content: 'a'.repeat(70) },
       {

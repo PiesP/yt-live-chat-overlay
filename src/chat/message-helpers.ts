@@ -12,6 +12,7 @@
 import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { asRecord, getString, type JsonObject } from '@chat/youtube/request';
 import { parseAnyColor } from '@renderer/color-utils';
+import { splitGraphemeClusters } from '@renderer/text-segmentation';
 import { colors, SUPERCHAT_TIER_KEYS } from '@util/design-tokens';
 
 export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
@@ -62,13 +63,19 @@ const NEAR_BLACK_THRESHOLD = 15;
 
 function truncateText(text: string): string {
   const normalized = normalizeInlineText(text);
-  const codePoints = Array.from(normalized);
-  if (codePoints.length > MAX_REGULAR_MESSAGE_TEXT_LENGTH) {
-    return `${codePoints
-      .slice(0, MAX_REGULAR_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)
-      .join('')}\u2026`;
+  const clusters = splitGraphemeClusters(normalized);
+  const codePoints = clusters.reduce((length, cluster) => length + Array.from(cluster).length, 0);
+  if (codePoints <= MAX_REGULAR_MESSAGE_TEXT_LENGTH) return normalized;
+  let retained = '';
+  let retainedLength = 0;
+  for (const cluster of clusters) {
+    const length = Array.from(cluster).length;
+    if (retainedLength + length > MAX_REGULAR_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)
+      break;
+    retained += cluster;
+    retainedLength += length;
   }
-  return normalized;
+  return `${retained}\u2026`;
 }
 
 /**
@@ -102,7 +109,7 @@ export function hasEmojiContent(segments: readonly ContentSegment[]): boolean {
  */
 export function getTranslatableText(message: ChatMessage): string {
   let result = '';
-  for (const seg of message.content) {
+  for (const seg of message.canonicalContent ?? message.content) {
     if (seg.type === 'text' && seg.content.length > 0) {
       result += seg.content;
     }
