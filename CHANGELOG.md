@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Pending comment storage** — Release consumed Main Canvas queue references during overflow, draining and trimming, with bounded bucket storage across repeated reuse. Priority, FIFO order and drop accounting remain intact.
 - **Opacity controls** — Preserve outline opacity across its full 0–100% range through preview, import, save and reload. Text opacity keeps its 50–100% range; each slider and number input now shares its range and adjustment feedback.
 - **Release preparation** — Reject missing or empty version changelog entries before replacing an existing local candidate bundle.
 - **Chat request deadlines** — Preserve request timeouts during internal retry waits so live polling counts the failure and can recover on the next healthy response. Session stop and replay seek still cancel their owned requests.

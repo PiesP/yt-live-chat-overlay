@@ -55,6 +55,13 @@ optional effects. Lane availability and collision safety can still delay entry.
 Geometric entry means crossing the viewport edge, independently of fade opacity.
 
 Drain attempts include failures in both the count and elapsed-work limits.
+The Main pending priority queue clears each consumed head reference immediately.
+Empty buckets retain zero slots; otherwise prefix reclamation at half-consumed
+storage keeps fewer than twice the live slots. Batch removal compacts during
+its existing linear scan, and trimming applies the same reclamation invariant.
+This bounds retained queue storage independently of cumulative traffic while
+preserving FIFO ordering, priority displacement and drop accounting.
+
 Higher priority groups are normally examined first. Each group's identity cursor
 rotates past repeated failures; after a time-budget interruption, the next group
 receives the first attempt in the following drain. Successful placements and
