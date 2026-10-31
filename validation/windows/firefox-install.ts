@@ -506,7 +506,7 @@ async function runDeterministicPhase(
   );
   assert.equal(reloaded.persisted, true, 'Firefox extension settings did not survive reload');
   await session.waitFor(
-    `document.querySelector('#yt-chat-overlay-debug > div')?.textContent === 'Rcvd: 1 | Rndr: 1'`,
+    `(() => { const line = document.querySelector('#yt-chat-overlay-debug > div')?.textContent; return /^Rcvd: 1 [|] Alloc: 1 [|] Shown≥[0-9]+ [|] Uncertain: [0-9]+$/u.test(line ?? '') || line === 'Rcvd: 1 | Rndr: 1'; })()`,
     'the installed Firefox extension chat render'
   );
   const renderedCount = await evaluate<number>(
