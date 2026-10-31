@@ -45,7 +45,7 @@ type BacklogCapacityDropReason =
 export interface BacklogControllerConfig {
   /** How to handle past chat messages */
   backlogMode: BacklogMode;
-  /** Max messages per second during backlog injection */
+  /** Upper bound for the randomized target rate; zero pauses injection. */
   backlogMaxRate: number;
   /** Speed multiplier for backlog message animations (2 = twice as fast) */
   backlogSpeedMultiplier: number;
@@ -415,7 +415,7 @@ export class BacklogInjectionController implements Pauseable {
 
     // If already injecting, queue additional messages into the existing
     // injection rather than resetting state and losing progress.
-    if (this.isInjecting) {
+    if (this.isActive) {
       const added = this.appendUniqueMessages(messages);
       this.syncTotalBacklog();
       if (added > 0) {
@@ -507,6 +507,12 @@ export class BacklogInjectionController implements Pauseable {
     this.scheduler.updateConfig(config);
     this.trimPendingToCapacity();
     this.syncTotalBacklog();
+    if (this.config.backlogMaxRate <= 0) {
+      this.injectionTimer = clearSafeTimeout(this.injectionTimer);
+      this.isInjecting = false;
+    } else if (this.isActive && !this.paused && !this.isInjecting) {
+      this.startInjection();
+    }
   }
 
   /**
@@ -580,6 +586,11 @@ export class BacklogInjectionController implements Pauseable {
         this.onUtilizationQuery
       );
     this.realTimeActivityCount = updatedActivityCount;
+    if (meanInterval === null) {
+      this.isInjecting = false;
+      this.injectionTimer = clearSafeTimeout(this.injectionTimer);
+      return;
+    }
 
     const message = this.dequeueBacklog();
     if (!message) {

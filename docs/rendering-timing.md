@@ -70,6 +70,35 @@ separation. Spread still spans the full safe zone and may
 leave unused rows or future reservations. The settings preview paints two
 rows with the shared estimate, reservation and drawing code.
 
+## Burst rates and Backlog selection
+
+Burst levels use messages per actual elapsed second over the bounded sample
+window, including delayed timer ticks. Default and saved thresholds retain their
+numeric values (5/15/30 by default); no migration or automatic retuning applies.
+The corrected units can select a higher burst level than the former per-sample
+comparison. An arrival batch sharing one timestamp does not supply an
+inter-arrival interval for the separate speed EMA. Backlog retains its exclusion
+from additional burst acceleration.
+
+Backlog sampling covers message rank after timestamp ordering, rather than equal
+time buckets, within the controller's existing bounded candidate set. When the
+ordinary budget permits, it reserves the oldest and latest ordinary candidates
+before favoring substantial text and spreading remaining picks across each
+tier. A single slot favors the latest. Paid and membership candidates remain
+protected outside that ordinary sampling budget. The short-text heuristic
+accepts CJK and pictographic emoji reactions without claiming to infer meaning.
+Full mode covers the full admitted time range; sampling and capacity limits
+still apply, so it does not promise to show every historical message.
+
+A maximum Backlog rate of zero holds the bounded pending queue without a timer
+or emission; a positive maximum resumes it. The runtime maximum wins a conflict
+with the minimum, while saved explicit values remain intact through load,
+import, preview and save. The maximum caps the randomized scheduling target's
+mean rate, not every instantaneous inter-message interval. Existing defaults,
+resource bounds and replay due-time rules remain unchanged.
+
+## Entry and queue policy
+
 Live entry pacing groups messages by queue priority and speed tier. Backlog
 messages retain their existing lower priority. Temporal delay and horizontal
 offset share the adaptive entry window. A group's previous geometric entry is

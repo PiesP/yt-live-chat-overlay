@@ -88,6 +88,19 @@ describe('polling interval normalization', () => {
   });
 });
 
+describe('backlog target rate settings', () => {
+  it('keeps zero and a conflicting minimum through stored load and form patches', () => {
+    const pair = { backlogMaxRate: 0, backlogInjectionRateMin: 4 };
+    expect(normalizeStoredSettings(pair)).toMatchObject(pair);
+    expect(applySettingsPatch(DEFAULT_SETTINGS, pair)).toMatchObject(pair);
+    expect(
+      changedSettingsPatch(DEFAULT_SETTINGS, applySettingsPatch(DEFAULT_SETTINGS, pair))
+    ).toEqual({
+      backlogMaxRate: 0,
+    });
+  });
+});
+
 describe('scalar and nested normalization boundaries', () => {
   it.each([
     [-1, 0],
