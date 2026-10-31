@@ -133,6 +133,9 @@ export function isValidWorkerStatsMessage(value: unknown): value is WorkerStatsM
     isNonNegativeSafeInteger(value.activeMessages) &&
     isNonNegativeSafeInteger(value.pendingQueueDepth) &&
     isNonNegativeSafeInteger(value.totalRendered) &&
+    (!hasOwn(value, 'totalPresented') ||
+      (isNonNegativeSafeInteger(value.totalPresented) &&
+        value.totalPresented <= value.totalRendered)) &&
     isNonNegativeSafeInteger(value.totalDrops) &&
     isNonNegativeSafeInteger(value.processedBatchSequence) &&
     isFiniteNonNegative(value.laneUtilization) &&
@@ -198,7 +201,8 @@ function isValidActiveMotion(value: unknown): value is WorkerActiveMotion {
     isFiniteNonNegative(value.fadeStartEpochMs) &&
     value.fadeStartEpochMs <= Number.MAX_SAFE_INTEGER &&
     isNonNegativeSafeInteger(value.speedTier) &&
-    value.speedTier <= 3
+    value.speedTier <= 3 &&
+    (!hasOwn(value, 'wasPresented') || typeof value.wasPresented === 'boolean')
   );
 }
 
@@ -243,6 +247,12 @@ export function isValidWorkerMessageSnapshot(value: unknown): value is WorkerMes
     isBoundedMessageIdArray(value.activeMessageIds) &&
     isBoundedMessageIdArray(value.pendingMessageIds) &&
     isNonNegativeSafeInteger(value.processedBatchSequence) &&
+    (!hasOwn(value, 'totalRendered') || isNonNegativeSafeInteger(value.totalRendered)) &&
+    (!hasOwn(value, 'totalPresented') ||
+      (isNonNegativeSafeInteger(value.totalPresented) &&
+        (!hasOwn(value, 'totalRendered') ||
+          (isNonNegativeSafeInteger(value.totalRendered) &&
+            value.totalPresented <= value.totalRendered)))) &&
     (!hasOwn(value, 'epoch') || isNonNegativeSafeInteger(value.epoch)) &&
     (!hasOwn(value, 'motionSnapshot') ||
       (isNonNegativeSafeInteger(value.epoch) &&

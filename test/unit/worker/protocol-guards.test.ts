@@ -732,6 +732,35 @@ describe('renderer worker protocol guards', () => {
     }
   });
 
+  it('bounds presented counters and recovery presentation flags', () => {
+    expect(isValidWorkerStatsMessage(validStats({ totalRendered: 2, totalPresented: 1 }))).toBe(
+      true
+    );
+    expect(isValidWorkerStatsMessage(validStats({ totalRendered: 1, totalPresented: 2 }))).toBe(
+      false
+    );
+    expect(
+      isValidWorkerMessageSnapshot(validSnapshot({ totalRendered: 2, totalPresented: 1 }))
+    ).toBe(true);
+    expect(
+      isValidWorkerMessageSnapshot(validSnapshot({ totalRendered: 1, totalPresented: 2 }))
+    ).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot(
+        snapshotWithMotion({
+          activeMotions: [validMotion({ wasPresented: true })],
+        })
+      )
+    ).toBe(true);
+    expect(
+      isValidWorkerMessageSnapshot(
+        snapshotWithMotion({
+          activeMotions: [validMotion({ wasPresented: 'yes' })],
+        })
+      )
+    ).toBe(false);
+  });
+
   it('validates drop-reason totals and rejects malformed reason records', () => {
     expect(isValidWorkerStatsMessage(validStats({ dropReasons: {} }))).toBe(true);
     expect(
