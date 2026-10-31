@@ -2,7 +2,10 @@ import type { ChatMessage } from '@app-types';
 import {
   commitDrainBatch,
   createDrainBatch,
+  fairDrainStartPriority,
+  HIGH_PRIORITY_SUCCESS_SHARE,
   nextDrainPriority,
+  nextHigherPrioritySuccesses,
   recordDrainResult,
   selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
@@ -160,6 +163,87 @@ describe('Canvas drain batch bookkeeping', () => {
     expect(resume).toBe(0);
     const next = selectDrainCandidates(queue, priorityOf, new Map(), 32, resume);
     expect(next.map(priorityOf)).toEqual([0, 200, 100]);
+  });
+
+  it('compares successful-service shares under twelve one-vacancy paid cycles', () => {
+    const trace = (share: number | null) => {
+      const pending: Array<{ id: string; priority: number }> = [];
+      const visible: Array<{ id: string; cycle: number }> = [];
+      let highSuccesses = 0;
+      for (let cycle = 0; cycle < 12; cycle++) {
+        pending.push({ id: `paid-${cycle}`, priority: 200 });
+        pending.push({ id: `ordinary-${cycle}`, priority: 0 });
+        const resume = share !== null && highSuccesses >= share ? 0 : undefined;
+        const selected = selectDrainCandidates(
+          pending,
+          (entry) => entry.priority,
+          new Map(),
+          32,
+          resume
+        )[0];
+        expect(selected).toBeDefined();
+        if (!selected) break;
+        pending.splice(pending.indexOf(selected), 1);
+        visible.push({ id: selected.id, cycle });
+        highSuccesses = selected.priority === 0 ? 0 : Math.min(share ?? 12, highSuccesses + 1);
+      }
+      return {
+        paid: visible.filter((entry) => entry.id.startsWith('paid-')).length,
+        ordinary: visible.filter((entry) => entry.id.startsWith('ordinary-')).length,
+        firstOrdinaryCycle: visible.find((entry) => entry.id.startsWith('ordinary-'))?.cycle,
+        pending: pending.length,
+      };
+    };
+    expect(trace(null)).toEqual({
+      paid: 12,
+      ordinary: 0,
+      firstOrdinaryCycle: undefined,
+      pending: 12,
+    });
+    expect(trace(1)).toEqual({ paid: 6, ordinary: 6, firstOrdinaryCycle: 1, pending: 12 });
+    expect(trace(2)).toEqual({ paid: 8, ordinary: 4, firstOrdinaryCycle: 2, pending: 12 });
+    expect(trace(4)).toEqual({ paid: 10, ordinary: 2, firstOrdinaryCycle: 4, pending: 12 });
+    expect(HIGH_PRIORITY_SUCCESS_SHARE).toBe(2);
+    expect(fairDrainStartPriority([200, 0], 2)).toBe(0);
+    expect(fairDrainStartPriority([200, -50], 2)).toBeUndefined();
+    expect(nextHigherPrioritySuccesses(1, 200)).toBe(2);
+    expect(nextHigherPrioritySuccesses(2, 0)).toBe(0);
+    expect(nextHigherPrioritySuccesses(2, -50)).toBe(2);
+  });
+
+  it('keeps one admitted ordinary at capacity and replaces stale equal-priority ordinary', () => {
+    const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
+    const make = (id: string, kind: ChatMessage['kind'], isBacklog = false): ChatMessage => ({
+      id,
+      kind,
+      isBacklog,
+      text: id,
+      content: [{ type: 'text', content: id }],
+      timestamp: 0,
+      authorType: 'normal',
+    });
+    const drops: string[] = [];
+    const enqueue = (message: ChatMessage, priority: number) =>
+      enqueueWithOverflow(
+        queue,
+        message,
+        priority,
+        (_reason, discarded) => {
+          drops.push(discarded.id ?? '');
+        },
+        2
+      );
+    expect(enqueue(make('old-ordinary', 'text'), 0)).toBe('enqueued');
+    expect(enqueue(make('paid-1', 'superchat'), 200)).toBe('enqueued');
+    expect(enqueue(make('paid-2', 'superchat'), 200)).toBe('dropped');
+    expect(enqueue(make('fresh-ordinary', 'text'), 0)).toBe('replaced');
+    expect(queue.toArray().map((entry) => entry.id)).toEqual(['paid-1', 'fresh-ordinary']);
+    expect(drops).toEqual(['paid-2', 'old-ordinary']);
+
+    queue.clear();
+    expect(enqueue(make('backlog-old', 'text', true), -50)).toBe('enqueued');
+    expect(enqueue(make('backlog-new', 'text', true), -50)).toBe('enqueued');
+    expect(enqueue(make('backlog-latest', 'text', true), -50)).toBe('dropped');
   });
 
   it('records placed, oversized, and transient results without reordering', () => {

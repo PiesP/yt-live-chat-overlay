@@ -677,7 +677,18 @@ export function enqueueWithOverflow(
 ): 'enqueued' | 'dropped' | 'replaced' {
   if (queue.size >= maxSize) {
     const lowest = queue.peekLowest();
-    if (lowest && priority <= RendererBase.getMessagePriority(lowest)) {
+    const lowestPriority = lowest ? RendererBase.getMessagePriority(lowest) : undefined;
+    // Keep one already-admitted live ordinary message through a paid burst.
+    // Equal-priority live ordinary overflow favors a current reaction instead
+    // of retaining the oldest waiting item indefinitely. Backlog stays FIFO.
+    const replaceOrdinary = priority === 0 && lowestPriority === 0;
+    const soleOrdinary =
+      lowestPriority === 0 &&
+      queue.toArray().filter((entry) => RendererBase.getMessagePriority(entry) === 0).length === 1;
+    if (
+      lowestPriority === undefined ||
+      (!replaceOrdinary && (priority <= lowestPriority || (soleOrdinary && priority > 0)))
+    ) {
       onDrop('queue_priority', message);
       return 'dropped';
     }

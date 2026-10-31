@@ -23,6 +23,27 @@ interface DrainQueue<T> {
 /** Both renderers count failed collision attempts against the same work limit. */
 export const DRAIN_MAX_ATTEMPTS = 32;
 export const DRAIN_WORK_BUDGET_MS = 4;
+/** Two higher-priority successes retain paid preference before one live ordinary opportunity. */
+export const HIGH_PRIORITY_SUCCESS_SHARE = 2;
+
+/** Backlog priority -50 is deliberately outside the live ordinary service share. */
+export function fairDrainStartPriority(
+  eligiblePriorities: readonly number[],
+  higherPrioritySuccesses: number,
+  interruptedPriority?: number
+): number | undefined {
+  return higherPrioritySuccesses >= HIGH_PRIORITY_SUCCESS_SHARE &&
+    eligiblePriorities.includes(0) &&
+    eligiblePriorities.some((priority) => priority > 0)
+    ? 0
+    : interruptedPriority;
+}
+
+/** Count committed admissions, never failed attempts or merely queued messages. */
+export function nextHigherPrioritySuccesses(previous: number, priority: number): number {
+  if (priority === 0) return 0;
+  return priority > 0 ? Math.min(HIGH_PRIORITY_SUCCESS_SHARE, previous + 1) : previous;
+}
 
 /**
  * Preserve priority order while rotating past a repeatedly unplaceable prefix.

@@ -2448,4 +2448,48 @@ describe('CanvasRenderer', () => {
     expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
     expect(internals.drainLocked).toBe(false);
   });
+
+  it.each([false, true])(
+    'serves live ordinary after two successful paid placements with %s async drain',
+    async (asyncMode) => {
+      vi.spyOn(performance, 'now').mockReturnValue(0);
+      const localOverlay = new Overlay();
+      (localOverlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+        width: 640,
+        height: 360,
+      };
+      const renderer = new CanvasRenderer(localOverlay, makeSettings({ maxConcurrentMessages: 1 }));
+      const internals = renderer as unknown as {
+        pendingQueue: {
+          enqueue(message: ChatMessage, priority: number): void;
+          toArray(): ChatMessage[];
+        };
+        activeMessages: CanvasMessage[];
+        placeQueuedMessage: ReturnType<typeof vi.fn>;
+        drainQueue(now: number): void;
+        drainQueueAsync(now: number): Promise<void>;
+      };
+      internals.placeQueuedMessage = vi.fn((_message: ChatMessage) => {
+        internals.activeMessages.push({} as CanvasMessage);
+        return { placed: true, oversized: false };
+      });
+      internals.pendingQueue.enqueue(makeMessage('ordinary', 'ordinary'), 0);
+      for (let cycle = 0; cycle < 3; cycle++) {
+        internals.activeMessages.length = 0;
+        internals.pendingQueue.enqueue(
+          { ...makeMessage(`paid-${cycle}`, 'paid'), kind: 'superchat' },
+          200
+        );
+        if (asyncMode) await internals.drainQueueAsync(cycle * 16);
+        else internals.drainQueue(cycle * 16);
+      }
+      expect(internals.placeQueuedMessage.mock.calls.map(([message]) => message.id)).toEqual([
+        'paid-0',
+        'paid-1',
+        'ordinary',
+      ]);
+      expect(internals.pendingQueue.toArray().map((message) => message.id)).toContain('paid-2');
+      renderer.destroy();
+    }
+  );
 });
