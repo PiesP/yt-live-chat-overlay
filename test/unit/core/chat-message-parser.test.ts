@@ -15,7 +15,7 @@ import {
   MAX_RENDER_CONTENT_SEGMENTS,
   MAX_RENDER_FIELD_CODE_POINTS,
 } from '@chat/render-resource-limits';
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -529,6 +529,22 @@ describe('extractChatEvents message-boundary normalization', () => {
     });
     expect(message?.text).toBe(source);
     expect(message?.canonicalText).toBeUndefined();
+  });
+
+  it('omits an overlong text run when grapheme segmentation is unavailable', () => {
+    vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      const source = `${'A'.repeat(78)}e\u0301ZZ`;
+      const message = parseRenderer('liveChatTextMessageRenderer', {
+        id: 'segmenter-unavailable',
+        authorName: { simpleText: 'Viewer' },
+        message: { simpleText: source },
+      });
+      expect(message?.text).toBe('…');
+      expect(message?.canonicalText).toBe(source);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('does not retain an emoji image that cannot fit in the visible projection', () => {

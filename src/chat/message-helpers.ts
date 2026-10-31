@@ -12,7 +12,7 @@
 import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { asRecord, getString, type JsonObject } from '@chat/youtube/request';
 import { parseAnyColor } from '@renderer/color-utils';
-import { splitGraphemeClusters } from '@renderer/text-segmentation';
+import { splitGraphemesForTruncation } from '@renderer/text-segmentation';
 import { colors, SUPERCHAT_TIER_KEYS } from '@util/design-tokens';
 
 export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
@@ -63,7 +63,7 @@ const NEAR_BLACK_THRESHOLD = 15;
 
 function truncateText(text: string): string {
   const normalized = normalizeInlineText(text);
-  const clusters = splitGraphemeClusters(normalized);
+  const clusters = splitGraphemesForTruncation(normalized) ?? [normalized];
   const codePoints = clusters.reduce((length, cluster) => length + Array.from(cluster).length, 0);
   if (codePoints <= MAX_REGULAR_MESSAGE_TEXT_LENGTH) return normalized;
   let retained = '';

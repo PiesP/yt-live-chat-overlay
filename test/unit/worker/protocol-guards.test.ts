@@ -679,6 +679,24 @@ describe('renderer worker protocol guards', () => {
     ).toBe(false);
   });
 
+  it('rejects non-string canonicalText before admitting a Worker message', () => {
+    const base = { id: 'canonical', text: 'display', width: 100, height: 20, priority: 0 };
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [{ ...base, canonicalText: 'accepted source' }],
+      })
+    ).toBe(true);
+    for (const canonicalText of [null, ['A'.repeat(4096), 'B'.repeat(4096)], 42, {}]) {
+      expect(
+        isValidControlMessage({
+          type: 'addMessages',
+          messages: [{ ...base, canonicalText }],
+        })
+      ).toBe(false);
+    }
+  });
+
   it('accepts the exact Worker stats ID limit and rejects one entry beyond it', () => {
     const exactLimitIds = messageIds(MAX_STATS_MESSAGE_IDS);
     expect(

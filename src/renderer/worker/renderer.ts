@@ -1074,6 +1074,8 @@ export class WorkerRenderer {
     }
 
     existing.text = msg.text;
+    if (msg.canonicalText !== undefined) existing.canonicalText = msg.canonicalText;
+    else delete existing.canonicalText;
     existing.content = msg.content ?? [];
     existing.ghostText = getDisplayText(existing.content);
     existing.speedTier = this.config ? getSpeedTier(msg, this.config) : existing.speedTier;
