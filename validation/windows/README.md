@@ -18,8 +18,12 @@ detailed videos at 400px and 960px viewport widths; recorded player bounds are
 the actual overlay size. The presentation workload includes a
 localized long amount, mixed RTL/CJK author, sticker, membership event, and
 ordinary comment. The videos must decode and advance before capture. Each backend
-is limited to 16 PNG captures, 48 records per snapshot, and 60 seconds; the total
-PNG ceiling is 32. On the detailed scene, a page-owned Translator stub records
+is limited to 16 recorded phases, 12 PNG captures, 48 records per snapshot, and
+60 seconds; the total PNG ceiling is 24. Reduced-motion fixed, pre-pause motion,
+paused motion, and zero-capacity phases retain their complete JSON observations
+without an additional PNG. This leaves room for the existing full-profile
+artifacts under the controller's unchanged 64-file collection limit.
+On the detailed scene, a page-owned Translator stub records
 the accepted canonical tail and supplies a distinct selected translation; the
 probe requires its positive-alpha draw in the same complete frame. The fixture
 also opens the actual settings dialog and reads three drawn production Canvas

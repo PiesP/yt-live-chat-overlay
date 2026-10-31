@@ -64,7 +64,8 @@ const PROBE_IDS = [...IDS, ...Object.values(PRESENTATION_IDS).flatMap(Object.val
 const MAX_RECORDS = 48;
 // Extra translated-frame and production-preview waits remain under a hard backend deadline.
 const MAX_RUN_MS = 60_000;
-const MAX_CAPTURES_PER_BACKEND = 16;
+const MAX_PHASES_PER_BACKEND = 16;
+const MAX_CAPTURES_PER_BACKEND = 12;
 const MAX_OVERLOAD_MS = 120_000;
 const MAX_OVERLOAD_RECORDS = 128;
 
@@ -1243,7 +1244,7 @@ async function runBackend(options: {
     name: string;
     snapshot: MatrixSnapshot;
     flow: ReturnType<typeof flowTrace>;
-    screenshot: string;
+    screenshot: string | null;
   }> = [];
   const rateObservations: Array<Record<string, unknown>> = [];
   const presentationObservations: Array<Record<string, unknown>> = [];
@@ -1253,6 +1254,7 @@ async function runBackend(options: {
   const baselineFindings: string[] = [];
   const cleanupErrors: string[] = [];
   const delivered = new Set<string>();
+  let screenshotCount = 0;
   let nativeProbe: NativePageScriptProbe | undefined;
   let previousSettings:
     | Parameters<NonNullable<Window['__ytChatOverlay']>['applySettings']>[0]
@@ -1334,11 +1336,15 @@ async function runBackend(options: {
         baselineFindings.push(`No measured paid plan for ${id} at ${lines} lines`);
     }
   };
-  const capture = async (name: string) => {
-    assert(phases.length < MAX_CAPTURES_PER_BACKEND, 'Matrix capture budget exceeded');
-    const filename = `comment-display-${backend}-${name}.png`;
+  const capture = async (name: string, includeScreenshot = true) => {
+    assert(phases.length < MAX_PHASES_PER_BACKEND, 'Matrix phase budget exceeded');
+    const filename = includeScreenshot ? `comment-display-${backend}-${name}.png` : null;
     const observed = await snapshot(page, backend);
-    await page.screenshot({ path: join(output, filename), animations: 'disabled' });
+    if (filename) {
+      assert(screenshotCount < MAX_CAPTURES_PER_BACKEND, 'Matrix capture budget exceeded');
+      await page.screenshot({ path: join(output, filename), animations: 'disabled' });
+      screenshotCount++;
+    }
     phases.push({ name, snapshot: observed, flow: flowTrace(observed), screenshot: filename });
     return observed;
   };
@@ -1600,7 +1606,7 @@ async function runBackend(options: {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await send('reduced');
     await observeVisible(IDS[9]);
-    const reduced = await capture('reduced-motion-fixed');
+    const reduced = await capture('reduced-motion-fixed', false);
     const reducedDraw = check(() => assertCoherentVisibleFrame(reduced, IDS[9]));
     check(() =>
       assert(
@@ -1619,7 +1625,7 @@ async function runBackend(options: {
     await page.evaluate(() => window.__ytChatOverlay?.applySettings({ danmakuMode: 'scroll' }));
     await send('motion');
     await observeVisible(IDS[6]);
-    const before = await capture('motion-before');
+    const before = await capture('motion-before', false);
     check(() => assertCoherentVisibleFrame(before, IDS[6]));
     check(() =>
       assert(
@@ -1630,7 +1636,7 @@ async function runBackend(options: {
     );
     await page.evaluate(() => window.__ytPlacementSetPaused(true));
     await page.waitForTimeout(300);
-    const paused = await capture('paused');
+    const paused = await capture('paused', false);
     const pausedRow = paused.activeNow.find((entry) => entry.id === IDS[6]);
     const beforeRow = before.activeNow.find((entry) => entry.id === IDS[6]);
     check(() =>
@@ -1699,7 +1705,7 @@ async function runBackend(options: {
     });
     await send('zero');
     await waitForIngress(page, backend, IDS[7]);
-    const zero = await capture('zero-capacity');
+    const zero = await capture('zero-capacity', false);
     check(() => assert(!zero.firstEntry[IDS[7]], 'Zero-capacity row was visibly drawn'));
     check(() =>
       assert(
@@ -2866,7 +2872,7 @@ export async function runCommentDisplayMatrix(options: {
             (entry) =>
               entry.status === 'passed' &&
               entry.phases.length ===
-                (entry.layoutSupport === 'legacy-stacked-only' ? 11 : MAX_CAPTURES_PER_BACKEND)
+                (entry.layoutSupport === 'legacy-stacked-only' ? 11 : MAX_PHASES_PER_BACKEND)
           ) &&
           (legacyCorrectnessBaseline || overloadResults.every((entry) => entry.status === 'passed'))
           ? 'observed'
@@ -2909,6 +2915,7 @@ export async function runCommentDisplayMatrix(options: {
     instrumentation:
       'Canvas and Worker draw, queue, and frame hooks are active during timing samples; probe overhead is included and has not been isolated; no GPU or FPS claim',
     limits: {
+      maxPhasesPerBackend: MAX_PHASES_PER_BACKEND,
       maxCapturesPerBackend: MAX_CAPTURES_PER_BACKEND,
       maxRecordsPerSnapshot: MAX_RECORDS,
       maxBackendMs: MAX_RUN_MS,
