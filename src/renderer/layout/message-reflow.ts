@@ -166,27 +166,7 @@ export function reconcileMessagePlacements<T>(
   const occupants = new Map<number, ReflowPlacement<T>[]>();
   const scratch = new Set<ReflowPlacement<T>>();
   const dropped: Array<{ message: T; reason: 'oversized' | 'reflow_capacity' }> = [];
-  const preferredLane = (candidate: ReflowCandidate<T>, slotCount: number): number => {
-    const maxLane = options.laneCount - slotCount;
-    if (!Number.isFinite(candidate.preferredY) || options.laneHeight <= 0) {
-      return candidate.laneIndex;
-    }
-    const origin = options.viewportHeight * options.safeTop;
-    const offset = getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
-    return Math.max(
-      0,
-      Math.min(
-        maxLane,
-        Math.round(((candidate.preferredY ?? 0) - origin - offset) / options.laneHeight)
-      )
-    );
-  };
-  const tryLane = (
-    candidate: ReflowCandidate<T>,
-    laneIndex: number,
-    slotCount: number
-  ): boolean => {
-    if (laneIndex < 0 || laneIndex + slotCount > options.laneCount) return false;
+  const contentY = (candidate: ReflowCandidate<T>, laneIndex: number): number | null => {
     const offset = getSafeRowContentOffset(
       candidate.height,
       options.laneHeight,
@@ -194,9 +174,39 @@ export function reconcileMessagePlacements<T>(
       laneIndex,
       options.viewportHeight * (1 - options.safeTop - (options.safeBottom ?? 0))
     );
-    if (offset === null) return false;
-    const y =
-      computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) + offset;
+    return offset === null
+      ? null
+      : computeLaneY(laneIndex, options.viewportHeight, options.safeTop, options.laneHeight) +
+          offset;
+  };
+  const preferredLane = (candidate: ReflowCandidate<T>, slotCount: number): number => {
+    const maxLane = options.laneCount - slotCount;
+    if (!Number.isFinite(candidate.preferredY) || options.laneHeight <= 0) {
+      return candidate.laneIndex;
+    }
+    const origin = options.viewportHeight * options.safeTop;
+    const offset = getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
+    const targetY = candidate.preferredY ?? 0;
+    const nearest = Math.max(
+      0,
+      Math.min(maxLane, Math.round((targetY - origin - offset) / options.laneHeight))
+    );
+    // Only the final block can have less centering room than a complete grid block.
+    const nearestY = contentY(candidate, nearest);
+    const finalY = contentY(candidate, maxLane);
+    return finalY !== null &&
+      (nearestY === null || Math.abs(finalY - targetY) < Math.abs(nearestY - targetY))
+      ? maxLane
+      : nearest;
+  };
+  const tryLane = (
+    candidate: ReflowCandidate<T>,
+    laneIndex: number,
+    slotCount: number
+  ): boolean => {
+    if (laneIndex < 0 || laneIndex + slotCount > options.laneCount) return false;
+    const y = contentY(candidate, laneIndex);
+    if (y === null) return false;
     scratch.clear();
     // Every content rectangle plus its gap fits inside its reserved slot block.
     // Thus a clearance conflict must share a slot; the adjacent lanes also
@@ -251,17 +261,14 @@ export function reconcileMessagePlacements<T>(
       if (Number.isFinite(candidate.preferredY)) {
         const anchor = preferredLane(candidate, slotCount);
         const targetY = candidate.preferredY ?? 0;
-        const baseY =
-          options.viewportHeight * options.safeTop +
-          getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
         for (let distance = 0; distance <= maxLane && !placed; distance++) {
           const lower = anchor - distance;
           const upper = anchor + distance;
+          const lowerY = lower >= 0 ? contentY(candidate, lower) : null;
+          const upperY = upper <= maxLane ? contentY(candidate, upper) : null;
           const upperFirst =
-            upper <= maxLane &&
-            (lower < 0 ||
-              Math.abs(baseY + upper * options.laneHeight - targetY) <
-                Math.abs(baseY + lower * options.laneHeight - targetY));
+            upperY !== null &&
+            (lowerY === null || Math.abs(upperY - targetY) < Math.abs(lowerY - targetY));
           const first = upperFirst ? upper : lower;
           const second = upperFirst ? lower : upper;
           if (first >= 0 && first <= maxLane) placed = tryLane(candidate, first, slotCount);
