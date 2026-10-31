@@ -8,6 +8,7 @@ import { join } from 'node:path';
 
 import type { BrowserContext, Page } from '@playwright/test';
 
+import { resolveLimits } from '../../src/settings/limits.ts';
 import {
   installNativePageScriptProbe,
   type NativePageScriptProbe,
@@ -71,6 +72,9 @@ const MAX_OVERLOAD_MS = 120_000;
 const MAX_OVERLOAD_RECORDS = 128;
 const PRESENTATION_VIEWPORT_HEIGHT = 1100;
 const PRESENTATION_PLAYER_HEIGHT = 900;
+const MIN_PAID_BODY_LINES = resolveLimits('superChatMaxBodyLines').min;
+const ROLE_BASE_WAIT_MS = 5000;
+const MATRIX_CLEANUP_RESERVE_MS = 1000;
 
 export type MatrixMode = 'baseline' | 'candidate';
 type Backend = 'worker' | 'main';
@@ -171,6 +175,46 @@ type MatrixSnapshot = {
   presentationCounterAvailable: boolean;
   overflow: number;
 };
+type RoleWaitBudget = {
+  plannedStartAtEpochMs: number | null;
+  observedFrameAtEpochMs: number | null;
+  plannedDelayMs: number;
+  requestedMs: number;
+  remainingMs: number;
+  timeoutMs: number;
+  budgetLimited: boolean;
+};
+type RoleWaitObservation = RoleWaitBudget & {
+  startedAtEpochMs: number;
+  outcome: 'visible' | 'failed' | 'budget-exhausted';
+};
+
+/** Budget a source-planned role without extending the backend deadline. */
+export function planRoleVisibilityWait(
+  plannedStartAtEpochMs: number | null,
+  observedFrameAtEpochMs: number | null,
+  elapsedBackendMs: number
+): RoleWaitBudget {
+  assert(Number.isFinite(elapsedBackendMs) && elapsedBackendMs >= 0);
+  const plannedDelayMs =
+    plannedStartAtEpochMs !== null &&
+    observedFrameAtEpochMs !== null &&
+    Number.isFinite(plannedStartAtEpochMs) &&
+    Number.isFinite(observedFrameAtEpochMs)
+      ? Math.max(0, plannedStartAtEpochMs - observedFrameAtEpochMs)
+      : 0;
+  const requestedMs = ROLE_BASE_WAIT_MS + Math.ceil(plannedDelayMs);
+  const remainingMs = Math.max(0, MAX_RUN_MS - elapsedBackendMs - MATRIX_CLEANUP_RESERVE_MS);
+  return {
+    plannedStartAtEpochMs,
+    observedFrameAtEpochMs,
+    plannedDelayMs,
+    requestedMs,
+    remainingMs,
+    timeoutMs: plannedDelayMs < remainingMs ? Math.min(requestedMs, remainingMs) : 0,
+    budgetLimited: requestedMs > remainingMs,
+  };
+}
 type PreviewSample = {
   label: string;
   ariaLabel: string;
@@ -1416,7 +1460,8 @@ async function waitForVisible(
   page: Page,
   backend: Backend,
   id: string,
-  layout?: 'stacked' | 'wide'
+  layout?: 'stacked' | 'wide',
+  timeoutMs = ROLE_BASE_WAIT_MS
 ) {
   await page.waitForFunction(
     ({ selectedBackend, messageId, requestedLayout }) => {
@@ -1448,7 +1493,7 @@ async function waitForVisible(
       return visible;
     },
     { selectedBackend: backend, messageId: id, requestedLayout: layout },
-    { polling: 100, timeout: 5000 }
+    { polling: 100, timeout: timeoutMs }
   );
 }
 
@@ -1550,6 +1595,7 @@ async function waitForProbeConfig(
     layout?: 'stacked' | 'wide';
     activeCap?: number;
     queueCap?: number;
+    paidBodyLines?: number;
   }
 ) {
   await page.waitForFunction(
@@ -1575,6 +1621,8 @@ async function waitForProbeConfig(
         (config.layout === undefined || exact?.superChatLayout === config.layout) &&
         (config.activeCap === undefined || exact?.maxConcurrentMessages === config.activeCap) &&
         (config.queueCap === undefined || exact?.queueMaxSize === config.queueCap) &&
+        (config.paidBodyLines === undefined ||
+          exact?.superChatMaxBodyLines === config.paidBodyLines) &&
         (config.reducedMotion === undefined ||
           (exact?.reducedMotion === config.reducedMotion &&
             frame.config.reducedMotion === config.reducedMotion)) &&
@@ -1725,10 +1773,12 @@ async function runBackend(options: {
     delivered: string[];
     diagnostic?: MatrixSnapshot | null;
     failureStage?: string;
+    currentRoleWait?: RoleWaitObservation | null;
     errorType?: string;
     errorMessage?: string;
   };
   const startedAt = Date.now();
+  let currentRoleWait: RoleWaitObservation | null = null;
   const check = <T>(predicate: () => T): T | undefined => {
     try {
       return predicate();
@@ -2604,15 +2654,32 @@ async function runBackend(options: {
           const budget = check(() => paidRowBudget(observed, paidId, 4));
           rowBudgetObservations.push({ name, lines: 4, budget });
           if (layout === 'stacked') {
-            await page.evaluate(() =>
-              window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: 1 })
+            failureStage = `presentation:${scene}:${width}:${layout}:minimum-lines`;
+            await page.evaluate(
+              (minimum) =>
+                window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: minimum }),
+              MIN_PAID_BODY_LINES
             );
-            await observePlan(paidId, 1);
-            const oneLine = await snapshot(page, backend);
+            const effectiveMinimum = await page.evaluate(
+              () => window.__ytChatOverlay?.getSettings().superChatMaxBodyLines
+            );
+            assert.equal(
+              effectiveMinimum,
+              MIN_PAID_BODY_LINES,
+              'Installed paid-line minimum changed'
+            );
+            await waitForProbeConfig(page, backend, {
+              viewportWidth: width,
+              playerHeight: PRESENTATION_PLAYER_HEIGHT,
+              paidBodyLines: MIN_PAID_BODY_LINES,
+            });
+            await observePlan(paidId, MIN_PAID_BODY_LINES);
+            const minimumLines = await snapshot(page, backend);
             rowBudgetObservations.push({
-              name: `${name}-one-line`,
-              lines: 1,
-              budget: check(() => paidRowBudget(oneLine, paidId, 1)),
+              name: `${name}-minimum-lines`,
+              lines: MIN_PAID_BODY_LINES,
+              effectiveLines: effectiveMinimum,
+              budget: check(() => paidRowBudget(minimumLines, paidId, MIN_PAID_BODY_LINES)),
             });
             await page.evaluate(() =>
               window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: 4 })
@@ -2626,6 +2693,7 @@ async function runBackend(options: {
           id: string;
           proof: ReturnType<typeof presentationItem> | undefined;
           jsonOnlyDueFrame: boolean;
+          wait: RoleWaitObservation;
         }> = [];
         for (const [role, id] of [
           ['sticker', PRESENTATION_IDS[scene].sticker],
@@ -2633,8 +2701,23 @@ async function runBackend(options: {
           ['ordinary', ordinaryId],
         ] as const) {
           failureStage = `presentation:${scene}:${width}:${layout}:${role}`;
+          const planning = backend === 'worker' ? await snapshot(page, backend) : null;
+          const plannedStartAtEpochMs =
+            planning?.activeNow.find((entry) => entry.id === id)?.startAtEpochMs ?? null;
+          const waitBudget = planRoleVisibilityWait(
+            plannedStartAtEpochMs,
+            planning?.frame?.startedAtEpochMs ?? null,
+            Date.now() - startedAt
+          );
+          currentRoleWait = {
+            ...waitBudget,
+            startedAtEpochMs: Date.now(),
+            outcome: waitBudget.timeoutMs > 0 ? 'failed' : 'budget-exhausted',
+          };
+          assert(waitBudget.timeoutMs > 0, 'No matrix budget remains for planned role visibility');
           try {
-            await waitForVisible(page, backend, id, layout);
+            await waitForVisible(page, backend, id, layout, waitBudget.timeoutMs);
+            currentRoleWait.outcome = 'visible';
           } catch (error) {
             if (mode === 'candidate') throw error;
             if (baselineFindings.length < 24)
@@ -2646,6 +2729,7 @@ async function runBackend(options: {
             id,
             proof: check(() => presentationItem(itemFrame, id, role)),
             jsonOnlyDueFrame: itemFrame.frame?.frameId !== observed.frame?.frameId,
+            wait: currentRoleWait,
           });
         }
         const ordinary = itemObservations.find((entry) => entry.role === 'ordinary')?.proof;
@@ -2899,6 +2983,7 @@ async function runBackend(options: {
       delivered: [...delivered],
       diagnostic,
       failureStage,
+      currentRoleWait,
       errorType: error instanceof Error ? error.name : typeof error,
       errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 400),
     };
@@ -3895,6 +3980,7 @@ export async function runCommentDisplayMatrix(options: {
   validateMatrixMode(options.mode);
   const fixturePaths = [
     'validation/windows/comment-display-matrix.ts',
+    'src/settings/limits.ts',
     'validation/windows/placement-timing.ts',
     'validation/windows/native-page-script-probe.ts',
     'validation/windows/visible-watch.ts',

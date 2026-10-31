@@ -36,6 +36,7 @@
       "validation/windows/release-upgrade",
       "validation/windows/placement-timing.ts",
       "validation/windows/comment-display-matrix.ts",
+      "src/settings/limits.ts",
       "validation/windows/bitmap-lifecycle.ts",
       "validation/windows/worker-redirect-transport.ts",
       "validation/windows/video-pip.ts",

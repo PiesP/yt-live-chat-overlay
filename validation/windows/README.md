@@ -25,11 +25,11 @@ It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
 detailed videos at 400px and 960px viewport widths. Each page uses a measured
 900px player inside a 1100px high physical viewport, with an actual config and
-viewport-fit barrier before source input. This is sized so the paid, sticker,
-membership, and ordinary rows enough lanes to be due together at 32px without
-changing their source or scheduling policy. Recorded viewport dimensions come
-from the live page and player bounds are the actual overlay size. The
-presentation workload includes a
+viewport-fit barrier before source input. This provides measured lanes for paid,
+sticker, membership, and ordinary rows at 32px without changing source or
+scheduling policy; a row can still have a future planned start. Recorded viewport
+dimensions come from the live page and player bounds are the actual overlay size.
+The presentation workload includes a
 localized long amount, mixed RTL/CJK author, sticker, membership event, and
 ordinary comment. The videos must decode and advance before capture. Each backend
 is limited to 16 recorded phases, 12 PNG captures, 48 non-draw records per
@@ -83,11 +83,15 @@ cannot infer unknown attribution across fallback and recovery. Exact original-pl
 translation line counts and total-height budget, effect alpha, and overload-policy
 acceptance are recorded separately from the PNG review. The detailed paid card
 records the production `preparePaidCardPlan` output for four total body rows and
-for a one-row canonical fallback. The same completed frame must contain the
-selected translation when rows are available, keep body and translation ink
-inside the committed card, and omit translated ink for the deliberate one-row
-fallback. The bright membership card records its actual border stroke alpha and
-body draw alpha in two completed frames at least 250 logical milliseconds apart
+for the supported two-row setting minimum. The effective setting and completed
+frame must agree; original and selected translation rows share the selected
+total row budget, with positive-alpha ink inside the committed card. The
+separate direct planner unit test retains its one-row fallback boundary. Worker
+role visibility waits use each actual source-planned start plus five seconds,
+bounded by the unchanged 60-second backend deadline, and record the planned
+start, budget, and outcome. The bright membership card records its actual border
+stroke alpha and body draw alpha in two completed frames at least 250 logical
+milliseconds apart
 under effective reduced motion; the border alpha must remain stable. A zero-row
 membership deferred for zero usable rows and a prefetched future replay membership must publish
 neither a positive-alpha draw nor an observed border stroke before eligibility.

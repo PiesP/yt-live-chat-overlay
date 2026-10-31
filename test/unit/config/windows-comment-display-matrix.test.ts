@@ -8,6 +8,7 @@ import { RenderWorkerManager } from '@renderer/worker/manager';
 import type { ObservabilityReporter } from '@util/observability';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
+import { resolveLimits } from '../../../src/settings/limits.ts';
 import {
   assertBackend,
   assertCoherentVisibleFrame,
@@ -29,6 +30,7 @@ import {
   overloadTrace,
   overflowSeedAdmissionFinding,
   paidRowBudget,
+  planRoleVisibilityWait,
   presentationItem,
   presentationGeometry,
   snapshot,
@@ -43,6 +45,25 @@ const source = MATRIX_BATCHES.content.map(
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('budgets source-planned role visibility inside the unchanged backend deadline', () => {
+    const planned = planRoleVisibilityWait(1793452736488.9, 1793452735688, 25_000);
+    expect(planned.plannedDelayMs).toBeCloseTo(800.9, 1);
+    expect(planned.timeoutMs).toBe(5801);
+    expect(planned.budgetLimited).toBe(false);
+    expect(planRoleVisibilityWait(1000, 1100, 25_000).timeoutMs).toBe(5000);
+    expect(planRoleVisibilityWait(null, 1100, 25_000).timeoutMs).toBe(5000);
+    expect(planRoleVisibilityWait(Number.NaN, 1100, 25_000).timeoutMs).toBe(5000);
+    const futureOutsideBudget = planRoleVisibilityWait(3100, 1100, 58_000);
+    expect(futureOutsideBudget.timeoutMs).toBe(0);
+    expect(futureOutsideBudget.budgetLimited).toBe(true);
+    const limitedSlack = planRoleVisibilityWait(1600, 1100, 56_000);
+    expect(limitedSlack.timeoutMs).toBe(3000);
+    expect(limitedSlack.budgetLimited).toBe(true);
+    const exhausted = planRoleVisibilityWait(1793452736488.9, 1793452735688, 59_000);
+    expect(exhausted.timeoutMs).toBe(0);
+    expect(exhausted.budgetLimited).toBe(true);
+  });
+
   it('refreshes capped Worker samples while waiting for actual renderer ingress', async () => {
     const id = 'WINDOWS380_LOAD_OVERFLOW_NEW_3';
     let now = 0;
@@ -641,6 +662,33 @@ describe('Windows comment display matrix contract', () => {
       },
     };
     expect(paidRowBudget(oneLine, id, 1).oneLineFallback).toBe(true);
+    const supportedMinimum = resolveLimits('superChatMaxBodyLines').min;
+    expect(supportedMinimum).toBe(2);
+    const minimumPlan = {
+      ...sample,
+      frame: {
+        ...sample.frame,
+        cardPlans: [
+          { ...originalPlan, maxBodyLines: supportedMinimum, bodyRows: 1, translationRows: 1 },
+        ],
+      },
+    };
+    expect(paidRowBudget(minimumPlan, id, supportedMinimum).translationInk).not.toBeNull();
+    expect(() =>
+      paidRowBudget(
+        {
+          ...minimumPlan,
+          frame: {
+            ...minimumPlan.frame,
+            cardPlans: [
+              { ...originalPlan, maxBodyLines: supportedMinimum, bodyRows: 2, translationRows: 1 },
+            ],
+          },
+        },
+        id,
+        supportedMinimum
+      )
+    ).toThrow(/budget/);
     expect(() => assertNoVisibleCardInk(sample, member)).toThrow();
     expect(() =>
       assertNoVisibleCardInk(
