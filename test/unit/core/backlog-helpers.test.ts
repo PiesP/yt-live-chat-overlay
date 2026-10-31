@@ -39,6 +39,45 @@ describe('BacklogSampler candidate coverage', () => {
     expect(new Set(picked.map((message) => message.id)).size).toBe(selected);
   });
 
+  it('keeps the latest short reaction when substantial text fills all 120 slots', () => {
+    const input = messages(200).map((message, index) => ({
+      ...message,
+      text: index < 120 ? 'ordinary message' : 'gg',
+    }));
+    const picked = sampler.sampleMessages(input);
+    expect(picked).toHaveLength(120);
+    expect(picked[0]?.id).toBe('0');
+    expect(picked.at(-1)?.id).toBe('199');
+    expect(new Set(picked.map((message) => message.id)).size).toBe(120);
+  });
+
+  it.each([
+    { input: 200, ordinaryBudget: 120 },
+    { input: 499, ordinaryBudget: 299 },
+    { input: 500, ordinaryBudget: 175 },
+  ])(
+    'covers mixed-tier endpoints and protects paid messages at $input',
+    ({ input, ordinaryBudget }) => {
+      const candidates = messages(input).map((message, index) => ({
+        ...message,
+        kind: (index === 10
+          ? 'superchat'
+          : index === 11
+            ? 'membership'
+            : 'text') as ChatMessage['kind'],
+        text: index < ordinaryBudget + 2 ? 'ordinary message' : 'gg',
+      }));
+      const picked = sampler.sampleMessages(candidates);
+      const ids = picked.map((message) => message.id);
+      expect(picked).toHaveLength(ordinaryBudget + 2);
+      expect(ids).toContain('0');
+      expect(ids).toContain(String(input - 1));
+      expect(ids).toContain('10');
+      expect(ids).toContain('11');
+      expect(new Set(ids).size).toBe(picked.length);
+    }
+  );
+
   it('uses message ranks across irregular timestamps and favors the latest for one slot', () => {
     const input = messages(6).map((message, index) => ({
       ...message,

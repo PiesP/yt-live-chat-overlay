@@ -88,13 +88,16 @@ export class BacklogSampler {
     const tier1: ChatMessage[] = [];
     const tier2: ChatMessage[] = [];
     const tier3: ChatMessage[] = [];
+    let oldestOrdinary: ChatMessage | undefined;
+    let latestOrdinary: ChatMessage | undefined;
     for (const m of messages) {
       if (isPriorityMessage(m)) {
         tier1.push(m);
-      } else if (isSubstantialText(m)) {
-        tier2.push(m);
       } else {
-        tier3.push(m);
+        if (!oldestOrdinary || m.timestamp < oldestOrdinary.timestamp) oldestOrdinary = m;
+        if (!latestOrdinary || m.timestamp >= latestOrdinary.timestamp) latestOrdinary = m;
+        if (isSubstantialText(m)) tier2.push(m);
+        else tier3.push(m);
       }
     }
 
@@ -105,16 +108,32 @@ export class BacklogSampler {
 
     const selected: ChatMessage[] = [...tier1];
     let remaining = normalBudget;
+    const reserved = new Set<ChatMessage>();
 
-    if (tier2.length > 0 && remaining > 0) {
-      const pick = Math.min(remaining, tier2.length);
-      selected.push(...this.rankDistributedPick(tier2, pick));
+    // Cover the entire admitted ordinary range before applying text-tier bias.
+    // Priority messages remain fully protected outside the ordinary budget.
+    if (remaining > 1 && oldestOrdinary) {
+      selected.push(oldestOrdinary);
+      reserved.add(oldestOrdinary);
+      remaining--;
+    }
+    if (remaining > 0 && latestOrdinary && !reserved.has(latestOrdinary)) {
+      selected.push(latestOrdinary);
+      reserved.add(latestOrdinary);
+      remaining--;
+    }
+
+    const availableTier2 = tier2.filter((message) => !reserved.has(message));
+    if (availableTier2.length > 0 && remaining > 0) {
+      const pick = Math.min(remaining, availableTier2.length);
+      selected.push(...this.rankDistributedPick(availableTier2, pick));
       remaining -= pick;
     }
 
-    if (tier3.length > 0 && remaining > 0) {
-      const pick = Math.min(remaining, tier3.length);
-      selected.push(...this.rankDistributedPick(tier3, pick));
+    const availableTier3 = tier3.filter((message) => !reserved.has(message));
+    if (availableTier3.length > 0 && remaining > 0) {
+      const pick = Math.min(remaining, availableTier3.length);
+      selected.push(...this.rankDistributedPick(availableTier3, pick));
     }
 
     return selected.sort((a, b) => {
