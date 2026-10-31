@@ -247,6 +247,92 @@ describe('Canvas reservation safety', () => {
     return { renderer, internals };
   }
 
+  it('keeps an unfit queued comment until a safe-zone change and skips repeated placement attempts', () => {
+    const overlay = new Overlay();
+    const dimensions = { width: 320, height: 100 };
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const tight = makeSettings({
+      safeTop: 0.25,
+      safeBottom: 0.5,
+      fontSize: 32,
+      laneSpacing: 0,
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+    });
+    const renderer = new CanvasRenderer(overlay, tight);
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
+      activeMessages: CanvasMessage[];
+      drainQueue(now: number): void;
+      checkPlacement(message: ChatMessage, now: number): unknown;
+    };
+    internals.laneAllocator.reset(dimensions, 0);
+    const check = vi.spyOn(internals, 'checkPlacement');
+    internals.pendingQueue.enqueue(makeMessage('deferred', 'A visible ordinary row'), 0);
+    internals.drainQueue(0);
+    expect(internals.pendingQueue.toArray()).toHaveLength(1);
+    expect(internals.activeMessages).toHaveLength(0);
+    expect(check).toHaveBeenCalledTimes(1);
+    internals.drainQueue(16);
+    expect(check).toHaveBeenCalledTimes(1);
+    renderer.updateSettings(makeSettings({ ...tight, safeTop: 0.1, safeBottom: 0.1 }));
+    internals.drainQueue(32);
+    expect(internals.pendingQueue.toArray()).toHaveLength(0);
+    expect(internals.activeMessages).toHaveLength(1);
+    renderer.destroy();
+  });
+
+  it('admits a tall row in the final partial grid cell without leaving its neighbor free', () => {
+    const overlay = new Overlay();
+    const dimensions = { width: 640, height: 80 };
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ danmakuMode: 'top', safeTop: 0, safeBottom: 0, laneSpacing: 0 })
+    );
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      activeMessagesByLane: Map<number, CanvasMessage[]>;
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      placeQueuedMessage(
+        message: ChatMessage,
+        now: number,
+        dimensions: { width: number; height: number },
+        batchIndex: number,
+        previousStaggerDelayMs: number
+      ): { placed: boolean };
+    };
+    internals.laneAllocator.restore({
+      heap: [
+        [0, 0],
+        [1, 0],
+      ],
+      indexMap: { 0: 0, 1: 1 },
+      laneHeight: 50,
+      laneCount: 2,
+      speedTierLanes: {},
+    });
+    internals.estimateDimensions = () => ({ width: 100, height: 70 });
+    const result = internals.placeQueuedMessage(
+      makeMessage('partial', 'partial'),
+      1000,
+      dimensions,
+      0,
+      0
+    );
+    expect(result.placed).toBe(true);
+    const placed = internals.activeMessages[0];
+    expect(placed).toBeDefined();
+    expect(placed?.laneIndex).toBe(0);
+    expect((placed?.y ?? 0) + 70).toBeLessThanOrEqual(80);
+    expect(internals.activeMessagesByLane.get(1)).toContain(placed);
+    renderer.destroy();
+  });
+
   it.each(['scroll', 'reverse'] as const)(
     'validates future reservations and chooses a safe alternative in %s',
     (mode) => {

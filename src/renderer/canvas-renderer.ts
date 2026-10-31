@@ -67,6 +67,7 @@ import {
 import {
   drawRoundRect,
   getDisplayText,
+  type RegularMessageRenderConfig,
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
@@ -96,7 +97,11 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
-import { getRowSlotCount, rowsNeedVerticalClearance } from '@renderer/layout/row-geometry';
+import {
+  getRegularRowHeight,
+  getRowSlotCount,
+  rowsNeedVerticalClearance,
+} from '@renderer/layout/row-geometry';
 import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import {
   computeAgeFadeRate,
@@ -108,6 +113,7 @@ import {
 import {
   clearTextMeasurementCaches,
   getFontString,
+  measureTextHeight,
   measureTextWidth,
 } from '@renderer/text-measure';
 import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
@@ -313,7 +319,7 @@ export class CanvasRenderer extends RendererBase {
     text: string,
     direction: CanvasDirection = 'ltr'
   ): number => measureTextWidth(text, this.boundGetFont(this.settings.fontSize), direction);
-  private readonly regularRenderConfig = {
+  private readonly regularRenderConfig: RegularMessageRenderConfig = {
     showAuthor: true,
     fontSize: 1,
     fontWeight: 'bold',
@@ -324,7 +330,10 @@ export class CanvasRenderer extends RendererBase {
     backgroundColor: '#00000000',
     messageWidth: 0,
     messageHeight: 0,
+    mode: 'scroll',
   };
+  /** Capacity failures are retried only after a geometry revision. */
+  private capacityDeferred = new WeakSet<ChatMessage>();
   private renderContext: CanvasRenderContext | null = null;
   private readonly boundIsAntiBlockActive = (): boolean => this.isAntiBlockActive();
   private readonly boundDrainQueue = (now: number): void => this.drainQueue(now);
@@ -541,6 +550,7 @@ export class CanvasRenderer extends RendererBase {
       // Paid-card width bounds depend on the current viewport width.
       // Queued messages must be remeasured after every resize.
       this.dimensionCache.clear();
+      this.capacityDeferred = new WeakSet();
       if (d && this.canvas) {
         clearTextMeasurementCaches();
         this.applyDevicePixelRatio(d);
@@ -553,6 +563,7 @@ export class CanvasRenderer extends RendererBase {
         this.laneAllocator.reset(d);
         this.reflowActiveMessages(d);
       }
+      if (!this.workerManager.isActive) this.startRenderLoop();
     });
 
     // Forward user-pause toggle to both main-thread and worker renderers
@@ -580,9 +591,20 @@ export class CanvasRenderer extends RendererBase {
     this.reducedMotion = this.reducedMotionQuery.matches;
     this.reducedMotionListener = (e: MediaQueryListEvent) => {
       this.reducedMotion = e.matches;
+      this.capacityDeferred = new WeakSet();
+      this.dimensionCache.clear();
       if (!this.workerManager.isActive) {
         const dimensions = this.overlay.getDimensions();
-        if (dimensions) this.reflowActiveMessages(dimensions, 'policy');
+        if (dimensions) {
+          for (const message of this.activeMessages)
+            this.applyMessageGeometry(
+              message,
+              this.estimateTranslatedDimensions(message.message, message.translatedText ?? null)
+            );
+          this.laneAllocator.reset(dimensions);
+          this.reflowActiveMessages(dimensions, 'policy');
+          this.startRenderLoop();
+        }
       }
       // Relay OS preference change to the Worker (workers lack matchMedia).
       if (this.workerManager.isActive) {
@@ -667,6 +689,7 @@ export class CanvasRenderer extends RendererBase {
       laneSpacing: this.settings.laneSpacing,
       viewportHeight: dimensions.height,
       safeTop: this.settings.safeTop,
+      safeBottom: this.settings.safeBottom,
       mode: this.settings.danmakuMode,
       headwayGapRatio: this.settings.headwayGapRatio,
       now,
@@ -1260,7 +1283,10 @@ export class CanvasRenderer extends RendererBase {
       // a non-connected status, one extra frame renders the status bar
       // before stopping the loop. When the status changes, the loop is
       // restarted via setConnectionStatus.
-      if (this.activeMessages.length === 0 && this.pendingQueue.isEmpty) {
+      if (
+        this.activeMessages.length === 0 &&
+        this.pendingQueue.toArray().every((message) => this.capacityDeferred.has(message))
+      ) {
         // H2: Allow one extra frame for status bar rendering when idle
         // with a non-connected status.
         if (!this.hasRenderedStatusBar && this.connectionStatus !== 'connected') {
@@ -1659,7 +1685,7 @@ export class CanvasRenderer extends RendererBase {
       // This guarantees zero message loss from internal queue management.
       const batch = createDrainBatch(
         selectDrainCandidates(
-          this.pendingQueue.toArray(),
+          this.pendingQueue.toArray().filter((message) => !this.capacityDeferred.has(message)),
           CanvasRenderer.getMessagePriority,
           this.drainCursors,
           DRAIN_MAX_ATTEMPTS,
@@ -1721,7 +1747,7 @@ export class CanvasRenderer extends RendererBase {
 
       const batch = createDrainBatch(
         selectDrainCandidates(
-          this.pendingQueue.toArray(),
+          this.pendingQueue.toArray().filter((message) => !this.capacityDeferred.has(message)),
           CanvasRenderer.getMessagePriority,
           this.drainCursors
         )
@@ -1844,8 +1870,19 @@ export class CanvasRenderer extends RendererBase {
     const totalLanes = this.laneAllocator.getLaneCount();
     const laneHeight = this.laneAllocator.getLaneHeight();
     const requiredSlots = getRowSlotCount(msgHeight, laneHeight, this.settings.laneSpacing);
-    if (requiredSlots > totalLanes) {
+    const usableHeight = dims.height * (1 - this.settings.safeTop - this.settings.safeBottom);
+    if (totalLanes <= 0 || msgHeight > usableHeight || requiredSlots > totalLanes) {
       this.observability.recordCollisionCheck(performance.now() - t0);
+      const baselineHeight = getRegularRowHeight(
+        this.settings.fontSize,
+        this.settings.fontWeight,
+        this.settings.fontFamily,
+        this.settings.outline.enabled ? this.settings.outline.widthPx : 0
+      );
+      if (usableHeight < baselineHeight) {
+        this.capacityDeferred.add(message);
+        return { ok: false, reason: 'temporarily_unavailable' };
+      }
       return { ok: false, reason: 'oversized' };
     }
 
@@ -2098,7 +2135,13 @@ export class CanvasRenderer extends RendererBase {
       this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
       this.overlay.getDimensions()?.width,
       undefined,
-      this.settings.backgroundColors[message.authorType]
+      this.settings.backgroundColors[message.authorType],
+      this.effectiveMotionMode,
+      {
+        width: measureTextWidth,
+        height: measureTextHeight,
+        ...(this.ctx ? { context: this.ctx } : {}),
+      }
     );
 
     if (message.id) {
@@ -2139,7 +2182,13 @@ export class CanvasRenderer extends RendererBase {
         letterSpacing: this.getSpeedTier(message) === SPEED_TIER.FAR ? '1px' : '0px',
         outlineWidthPx: this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
         backgroundColor: this.settings.backgroundColors[message.authorType],
+        mode: this.effectiveMotionMode,
         ...(availableWidth !== undefined ? { availableWidth } : {}),
+        measurement: {
+          width: measureTextWidth,
+          height: measureTextHeight,
+          ...(this.ctx ? { context: this.ctx } : {}),
+        },
       }
     );
   }
@@ -2316,7 +2365,11 @@ export class CanvasRenderer extends RendererBase {
       this.pendingTranslationReadIdx = 0;
     }
 
-    if (laneGeometryChanged) this.dimensionCache.clear();
+    if (laneGeometryChanged || motionPolicyChanged) {
+      this.dimensionCache.clear();
+      this.capacityDeferred = new WeakSet();
+      if (!this.workerManager.isActive) this.startRenderLoop();
+    }
     this.textBitmapCache.resize(settings.textCacheMb * 1_000_000);
     if (textBitmapStyleChanged) this.textBitmapCache.clear();
     // Pre-compute 1/fadeDurationMs to avoid per-frame divisions in opacity calc
@@ -2343,7 +2396,7 @@ export class CanvasRenderer extends RendererBase {
       );
     }
 
-    if (laneGeometryChanged && !this.workerManager.isActive) {
+    if ((laneGeometryChanged || motionPolicyChanged) && !this.workerManager.isActive) {
       for (const message of this.activeMessages) {
         translationGeometryChanged =
           this.applyMessageGeometry(
@@ -2484,6 +2537,7 @@ export class CanvasRenderer extends RendererBase {
     this.textBitmapCache.clear();
     this.superChatGradientCache.clear();
     this.dimensionCache.clear();
+    this.capacityDeferred = new WeakSet();
   }
 
   private initializeSourceDetectionPipeline(): void {
