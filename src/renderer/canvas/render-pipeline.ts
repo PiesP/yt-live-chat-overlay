@@ -13,7 +13,6 @@
 import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import type { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
-import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
   COMPACTION_THRESHOLD_RATIO,
   removeMessageFromLaneIndex,
@@ -472,7 +471,13 @@ export function drawStage(
               ctx.imageFetchManager.stickerCache,
               ctx.imageFetchManager.emojiCache,
               ctx.boundGetFont,
-              ctx.superChatGradientCache
+              ctx.superChatGradientCache,
+              ctx.settings.translationEnabled &&
+                ctx.settings.translationMode === 'dual' &&
+                msg.translatedText !== msg.message.text
+                ? msg.translatedText
+                : undefined,
+              ctx.isReducedMotionActive
             );
           } finally {
             renderCtx.restore();
@@ -484,13 +489,11 @@ export function drawStage(
           ctx.settings.translationEnabled &&
           msg.translatedText &&
           msg.translatedText !== msg.message.text &&
-          ctx.settings.translationMode !== 'replace'
+          ctx.settings.translationMode !== 'replace' &&
+          msg.message.kind === 'text'
         ) {
           const fontSize = Math.max(1, Math.round(ctx.settings.fontSize * TRANSLATION_FONT_SCALE));
           const translationHeight = msg.translationHeight ?? fontSize;
-          const isPaidCard = msg.message.kind !== 'text';
-          const paidPadding =
-            msg.message.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
           const regularInsets = getRegularCardInsets(
             ctx.settings.fontSize,
             ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
@@ -499,10 +502,10 @@ export function drawStage(
               !!renderMessage.authorPhotoUrl,
             hasRegularBackground(ctx.settings.backgroundColors[renderMessage.authorType])
           );
-          const paddingH = isPaidCard ? paidPadding.paddingH : regularInsets.horizontal;
-          const paddingV = isPaidCard ? paidPadding.paddingV : regularInsets.vertical;
+          const paddingH = regularInsets.horizontal;
+          const paddingV = regularInsets.vertical;
           const translationAbove =
-            isPaidCard || effectiveMode === 'top' || effectiveMode === 'bottom'
+            effectiveMode === 'top' || effectiveMode === 'bottom'
               ? 0
               : getRegularContentBounds(
                   { text: msg.translatedText, content: [] },
@@ -520,18 +523,14 @@ export function drawStage(
           try {
             renderCtx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
             const transFont = getFontString(fontSize, 'normal', ctx.settings.fontFamily);
-            if (isPaidCard || effectiveMode === 'top' || effectiveMode === 'bottom') {
+            if (effectiveMode === 'top' || effectiveMode === 'bottom') {
               renderWrappedContentSegments(
                 renderCtx,
                 [{ type: 'text', content: msg.translatedText }],
                 snappedX + paddingH,
                 transY,
                 Math.max(0, msg.width - paddingH * 2),
-                isPaidCard
-                  ? msg.message.kind === 'superchat'
-                    ? ctx.settings.superChatMaxBodyLines
-                    : ctx.settings.membershipMaxBodyLines
-                  : 3,
+                3,
                 transColor,
                 fontSize,
                 ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
@@ -571,70 +570,6 @@ export function drawStage(
       }
     } finally {
       renderCtx.globalAlpha = 1;
-    }
-  }
-}
-
-// ── drawGlowStage ───────────────────────────────────────────────────────
-
-/**
- * Render pulsing-border glow effects for membership/superchat cards.
- *
- * Uses ctx.filter blur for GPU-accelerated Gaussian blur (all browsers).
- * Drawn BEFORE text passes so glow renders beneath the text layer.
- */
-export function drawGlowStage(
-  _ctx: CanvasRenderContext,
-  renderCtx: CanvasRenderingContext2D,
-  buckets: CanvasMessage[][],
-  dims: OverlayDimensions
-): void {
-  for (let bucketIndex = 1; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
-    const entries = buckets[bucketIndex];
-    if (!entries || entries.length === 0) continue;
-    for (const msg of entries) {
-      if (
-        !isPresentableFrame(
-          msg._frameElapsed ?? -1,
-          msg.duration,
-          msg.x,
-          msg.y,
-          msg.width,
-          msg.height,
-          dims.width,
-          dims.height,
-          bucketIndex,
-          msg.reflowHidden === true
-        )
-      )
-        continue;
-      if (!msg.message || msg.message.kind === 'text') continue;
-      const renderMessage = msg.renderMessage;
-      if (!renderMessage) continue;
-
-      const cardConfig =
-        renderMessage.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
-
-      if (cardConfig.decoration !== 'pulsingBorder') continue;
-      const pb = cardConfig.pulsingBorder;
-      if (!pb) continue;
-
-      const elapsed = msg._frameElapsed ?? 0;
-      const pulse = computePulseAlpha(elapsed, pb.baseAlpha, pb.amplitude);
-      if (pulse <= 0.01) continue;
-
-      const alpha = Math.min(1, pulse * 0.3);
-      renderCtx.save();
-      renderCtx.globalAlpha = alpha;
-      renderCtx.filter = 'blur(8px)';
-      renderCtx.fillStyle = `rgb(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b})`;
-      renderCtx.fillRect(
-        Math.floor(msg.x) - 4,
-        Math.floor(msg.y) - 4,
-        msg.width + 8,
-        msg.height + 8
-      );
-      renderCtx.restore();
     }
   }
 }

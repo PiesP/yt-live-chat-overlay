@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import type { OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { t } from '@i18n/index';
+import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { renderRegularMessage, splitGraphemeClusters } from '@renderer/canvas/shared';
+import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
@@ -14,7 +16,7 @@ import {
   getRowGridHeight,
   getRowSlotCount,
 } from '@renderer/layout/row-geometry';
-import { estimateMessageDimensions } from '@renderer/shared';
+import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import {
   AUTHOR_BACKGROUND_ALPHA_HEX,
@@ -1026,7 +1028,9 @@ export class SettingsUiForm {
     metrics.className = 'yt-chat-overlay-settings-font-preview-metrics';
     metrics.dataset.previewMetrics = '';
     stage.append(topZone, bottomZone, previewText);
-    container.append(stage, metrics);
+    const cards = domDiv('yt-chat-overlay-settings-card-preview');
+    cards.dataset.cardPreview = '';
+    container.append(stage, metrics, cards);
     return container;
   }
 
@@ -1565,6 +1569,156 @@ export class SettingsUiForm {
         getFont,
         (text, direction) => measureTextWidth(text, getFont(settings.fontSize), direction)
       );
+    }
+    this.populateCardPreview(settings);
+  }
+
+  /** Paid samples are measured and painted through the production Canvas path. */
+  private populateCardPreview(settings: Readonly<OverlaySettings>): void {
+    const host = this.modal?.querySelector<HTMLElement>('[data-card-preview]');
+    if (!host) return;
+    const sampleText = t('danmaku.previewMessage');
+    const emoji = { type: 'emoji' as const, emoji: { url: '', alt: '🙂', fallbackText: '🙂' } };
+    const samples: Array<{
+      label: string;
+      message: ChatMessage;
+      width?: number;
+      translated?: string | undefined;
+    }> = [
+      {
+        label: t('chat.superChat'),
+        message: {
+          kind: 'superchat',
+          authorType: 'normal',
+          timestamp: 0,
+          author: 'A very long author 이름',
+          text: sampleText,
+          content: [{ type: 'text', content: sampleText }, emoji],
+          superChat: { tier: 'blue', amount: '$12.34' },
+        },
+        translated: settings.translationEnabled ? '번역된 메시지 🙂' : undefined,
+      },
+      {
+        label: `${t('chat.superChat')} · 240 px`,
+        width: 240,
+        message: {
+          kind: 'superchat',
+          authorType: 'normal',
+          timestamp: 0,
+          author: '長い名前 مرحبا',
+          text: sampleText,
+          content: [{ type: 'text', content: sampleText }],
+          superChat: { tier: 'yellow', amount: '¥123,456,789' },
+        },
+      },
+      {
+        label: t('chat.membership'),
+        message: {
+          kind: 'membership',
+          authorType: 'member',
+          timestamp: 0,
+          author: 'Member 회원',
+          text: sampleText,
+          content: [{ type: 'text', content: sampleText }, emoji],
+          membershipHeader: t('chat.membership'),
+        },
+      },
+    ];
+    host.replaceChildren();
+    const noBitmap = { maxBytes: 0, get: (): undefined => undefined, set: (): boolean => false };
+    const noImages = { get: (): null => null };
+    const available = Math.max(1, Math.floor(host.getBoundingClientRect().width || 320));
+    const dpr = window.devicePixelRatio || 1;
+    const outlineWidth = settings.outline.enabled ? settings.outline.widthPx : 0;
+    const getFont = (size: number): string =>
+      getFontString(size, settings.fontWeight, settings.fontFamily);
+    for (const sample of samples) {
+      const row = domDiv('yt-chat-overlay-settings-card-preview-row');
+      const label = document.createElement('span');
+      label.textContent = sample.label;
+      const canvas = document.createElement('canvas');
+      canvas.setAttribute('role', 'img');
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+      const widthLimit = Math.min(available, sample.width ?? available);
+      const translated = sample.translated;
+      const renderMessage: ChatMessage =
+        translated && settings.translationMode === 'replace'
+          ? {
+              ...sample.message,
+              text: translated,
+              content: [{ type: 'text', content: translated }],
+            }
+          : sample.message;
+      canvas.setAttribute(
+        'aria-label',
+        `${sample.label}: ${renderMessage.author ?? ''} ${renderMessage.text}`
+      );
+      const measured =
+        translated && settings.translationMode === 'dual'
+          ? estimateTranslatedMessageDimensions(renderMessage, translated, 'dual', {
+              fontSize: settings.fontSize,
+              showAuthor: settings.showAuthor.superChat,
+              fontWeight: settings.fontWeight,
+              fontFamily: settings.fontFamily,
+              maxBodyLines: {
+                superchat: settings.superChatMaxBodyLines,
+                membership: settings.membershipMaxBodyLines,
+              },
+              showSuperChatAmount: settings.showSuperChatAmount,
+              outlineWidthPx: outlineWidth,
+              availableWidth: widthLimit,
+              superChatLayout: settings.superChatLayout,
+              measurement: { width: measureTextWidth, height: measureTextHeight, context },
+            })
+          : estimateMessageDimensions(
+              renderMessage,
+              settings.fontSize,
+              settings.showAuthor.superChat,
+              settings.fontWeight,
+              settings.fontFamily,
+              {
+                superchat: settings.superChatMaxBodyLines,
+                membership: settings.membershipMaxBodyLines,
+              },
+              settings.showSuperChatAmount,
+              '0px',
+              outlineWidth,
+              widthLimit,
+              undefined,
+              '#00000000',
+              'scroll',
+              { width: measureTextWidth, height: measureTextHeight, context },
+              settings.superChatLayout
+            );
+      canvas.width = Math.ceil(measured.width * dpr);
+      canvas.height = Math.ceil(measured.height * dpr);
+      canvas.style.inlineSize = `${measured.width}px`;
+      canvas.style.blockSize = `${measured.height}px`;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.globalAlpha = settings.opacity;
+      renderPaidCard(
+        context,
+        renderMessage,
+        measured.width,
+        measured.height,
+        0,
+        0,
+        0,
+        renderMessage.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG,
+        settings,
+        noBitmap as never,
+        noImages as never,
+        noImages as never,
+        noImages as never,
+        getFont,
+        new Map(),
+        settings.translationMode === 'dual' ? translated : undefined,
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches &&
+          !settings.ignoreReducedMotion
+      );
+      row.append(label, canvas);
+      host.append(row);
     }
   }
 

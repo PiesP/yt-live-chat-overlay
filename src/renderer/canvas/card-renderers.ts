@@ -9,8 +9,8 @@
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
+import { resolveTextDirection } from '@renderer/canvas/bidi-layout';
 import { type GradientCache, getCachedGradient } from '@renderer/canvas/gradient-utils';
-import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -18,11 +18,11 @@ import {
   renderWrappedContentSegments,
   splitGraphemeClusters,
 } from '@renderer/canvas/shared';
-import type { CardConfig } from '@renderer/card-config';
-import { computeReadableTextColor } from '@renderer/color-utils';
-import { getAuthorNameMaxWidth } from '@renderer/layout/card-layout';
+import { type CardConfig, resolveCardBorderAlpha } from '@renderer/card-config';
+import { computeOutlineColor, computeReadableTextColor } from '@renderer/color-utils';
+import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
 import { getFontString, measureTextHeight } from '@renderer/text-measure';
-import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
+import { rendererLayout } from '@util/design-tokens';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -119,7 +119,8 @@ function renderCardDecoration(
   elapsed: number,
   config: CardConfig,
   message: ChatMessage,
-  _baseColor: string
+  _baseColor: string,
+  reducedMotion: boolean
 ): void {
   if (config.decoration === 'accentBar' && config.accentBar) {
     const barColorRaw = config.accentBar.color;
@@ -130,7 +131,7 @@ function renderCardDecoration(
     ctx.fill();
   } else if (config.decoration === 'pulsingBorder' && config.pulsingBorder) {
     const pb = config.pulsingBorder;
-    const pulse = computePulseAlpha(elapsed, pb.baseAlpha, pb.amplitude);
+    const pulse = resolveCardBorderAlpha(elapsed, pb, reducedMotion);
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, config.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
@@ -175,23 +176,24 @@ function renderCardHeaderTag(
         lo = mid + 1;
       }
     }
-    displayText = lo > 0 ? `${clusters.slice(0, lo - 1).join('')}…` : '…';
+    displayText = lo > 0 ? `${clusters.slice(0, lo - 1).join('')}…` : '';
   }
 
   const tagY = y + (config.headerTag.marginTop ?? 0);
   // Route through renderSegment for bitmap caching (fixes #9)
-  renderSegment(
-    ctx,
-    displayText,
-    x,
-    tagY,
-    config.headerTag.color,
-    headerFontSize,
-    settings.outline.enabled ? settings.outline.widthPx : 0,
-    settings.outline.enabled ? settings.outline.opacity : 0,
-    _textBitmapCache,
-    getFontFn
-  );
+  if (displayText)
+    renderSegment(
+      ctx,
+      displayText,
+      x,
+      tagY,
+      config.headerTag.color,
+      headerFontSize,
+      settings.outline.enabled ? settings.outline.widthPx : 0,
+      settings.outline.enabled ? settings.outline.opacity : 0,
+      _textBitmapCache,
+      getFontFn
+    );
 
   const headerHeight = measureTextHeight(headerFont, headerFontSize);
   return tagY + headerHeight + (config.headerTag.marginBottom ?? 0);
@@ -210,7 +212,9 @@ function renderCardBadge(
   fontSize: number,
   config: CardConfig,
   settings: OverlaySettings,
-  _textBitmapCache2: ResizableByteLimitedCache<HTMLCanvasElement>
+  _textBitmapCache2: ResizableByteLimitedCache<HTMLCanvasElement>,
+  reservedWidth: number,
+  foreground: string
 ): number {
   if (!config.badge) return y;
   const badge = config.badge;
@@ -219,7 +223,7 @@ function renderCardBadge(
   const badgeFont = getFontString(badgeFontSize, 'bold', settings.fontFamily);
   ctx.font = badgeFont;
   const badgeTextWidth = Math.ceil(ctx.measureText(text).width);
-  const badgeWidth = badgeTextWidth + badge.paddingH * 2;
+  const badgeWidth = Math.min(reservedWidth, badgeTextWidth + badge.paddingH * 2);
   const badgeHeight = badgeFontSize + badge.paddingV * 2;
 
   drawRoundRect(ctx, x, y, badgeWidth, badgeHeight, badge.radius);
@@ -234,18 +238,17 @@ function renderCardBadge(
   // visually centered within the badge rectangle.
   const textHeight = measureTextHeight(badgeFont, badgeFontSize);
   const textY = y + (badgeHeight - textHeight) / 2;
-  renderSegment(
-    ctx,
-    text,
-    x + badge.paddingH,
-    textY,
-    DEFAULT_TEXT_COLOR,
-    badgeFontSize,
-    settings.outline.enabled ? settings.outline.widthPx : 0,
-    settings.outline.enabled ? settings.outline.opacity : 0,
-    _textBitmapCache2,
-    () => badgeFont
-  );
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.direction = resolveTextDirection(text);
+  ctx.fillStyle = foreground;
+  const textWidth = Math.max(0, badgeWidth - badge.paddingH * 2);
+  if (settings.outline.enabled && settings.outline.widthPx > 0) {
+    ctx.strokeStyle = computeOutlineColor(foreground, settings.outline.opacity);
+    ctx.lineWidth = settings.outline.widthPx;
+    ctx.strokeText(text, x + badge.paddingH, textY, textWidth);
+  }
+  ctx.fillText(text, x + badge.paddingH, textY, textWidth);
   ctx.restore();
 
   return y + badgeHeight;
@@ -276,7 +279,9 @@ export function renderPaidCard(
   stickerCache: ResizableByteLimitedCache<HTMLImageElement>,
   emojiCache: ResizableByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
-  gradientCache: GradientCache
+  gradientCache: GradientCache,
+  translatedText?: string | null,
+  reducedMotion = false
 ): void {
   const fontSize = settings.fontSize;
   const w = msgWidth;
@@ -315,32 +320,61 @@ export function renderPaidCard(
   );
 
   // 2. Decoration
-  renderCardDecoration(ctx, x, y, w, h, elapsed, config, message, baseColor);
+  renderCardDecoration(ctx, x, y, w, h, elapsed, config, message, baseColor, reducedMotion);
 
   // 3. Content layout
   const padH = config.padding.horizontal;
   const padV = config.padding.vertical;
   const textX = x + padH;
-  let cursorY = y + padV;
-
-  // 4. Author section (name + photo) — rendered first so name appears above amount/duration
   const showAuthor =
     typeof config.authorSection.show === 'function'
       ? config.authorSection.show(message, settings)
       : config.authorSection.show;
-  if (showAuthor && message.author) {
-    const authorNameMaxWidth = getAuthorNameMaxWidth(
-      w - padH * 2,
-      config.authorSection.nameMaxWidth,
-      message.authorPhotoUrl
-    );
-    cursorY = drawAuthorSection(
+  const plan = preparePaidCardPlan({
+    kind: message.kind === 'superchat' ? 'superchat' : 'membership',
+    width: w,
+    fontSize,
+    fontWeight: settings.fontWeight,
+    fontFamily: settings.fontFamily,
+    paddingH: padH,
+    paddingV: padV,
+    author: message.author,
+    authorPhotoUrl: message.authorPhotoUrl,
+    showAuthor,
+    amount: message.superChat?.amount,
+    showAmount: settings.showSuperChatAmount,
+    membershipHeader: message.membershipHeader,
+    content: message.content,
+    translatedText,
+    maxBodyLines:
+      message.kind === 'superchat'
+        ? settings.superChatMaxBodyLines
+        : settings.membershipMaxBodyLines,
+    outlineWidthPx: settings.outline.enabled ? settings.outline.widthPx : 0,
+    wide: settings.superChatLayout === 'wide',
+    sticker: !!message.superChat?.sticker,
+    measure: (text, font, direction) => {
+      const previous = ctx.font;
+      const previousDirection = ctx.direction;
+      ctx.font = font;
+      ctx.direction = direction ?? 'ltr';
+      const width = ctx.measureText(text).width;
+      ctx.font = previous;
+      ctx.direction = previousDirection;
+      return width;
+    },
+    context: ctx,
+  });
+
+  // 4. Author section (name + photo) — rendered first so name appears above amount/duration
+  if (plan.authorY !== undefined) {
+    drawAuthorSection(
       ctx,
       message,
       textX,
-      cursorY,
+      y + plan.authorY,
       textColor,
-      authorNameMaxWidth,
+      plan.authorMaxWidth,
       Math.round(settings.fontSize * rendererLayout.authorFontScale),
       settings.fontWeight,
       settings.fontFamily,
@@ -354,14 +388,14 @@ export function renderPaidCard(
   }
 
   // 5. Header tag (tier name / membership duration)
-  if (config.headerTag?.getText) {
+  if (config.headerTag?.getText && plan.headerY !== undefined) {
     const headerText = config.headerTag.getText(message);
     if (headerText) {
       const headerMaxWidth = w - padH * 2;
-      cursorY = renderCardHeaderTag(
+      renderCardHeaderTag(
         ctx,
         textX,
-        cursorY,
+        y + plan.headerY,
         headerText,
         headerMaxWidth,
         config,
@@ -373,46 +407,65 @@ export function renderPaidCard(
   }
 
   // 6. Badge (amount pill) — respects showSuperChatAmount setting
-  if (config.badge?.getText && settings.showSuperChatAmount) {
+  if (config.badge?.getText && plan.amountY !== undefined && plan.amountX !== undefined) {
     const badgeText = config.badge.getText(message);
     if (badgeText) {
-      cursorY = renderCardBadge(
+      renderCardBadge(
         ctx,
-        textX,
-        cursorY + spacing.xs,
+        x + plan.amountX,
+        y + plan.amountY,
         badgeText,
         fontSize,
         config,
         settings,
-        textBitmapCache
+        textBitmapCache,
+        plan.amountWidth,
+        textColor
       );
     }
   }
 
   // 7. Body text (capture bottom Y for sticker placement)
-  let textBottomY = cursorY;
-  if (message.content.length > 0) {
+  if (plan.bodyY !== undefined && plan.body) {
     const bodyMaxWidth = w - padH * 2;
-    const bodyMaxLines =
-      config.body.maxLines === 'fromSettings'
-        ? message.kind === 'superchat'
-          ? settings.superChatMaxBodyLines
-          : settings.membershipMaxBodyLines
-        : config.body.maxLines;
-    textBottomY = renderWrappedContentSegments(
+    renderWrappedContentSegments(
       ctx,
       message.content,
       textX,
-      cursorY + config.body.marginTop,
+      y + plan.bodyY,
       bodyMaxWidth,
-      bodyMaxLines,
+      plan.body.lines.length,
       textColor,
       fontSize,
       settings.outline.enabled ? settings.outline.widthPx : 0,
       settings.outline.enabled ? settings.outline.opacity : 0,
       textBitmapCache,
       emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
-      getFontFn
+      getFontFn,
+      undefined,
+      plan.body
+    );
+  }
+
+  if (plan.translationY !== undefined && plan.translation && translatedText) {
+    const translationSize = Math.max(1, Math.round(fontSize * 0.85));
+    const translationFont = getFontString(translationSize, 'normal', settings.fontFamily);
+    renderWrappedContentSegments(
+      ctx,
+      [{ type: 'text', content: translatedText }],
+      textX,
+      y + plan.translationY,
+      plan.innerWidth,
+      plan.translation.lines.length,
+      textColor,
+      translationSize,
+      settings.outline.enabled ? settings.outline.widthPx : 0,
+      settings.outline.enabled ? settings.outline.opacity : 0,
+      textBitmapCache,
+      emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
+      () => translationFont,
+      undefined,
+      plan.translation
     );
   }
 
@@ -424,11 +477,24 @@ export function renderPaidCard(
       const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (stickerImg) {
         const maxStickerSize = Math.round(fontSize * config.sticker.sizeScale);
-        const stickerY = textBottomY + (config.sticker.marginTop ?? 0);
+        const stickerY = y + (plan.stickerY ?? 0);
         const availableHeight = y + h - padV - stickerY;
-        const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
+        const stickerSize = Math.max(
+          0,
+          Math.min(maxStickerSize, plan.stickerSize, availableHeight)
+        );
         if (stickerSize > 0) {
-          ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
+          const scale = Math.min(
+            stickerSize / stickerImg.naturalWidth,
+            stickerSize / stickerImg.naturalHeight
+          );
+          ctx.drawImage(
+            stickerImg,
+            textX,
+            stickerY,
+            stickerImg.naturalWidth * scale,
+            stickerImg.naturalHeight * scale
+          );
         }
       }
     }

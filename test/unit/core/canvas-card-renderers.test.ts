@@ -43,6 +43,8 @@ function createMockCtx(): { ctx: CanvasRenderingContext2D; ops: PathOp[] } {
     restore: vi.fn(() => {}),
     fill: vi.fn(() => {}),
     stroke: vi.fn(() => {}),
+    strokeText: vi.fn(() => {}),
+    fillText: vi.fn(() => {}),
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 1,
@@ -131,6 +133,68 @@ describe('drawLeftRoundedRect', () => {
   });
 });
 
+describe('bounded amount rendering', () => {
+  it('passes a contained text width to Canvas without altering the localized amount', () => {
+    const amount = 'X'.repeat(22);
+    const fillText = vi.fn();
+    const gradient = { addColorStop: vi.fn() } as unknown as CanvasGradient;
+    const ctx = {
+      font: 'bold 24px sans-serif',
+      direction: 'ltr',
+      textAlign: 'left',
+      textBaseline: 'top',
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      createLinearGradient: vi.fn(() => gradient),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arcTo: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      strokeText: vi.fn(),
+      fillText,
+      measureText: vi.fn((text: string) => ({
+        width: text === amount ? 220 : text.length * 10,
+        actualBoundingBoxAscent: 10,
+        actualBoundingBoxDescent: 3,
+      })),
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+    } as unknown as CanvasRenderingContext2D;
+    const msg: ChatMessage = {
+      kind: 'superchat',
+      authorType: 'normal',
+      timestamp: 0,
+      text: '',
+      content: [],
+      superChat: { tier: 'blue', amount },
+    };
+    const cache = { get: (): undefined => undefined, set: (): boolean => false };
+    renderPaidCard(
+      ctx,
+      msg,
+      240,
+      80,
+      0,
+      0,
+      0,
+      SUPERCHAT_CARD_CONFIG,
+      DEFAULT_SETTINGS,
+      cache as never,
+      cache as never,
+      cache as never,
+      cache as never,
+      () => 'bold 24px sans-serif',
+      new Map()
+    );
+    expect(fillText).toHaveBeenCalledWith(amount, 36, expect.any(Number), 168);
+  });
+});
+
 describe('renderPaidCard canvas state', () => {
   it('restores the caller font after rendering an amount badge', () => {
     class MockOffscreenCanvas {
@@ -163,6 +227,8 @@ describe('renderPaidCard canvas state', () => {
       arcTo: vi.fn(),
       fill: vi.fn(),
       stroke: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn(),
       measureText: vi.fn(() => ({
         width: 36,
         actualBoundingBoxAscent: 10,

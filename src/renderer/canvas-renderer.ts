@@ -60,7 +60,6 @@ import {
   cleanupAndBucketStage,
   compactRemovedMessages,
   drainStage,
-  drawGlowStage,
   drawStage,
   mirrorVisibleMessages,
 } from '@renderer/canvas/render-pipeline';
@@ -1438,13 +1437,6 @@ export class CanvasRenderer extends RendererBase {
       compactRemovedMessages(rctx, cleanupResult.writeIdx, cleanupResult.oldLength);
     }
 
-    // ── Glow stage: membership card pulsing borders ──
-    // Drive glow by cardConfig.decoration over all buckets, not just nearBuckets,
-    // so pulsing-border glow works even when depth layers are disabled.
-    drawGlowStage(rctx, ctx, cleanupResult.farBuckets, dims);
-    drawGlowStage(rctx, ctx, cleanupResult.midBuckets, dims);
-    drawGlowStage(rctx, ctx, cleanupResult.nearBuckets, dims);
-
     drawStage(rctx, ctx, cleanupResult.farBuckets, frameId, dims);
     drawStage(rctx, ctx, cleanupResult.midBuckets, frameId, dims);
     drawStage(rctx, ctx, cleanupResult.nearBuckets, frameId, dims);
@@ -2141,7 +2133,8 @@ export class CanvasRenderer extends RendererBase {
         width: measureTextWidth,
         height: measureTextHeight,
         ...(this.ctx ? { context: this.ctx } : {}),
-      }
+      },
+      this.settings.superChatLayout
     );
 
     if (message.id) {
@@ -2189,6 +2182,7 @@ export class CanvasRenderer extends RendererBase {
           height: measureTextHeight,
           ...(this.ctx ? { context: this.ctx } : {}),
         },
+        superChatLayout: this.settings.superChatLayout,
       }
     );
   }

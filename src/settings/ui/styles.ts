@@ -1021,6 +1021,24 @@ export const SETTINGS_UI_STYLES = `
         line-height: 1.5;
         text-align: start;
       }
+      .yt-chat-overlay-settings-card-preview {
+        display: grid;
+        gap: ${spacing.sm}px;
+        padding: ${spacing.sm}px;
+        background: ${uiColors.background};
+        min-inline-size: 0;
+      }
+      .yt-chat-overlay-settings-card-preview-row {
+        display: grid;
+        gap: ${spacing.xs}px;
+        color: ${uiColors.textMuted};
+        font-size: ${typography.fontSize.xs};
+        min-inline-size: 0;
+      }
+      .yt-chat-overlay-settings-card-preview-row canvas {
+        display: block;
+        max-inline-size: 100%;
+      }
 
       /* ── Weight toggle pills ── */
       .yt-chat-overlay-settings-weight-toggle {

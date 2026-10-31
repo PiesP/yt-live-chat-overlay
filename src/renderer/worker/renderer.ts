@@ -38,7 +38,11 @@ import { MAX_WORKER_IMAGE_BYTES, readBoundedImageBlob } from '@media/bounded-ima
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
-import { resetBidiLayoutCaches, type TextDirection } from '@renderer/canvas/bidi-layout';
+import {
+  resetBidiLayoutCaches,
+  resolveTextDirection,
+  type TextDirection,
+} from '@renderer/canvas/bidi-layout';
 import {
   DRAIN_MAX_ATTEMPTS,
   DRAIN_WORK_BUDGET_MS,
@@ -46,7 +50,6 @@ import {
   selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
 import { type GradientCache, getCachedGradient } from '@renderer/canvas/gradient-utils';
-import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
   addMessageToLaneIndex,
   fastRandom,
@@ -66,8 +69,8 @@ import {
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
 import { getSpeedTier } from '@renderer/canvas/speed-tier';
-import type { CardConfigWorker } from '@renderer/card-config';
-import { desaturateColor } from '@renderer/color-utils';
+import { type CardConfigWorker, resolveCardBorderAlpha } from '@renderer/card-config';
+import { computeOutlineColor, desaturateColor } from '@renderer/color-utils';
 import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_MAX_DURATION_MS,
@@ -82,11 +85,7 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
 import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
-import {
-  getAuthorNameMaxWidth,
-  getRegularCardInsets,
-  hasRegularBackground,
-} from '@renderer/layout/card-layout';
+import { getRegularCardInsets, hasRegularBackground } from '@renderer/layout/card-layout';
 import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import {
   buildLaneHeap,
@@ -113,6 +112,7 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
+import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
 import {
   getRegularContentBounds,
   getRegularRowHeight,
@@ -137,12 +137,7 @@ import {
   measureBoundingBoxWidth,
 } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
-import {
-  DEFAULT_FONT_FAMILY,
-  DEFAULT_TEXT_COLOR,
-  rendererLayout,
-  spacing,
-} from '@util/design-tokens';
+import { DEFAULT_FONT_FAMILY, DEFAULT_TEXT_COLOR, rendererLayout } from '@util/design-tokens';
 
 import { isValidControlMessage } from './protocol-guards';
 import type {
@@ -217,7 +212,10 @@ function renderPaidCardWorker(
   measureTextFn: (text: string, direction?: TextDirection) => number,
   gradientCache: GradientCache,
   /** Configurable SuperChat opacity from settings, clamped to [0.35, 1]. */
-  superChatOpacity: number
+  superChatOpacity: number,
+  superChatLayout: 'stacked' | 'wide',
+  translatedText: string | null | undefined,
+  reducedMotion: boolean
 ): void {
   const w = msgWidth;
   const h = msgHeight;
@@ -287,7 +285,7 @@ function renderPaidCardWorker(
     ctx.restore();
   } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
     const pb = card.pulsingBorder;
-    const pulse = computePulseAlpha(elapsed, pb.baseAlpha, pb.amplitude);
+    const pulse = resolveCardBorderAlpha(elapsed, pb, reducedMotion);
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, card.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
@@ -300,22 +298,46 @@ function renderPaidCardWorker(
   const padH = card.padding.horizontal;
   const padV = card.padding.vertical;
   const textX = x + padH;
-  let cursorY = y + padV;
+  const plan = preparePaidCardPlan({
+    kind: message.kind === 'superchat' ? 'superchat' : 'membership',
+    width: w,
+    fontSize,
+    fontWeight: fontWeight as FontWeight,
+    fontFamily,
+    paddingH: padH,
+    paddingV: padV,
+    author: message.author,
+    authorPhotoUrl: message.authorPhotoUrl,
+    showAuthor: card.authorShow,
+    amount: message.superChatAmount,
+    showAmount: card.showBadgeAmount,
+    membershipHeader: message.membershipHeader,
+    content,
+    translatedText,
+    maxBodyLines: card.bodyMaxLines,
+    outlineWidthPx,
+    wide: superChatLayout === 'wide',
+    sticker: !!message.superChatStickerUrl,
+    measure: (text, font, direction) => {
+      const previous = ctx.font;
+      ctx.font = font;
+      const width = measureTextFn(text, direction);
+      ctx.font = previous;
+      return width;
+    },
+    measureHeight: (font, size) => measureTextHeight(size, font, ctx),
+    context: ctx,
+  });
 
   // ── 5. Author section (name + photo) — rendered first so name appears above amount/duration
-  if (card.authorShow && message.author) {
-    const authorNameMaxWidth = getAuthorNameMaxWidth(
-      w - padH * 2,
-      card.authorNameMaxWidth,
-      message.authorPhotoUrl
-    );
-    cursorY = drawAuthorSection(
+  if (plan.authorY !== undefined) {
+    drawAuthorSection(
       ctx,
       message,
       textX,
-      cursorY,
+      y + plan.authorY,
       textColor,
-      authorNameMaxWidth,
+      plan.authorMaxWidth,
       Math.round(fontSize * rendererLayout.authorFontScale),
       fontWeight,
       fontFamily,
@@ -329,7 +351,7 @@ function renderPaidCardWorker(
   }
 
   // ── 6. Header tag (tier name / membership duration)
-  if (card.headerTagEnabled && message.membershipHeader) {
+  if (card.headerTagEnabled && message.membershipHeader && plan.headerY !== undefined) {
     const headerFontSize = Math.round(fontSize * card.headerTagFontSizeScale);
     const headerFont = getFontString(headerFontSize, fontWeight as FontWeight, fontFamily);
     ctx.save();
@@ -349,35 +371,45 @@ function renderPaidCardWorker(
           lo = mid + 1;
         }
       }
-      displayText = lo > 0 ? `${graphemes.slice(0, lo - 1).join('')}…` : '…';
+      displayText = lo > 0 ? `${graphemes.slice(0, lo - 1).join('')}…` : '';
     }
     strokeTextOutline(
       ctx,
       displayText,
       textX,
-      cursorY + card.headerTagMarginTop,
+      y + plan.headerY + card.headerTagMarginTop,
       card.headerTagColor,
       outlineWidthPx,
       outlineOpacity
     );
     ctx.fillStyle = card.headerTagColor;
-    ctx.fillText(displayText, textX, cursorY + card.headerTagMarginTop);
+    ctx.fillText(displayText, textX, y + plan.headerY + card.headerTagMarginTop);
     ctx.restore();
-    const headerHeight = measureTextHeight(headerFontSize, headerFont, ctx);
-    cursorY += headerHeight + card.headerTagMarginTop + card.headerTagMarginBottom;
   }
 
   // ── 7. Badge (amount pill) — respects showSuperChatAmount setting
-  if (card.badgeEnabled && card.showBadgeAmount && message.superChatAmount) {
-    cursorY += spacing.xs;
+  if (
+    card.badgeEnabled &&
+    plan.amountY !== undefined &&
+    plan.amountX !== undefined &&
+    message.superChatAmount
+  ) {
+    ctx.save();
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold' as FontWeight, fontFamily);
     ctx.font = badgeFont;
     const badgeTextWidth = Math.ceil(ctx.measureText(message.superChatAmount).width);
-    const badgeWidth = badgeTextWidth + card.badgePaddingH * 2;
+    const badgeWidth = Math.min(plan.amountWidth, badgeTextWidth + card.badgePaddingH * 2);
     const badgeHeight = badgeFontSize + card.badgePaddingV * 2;
 
-    drawRoundRect(ctx, textX, cursorY, badgeWidth, badgeHeight, card.badgeRadius);
+    drawRoundRect(
+      ctx,
+      x + plan.amountX,
+      y + plan.amountY,
+      badgeWidth,
+      badgeHeight,
+      card.badgeRadius
+    );
     const prevFillStyle = ctx.fillStyle;
     const prevStrokeStyle = ctx.strokeStyle;
     const prevLineWidth = ctx.lineWidth;
@@ -388,36 +420,35 @@ function renderPaidCardWorker(
     ctx.stroke();
 
     ctx.textBaseline = 'middle';
-    strokeTextOutline(
-      ctx,
-      message.superChatAmount,
-      textX + card.badgePaddingH,
-      cursorY + badgeHeight / 2,
-      DEFAULT_TEXT_COLOR,
-      outlineWidthPx,
-      outlineOpacity
-    );
-    ctx.fillStyle = DEFAULT_TEXT_COLOR;
-    ctx.fillText(message.superChatAmount, textX + card.badgePaddingH, cursorY + badgeHeight / 2);
+    ctx.textAlign = 'left';
+    ctx.direction = resolveTextDirection(message.superChatAmount);
+    const amountTextX = x + plan.amountX + card.badgePaddingH;
+    const amountTextY = y + plan.amountY + badgeHeight / 2;
+    const amountTextMax = Math.max(0, badgeWidth - card.badgePaddingH * 2);
+    if (outlineWidthPx > 0) {
+      ctx.strokeStyle = computeOutlineColor(textColor, outlineOpacity);
+      ctx.lineWidth = outlineWidthPx;
+      ctx.strokeText(message.superChatAmount, amountTextX, amountTextY, amountTextMax);
+    }
+    ctx.fillStyle = textColor;
+    ctx.fillText(message.superChatAmount, amountTextX, amountTextY, amountTextMax);
     ctx.textBaseline = 'top';
     ctx.fillStyle = prevFillStyle;
     ctx.strokeStyle = prevStrokeStyle;
     ctx.lineWidth = prevLineWidth;
-
-    cursorY += badgeHeight;
+    ctx.restore();
   }
 
   // ── 8. Body text ──────────────────────────────────────────────────────
-  let textBottomY = cursorY;
-  if (content.length > 0) {
+  if (plan.bodyY !== undefined && plan.body) {
     const bodyMaxWidth = w - padH * 2;
-    textBottomY = renderWrappedContentSegments(
+    renderWrappedContentSegments(
       ctx,
       content,
       textX,
-      cursorY + card.bodyMarginTop,
+      y + plan.bodyY,
       bodyMaxWidth,
-      card.bodyMaxLines,
+      plan.body.lines.length,
       textColor,
       fontSize,
       outlineWidthPx,
@@ -425,7 +456,30 @@ function renderPaidCardWorker(
       textBitmapCache,
       emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
       getFontFn,
-      measureTextFn
+      measureTextFn,
+      plan.body
+    );
+  }
+
+  if (plan.translationY !== undefined && plan.translation && translatedText) {
+    const translationSize = Math.max(1, Math.round(fontSize * TRANSLATION_FONT_SCALE));
+    const translationFont = getFontString(translationSize, 'normal', fontFamily);
+    renderWrappedContentSegments(
+      ctx,
+      [{ type: 'text', content: translatedText }],
+      textX,
+      y + plan.translationY,
+      plan.innerWidth,
+      plan.translation.lines.length,
+      textColor,
+      translationSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
+      () => translationFont,
+      measureTextFn,
+      plan.translation
     );
   }
 
@@ -436,11 +490,18 @@ function renderPaidCardWorker(
     const stickerImg = stickerCache?.get(message.superChatStickerUrl);
     if (stickerImg) {
       const maxStickerSize = Math.round(fontSize * card.stickerSizeScale);
-      const stickerY = textBottomY + (card.stickerMarginTop ?? 0);
+      const stickerY = y + (plan.stickerY ?? 0);
       const availableHeight = y + h - padV - stickerY;
-      const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
+      const stickerSize = Math.max(0, Math.min(maxStickerSize, plan.stickerSize, availableHeight));
       if (stickerSize > 0) {
-        ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
+        const scale = Math.min(stickerSize / stickerImg.width, stickerSize / stickerImg.height);
+        ctx.drawImage(
+          stickerImg,
+          textX,
+          stickerY,
+          stickerImg.width * scale,
+          stickerImg.height * scale
+        );
       }
     }
   }
@@ -1161,6 +1222,7 @@ export class WorkerRenderer {
       backgroundColor: config.backgroundColors[authorType] ?? '#00000000',
       mode: this.effectiveMotionMode,
       measurement,
+      superChatLayout: config.superChatLayout,
     });
   }
 
@@ -2134,7 +2196,14 @@ export class WorkerRenderer {
                   getFont,
                   this.boundMeasureTextCached,
                   this.superChatGradientCache,
-                  cfg.superChatOpacity
+                  cfg.superChatOpacity,
+                  cfg.superChatLayout,
+                  cfg.translationEnabled &&
+                    cfg.translationMode === 'dual' &&
+                    msg.translatedText !== msg.text
+                    ? msg.translatedText
+                    : undefined,
+                  cfg.reducedMotion && !cfg.ignoreReducedMotion
                 );
               } finally {
                 this.ctx.restore();
@@ -2177,6 +2246,7 @@ export class WorkerRenderer {
             if (
               cfg.translationEnabled &&
               cfg.translationMode === 'dual' &&
+              !msg.cardConfigWorker &&
               msg.translatedText &&
               msg.translatedText !== msg.text
             ) {
@@ -2186,8 +2256,6 @@ export class WorkerRenderer {
                 ? cfg.authorColors[msg.authorType] || renderColor
                 : renderColor;
               const translationHeight = msg.translationHeight ?? translationFontSize;
-              const paidPadding =
-                msg.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
               const regularInsets = getRegularCardInsets(
                 cfg.fontSize,
                 strokeWidth,
@@ -2198,14 +2266,10 @@ export class WorkerRenderer {
                   cfg.backgroundColors[msg.authorType ?? 'normal'] ?? '#00000000'
                 )
               );
-              const paddingH = msg.cardConfigWorker
-                ? paidPadding.paddingH
-                : regularInsets.horizontal;
-              const paddingV = msg.cardConfigWorker ? paidPadding.paddingV : regularInsets.vertical;
+              const paddingH = regularInsets.horizontal;
+              const paddingV = regularInsets.vertical;
               const translationAbove =
-                msg.cardConfigWorker ||
-                this.effectiveMotionMode === 'top' ||
-                this.effectiveMotionMode === 'bottom'
+                this.effectiveMotionMode === 'top' || this.effectiveMotionMode === 'bottom'
                   ? 0
                   : getRegularContentBounds(
                       { text: msg.translatedText, content: [] },
@@ -2219,22 +2283,14 @@ export class WorkerRenderer {
               try {
                 this.ctx.globalAlpha =
                   (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-                if (
-                  msg.cardConfigWorker ||
-                  this.effectiveMotionMode === 'top' ||
-                  this.effectiveMotionMode === 'bottom'
-                ) {
+                if (this.effectiveMotionMode === 'top' || this.effectiveMotionMode === 'bottom') {
                   renderWrappedContentSegments(
                     this.ctx,
                     [{ type: 'text', content: msg.translatedText }],
                     sx + paddingH,
                     Math.floor(translationY),
                     Math.max(0, msg.width - paddingH * 2),
-                    msg.cardConfigWorker
-                      ? msg.kind === 'superchat'
-                        ? cfg.superChatMaxBodyLines
-                        : cfg.membershipMaxBodyLines
-                      : 3,
+                    3,
                     translationColor,
                     translationFontSize,
                     strokeWidth,

@@ -17,7 +17,6 @@ import {
   prepareWrappedContent,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
-import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@renderer/constants';
 import {
   getAuthorPhotoSlotWidth,
@@ -26,6 +25,7 @@ import {
   getRegularCardInsets,
   hasRegularBackground,
 } from '@renderer/layout/card-layout';
+import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
 import { getRegularContentBounds } from '@renderer/layout/row-geometry';
 import { RendererBase } from '@renderer/renderer-base';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
@@ -103,7 +103,8 @@ export function estimateMessageDimensions(
   minimumPaidCardWidth?: number,
   backgroundColor = '#00000000',
   mode: DanmakuMode = 'scroll',
-  measurement: DimensionMeasurement = defaultMeasurement
+  measurement: DimensionMeasurement = defaultMeasurement,
+  superChatLayout: 'stacked' | 'wide' = 'stacked'
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -120,7 +121,8 @@ export function estimateMessageDimensions(
       availableWidth,
       minimumPaidCardWidth,
       measurement,
-      outlineWidthPx
+      outlineWidthPx,
+      superChatLayout
     );
   }
   if (message.kind === 'membership') {
@@ -240,13 +242,13 @@ function estimateSuperChatDimensions(
   availableWidth?: number,
   minimumWidth?: number,
   measurement: DimensionMeasurement = defaultMeasurement,
-  outlineWidthPx = 0
+  outlineWidthPx = 0,
+  superChatLayout: 'stacked' | 'wide' = 'stacked'
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
 
   let authorSectionWidth = 0;
-  let authorSectionHeight = 0;
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
@@ -255,19 +257,15 @@ function estimateSuperChatDimensions(
     const maxNameWidth = Math.max(1, widthBounds.max - paddingH * 2 - photoSlotWidth);
     const authorNameWidth = Math.min(rawNameWidth, rendererLayout.authorNameMaxWidth, maxNameWidth);
     authorSectionWidth = photoSlotWidth + authorNameWidth;
-    const nameHeight = measurement.height(authorFont, authorFontSize);
-    authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
   }
 
   let badgeWidth = 0;
-  let badgeHeight = 0;
   const badgeText = message.superChat?.amount ?? '';
   if (showSuperChatAmount && badgeText) {
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold', fontFamily);
     const badgeTextWidth = measurement.width(badgeText, badgeFont);
     badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
-    badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
   }
 
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
@@ -285,40 +283,39 @@ function estimateSuperChatDimensions(
   const maxLineWidth = pass1Result.maxLineWidth;
 
   // Determine card width from the widest element
-  const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
+  const wideHeaderWidth =
+    superChatLayout === 'wide' && authorSectionWidth && badgeWidth
+      ? authorSectionWidth + spacing.xs + badgeWidth
+      : 0;
+  const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth, wideHeaderWidth);
   const width = Math.min(
     widthBounds.max,
     Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
   );
 
-  // Resolve the actual visible rows at the final card width.
-  const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const bodyLayout = prepareWrappedContent(
-    toSharedContentSegments(message.content),
-    actualInnerWidth,
-    maxBodyLines,
-    font,
+  const plan = preparePaidCardPlan({
+    kind: 'superchat',
+    width,
     fontSize,
-    (text, direction) => measurement.width(text, font, direction),
-    measurement.context,
-    outlineWidthPx
-  );
-  const lineCount = bodyLayout.lines.length;
-  const textHeight = bodyLayout.height;
-
-  let stickerHeight = 0;
-  if (message.superChat?.sticker) {
-    stickerHeight =
-      Math.round(fontSize * rendererLayout.superchatStickerSize) +
-      (SUPERCHAT_CARD_CONFIG.sticker?.marginTop ?? 0);
-  }
-
-  const badgeSectionHeight = badgeHeight > 0 ? spacing.xs + badgeHeight : 0;
-  const bodySectionHeight = lineCount > 0 ? SUPERCHAT_CARD_CONFIG.body.marginTop + textHeight : 0;
-  const contentHeight =
-    authorSectionHeight + badgeSectionHeight + bodySectionHeight + stickerHeight;
-
-  return { width, height: contentHeight + paddingV * 2 };
+    fontWeight,
+    fontFamily,
+    paddingH,
+    paddingV,
+    author: message.author,
+    authorPhotoUrl: message.authorPhotoUrl,
+    showAuthor,
+    amount: badgeText,
+    showAmount: !!showSuperChatAmount,
+    content: toSharedContentSegments(message.content),
+    maxBodyLines,
+    outlineWidthPx,
+    wide: superChatLayout === 'wide',
+    sticker: !!message.superChat?.sticker,
+    measure: measurement.width,
+    measureHeight: measurement.height,
+    context: measurement.context,
+  });
+  return { width, height: plan.height };
 }
 
 function estimateMembershipDimensions(
@@ -337,7 +334,6 @@ function estimateMembershipDimensions(
   const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
 
   let authorSectionWidth = 0;
-  let authorSectionHeight = 0;
   if (message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
@@ -349,19 +345,13 @@ function estimateMembershipDimensions(
       maxNameWidth
     );
     authorSectionWidth = photoSlotWidth + authorNameWidth;
-    authorSectionHeight = getAuthorRowHeight(
-      measurement.height(authorFont, authorFontSize),
-      message.authorPhotoUrl
-    );
   }
 
   // Membership header height (if present)
-  let headerHeight = 0;
   let headerWidth = 0;
   if (message.membershipHeader) {
     const headerFontSize = Math.round(fontSize * 0.8);
     const headerFont = getFontString(headerFontSize, fontWeight, fontFamily);
-    headerHeight = measurement.height(headerFont, headerFontSize);
     headerWidth = Math.min(
       measurement.width(message.membershipHeader, headerFont),
       widthBounds.max
@@ -382,36 +372,31 @@ function estimateMembershipDimensions(
     Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
   );
 
-  // Re-build wrapped lines at the actual card inner width so line count matches
-  // what renderMembership will produce. Uses buildWrappedLines (SSOT with
-  // renderWrappedContentSegments) for consistent emoji piece widths.
-  const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const bodyLayout = prepareWrappedContent(
-    toSharedContentSegments(message.content),
-    actualInnerWidth,
-    maxBodyLines,
-    font,
+  const plan = preparePaidCardPlan({
+    kind: 'membership',
+    width,
     fontSize,
-    (text, direction) => measurement.width(text, font, direction),
-    measurement.context,
-    outlineWidthPx
-  );
-  const bodyLineCount = bodyLayout.lines.length;
-  const textHeight = bodyLayout.height;
-
-  // Include author-to-body gap when author section is present (matching renderMembership)
-  const headerSectionHeight =
-    headerHeight > 0
-      ? (MEMBERSHIP_CARD_CONFIG.headerTag?.marginTop ?? 0) +
-        headerHeight +
-        (MEMBERSHIP_CARD_CONFIG.headerTag?.marginBottom ?? 0)
-      : 0;
-  const bodySectionHeight =
-    bodyLineCount > 0 ? MEMBERSHIP_CARD_CONFIG.body.marginTop + textHeight : 0;
-
+    fontWeight,
+    fontFamily,
+    paddingH,
+    paddingV,
+    author: message.author,
+    authorPhotoUrl: message.authorPhotoUrl,
+    showAuthor: true,
+    membershipHeader: message.membershipHeader,
+    showAmount: false,
+    content: toSharedContentSegments(message.content),
+    maxBodyLines,
+    outlineWidthPx,
+    wide: false,
+    sticker: false,
+    measure: measurement.width,
+    measureHeight: measurement.height,
+    context: measurement.context,
+  });
   return {
     width,
-    height: paddingV * 2 + authorSectionHeight + headerSectionHeight + bodySectionHeight,
+    height: plan.height,
   };
 }
 
@@ -428,6 +413,7 @@ export interface MessageDimensionOptions {
   backgroundColor?: string;
   mode?: DanmakuMode;
   measurement?: DimensionMeasurement;
+  superChatLayout?: 'stacked' | 'wide';
 }
 
 export interface TranslatedMessageDimensions extends MessageDimensions {
@@ -455,6 +441,7 @@ export function estimateTranslatedMessageDimensions(
     backgroundColor = '#00000000',
     mode: motionMode = 'scroll',
     measurement = defaultMeasurement,
+    superChatLayout = 'stacked',
   } = options;
   const estimate = (candidate: ChatMessage, minimumPaidCardWidth?: number): MessageDimensions =>
     estimateMessageDimensions(
@@ -471,7 +458,8 @@ export function estimateTranslatedMessageDimensions(
       minimumPaidCardWidth,
       backgroundColor,
       motionMode,
-      measurement
+      measurement,
+      superChatLayout
     );
   const base = estimate(message);
   if (!translatedText || (mode === 'dual' && translatedText === message.text)) {
@@ -485,6 +473,43 @@ export function estimateTranslatedMessageDimensions(
   };
   if (mode === 'replace') {
     return { ...estimate(translatedMessage), translationHeight: 0 };
+  }
+
+  if (message.kind !== 'text') {
+    const padding =
+      message.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
+    const plan = preparePaidCardPlan({
+      kind: message.kind,
+      width: base.width,
+      fontSize,
+      fontWeight,
+      fontFamily,
+      paddingH: padding.paddingH,
+      paddingV: padding.paddingV,
+      author: message.author,
+      authorPhotoUrl: message.authorPhotoUrl,
+      showAuthor: message.kind === 'superchat' ? showAuthor : true,
+      amount: message.superChat?.amount,
+      showAmount: !!showSuperChatAmount,
+      membershipHeader: message.membershipHeader,
+      content: toSharedContentSegments(message.content),
+      translatedText,
+      maxBodyLines:
+        message.kind === 'superchat'
+          ? (maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines)
+          : (maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines),
+      outlineWidthPx,
+      wide: superChatLayout === 'wide',
+      sticker: !!message.superChat?.sticker,
+      measure: measurement.width,
+      measureHeight: measurement.height,
+      context: measurement.context,
+    });
+    return {
+      width: base.width,
+      height: plan.height,
+      translationHeight: plan.translation?.height ?? 0,
+    };
   }
 
   const translationFontSize = Math.max(1, Math.round(fontSize * TRANSLATION_FONT_SCALE));
