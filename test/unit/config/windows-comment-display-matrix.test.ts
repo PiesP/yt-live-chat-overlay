@@ -591,6 +591,11 @@ describe('Windows comment display matrix contract', () => {
       activeNow: [{ id, x: 10, y: 10, width: 160, height: 100, startAtEpochMs: 1793454396124.4 }],
     };
     expect(planVisibleItemWait(actual10Restoration, id, 25_000).timeoutMs).toBe(9218);
+    const laterMainRole = {
+      ...actual10Restoration,
+      activeNow: [{ id, x: 10, y: 10, width: 160, height: 100, startAtEpochMs: 1793454398199.1 }],
+    };
+    expect(planVisibleItemWait(laterMainRole, id, 25_000).timeoutMs).toBe(11293);
     expect(planVisibleItemWait(actual10Restoration, 'MISSING', 25_000).timeoutMs).toBe(5000);
     expect(membershipEffect(sample, member).borderAlpha).toBe(0.75);
     const bodyDraw = sample.frame.draws[0]!;
@@ -964,6 +969,68 @@ describe('Windows comment display matrix contract', () => {
     expect(plansCapped.frame?.truncated).toBe(true);
   });
 
+  it('retrieves separately retained restoration frames after the earlier row expires', async () => {
+    const deferredId = 'WINDOWS380_ZERO';
+    const newId = 'WINDOWS380_RESTORED';
+    const makeFrame = (id: string, frameId: number, startedAtEpochMs: number) => ({
+      frameId,
+      startedAtEpochMs,
+      complete: true,
+      cleared: true,
+      truncated: false,
+      logicalWidth: 655,
+      logicalHeight: 368,
+      backingRatioX: 1,
+      backingRatioY: 1,
+      config: { superChatLayout: 'stacked' },
+      active: [{ id, x: 10, y: 10, width: 80, height: 30 }],
+      draws: [{ id, alpha: 1, rect: { left: 10, top: 10, right: 90, bottom: 40 } }],
+      cardPlans: [],
+    });
+    const earlier = makeFrame(newId, 12, 1793454387200);
+    const later = makeFrame(deferredId, 24, 1793454396200);
+    const probe = {
+      workers: [],
+      latestRenderFrame: later,
+      firstCompleteFrames: {
+        [`${newId}|stacked`]: earlier,
+        [`${deferredId}|stacked`]: later,
+      },
+      firstEntry: { [newId]: 1793454387200, [deferredId]: 1793454396200 },
+      exact: { config: { superChatLayout: 'stacked' }, activeNow: later.active },
+    };
+    const sandbox = {
+      window: { __ytPlacementProbe: probe },
+      document: {
+        querySelector: () => ({
+          getBoundingClientRect: () => ({ width: 655, height: 368, left: 0, top: 0 }),
+        }),
+        querySelectorAll: () => [],
+      },
+      innerWidth: 720,
+      innerHeight: 540,
+      devicePixelRatio: 1,
+    };
+    const page = {
+      evaluate: async (callback: (input: unknown) => unknown, input: unknown) =>
+        runInNewContext(`(${callback.toString()})(${JSON.stringify(input)})`, sandbox),
+    } as unknown as Parameters<typeof snapshot>[0];
+    const deferred = await snapshot(page, 'main', 48, { id: deferredId, layout: 'stacked' });
+    const restored = await snapshot(page, 'main', 48, { id: newId, layout: 'stacked' });
+    expect(restored.frame?.frameId).toBe(12);
+    expect(deferred.frame?.frameId).toBe(24);
+    expect(
+      assertRestoredVisibility(deferred, restored, deferredId, newId, 'stacked')
+    ).toMatchObject({
+      deferred: { id: deferredId, frameId: 24 },
+      new: { id: newId, frameId: 12 },
+    });
+    const wrongLayout = await snapshot(page, 'main', 48, { id: newId, layout: 'wide' });
+    expect(() =>
+      assertRestoredVisibility(deferred, wrongLayout, deferredId, newId, 'stacked')
+    ).toThrow();
+  });
+
   it('binds both packaged files to the controller source, core, and build identities', () => {
     const fixture = 'validation/windows/comment-display-matrix.ts';
     const bundle = {
@@ -1125,24 +1192,100 @@ describe('Windows comment display matrix contract', () => {
       firstVisibleAtEpochMs: 1000,
     });
     const restored = 'WINDOWS380_RESTORED';
-    expect(() => assertRestoredVisibility(snapshot, id, restored)).toThrow();
+    const restoredEndAt = 1793454395137.1;
+    const deferredStartAt = 1793454396124.4;
+    expect(restoredEndAt).toBeLessThan(deferredStartAt);
+    const deferredRow = { id, x: 10, y: 10, width: 80, height: 30 };
+    const newRow = { ...deferredRow, id: restored };
+    const deferredFrame = {
+      ...snapshot,
+      frame: {
+        ...snapshot.frame,
+        frameId: 3,
+        startedAtEpochMs: 1793454396200,
+        active: [deferredRow],
+      },
+      activeNow: [deferredRow],
+      firstEntry: { [id]: 1793454396200 },
+    };
+    const newFrame = {
+      ...snapshot,
+      frame: {
+        ...snapshot.frame,
+        frameId: 2,
+        startedAtEpochMs: 1793454387200,
+        active: [newRow],
+        draws: [{ id: restored, alpha: 1, rect: { left: 10, top: 10, right: 90, bottom: 40 } }],
+      },
+      activeNow: [newRow],
+      firstEntry: { [restored]: 1793454387200 },
+    };
+    expect(
+      assertRestoredVisibility(deferredFrame, newFrame, id, restored, 'stacked')
+    ).toMatchObject({
+      deferred: { id, frameId: 3, ink: { alpha: 1 } },
+      new: { id: restored, frameId: 2, ink: { alpha: 1 } },
+    });
     expect(() =>
       assertRestoredVisibility(
+        deferredFrame,
+        { ...newFrame, firstEntry: {} },
+        id,
+        restored,
+        'stacked'
+      )
+    ).toThrow();
+    expect(() =>
+      assertRestoredVisibility(
+        deferredFrame,
+        { ...newFrame, frame: { ...newFrame.frame, draws: [] } },
+        id,
+        restored,
+        'stacked'
+      )
+    ).toThrow();
+    expect(() =>
+      assertRestoredVisibility(
+        deferredFrame,
         {
-          ...snapshot,
-          firstEntry: { ...snapshot.firstEntry, [restored]: 1001 },
+          ...newFrame,
           frame: {
-            ...snapshot.frame!,
-            draws: [
-              ...snapshot.frame!.draws,
-              { id: restored, alpha: 1, rect: { left: 100, top: 10, right: 180, bottom: 40 } },
-            ],
+            ...newFrame.frame,
+            draws: newFrame.frame.draws.map((draw) => ({ ...draw, alpha: 0 })),
           },
         },
         id,
-        restored
+        restored,
+        'stacked'
       )
-    ).not.toThrow();
+    ).toThrow();
+    expect(() =>
+      assertRestoredVisibility(
+        deferredFrame,
+        { ...newFrame, frame: { ...newFrame.frame, complete: false } },
+        id,
+        restored,
+        'stacked'
+      )
+    ).toThrow();
+    expect(() =>
+      assertRestoredVisibility(
+        deferredFrame,
+        { ...newFrame, layout: 'wide' },
+        id,
+        restored,
+        'stacked'
+      )
+    ).toThrow();
+    expect(() =>
+      assertRestoredVisibility(
+        deferredFrame,
+        { ...newFrame, backend: 'main' },
+        id,
+        restored,
+        'stacked'
+      )
+    ).toThrow();
     expect(() => assertCoherentVisibleFrame({ ...snapshot, firstEntry: {} }, id)).toThrow();
     expect(() =>
       assertCoherentVisibleFrame(

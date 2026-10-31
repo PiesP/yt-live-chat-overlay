@@ -896,13 +896,52 @@ export function bindMatrixIdentity(
 }
 
 export function assertRestoredVisibility(
-  snapshot: MatrixSnapshot,
+  deferredSnapshot: MatrixSnapshot,
+  newSnapshot: MatrixSnapshot,
   deferredId: string,
-  newId: string
-) {
-  assertCoherentVisibleFrame(snapshot, deferredId);
-  assertCoherentVisibleFrame(snapshot, newId);
+  newId: string,
+  expectedLayout: 'stacked' | 'wide'
+): { deferred: RestorationFrameProof; new: RestorationFrameProof } {
+  assert.equal(deferredSnapshot.backend, newSnapshot.backend, 'Restoration changed renderer owner');
+  const prove = (snapshot: MatrixSnapshot, id: string): RestorationFrameProof => {
+    assert.equal(snapshot.layout, expectedLayout, `${id} changed layout`);
+    const frame = snapshot.frame;
+    assert(frame, `${id} lacks a completed frame`);
+    assert(
+      frame.active.some((entry) => entry.id === id),
+      `${id} lacks frame ownership`
+    );
+    const { draw, row, frameId } = assertCommittedVisibleItem(snapshot, id);
+    const firstVisibleAtEpochMs = snapshot.firstEntry[id];
+    assert(typeof firstVisibleAtEpochMs === 'number' && Number.isFinite(firstVisibleAtEpochMs));
+    assert(
+      draw.rect && draw.rect.right > draw.rect.left && draw.rect.bottom > draw.rect.top,
+      `${id} lacks nonempty source ink`
+    );
+    return {
+      id,
+      backend: snapshot.backend,
+      layout: expectedLayout,
+      frameId,
+      frameStartedAtEpochMs: frame.startedAtEpochMs,
+      firstVisibleAtEpochMs,
+      active: row,
+      ink: { alpha: draw.alpha, rect: draw.rect },
+    };
+  };
+  return { deferred: prove(deferredSnapshot, deferredId), new: prove(newSnapshot, newId) };
 }
+
+type RestorationFrameProof = {
+  id: string;
+  backend: Backend;
+  layout: 'stacked' | 'wide';
+  frameId: number;
+  frameStartedAtEpochMs: number;
+  firstVisibleAtEpochMs: number;
+  active: MatrixFrame['active'][number];
+  ink: { alpha: number; rect: Rect };
+};
 
 export function assertCoherentVisibleFrame(snapshot: MatrixSnapshot, id: string): MatrixDraw {
   const frame = snapshot.frame;
@@ -1778,6 +1817,7 @@ async function runBackend(options: {
     previewObservations: typeof previewObservations;
     rowBudgetObservations: typeof rowBudgetObservations;
     restorationWaitObservations: typeof restorationWaitObservations;
+    restorationProof: typeof restorationProof;
     effectObservations: typeof effectObservations;
     baselineFindings: typeof baselineFindings;
     cleanupErrors: typeof cleanupErrors;
@@ -1791,6 +1831,7 @@ async function runBackend(options: {
   const startedAt = Date.now();
   let currentRoleWait: RoleWaitObservation | null = null;
   const restorationWaitObservations: Array<{ id: string; wait: RoleWaitObservation }> = [];
+  let restorationProof: ReturnType<typeof assertRestoredVisibility> | null = null;
   const check = <T>(predicate: () => T): T | undefined => {
     try {
       return predicate();
@@ -1806,8 +1847,10 @@ async function runBackend(options: {
   };
   const observeVisible = async (id: string, usePlannedStart = false) => {
     let wait: RoleWaitObservation | null = null;
+    let layout: 'stacked' | 'wide' | null = null;
     if (usePlannedStart) {
       const planning = await snapshot(page, backend);
+      layout = planning.layout === 'wide' ? 'wide' : 'stacked';
       const budget = planVisibleItemWait(planning, id, Date.now() - startedAt);
       wait = {
         ...budget,
@@ -1819,12 +1862,20 @@ async function runBackend(options: {
       assert(budget.timeoutMs > 0, `No matrix budget remains for ${id} visibility`);
     }
     try {
-      await waitForVisible(page, backend, id, undefined, wait?.timeoutMs);
+      await waitForVisible(page, backend, id, layout ?? undefined, wait?.timeoutMs);
+      const observed = layout ? await snapshot(page, backend, MAX_RECORDS, { id, layout }) : null;
+      if (observed) {
+        assert.equal(observed.layout, layout);
+        assert(observed.frame?.active.some((entry) => entry.id === id));
+        assertCommittedVisibleItem(observed, id);
+      }
       if (wait) wait.outcome = 'visible';
+      return observed;
     } catch (error) {
       if (mode === 'candidate') throw error;
       if (baselineFindings.length < 24)
         baselineFindings.push(`No complete visible frame for ${id}`);
+      return null;
     }
   };
   const observeTranslation = async (id: string) => {
@@ -2366,11 +2417,17 @@ async function runBackend(options: {
     await page.evaluate(() => window.__ytChatOverlay?.applySettings({ safeTop: 0, safeBottom: 0 }));
     await send('restored');
     failureStage = 'restoration:zero';
-    await observeVisible(IDS[7], true);
+    const deferredFrame = await observeVisible(IDS[7], true);
     failureStage = 'restoration:new';
-    await observeVisible(IDS[8], true);
-    const restored = await capture('restored');
-    check(() => assertRestoredVisibility(restored, IDS[7], IDS[8]));
+    const newFrame = await observeVisible(IDS[8], true);
+    await capture('restored');
+    failureStage = 'restoration:proof';
+    restorationProof =
+      check(() => {
+        assert(deferredFrame && newFrame, 'Both restored IDs need retained visible frames');
+        const layout = deferredFrame.layout === 'wide' ? 'wide' : 'stacked';
+        return assertRestoredVisibility(deferredFrame, newFrame, IDS[7], IDS[8], layout);
+      }) ?? null;
     // Retain this document and backlog owner; give its existing fixed rows
     // enough real lanes before the zero-rate source batch is admitted.
     await page.setViewportSize({ width: 720, height: 1000 });
@@ -2724,10 +2781,8 @@ async function runBackend(options: {
           ['ordinary', ordinaryId],
         ] as const) {
           failureStage = `presentation:${scene}:${width}:${layout}:${role}`;
-          const planning = backend === 'worker' ? await snapshot(page, backend) : null;
-          const waitBudget = planning
-            ? planVisibleItemWait(planning, id, Date.now() - startedAt)
-            : planRoleVisibilityWait(null, null, Date.now() - startedAt);
+          const planning = await snapshot(page, backend);
+          const waitBudget = planVisibleItemWait(planning, id, Date.now() - startedAt);
           currentRoleWait = {
             ...waitBudget,
             startedAtEpochMs: Date.now(),
@@ -2980,6 +3035,7 @@ async function runBackend(options: {
       previewObservations,
       rowBudgetObservations,
       restorationWaitObservations,
+      restorationProof,
       effectObservations,
       baselineFindings,
       cleanupErrors,
@@ -2998,6 +3054,7 @@ async function runBackend(options: {
       previewObservations,
       rowBudgetObservations,
       restorationWaitObservations,
+      restorationProof,
       effectObservations,
       baselineFindings,
       cleanupErrors,

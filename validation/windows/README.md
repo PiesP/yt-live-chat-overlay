@@ -15,7 +15,10 @@ holds an 800px player so the six simultaneous content rows can be due together.
 It waits for all three canonical accessible tails before the content capture
 and requires the deferred zero-capacity ID itself to draw after restoration.
 Both restoration IDs use their actual source-planned starts for bounded visible
-frame waits on Main and Worker; a reservation alone does not pass.
+frame waits on Main and Worker. Each ID needs its own retained complete frame,
+positive-alpha ink inside committed bounds, and the restored layout; their
+planned intervals need not overlap. The final restored PNG shows its capture
+instant and does not claim that both rows were visible together.
 The 51-row zero-rate backlog must stay outside renderer ingress, then its first
 row must enter and paint after a same-page positive-rate update. A separate
 fresh page checks the positive cohort with its own distinct first-visible ID.
@@ -88,8 +91,8 @@ records the production `preparePaidCardPlan` output for four total body rows and
 for the supported two-row setting minimum. The live effective setting and completed
 frame plan must agree; original and selected translation rows share the selected
 total row budget, with positive-alpha ink inside the committed card. The
-separate direct planner unit test retains its one-row fallback boundary. Worker
-role visibility waits use each actual source-planned start plus five seconds,
+separate direct planner unit test retains its one-row fallback boundary. Main
+and Worker role visibility waits use each actual source-planned start plus five seconds,
 bounded by the unchanged 60-second backend deadline, and record the planned
 start, budget, and outcome. The bright membership card records its actual border
 stroke alpha and body draw alpha in two completed frames at least 250 logical
