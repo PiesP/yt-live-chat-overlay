@@ -152,29 +152,31 @@ describe('enqueueWithOverflow', () => {
   });
 
   describe('edge cases', () => {
-    it('handles maxSize=1 correctly', () => {
+    it('protects the sole admitted ordinary message at maxSize=1', () => {
       const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
-      // First message enqueues
-      const r1 = enqueueWithOverflow(queue, makeMessage('text'), 50, onDrop, 1);
+      const ordinary = makeMessage('text');
+      const r1 = enqueueWithOverflow(queue, ordinary, 0, onDrop, 1);
       expect(r1).toBe('enqueued');
       expect(queue.size).toBe(1);
 
-      // Second message replaces (higher priority)
-      const r2 = enqueueWithOverflow(queue, makeMessage('text'), 100, onDrop, 1);
-      expect(r2).toBe('replaced');
+      const paid = makeMessage('superchat');
+      const r2 = enqueueWithOverflow(queue, paid, 200, onDrop, 1);
+      expect(r2).toBe('dropped');
+      expect(queue.toArray()).toEqual([ordinary]);
+      expect(onDrop).toHaveBeenCalledWith('queue_priority', paid);
     });
 
-    it('handles empty queue with size at max (impossible but defensive)', () => {
-      // This is a defensive test — queue should never report size >= max when empty
+    it('does not enqueue into a zero-capacity queue', () => {
       const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
-      // With maxSize=0, every call would overflow, but peekLowest returns undefined
-      // so it should fall through to enqueue
-      const result = enqueueWithOverflow(queue, makeMessage('text'), 50, onDrop, 0);
-      expect(result).toBe('replaced'); // queue.size(0) >= maxSize(0), peekLowest returns undefined, dropLowest → enqueue
+      const message = makeMessage('text');
+      const result = enqueueWithOverflow(queue, message, 0, onDrop, 0);
+      expect(result).toBe('dropped');
+      expect(queue.size).toBe(0);
+      expect(onDrop).toHaveBeenCalledWith('queue_priority', message);
     });
   });
 });

@@ -3,6 +3,7 @@
 import { LruMap } from '@piesp/browser-core/util';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { WorkerRenderer } from '@renderer/worker/renderer';
+import type { WorkerMessage } from '@renderer/worker/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 vi.hoisted(() => {
@@ -58,6 +59,165 @@ describe('WorkerRenderer', () => {
     const internals = wr as unknown as { superChatGradientCache: LruMap<string, CanvasGradient> };
     expect(internals.superChatGradientCache).toBeInstanceOf(LruMap);
     expect(internals.superChatGradientCache.maxSize).toBe(GRADIENT_CACHE_MAX);
+  });
+
+  it('keeps one live ordinary while refreshing equal-priority Worker overflow', () => {
+    const internals = wr as unknown as {
+      config: { queueMaxSize: number };
+      pendingQueue: WorkerMessage[];
+      messageById: Map<string, WorkerMessage>;
+      animFrameId: number | null;
+      measureMessageGeometry: ReturnType<typeof vi.fn>;
+      enqueueMessage(message: WorkerMessage): boolean;
+    };
+    internals.config = { queueMaxSize: 2 };
+    internals.animFrameId = 1;
+    internals.measureMessageGeometry = vi.fn(() => ({ width: 80, height: 20 }));
+    const message = (id: string, priority: number): WorkerMessage => ({
+      id,
+      priority,
+      text: id,
+      width: 80,
+      height: 20,
+      isBacklog: false,
+    });
+    expect(internals.enqueueMessage(message('ordinary-old', 0))).toBe(true);
+    expect(internals.enqueueMessage(message('paid-1', 200))).toBe(true);
+    expect(internals.enqueueMessage(message('paid-2', 200))).toBe(false);
+    expect(internals.enqueueMessage(message('ordinary-new', 0))).toBe(true);
+    expect(internals.pendingQueue.map((entry) => entry.id)).toEqual(['ordinary-new', 'paid-1']);
+    expect(internals.messageById.has('ordinary-old')).toBe(false);
+  });
+
+  it('gives an admitted ordinary successful service after two paid Worker admissions', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    const internals = wr as unknown as {
+      config: Record<string, unknown>;
+      pendingQueue: WorkerMessage[];
+      activeMessages: unknown[];
+      numLanes: number;
+      laneHeight: number;
+      findPlacement: ReturnType<typeof vi.fn>;
+      planQueuedMessage: ReturnType<typeof vi.fn>;
+      checkCollision: ReturnType<typeof vi.fn>;
+      activateMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    internals.config = {
+      queueMaxSize: 20,
+      maxConcurrentMessages: 1,
+      depthLayersEnabled: false,
+      danmakuMode: 'scroll',
+      fontSize: 20,
+      fontWeight: 'bold',
+      fontFamily: 'Arial',
+      laneSpacing: 0,
+      safeTop: 0,
+      safeBottom: 0,
+      outlineWidthPx: 0,
+    };
+    internals.numLanes = 10;
+    internals.laneHeight = 20;
+    internals.findPlacement = vi.fn(() => ({
+      laneIndex: 0,
+      slotCount: 1,
+      laneY: 0,
+      verticalOffset: 0,
+      waitMs: 0,
+    }));
+    internals.planQueuedMessage = vi.fn(() => ({}));
+    internals.checkCollision = vi.fn(() => true);
+    internals.activateMessage = vi.fn((entry: WorkerMessage) => {
+      internals.activeMessages.push(entry);
+      return 0;
+    });
+    const message = (id: string, priority: number): WorkerMessage => ({
+      id,
+      priority,
+      text: id,
+      width: 80,
+      height: 20,
+      isBacklog: false,
+    });
+    internals.pendingQueue.push(message('ordinary', 0));
+    for (let cycle = 0; cycle < 3; cycle++) {
+      internals.activeMessages.length = 0;
+      internals.pendingQueue.push(message(`paid-${cycle}`, 200));
+      internals.drainQueue(cycle * 16, 640, 360);
+    }
+    expect(internals.activateMessage.mock.calls.map(([entry]) => entry.id)).toEqual([
+      'paid-0',
+      'paid-1',
+      'ordinary',
+    ]);
+    expect(internals.pendingQueue.map((entry) => entry.id)).toContain('paid-2');
+  });
+
+  it('resumes paid Worker attempts after a costly ordinary placement failure', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const internals = wr as unknown as {
+      config: Record<string, unknown>;
+      pendingQueue: WorkerMessage[];
+      activeMessages: unknown[];
+      numLanes: number;
+      laneHeight: number;
+      findPlacement: ReturnType<typeof vi.fn>;
+      planQueuedMessage: ReturnType<typeof vi.fn>;
+      checkCollision: ReturnType<typeof vi.fn>;
+      activateMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    internals.config = {
+      queueMaxSize: 20,
+      maxConcurrentMessages: 1,
+      depthLayersEnabled: false,
+      danmakuMode: 'scroll',
+      fontSize: 20,
+      fontWeight: 'bold',
+      fontFamily: 'Arial',
+      laneSpacing: 0,
+      safeTop: 0,
+      safeBottom: 0,
+      outlineWidthPx: 0,
+    };
+    internals.numLanes = 10;
+    internals.laneHeight = 20;
+    internals.findPlacement = vi.fn((height: number) => {
+      if (height === 40) {
+        clock += 5;
+        return null;
+      }
+      return { laneIndex: 0, slotCount: 1, laneY: 0, verticalOffset: 0, waitMs: 0 };
+    });
+    internals.planQueuedMessage = vi.fn(() => ({}));
+    internals.checkCollision = vi.fn(() => true);
+    internals.activateMessage = vi.fn((entry: WorkerMessage) => {
+      internals.activeMessages.push(entry);
+      return 0;
+    });
+    const message = (id: string, priority: number, height = 20): WorkerMessage => ({
+      id,
+      priority,
+      text: id,
+      width: 80,
+      height,
+      isBacklog: false,
+    });
+    internals.pendingQueue.push(message('ordinary', 0, 40));
+    for (let cycle = 0; cycle < 3; cycle++) {
+      internals.activeMessages.length = 0;
+      internals.pendingQueue.push(message(`paid-${cycle}`, 200));
+      internals.drainQueue(cycle * 16, 640, 360);
+    }
+    expect(internals.findPlacement.mock.calls.map(([height]) => height)).toEqual([20, 20, 40]);
+    internals.drainQueue(48, 640, 360);
+    expect(internals.activateMessage.mock.calls.map(([entry]) => entry.id)).toEqual([
+      'paid-0',
+      'paid-1',
+      'paid-2',
+    ]);
+    expect(internals.pendingQueue.map((entry) => entry.id)).toContain('ordinary');
   });
 
   it.each([

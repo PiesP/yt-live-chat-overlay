@@ -186,12 +186,53 @@ its existing linear scan, and trimming applies the same reclamation invariant.
 This bounds retained queue storage independently of cumulative traffic while
 preserving FIFO ordering, priority displacement and drop accounting.
 
-Higher priority groups are normally examined first. Each group's identity cursor
-rotates past repeated failures; after a time-budget interruption, the next group
-receives the first attempt in the following drain. Successful placements and
-permanently oversized messages are removed; transient failures remain in the
-existing bounded queue. The anti-block gate retains its priority bypass, replay
-policy, and forced retry deadline.
+Higher priority groups are normally examined first. After two higher-priority
+successful placements, the next eligible drain gives ordinary priority-zero
+content the first opportunity. A failed attempt does not spend that success
+credit. This is a start-of-drain preference, not a fixed throughput ratio or a
+latency guarantee across arbitrary geometry and simultaneous vacancies. Backlog
+ordinary messages have priority -50 and remain outside this share. Priority-zero
+due replay content participates after source-time eligibility; future replay
+content is not admitted early.
+
+Each group's identity cursor rotates past repeated failures. A saved
+time-budget continuation takes precedence over the success share, so a costly
+ordinary failure cannot prevent the next group from receiving an attempt in the
+following drain. Successful placements and permanently oversized messages are
+removed; transient failures remain in the existing bounded queue. The anti-block
+gate retains its priority bypass, replay policy, and forced retry deadline.
+
+At full pending capacity, equal-priority ordinary arrivals replace the oldest
+ordinary entry. Higher-priority arrivals preserve the last already-admitted
+ordinary entry; other priority displacement and paid/event FIFO rules remain.
+Worker ingress reuses its existing bounded deferred buffer and gives ordinary
+dispatch a turn after two higher-priority dispatches when capacity permits.
+If that ordinary entry cannot displace current Worker work, another eligible
+higher-priority entry can proceed. Dispatch is distinct from successful placement
+and actual presentation. Recovery's temporary ingress buffer retains FIFO and
+same-ID coalescing to preserve snapshot and replacement ownership.
+
+There is no waiting-age TTL. Queue sizes bound retained count, not waiting time;
+parser timestamps are not an eligible-running-time clock. User/video/visibility
+pause and not-yet-due replay content therefore do not expire against wall time.
+No active card is evicted, queue enlarged, or paid motion accelerated by this
+policy. Density subdivision is retained; earlier slot-query counts do not prove
+an elapsed-time or FPS improvement.
+
+A deterministic production-selector comparison used twelve one-vacancy cycles,
+one paid and one ordinary arrival per cycle, and inexpensive successful placement
+stubs. These are placement-model results, not browser first-visible measurements:
+
+| Start preference | Paid placements | Ordinary placements | First ordinary cycle (zero based) |
+| --- | ---: | ---: | ---: |
+| Existing paid first | 12 | 0 | Not observed |
+| 1 higher-priority success per ordinary opportunity | 6 | 6 | 1 |
+| Selected 2 successes per ordinary opportunity | 8 | 4 | 2 |
+| 4 successes per ordinary opportunity | 10 | 2 | 4 |
+
+The selected threshold keeps paid preference while allowing ordinary service in
+this recurring compatible-vacancy case. Actual first-visible delay, residence,
+dispositions, occupancy and work require the separate matched browser traces.
 
 Reflow gives messages currently crossing the viewport priority over future or
 offscreen entries. It first retains legal placements, then searches legal blocks

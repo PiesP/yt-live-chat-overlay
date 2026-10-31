@@ -50,7 +50,9 @@ import {
   DRAIN_MAX_ATTEMPTS,
   DRAIN_WORK_BUDGET_MS,
   type DrainBatch,
+  fairDrainStartPriority,
   nextDrainPriority,
+  nextHigherPrioritySuccesses,
   recordDrainResult,
   selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
@@ -151,6 +153,7 @@ export class CanvasRenderer extends RendererBase {
   private readonly entryPacing = new EntryPacingState();
   private readonly drainCursors = new Map<number, ChatMessage>();
   private drainResumePriority: number | undefined;
+  private higherPrioritySuccesses = 0;
   private canvas: HTMLCanvasElement | null = null;
   private statusActionButton: HTMLButtonElement | null = null;
   /** Set to true during onDestroy() — checked after async awaits in drainQueueAsync. */
@@ -1188,6 +1191,7 @@ export class CanvasRenderer extends RendererBase {
     }
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
+    this.higherPrioritySuccesses = 0;
     return messages;
   }
 
@@ -1203,6 +1207,7 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
+    this.higherPrioritySuccesses = 0;
   }
 
   /**
@@ -1675,13 +1680,20 @@ export class CanvasRenderer extends RendererBase {
       // and only remove (removeAll) those that were successfully placed.
       // Messages that fail placement stay in the queue for the next frame.
       // This guarantees zero message loss from internal queue management.
+      const eligible = this.pendingQueue
+        .toArray()
+        .filter((message) => !this.capacityDeferred.has(message));
       const batch = createDrainBatch(
         selectDrainCandidates(
-          this.pendingQueue.toArray().filter((message) => !this.capacityDeferred.has(message)),
+          eligible,
           CanvasRenderer.getMessagePriority,
           this.drainCursors,
           DRAIN_MAX_ATTEMPTS,
-          this.drainResumePriority
+          fairDrainStartPriority(
+            eligible.map(CanvasRenderer.getMessagePriority),
+            this.higherPrioritySuccesses,
+            this.drainResumePriority
+          )
         )
       );
       this.drainResumePriority = undefined;
@@ -1713,6 +1725,12 @@ export class CanvasRenderer extends RendererBase {
       }
 
       this.finalizeDrainBatch(batch);
+      for (const message of batch.committed) {
+        this.higherPrioritySuccesses = nextHigherPrioritySuccesses(
+          this.higherPrioritySuccesses,
+          CanvasRenderer.getMessagePriority(message)
+        );
+      }
 
       this.observability.recordDrainQueue(performance.now() - t0);
     } finally {
@@ -1737,13 +1755,23 @@ export class CanvasRenderer extends RendererBase {
       const dims = this.overlay.getDimensions();
       if (!dims) return;
 
+      const eligible = this.pendingQueue
+        .toArray()
+        .filter((message) => !this.capacityDeferred.has(message));
       const batch = createDrainBatch(
         selectDrainCandidates(
-          this.pendingQueue.toArray().filter((message) => !this.capacityDeferred.has(message)),
+          eligible,
           CanvasRenderer.getMessagePriority,
-          this.drainCursors
+          this.drainCursors,
+          DRAIN_MAX_ATTEMPTS,
+          fairDrainStartPriority(
+            eligible.map(CanvasRenderer.getMessagePriority),
+            this.higherPrioritySuccesses,
+            this.drainResumePriority
+          )
         )
       );
+      this.drainResumePriority = undefined;
       let lastYield = performance.now();
 
       for (const msg of batch.candidates) {
@@ -1774,6 +1802,12 @@ export class CanvasRenderer extends RendererBase {
       }
 
       this.finalizeDrainBatch(batch);
+      for (const message of batch.committed) {
+        this.higherPrioritySuccesses = nextHigherPrioritySuccesses(
+          this.higherPrioritySuccesses,
+          CanvasRenderer.getMessagePriority(message)
+        );
+      }
     } finally {
       this.drainLocked = false;
     }
@@ -2519,6 +2553,7 @@ export class CanvasRenderer extends RendererBase {
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
+    this.higherPrioritySuccesses = 0;
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.fallbackIngressQueue.clear();
@@ -2836,6 +2871,7 @@ export class CanvasRenderer extends RendererBase {
         this.entryPacing.clear();
         this.drainCursors.clear();
         this.drainResumePriority = undefined;
+        this.higherPrioritySuccesses = 0;
         if (dims) {
           this.laneAllocator.reset(dims, this.pausedAt ?? now);
         }

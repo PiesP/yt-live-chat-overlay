@@ -46,7 +46,9 @@ import {
 import {
   DRAIN_MAX_ATTEMPTS,
   DRAIN_WORK_BUDGET_MS,
+  fairDrainStartPriority,
   nextDrainPriority,
+  nextHigherPrioritySuccesses,
   selectDrainCandidates,
 } from '@renderer/canvas/drain-batch';
 import { type GradientCache, getCachedGradient } from '@renderer/canvas/gradient-utils';
@@ -519,6 +521,7 @@ export class WorkerRenderer {
   private readonly entryPacing = new EntryPacingState();
   private readonly drainCursors = new Map<number, WorkerMessage>();
   private drainResumePriority: number | undefined;
+  private higherPrioritySuccesses = 0;
   private ctx: OffscreenCanvasRenderingContext2D | null = null;
   private canvas: OffscreenCanvas | null = null;
   private config: WorkerConfig | null = null;
@@ -1268,7 +1271,15 @@ export class WorkerRenderer {
           minIdx = i;
         }
       }
-      if (msg.priority > (this.pendingQueue[minIdx]?.priority ?? 0)) {
+      const lowestPriority = this.pendingQueue[minIdx]?.priority;
+      const soleOrdinary =
+        lowestPriority === 0 &&
+        this.pendingQueue.filter((entry) => entry.priority === 0).length === 1;
+      const replaceOrdinary = msg.priority === 0 && lowestPriority === 0;
+      if (
+        lowestPriority !== undefined &&
+        (replaceOrdinary || (msg.priority > lowestPriority && !soleOrdinary))
+      ) {
         // Replace the lowest-priority entry.  Clean up the evicted
         // entry from messageById and register the new one so
         // translation results can be matched.
@@ -1493,6 +1504,7 @@ export class WorkerRenderer {
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
+    this.higherPrioritySuccesses = 0;
     this.isDestroyed = true;
     this.fetchGeneration++;
     for (const controller of this.fetchControllers) controller.abort();
@@ -1535,6 +1547,7 @@ export class WorkerRenderer {
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
+    this.higherPrioritySuccesses = 0;
     this.clearQueuedOwnedAssets();
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
@@ -2547,12 +2560,17 @@ export class WorkerRenderer {
     if (!this.config) return;
     this.sortPendingQueueIfNeeded();
     const t0 = performance.now();
+    const eligible = this.pendingQueue.filter((entry) => !this.capacityDeferred.has(entry));
     const candidates = selectDrainCandidates(
-      this.pendingQueue.filter((entry) => !this.capacityDeferred.has(entry)),
+      eligible,
       (entry) => entry.priority,
       this.drainCursors,
       DRAIN_MAX_ATTEMPTS,
-      this.drainResumePriority
+      fairDrainStartPriority(
+        eligible.map((entry) => entry.priority),
+        this.higherPrioritySuccesses,
+        this.drainResumePriority
+      )
     );
     this.drainResumePriority = undefined;
     let attempts = 0;
@@ -2646,6 +2664,10 @@ export class WorkerRenderer {
       if (!placed) continue;
       batchIndex++;
       committed.add(entry);
+      this.higherPrioritySuccesses = nextHigherPrioritySuccesses(
+        this.higherPrioritySuccesses,
+        entry.priority
+      );
 
       // Prepare content metrics before drawing; shared lookups never need DOM in Worker.
       if (entry.kind === 'text' && this.ctx) {

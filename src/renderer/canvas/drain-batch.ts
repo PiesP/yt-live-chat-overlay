@@ -23,6 +23,32 @@ interface DrainQueue<T> {
 /** Both renderers count failed collision attempts against the same work limit. */
 export const DRAIN_MAX_ATTEMPTS = 32;
 export const DRAIN_WORK_BUDGET_MS = 4;
+/** Two higher-priority successes retain paid preference before one priority-zero opportunity. */
+export const HIGH_PRIORITY_SUCCESS_SHARE = 2;
+
+/** Backlog priority -50 is deliberately outside the ordinary service share. */
+export function fairDrainStartPriority(
+  eligiblePriorities: readonly number[],
+  higherPrioritySuccesses: number,
+  interruptedPriority?: number
+): number | undefined {
+  // A saved time-budget continuation must run first. Otherwise a repeatedly
+  // costly ordinary failure can suppress every higher-priority attempt.
+  if (interruptedPriority !== undefined && eligiblePriorities.includes(interruptedPriority)) {
+    return interruptedPriority;
+  }
+  return higherPrioritySuccesses >= HIGH_PRIORITY_SUCCESS_SHARE &&
+    eligiblePriorities.includes(0) &&
+    eligiblePriorities.some((priority) => priority > 0)
+    ? 0
+    : undefined;
+}
+
+/** Count committed admissions, never failed attempts or merely queued messages. */
+export function nextHigherPrioritySuccesses(previous: number, priority: number): number {
+  if (priority === 0) return 0;
+  return priority > 0 ? Math.min(HIGH_PRIORITY_SUCCESS_SHARE, previous + 1) : previous;
+}
 
 /**
  * Preserve priority order while rotating past a repeatedly unplaceable prefix.

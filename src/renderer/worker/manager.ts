@@ -247,6 +247,8 @@ export class RenderWorkerManager {
     { count: number; epoch: number; saturationProbe: boolean }
   >();
   private readonly deferredIngress: DeferredWorkerMessage[] = [];
+  /** Bounded dispatch preference; Worker drain owns actual successful service. */
+  private higherPriorityIngressDispatches = 0;
   private messageSnapshotRequest: {
     requestId: number;
     epoch: number;
@@ -673,6 +675,7 @@ export class RenderWorkerManager {
       this.minimumWorkerPendingPriority = null;
       this.unacknowledgedBatches.clear();
       this.deferredIngress.length = 0;
+      this.higherPriorityIngressDispatches = 0;
       this.resetWorkerStats();
       this.startPingPong();
 
@@ -753,10 +756,11 @@ export class RenderWorkerManager {
       return this.prepareMessageForBatch(message, id, priority, trackDrops, false);
     }
 
-    // Keep paid/high-priority messages and known replacements as bounded raw
+    // Keep paid/high-priority messages, one priority-zero opportunity, and
+    // known replacements as bounded raw
     // ingress. They are serialized only when a receipt proves capacity or the
     // Worker reports that the next priority can displace a queued entry.
-    if (isKnownReplacement || priority >= 40) {
+    if (isKnownReplacement || priority >= 40 || priority === 0) {
       const accepted = this.enqueueDeferredIngress({
         message,
         id,
@@ -872,6 +876,24 @@ export class RenderWorkerManager {
       return true;
     }
 
+    if (entry.priority === 0 && !entry.knownReplacement) {
+      // At equal priority keep the newer source-eligible message. When every deferred
+      // entry is paid, reserve one existing slot for ordinary service.
+      const ordinaryIndex = this.deferredIngress.findIndex(
+        (candidate) => !candidate.knownReplacement && candidate.priority === 0
+      );
+      const replaceIndex =
+        ordinaryIndex >= 0
+          ? ordinaryIndex
+          : this.deferredIngress.findIndex((candidate) => !candidate.knownReplacement);
+      const replaced = this.deferredIngress[replaceIndex];
+      if (replaced) {
+        if (replaced.trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
+        this.deferredIngress[replaceIndex] = entry;
+        return true;
+      }
+    }
+
     const rank = (candidate: DeferredWorkerMessage): number =>
       candidate.knownReplacement ? Number.MAX_SAFE_INTEGER : candidate.priority;
     let lowestIndex = 0;
@@ -881,7 +903,10 @@ export class RenderWorkerManager {
       if (candidate && lowest && rank(candidate) < rank(lowest)) lowestIndex = index;
     }
     const lowest = this.deferredIngress[lowestIndex];
-    if (!lowest || rank(entry) <= rank(lowest)) {
+    const soleOrdinary =
+      lowest?.priority === 0 &&
+      this.deferredIngress.filter((candidate) => candidate.priority === 0).length === 1;
+    if (!lowest || rank(entry) <= rank(lowest) || (soleOrdinary && entry.priority > 0)) {
       if (entry.trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
       return false;
     }
@@ -899,10 +924,19 @@ export class RenderWorkerManager {
 
     while (this.deferredIngress.length > 0) {
       const projected = this.getProjectedWorkerWork();
-      const candidate = this.deferredIngress[0];
+      const ordinaryIndex = this.deferredIngress.findIndex(
+        (entry) => !entry.knownReplacement && entry.priority === 0
+      );
+      let candidateIndex =
+        ordinaryIndex >= 0 &&
+        this.higherPriorityIngressDispatches >= 2 &&
+        !this.deferredIngress[0]?.knownReplacement
+          ? ordinaryIndex
+          : 0;
+      const candidate = this.deferredIngress[candidateIndex];
       if (!candidate) return;
       if (projected < this.deps.settings.queueMaxSize) {
-        this.deferredIngress.shift();
+        this.deferredIngress.splice(candidateIndex, 1);
         this.prepareMessageForBatch(
           candidate.message,
           candidate.id,
@@ -910,22 +944,34 @@ export class RenderWorkerManager {
           candidate.trackDrops,
           false
         );
+        this.higherPriorityIngressDispatches =
+          candidate.priority === 0 ? 0 : Math.min(2, this.higherPriorityIngressDispatches + 1);
         continue;
       }
       if (this.hasSaturationProbeInFlight()) return;
-      const canDisplace =
-        candidate.knownReplacement ||
+      const canDisplace = (entry: DeferredWorkerMessage): boolean =>
+        entry.knownReplacement ||
         this.minimumWorkerPendingPriority === null ||
-        candidate.priority > this.minimumWorkerPendingPriority;
-      if (!canDisplace) return;
-      this.deferredIngress.shift();
+        entry.priority > this.minimumWorkerPendingPriority ||
+        (entry.priority === 0 && this.minimumWorkerPendingPriority === 0);
+      if (!canDisplace(candidate)) {
+        // Ordinary gets the next real vacancy, but it must not prevent a paid
+        // entry from displacing lower-priority Worker pending work meanwhile.
+        candidateIndex = this.deferredIngress.findIndex(canDisplace);
+        if (candidateIndex < 0) return;
+      }
+      const dispatch = this.deferredIngress[candidateIndex];
+      if (!dispatch) return;
+      this.deferredIngress.splice(candidateIndex, 1);
       this.prepareMessageForBatch(
-        candidate.message,
-        candidate.id,
-        candidate.priority,
-        candidate.trackDrops,
+        dispatch.message,
+        dispatch.id,
+        dispatch.priority,
+        dispatch.trackDrops,
         true
       );
+      this.higherPriorityIngressDispatches =
+        dispatch.priority === 0 ? 0 : Math.min(2, this.higherPriorityIngressDispatches + 1);
       return;
     }
   }
@@ -1156,6 +1202,7 @@ export class RenderWorkerManager {
     this.batchFlushScheduled = false;
     if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch, previousStates);
     this.deferredIngress.length = 0;
+    this.higherPriorityIngressDispatches = 0;
     this.releaseAllSentMessages();
     this.translatedMessages.clear();
     this.currentEpoch = Math.min(Number.MAX_SAFE_INTEGER, this.currentEpoch + 1);
@@ -1254,6 +1301,7 @@ export class RenderWorkerManager {
       this.discardPendingBatch(pendingBatch, pendingPreviousStates);
     }
     this.deferredIngress.length = 0;
+    this.higherPriorityIngressDispatches = 0;
     this.unacknowledgedBatches.clear();
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;

@@ -2448,4 +2448,117 @@ describe('CanvasRenderer', () => {
     expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
     expect(internals.drainLocked).toBe(false);
   });
+
+  it.each([false, true])(
+    'serves live ordinary after two successful paid placements with %s async drain',
+    async (asyncMode) => {
+      vi.spyOn(performance, 'now').mockReturnValue(0);
+      const localOverlay = new Overlay();
+      (localOverlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+        width: 640,
+        height: 360,
+      };
+      const renderer = new CanvasRenderer(localOverlay, makeSettings({ maxConcurrentMessages: 1 }));
+      const internals = renderer as unknown as {
+        pendingQueue: {
+          enqueue(message: ChatMessage, priority: number): void;
+          toArray(): ChatMessage[];
+        };
+        activeMessages: CanvasMessage[];
+        placeQueuedMessage: ReturnType<typeof vi.fn>;
+        drainQueue(now: number): void;
+        drainQueueAsync(now: number): Promise<void>;
+      };
+      internals.placeQueuedMessage = vi.fn((_message: ChatMessage) => {
+        internals.activeMessages.push({} as CanvasMessage);
+        return { placed: true, oversized: false };
+      });
+      internals.pendingQueue.enqueue(makeMessage('ordinary', 'ordinary'), 0);
+      for (let cycle = 0; cycle < 3; cycle++) {
+        internals.activeMessages.length = 0;
+        internals.pendingQueue.enqueue(
+          { ...makeMessage(`paid-${cycle}`, 'paid'), kind: 'superchat' },
+          200
+        );
+        if (asyncMode) await internals.drainQueueAsync(cycle * 16);
+        else internals.drainQueue(cycle * 16);
+      }
+      expect(internals.placeQueuedMessage.mock.calls.map(([message]) => message.id)).toEqual([
+        'paid-0',
+        'paid-1',
+        'ordinary',
+      ]);
+      expect(internals.pendingQueue.toArray().map((message) => message.id)).toContain('paid-2');
+      renderer.destroy();
+    }
+  );
+
+  it('resumes paid attempts after an ordinary failure exhausts the sync drain budget', () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const localOverlay = new Overlay();
+    (localOverlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 640,
+      height: 360,
+    };
+    const renderer = new CanvasRenderer(localOverlay, makeSettings({ maxConcurrentMessages: 1 }));
+    const internals = renderer as unknown as {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
+      activeMessages: CanvasMessage[];
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueue(now: number): void;
+    };
+    internals.placeQueuedMessage = vi.fn((message: ChatMessage) => {
+      if (message.id === 'ordinary') {
+        clock += 5;
+        return { placed: false, oversized: false };
+      }
+      internals.activeMessages.push({} as CanvasMessage);
+      return { placed: true, oversized: false };
+    });
+    internals.pendingQueue.enqueue(makeMessage('ordinary', 'ordinary'), 0);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      internals.activeMessages.length = 0;
+      internals.pendingQueue.enqueue(
+        { ...makeMessage(`paid-${cycle}`, 'paid'), kind: 'superchat' },
+        200
+      );
+      internals.drainQueue(cycle * 16);
+    }
+    expect(internals.placeQueuedMessage.mock.calls.map(([message]) => message.id)).toEqual([
+      'paid-0',
+      'paid-1',
+      'ordinary',
+    ]);
+    internals.drainQueue(48);
+    expect(internals.placeQueuedMessage.mock.calls[3]?.[0].id).toBe('paid-2');
+    renderer.destroy();
+  });
+
+  it('keeps FIFO ordinary ingress and coalesces same-id replacement during Worker fallback', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    const internals = renderer as unknown as {
+      enqueueFallbackIngress(message: ChatMessage, trackDrops: boolean): void;
+      fallbackIngressQueue: { toArray(): Array<{ message: ChatMessage }> };
+    };
+    const dropped = vi.spyOn(renderer.observability, 'onMessageDropped');
+    internals.enqueueFallbackIngress(makeMessage('first', 'first'), true);
+    internals.enqueueFallbackIngress(makeMessage('second', 'second'), true);
+    internals.enqueueFallbackIngress(makeMessage('latest', 'latest'), true);
+    expect(internals.fallbackIngressQueue.toArray().map(({ message }) => message.id)).toEqual([
+      'first',
+      'second',
+    ]);
+    expect(dropped).toHaveBeenCalledWith('queue_priority');
+
+    internals.enqueueFallbackIngress(
+      { ...makeMessage('first', 'replaced'), actionType: 'replace' },
+      true
+    );
+    expect(internals.fallbackIngressQueue.toArray().map(({ message }) => message.text)).toEqual([
+      'replaced',
+      'second',
+    ]);
+    renderer.destroy();
+  });
 });
