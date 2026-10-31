@@ -23,8 +23,13 @@ resumed backlog row. Its player bounds must fit the physical viewport. The
 fresh positive cohort returns to the 720-by-540 viewport before source input.
 It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
-detailed videos at 400px and 960px viewport widths; recorded player bounds are
-the actual overlay size. The presentation workload includes a
+detailed videos at 400px and 960px viewport widths. Each page uses a measured
+900px player inside a 1100px high physical viewport, with an actual config and
+viewport-fit barrier before source input. This is sized so the paid, sticker,
+membership, and ordinary rows enough lanes to be due together at 32px without
+changing their source or scheduling policy. Recorded viewport dimensions come
+from the live page and player bounds are the actual overlay size. The
+presentation workload includes a
 localized long amount, mixed RTL/CJK author, sticker, membership event, and
 ordinary comment. The videos must decode and advance before capture. Each backend
 is limited to 16 recorded phases, 12 PNG captures, 48 non-draw records per

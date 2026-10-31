@@ -69,6 +69,8 @@ const MAX_PHASES_PER_BACKEND = 16;
 const MAX_CAPTURES_PER_BACKEND = 12;
 const MAX_OVERLOAD_MS = 120_000;
 const MAX_OVERLOAD_RECORDS = 128;
+const PRESENTATION_VIEWPORT_HEIGHT = 1100;
+const PRESENTATION_PLAYER_HEIGHT = 900;
 
 export type MatrixMode = 'baseline' | 'candidate';
 type Backend = 'worker' | 'main';
@@ -1702,6 +1704,7 @@ async function runBackend(options: {
     | Parameters<NonNullable<Window['__ytChatOverlay']>['applySettings']>[0]
     | undefined;
   let deadlineExceeded = false;
+  let failureStage = 'setup';
   const deadline = setTimeout(() => {
     deadlineExceeded = true;
     void page.close().catch(() => {});
@@ -1721,6 +1724,7 @@ async function runBackend(options: {
     cleanupErrors: typeof cleanupErrors;
     delivered: string[];
     diagnostic?: MatrixSnapshot | null;
+    failureStage?: string;
     errorType?: string;
     errorMessage?: string;
   };
@@ -2452,7 +2456,8 @@ async function runBackend(options: {
         });
         await nativeProbe.assertReady();
       }
-      await page.setViewportSize({ width, height: 650 });
+      failureStage = `presentation:${scene}:${width}:navigation`;
+      await page.setViewportSize({ width, height: PRESENTATION_VIEWPORT_HEIGHT });
       await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
       if (nativeProbe) {
@@ -2463,7 +2468,7 @@ async function runBackend(options: {
       }
       await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings));
       await page.addStyleTag({
-        content: '#movie_player { height: 540px !important; aspect-ratio: auto !important; }',
+        content: `#movie_player { height: ${PRESENTATION_PLAYER_HEIGHT}px !important; aspect-ratio: auto !important; }`,
       });
       await page.evaluate(
         (selectedScene) =>
@@ -2488,9 +2493,10 @@ async function runBackend(options: {
         scene
       );
       await setScene(page, scene);
+      failureStage = `presentation:${scene}:${width}:geometry`;
       await waitForProbeConfig(page, backend, {
         viewportWidth: width,
-        playerHeight: 540,
+        playerHeight: PRESENTATION_PLAYER_HEIGHT,
         fontSize: 32,
         laneSpacing: 0,
         safeTop: 0,
@@ -2502,11 +2508,25 @@ async function runBackend(options: {
         activeCap: 40,
         queueCap: 80,
       });
+      assert(
+        await page.evaluate(() => {
+          const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+          return Boolean(
+            player &&
+            player.left >= 0 &&
+            player.top >= 0 &&
+            player.right <= innerWidth &&
+            player.bottom <= innerHeight
+          );
+        }),
+        'Presentation player exceeded the physical viewport'
+      );
       const paidId = PRESENTATION_IDS[scene].paid;
       const key = `presentation${scene[0]?.toUpperCase()}${scene.slice(1)}` as
         | 'presentationBright'
         | 'presentationDark'
         | 'presentationDetailed';
+      failureStage = `presentation:${scene}:${width}:source`;
       await send(key);
       if (scene === 'detailed') {
         try {
@@ -2533,6 +2553,7 @@ async function runBackend(options: {
       for (const layout of (wideSupported ? ['stacked', 'wide'] : ['stacked']) as Array<
         'stacked' | 'wide'
       >) {
+        failureStage = `presentation:${scene}:${width}:${layout}:layout`;
         if (layout === 'wide')
           await page.evaluate(() =>
             window.__ytChatOverlay?.applySettings({ superChatLayout: 'wide' })
@@ -2555,6 +2576,7 @@ async function runBackend(options: {
             { selectedBackend: backend, expectedLayout: layout },
             { timeout: 5000 }
           );
+        failureStage = `presentation:${scene}:${width}:${layout}:paid`;
         await observeVisible(paidId);
         if (scene === 'detailed') await observeTranslation(paidId);
         if (scene === 'detailed') await observePlan(paidId, 4);
@@ -2610,6 +2632,7 @@ async function runBackend(options: {
           ['membership', PRESENTATION_IDS[scene].membership],
           ['ordinary', ordinaryId],
         ] as const) {
+          failureStage = `presentation:${scene}:${width}:${layout}:${role}`;
           try {
             await waitForVisible(page, backend, id, layout);
           } catch (error) {
@@ -2662,8 +2685,8 @@ async function runBackend(options: {
           name,
           scene,
           layout,
-          viewportWidth: width,
-          viewportHeight: 650,
+          viewportWidth: observed.viewport.width,
+          viewportHeight: observed.viewport.height,
           logicalWidth: observed.frame?.logicalWidth ?? null,
           logicalHeight: observed.frame?.logicalHeight ?? null,
           paid,
@@ -2682,6 +2705,7 @@ async function runBackend(options: {
           overflow: observed.overflow,
         });
         if (scene === 'bright' && layout === 'stacked') {
+          failureStage = `presentation:${scene}:${width}:${layout}:membership-effect`;
           const memberId = PRESENTATION_IDS.bright.membership;
           try {
             await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -2759,6 +2783,7 @@ async function runBackend(options: {
       }
     }
     if (wideSupported) {
+      failureStage = 'presentation:settings-preview';
       await page.locator('#yt-chat-overlay-settings-button').click({ force: true });
       const modal = page.locator('#yt-chat-overlay-settings-backdrop');
       await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -2873,6 +2898,7 @@ async function runBackend(options: {
       cleanupErrors,
       delivered: [...delivered],
       diagnostic,
+      failureStage,
       errorType: error instanceof Error ? error.name : typeof error,
       errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 400),
     };
