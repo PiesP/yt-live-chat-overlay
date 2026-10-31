@@ -828,9 +828,9 @@ export class WorkerRenderer {
               this.superChatGradientCache.clear();
               if (geometryChanged && this.canvas) {
                 this.initLanes(this.logicalWidth, this.logicalHeight);
-                this.reflowActiveMessages();
+                this.reflowActiveMessages(motionPolicyChanged ? 'policy' : 'geometry');
               }
-              if (motionPolicyChanged && !geometryChanged) this.reflowActiveMessages();
+              if (motionPolicyChanged && !geometryChanged) this.reflowActiveMessages('policy');
             }
             break;
           case 'setPaused': {
@@ -1314,7 +1314,7 @@ export class WorkerRenderer {
   }
 
   /** Reposition active messages and restore their lane reservations after resize. */
-  private reflowActiveMessages(): void {
+  private reflowActiveMessages(reason: 'geometry' | 'policy' = 'geometry'): void {
     if (this.config && this.ctx) {
       for (const message of this.activeMessages) {
         if (message.kind !== 'text') continue;
@@ -1336,11 +1336,29 @@ export class WorkerRenderer {
       }
     }
     const config = this.config;
-    if (!config || this.numLanes <= 0) return;
+    if (!config) return;
     const now = this.pauseStartTime ?? performance.now();
+    if (this.numLanes <= 0 || this.laneHeight <= 0) {
+      this.laneHeap = buildLaneHeap(0, now, this.laneIndexToHeapIndex);
+      this.speedTierLanes.clear();
+      this.collidedLanes.clear();
+      this.activeMessagesByLane.clear();
+      this.entryPacing.clear();
+      for (const message of this.activeMessages) {
+        message.reflowHidden = true;
+        message.laneSlotCount = 0;
+        message.laneArrayIndices.length = 0;
+      }
+      return;
+    }
     const mode = this.effectiveMotionMode;
-    const candidates = this.activeMessages.map((message) => {
+    const expiredAtReflow: ActiveMessage[] = [];
+    const candidates = this.activeMessages.flatMap((message) => {
       const previous = previousMotionPlan(message, mode, this.logicalWidth, config.exitPaddingPx);
+      if (previous.endTime <= now) {
+        expiredAtReflow.push(message);
+        return [];
+      }
       const next = computeMessageMotionPlan({
         mode,
         now,
@@ -1363,12 +1381,15 @@ export class WorkerRenderer {
             ? config.modOwnerDurationMultiplier
             : 1,
       });
-      return {
-        message,
-        laneIndex: message.laneIndex,
-        height: message.height,
-        motion: reflowMotionPlan(previous, next, now, config.exitPaddingPx),
-      };
+      return [
+        {
+          message,
+          laneIndex: message.laneIndex,
+          preferredY: message.y,
+          height: message.height,
+          motion: reflowMotionPlan(previous, next, now, config.exitPaddingPx, reason),
+        },
+      ];
     });
     const reconciled = reconcileMessagePlacements(candidates, {
       laneCount: this.numLanes,
@@ -1388,6 +1409,7 @@ export class WorkerRenderer {
     this.entryPacing.clear();
     for (const placement of reconciled.placements) {
       const message = placement.message;
+      delete message.reflowHidden;
       applyReflowMotion(message, placement.motion, now);
       message.motion = placement.motion;
       this.entryPacing.commit(
@@ -1414,10 +1436,17 @@ export class WorkerRenderer {
       );
     }
     for (const dropped of reconciled.dropped) {
-      this.recordDrop(dropped.message, dropped.reason);
-      this.messageById.delete(dropped.message.id);
-      this.releaseQueuedAssetsForOwner(dropped.message.id);
-      this.pendingTranslations.delete(dropped.message.id);
+      // A temporary safe-zone loss does not consume an active message.
+      dropped.message.reflowHidden = true;
+      dropped.message.laneSlotCount = 0;
+      dropped.message.laneArrayIndices.length = 0;
+      this.activeMessages.push(dropped.message);
+    }
+    for (const message of expiredAtReflow) {
+      message.reflowHidden = true;
+      message.laneSlotCount = 0;
+      message.laneArrayIndices.length = 0;
+      this.activeMessages.push(message);
     }
   }
 
@@ -1755,8 +1784,8 @@ export class WorkerRenderer {
     for (const bucket of this.farOpacityBuckets) bucket.length = 0;
     for (const bucket of this.midOpacityBuckets) bucket.length = 0;
     for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
-    const mode = this.config.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const isScrolling =
+      this.effectiveMotionMode === 'scroll' || this.effectiveMotionMode === 'reverse';
     const strokeWidth =
       this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0
         ? this.config.outlineWidthPx
@@ -1777,7 +1806,7 @@ export class WorkerRenderer {
       // Keep message (in-place compaction)
       this.activeMessages[writeIdx++] = msg;
       // Still in stagger delay — keep but skip rendering
-      if (elapsed < 0) continue;
+      if (elapsed < 0 || msg.reflowHidden) continue;
       // ── Render pre-compute ──
       // Save previous position for temporal frame blending (FAR-tier motion blur)
       if (msg.speedTier === SPEED_TIER.FAR) {
@@ -1801,7 +1830,8 @@ export class WorkerRenderer {
             msg.duration,
             isScrolling,
             msg.speedTier,
-            this.opacityConfig
+            this.opacityConfig,
+            elapsed
           )
         : 0;
       if (opacity <= 0) continue;

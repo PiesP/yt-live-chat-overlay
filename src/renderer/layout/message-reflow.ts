@@ -41,38 +41,95 @@ export function previousMotionPlan(
   };
 }
 
-/** Preserve a future entry deadline, or elapsed progress for an already-started message. */
+/**
+ * Keep future entry deadlines. For visible geometry changes, anchor the current
+ * drawn X and preserve expiry by adjusting the affine velocity. A deliberate
+ * motion-policy change may instead establish one deadline at the new velocity.
+ */
 export function reflowMotionPlan(
   previous: MessageMotionPlan,
   next: MessageMotionPlan,
   now: number,
-  exitPaddingPx: number
+  exitPaddingPx: number,
+  reason: 'geometry' | 'policy' = 'geometry'
 ): MessageMotionPlan {
-  const elapsed = now - previous.startTime;
-  const startTime =
-    previous.viewportEntryTime > now
-      ? Math.max(
-          previous.startTime,
-          previous.viewportEntryTime - (next.viewportEntryTime - next.startTime)
-        )
-      : now - Math.min(1, elapsed / Math.max(1, previous.durationMs)) * next.durationMs;
-  return motionPlanFromMessage(
-    {
-      startTime,
-      pausedDuration: 0,
-      startX: next.startX,
-      width: next.messageWidthPx,
-      duration: next.durationMs,
-    },
-    next.mode,
-    next.screenWidthPx,
-    exitPaddingPx
-  );
+  // A reflow can run between expiration and the next cleanup frame.
+  if (previous.endTime <= now) return previous;
+
+  const policyChanged =
+    reason === 'policy' &&
+    (previous.mode !== next.mode ||
+      previous.isScrolling ||
+      previous.durationMs !== next.durationMs);
+  const previousPadding = previous.isScrolling
+    ? previous.travelDistancePx -
+      (previous.mode === 'scroll'
+        ? previous.startX + previous.messageWidthPx
+        : previous.screenWidthPx - previous.startX)
+    : exitPaddingPx;
+  if (
+    !policyChanged &&
+    previous.mode === next.mode &&
+    previous.screenWidthPx === next.screenWidthPx &&
+    previous.messageWidthPx === next.messageWidthPx &&
+    Math.abs(previousPadding - exitPaddingPx) < 1e-6
+  ) {
+    return previous;
+  }
+
+  const plan = (startTime: number, startX: number, duration: number): MessageMotionPlan =>
+    motionPlanFromMessage(
+      {
+        startTime,
+        pausedDuration: 0,
+        startX,
+        width: next.messageWidthPx,
+        duration,
+      },
+      next.mode,
+      next.screenWidthPx,
+      exitPaddingPx
+    );
+
+  if (previous.viewportEntryTime > now) {
+    const startTime = previous.viewportEntryTime - (next.viewportEntryTime - next.startTime);
+    const duration = policyChanged ? next.durationMs : previous.endTime - startTime;
+    return duration > 0 ? plan(startTime, next.startX, duration) : previous;
+  }
+
+  if (!next.isScrolling) {
+    return policyChanged
+      ? plan(now, next.startX, next.durationMs)
+      : plan(previous.startTime, next.startX, previous.durationMs);
+  }
+
+  const currentX = messageXAtTime(previous, now);
+  const sameDirection = previous.mode === next.mode;
+  const startX = sameDirection
+    ? next.mode === 'scroll'
+      ? Math.max(next.startX, currentX)
+      : Math.min(next.startX, currentX)
+    : currentX;
+  const remainingDistance =
+    next.mode === 'scroll'
+      ? currentX + next.messageWidthPx + exitPaddingPx
+      : next.screenWidthPx - currentX + exitPaddingPx;
+  const totalDistance =
+    next.mode === 'scroll'
+      ? startX + next.messageWidthPx + exitPaddingPx
+      : next.screenWidthPx - startX + exitPaddingPx;
+  const remainingTime = previous.endTime - now;
+  const velocity = policyChanged ? next.actualVelocityPxPerMs : remainingDistance / remainingTime;
+  if (remainingDistance <= 0 || totalDistance <= 0 || velocity <= 0) return previous;
+  const elapsedFromStart = Math.abs(startX - currentX) / velocity;
+  return plan(now - elapsedFromStart, startX, totalDistance / velocity);
 }
 
 export interface ReflowCandidate<T> {
   message: T;
   laneIndex: number;
+  /** Last actually drawn vertical position in logical pixels. */
+  preferredY?: number;
   height: number;
   motion: MessageMotionPlan;
 }
@@ -107,6 +164,21 @@ export function reconcileMessagePlacements<T>(
   const occupants = new Map<number, ReflowPlacement<T>[]>();
   const scratch = new Set<ReflowPlacement<T>>();
   const dropped: Array<{ message: T; reason: 'oversized' | 'reflow_capacity' }> = [];
+  const preferredLane = (candidate: ReflowCandidate<T>, slotCount: number): number => {
+    const maxLane = options.laneCount - slotCount;
+    if (!Number.isFinite(candidate.preferredY) || options.laneHeight <= 0) {
+      return candidate.laneIndex;
+    }
+    const origin = options.viewportHeight * options.safeTop;
+    const offset = getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
+    return Math.max(
+      0,
+      Math.min(
+        maxLane,
+        Math.round(((candidate.preferredY ?? 0) - origin - offset) / options.laneHeight)
+      )
+    );
+  };
   const tryLane = (
     candidate: ReflowCandidate<T>,
     laneIndex: number,
@@ -159,7 +231,7 @@ export function reconcileMessagePlacements<T>(
       const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
       if (slotCount > options.laneCount) {
         dropped.push({ message: candidate.message, reason: 'oversized' });
-      } else if (!tryLane(candidate, candidate.laneIndex, slotCount)) {
+      } else if (!tryLane(candidate, preferredLane(candidate, slotCount), slotCount)) {
         displaced.push(candidate);
       }
     }
@@ -167,13 +239,36 @@ export function reconcileMessagePlacements<T>(
       const slotCount = getRowSlotCount(candidate.height, options.laneHeight, options.laneSpacing);
       const maxLane = options.laneCount - slotCount;
       let placed = false;
-      // Scan every actual lane before declaring capacity unavailable. Indexed
-      // occupants bound pair checks to each candidate's vertical block.
-      for (let offset = 0; offset <= maxLane; offset++) {
-        const lane = options.mode === 'bottom' ? maxLane - offset : offset;
-        if (tryLane(candidate, lane, slotCount)) {
-          placed = true;
-          break;
+      if (Number.isFinite(candidate.preferredY)) {
+        const anchor = preferredLane(candidate, slotCount);
+        const targetY = candidate.preferredY ?? 0;
+        const baseY =
+          options.viewportHeight * options.safeTop +
+          getRowContentOffset(candidate.height, options.laneHeight, options.laneSpacing);
+        for (let distance = 0; distance <= maxLane && !placed; distance++) {
+          const lower = anchor - distance;
+          const upper = anchor + distance;
+          const upperFirst =
+            upper <= maxLane &&
+            (lower < 0 ||
+              Math.abs(baseY + upper * options.laneHeight - targetY) <
+                Math.abs(baseY + lower * options.laneHeight - targetY));
+          const first = upperFirst ? upper : lower;
+          const second = upperFirst ? lower : upper;
+          if (first >= 0 && first <= maxLane) placed = tryLane(candidate, first, slotCount);
+          if (!placed && second !== first && second >= 0 && second <= maxLane) {
+            placed = tryLane(candidate, second, slotCount);
+          }
+        }
+      } else {
+        // Legacy candidates without a physical anchor keep the mode-specific
+        // scan order. Every legal block remains checked before a capacity drop.
+        for (let offset = 0; offset <= maxLane; offset++) {
+          const lane = options.mode === 'bottom' ? maxLane - offset : offset;
+          if (tryLane(candidate, lane, slotCount)) {
+            placed = true;
+            break;
+          }
         }
       }
       if (!placed) dropped.push({ message: candidate.message, reason: 'reflow_capacity' });

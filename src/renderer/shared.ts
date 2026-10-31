@@ -510,29 +510,32 @@ export interface OpacityConfig {
  *  4. Backlog dimming
  *  5. Far depth layer dimming
  *  6. Age fade-out (gradual fade toward maxMessageAgeMs)
+ * `fadeElapsed` keeps first appearance and age clocks stable across reflow;
+ * `motionElapsed` follows the current committed plan for expiry fade-out.
  */
 export function computeMessageOpacity(
   isBacklog: boolean,
-  elapsed: number,
+  fadeElapsed: number,
   duration: number,
   isScrolling: boolean,
   speedTier: number,
-  config: OpacityConfig
+  config: OpacityConfig,
+  motionElapsed = fadeElapsed
 ): number {
   let opacity = config.baseOpacity;
 
   if (config.fadeDurationMs > 0) {
+    const remaining = duration - motionElapsed;
     if (isScrolling) {
-      const remaining = duration - elapsed;
       if (remaining < config.fadeDurationMs) {
         opacity *= Math.max(0, remaining * config.invFadeDuration);
       }
     } else {
-      if (elapsed < config.fadeDurationMs) {
-        opacity *= elapsed * config.invFadeDuration;
+      if (fadeElapsed < config.fadeDurationMs) {
+        opacity *= fadeElapsed * config.invFadeDuration;
       }
-      if (elapsed > duration - config.fadeDurationMs) {
-        opacity *= Math.max(0, (duration - elapsed) * config.invFadeDuration);
+      if (remaining < config.fadeDurationMs) {
+        opacity *= Math.max(0, remaining * config.invFadeDuration);
       }
     }
   }
@@ -543,7 +546,7 @@ export function computeMessageOpacity(
     opacity *= config.depthFarOpacityMul;
   }
 
-  const ageRatio = isScrolling ? Math.min(1, elapsed * config.ageFadeRate) : 0;
+  const ageRatio = isScrolling ? Math.min(1, fadeElapsed * config.ageFadeRate) : 0;
   opacity *= Math.max(0, 1 - ageRatio);
 
   return opacity;
