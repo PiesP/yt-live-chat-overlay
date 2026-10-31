@@ -26,6 +26,13 @@ describe('render message resource limits', () => {
     expect(
       getRenderMessageResourceViolation({
         ...message,
+        canonicalContent: [{ type: 'text', content: 'a' }],
+        author: 'a'.repeat(97),
+      })
+    ).toEqual({ field: 'aggregate', reason: 'aggregate-code-points' });
+    expect(
+      getRenderMessageResourceViolation({
+        ...message,
         canonicalContent: [{ type: 'text', content: 'a'.repeat(4097) }],
       })
     ).toEqual({ field: 'body', reason: 'code-point-length' });

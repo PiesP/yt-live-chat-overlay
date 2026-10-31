@@ -135,7 +135,7 @@ export function getRenderMessageResourceViolation(value: unknown): RenderResourc
   if (Array.isArray(value.canonicalContent)) {
     const canonicalContent = inspectContent(value.canonicalContent);
     if (canonicalContent.violation) return canonicalContent.violation;
-    bodyCodePoints = canonicalContent.codePoints;
+    bodyCodePoints = Math.max(canonicalContent.codePoints, canonicalText.codePoints);
   } else if (typeof value.canonicalText === 'string') {
     bodyCodePoints = canonicalText.codePoints;
   }
