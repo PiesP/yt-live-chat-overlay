@@ -58,6 +58,8 @@ export interface WorkerRecoveryMessage {
   trackDrops: boolean;
   /** Present only for a validated, current-epoch active Worker message. */
   activeMotion?: WorkerRecoveryMotion;
+  /** A timed-out Worker may have drawn this retained message after its last report. */
+  presentationAccounting?: 'reported' | 'unknown';
 }
 
 export interface WorkerRecoveryMotion
@@ -218,6 +220,7 @@ export class RenderWorkerManager {
   private _activeMessageCount = 0;
   private _laneUtilization = 0;
   private lastWorkerTotalRendered = 0;
+  private lastWorkerTotalPresented = 0;
   private lastWorkerTotalDrops = 0;
   private lastWorkerDropReasons: WorkerDropReasonCounts | null = null;
   private lastWorkerProcessedBatchSequence = 0;
@@ -549,6 +552,22 @@ export class RenderWorkerManager {
             if (data.epoch !== undefined && data.epoch !== request.epoch) {
               request.resolve(this.takeKnownMessages(request.knownMessages));
               break;
+            }
+            if (
+              data.totalRendered !== undefined &&
+              data.totalRendered >= this.lastWorkerTotalRendered
+            ) {
+              const delta = data.totalRendered - this.lastWorkerTotalRendered;
+              if (delta > 0) this.deps.observability.onMessagesRendered(delta);
+              this.lastWorkerTotalRendered = data.totalRendered;
+            }
+            if (
+              data.totalPresented !== undefined &&
+              data.totalPresented >= this.lastWorkerTotalPresented
+            ) {
+              const delta = data.totalPresented - this.lastWorkerTotalPresented;
+              if (delta > 0) this.deps.observability.onMessagesPresented(delta);
+              this.lastWorkerTotalPresented = data.totalPresented;
             }
             request.resolve(
               this.takeSnapshotMessages(
@@ -1295,6 +1314,8 @@ export class RenderWorkerManager {
       : null;
     if (
       stats.totalRendered < this.lastWorkerTotalRendered ||
+      (stats.totalPresented !== undefined &&
+        stats.totalPresented < this.lastWorkerTotalPresented) ||
       stats.totalDrops < this.lastWorkerTotalDrops ||
       stats.processedBatchSequence < this.lastWorkerProcessedBatchSequence ||
       stats.processedBatchSequence > this.nextBatchSequence ||
@@ -1322,6 +1343,11 @@ export class RenderWorkerManager {
     const renderedDelta = stats.totalRendered - this.lastWorkerTotalRendered;
     if (renderedDelta > 0) this.deps.observability.onMessagesRendered(renderedDelta);
     this.lastWorkerTotalRendered = stats.totalRendered;
+    if (stats.totalPresented !== undefined) {
+      const presentedDelta = stats.totalPresented - this.lastWorkerTotalPresented;
+      if (presentedDelta > 0) this.deps.observability.onMessagesPresented(presentedDelta);
+      this.lastWorkerTotalPresented = stats.totalPresented;
+    }
 
     const dropDelta = stats.totalDrops - this.lastWorkerTotalDrops;
     if (dropDelta > 0) {
@@ -1409,6 +1435,7 @@ export class RenderWorkerManager {
     this._queueDepth = 0;
     this._laneUtilization = 0;
     this.lastWorkerTotalRendered = 0;
+    this.lastWorkerTotalPresented = 0;
     this.lastWorkerTotalDrops = 0;
     this.lastWorkerDropReasons = null;
     this.lastWorkerProcessedBatchSequence = 0;
@@ -1468,12 +1495,20 @@ export class RenderWorkerManager {
         retained.batchSequence > processedBatchSequence
       ) {
         const motion = activeIdSet.has(id) ? activeMotionById.get(id) : undefined;
+        const presentationAccounting = activeIdSet.has(id)
+          ? motion?.wasPresented === undefined
+            ? 'unknown'
+            : undefined
+          : !pendingIdSet.has(id)
+            ? 'unknown'
+            : undefined;
         messages.push({
           message: retained.message,
           trackDrops:
             retained.trackDrops &&
             !activeIdSet.has(id) &&
             (pendingIdSet.has(id) || retained.batchSequence > processedBatchSequence),
+          ...(presentationAccounting ? { presentationAccounting } : {}),
           ...(motion && motionSnapshot
             ? {
                 activeMotion: {
@@ -1526,6 +1561,7 @@ export class RenderWorkerManager {
         // A timed-out Worker cannot prove a newer batch was placed. Preserve
         // tracking only for last-known pending or unacknowledged work.
         trackDrops: retained.trackDrops && !wasActive && (wasPending || isUnacknowledged),
+        presentationAccounting: 'unknown',
       });
       this.sentMessages.delete(id);
       this.deps.onMessageReleased?.(retained.message, id);

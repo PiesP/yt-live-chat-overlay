@@ -224,6 +224,8 @@ export interface WorkerStatsMessage {
   activeMessages: number;
   pendingQueueDepth: number;
   totalRendered: number;
+  /** Cumulative first eligible completed draws, distinct from activation. */
+  totalPresented?: number;
   totalDrops: number;
   /** Optional cumulative, reason-specific counters; their sum equals totalDrops. */
   dropReasons?: Partial<WorkerDropReasonCounts>;
@@ -247,6 +249,9 @@ export interface WorkerMessageSnapshot {
   activeMessageIds: string[];
   pendingMessageIds: string[];
   processedBatchSequence: number;
+  /** Final cumulative counters at the recovery boundary. */
+  totalRendered?: number;
+  totalPresented?: number;
   motionSnapshot?: WorkerMotionSnapshot;
 }
 
@@ -267,6 +272,8 @@ export interface WorkerActiveMotion {
   startEpochMs: number;
   fadeStartEpochMs: number;
   speedTier: number;
+  /** Whether a frame was already presented before a Worker recovery snapshot. */
+  wasPresented?: boolean;
 }
 
 export interface WorkerMotionSnapshot {
@@ -288,6 +295,8 @@ export interface ActiveMessage {
   motion?: MessageMotionPlan;
   /** No legal safe-zone lane currently fits; retain the clock until expiry. */
   reflowHidden?: boolean;
+  wasPresented?: boolean;
+  _lastDrawnFrame?: number;
   id: string;
   x: number;
   y: number;

@@ -79,6 +79,9 @@ export class MessageActivator {
     msg.ghostText = '';
     delete msg.translatedRenderMessage;
     delete msg.desaturatedUserColor;
+    delete msg.wasPresented;
+    delete msg.presentationAccountingUnknown;
+    delete msg._lastDrawnFrame;
     // Keep numeric fields — they'll be overwritten by Object.assign
     this.messagePool.push(msg);
   }
@@ -129,6 +132,9 @@ export class MessageActivator {
       speedTier: speedTier ?? SPEED_TIER.MID,
       renderMessage: message,
       ghostText: getDisplayText(message.content),
+      wasPresented: false,
+      presentationAccountingUnknown: undefined,
+      _lastDrawnFrame: undefined,
     });
 
     if (this.config.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {

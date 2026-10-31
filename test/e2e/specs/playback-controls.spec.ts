@@ -247,12 +247,12 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(['replay-start']);
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-start']);
-    await expect(counters).toHaveText('Rcvd: 1 | Rndr: 1');
+    await expect(counters).toHaveText(/^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u);
     await expect(page.locator('#yt-chat-overlay-debug > div').nth(5)).toHaveText(
       'Render: n/a | Drain: n/a'
     );
   } else {
-    await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
+    await expect(counters).toHaveText(/^Rcvd: 1 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/);
   }
 
   await page.waitForTimeout(1200);
@@ -269,9 +269,9 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   if (useWorker) {
     await expect.poll(async () => (await readWorkerTelemetry()).pausedStates).toEqual([true]);
     await expect.poll(addedWorkerMessageIds).toEqual(['replay-start']);
-    await expect(counters).toHaveText('Rcvd: 1 | Rndr: 1');
+    await expect(counters).toHaveText(/^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u);
   } else {
-    await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
+    await expect(counters).toHaveText(/^Rcvd: 1 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/);
   }
 
   await page.evaluate(() => {
@@ -285,9 +285,9 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(['replay-start', 'replay-later']);
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-later']);
-    await expect(counters).toHaveText('Rcvd: 2 | Rndr: 2');
+    await expect(counters).toHaveText(/^Rcvd: 2 \| Alloc: 2 \| Shown≥\d+ \| Uncertain: \d+$/u);
   } else {
-    await expect(counters).toHaveText(/^Rcvd: 2 \| Rndr: \d+$/);
+    await expect(counters).toHaveText(/^Rcvd: 2 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/);
   }
 
   await page.evaluate(() => {
@@ -301,7 +301,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
       .poll(addedWorkerMessageIds)
       .toEqual(['replay-start', 'replay-later', 'replay-start']);
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-start']);
-    await expect(counters).toHaveText('Rcvd: 3 | Rndr: 3');
+    await expect(counters).toHaveText(/^Rcvd: 3 \| Alloc: 3 \| Shown≥\d+ \| Uncertain: \d+$/u);
 
     const telemetryBeforeDestroy = await readWorkerTelemetry();
     expect(telemetryBeforeDestroy.pausedStates).toEqual([true, false]);
@@ -326,7 +326,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
       .toEqual({ acknowledgements: 1, terminated: 1 });
     await expect(page.locator(`#${OVERLAY_ID}`)).toHaveCount(0);
   } else {
-    await expect(counters).toHaveText(/^Rcvd: 3 \| Rndr: \d+$/);
+    await expect(counters).toHaveText(/^Rcvd: 3 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/);
   }
 
   expect(pageErrors).toEqual([]);
@@ -562,7 +562,9 @@ async function runSustainedViewingScenario(
     await expect.poll(addedWorkerMessageIds).toEqual(resumedIds);
   }
   await expectAccessibleMessageSet(resumedIds, pausedIds);
-  await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
+  await expect(debugCounters).toHaveText(
+    /^Rcvd: 12 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/u
+  );
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
   if (useWorker) {
     await expect
@@ -573,7 +575,9 @@ async function runSustainedViewingScenario(
 
   await setVisibility('hidden');
   await requestPhase('hidden');
-  await expect(debugCounters).toHaveText(/^Rcvd: 12 \| Rndr: \d+$/u);
+  await expect(debugCounters).toHaveText(
+    /^Rcvd: 12 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/u
+  );
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(resumedIds);
@@ -589,7 +593,9 @@ async function runSustainedViewingScenario(
     await expect.poll(addedWorkerMessageIds).toEqual(foregroundIds);
   }
   await expectAccessibleMessageSet(foregroundIds, ['sustained-visible']);
-  await expect(debugCounters).toHaveText(/^Rcvd: 13 \| Rndr: \d+$/u);
+  await expect(debugCounters).toHaveText(
+    /^Rcvd: 13 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/u
+  );
   await expect(debugDrops).toHaveText(/^Drop: 2 /u);
   if (useWorker) {
     await expect
@@ -644,7 +650,9 @@ async function runSustainedViewingScenario(
   }
   await expectAccessibleMessageSet(['sustained-second-video']);
   const secondSessionCounters = page.locator('#yt-chat-overlay-debug > div').first();
-  await expect(secondSessionCounters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/u);
+  await expect(secondSessionCounters).toHaveText(
+    /^Rcvd: 1 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/u
+  );
   await expect(page.locator('#yt-chat-overlay-debug > div').nth(1)).toHaveText(/^Drop: 0 /u);
 
   await page.evaluate(async () => {
@@ -766,7 +774,7 @@ test.describe('Playback controls', () => {
         });
         const messages = page.locator('.yt-live-chat-overlay-live-region');
         const counters = page.locator('#yt-chat-overlay-debug > div').first();
-        await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
+        await expect(counters).toHaveText(/^Rcvd: 1 \| Alloc: \d+ \| Shown≥\d+ \| Uncertain: \d+$/);
         await page.evaluate(() => {
           const video = document.querySelector('video');
           if (!video) throw new Error('Fixture video missing');

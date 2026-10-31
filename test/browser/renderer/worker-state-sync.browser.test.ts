@@ -187,6 +187,7 @@ function initializedManager(
     onMessageDropped: vi.fn(),
     onMessagesDropped: vi.fn(),
     onMessagesRendered: vi.fn(),
+    onMessagesPresented: vi.fn(),
     updateActiveMessages: vi.fn(),
     updateQueueDepth: vi.fn(),
     updateLaneUtilization: vi.fn(),
@@ -637,6 +638,113 @@ describe('Worker renderer state synchronization', () => {
     }
   });
 
+  it('counts and announces only completed visible Worker frames across future entry and replacement', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    try {
+      const renderer = initializedRenderer({
+        ...DEFAULT_SETTINGS,
+        translationEnabled: true,
+        translationMode: 'dual',
+      });
+      renderer.handleMessage({
+        data: { type: 'addMessages', messages: [makeWorkerMessage('present')], batchSequence: 1 },
+      } as MessageEvent);
+      const internals = renderer as unknown as {
+        activeMessages: Array<{
+          startTime: number;
+          fadeStartTime: number;
+          startX: number;
+          duration: number;
+          text: string;
+          canonicalText?: string;
+          translatedText?: string | null;
+          reflowHidden?: boolean;
+          wasPresented?: boolean;
+        }>;
+        opacityConfig: { baseOpacity: number };
+        statsFrameCounter: number;
+        renderFrame(): void;
+        postStats(force: boolean): void;
+      };
+      internals.renderFrame();
+      const message = internals.activeMessages[0];
+      expect(message).toBeDefined();
+      if (!message) return;
+      message.startTime = 5_000;
+      message.fadeStartTime = 1_000;
+      message.duration = 10_000;
+      internals.renderFrame();
+      message.startTime = 1_000;
+      message.startX = 2_000;
+      nowSpy.mockReturnValue(2_000);
+      internals.renderFrame();
+      message.startX = 640;
+      internals.opacityConfig.baseOpacity = 0.001;
+      internals.renderFrame();
+      internals.postStats(true);
+      expect(latestStats()).toMatchObject({ totalRendered: 1, totalPresented: 0 });
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) => (value as { type?: string }).type === 'liveRegionSnippets'
+        )
+      ).toBe(false);
+
+      internals.opacityConfig.baseOpacity = 1;
+      message.canonicalText = 'full original';
+      message.translatedText = 'translation';
+      internals.statsFrameCounter = 29;
+      internals.renderFrame();
+      expect(message.wasPresented).toBe(true);
+      expect(
+        postMessage.mock.calls.findLast(
+          ([value]) => (value as { type?: string }).type === 'liveRegionSnippets'
+        )?.[0]
+      ).toMatchObject({ messages: [{ id: 'present', text: 'full original — translation' }] });
+
+      message.reflowHidden = true;
+      internals.statsFrameCounter = 29;
+      internals.renderFrame();
+      message.reflowHidden = false;
+      renderer.handleMessage({
+        data: {
+          type: 'addMessages',
+          batchSequence: 2,
+          messages: [
+            {
+              ...makeWorkerMessage('present'),
+              actionType: 'replace',
+              text: 'edited',
+              canonicalText: 'full edit',
+              translatedText: 'other translation',
+              content: [{ type: 'text', content: 'edited' }],
+            },
+          ],
+        },
+      } as MessageEvent);
+      internals.statsFrameCounter = 29;
+      internals.renderFrame();
+      internals.postStats(true);
+      expect(latestStats()?.totalPresented).toBe(1);
+      expect(
+        postMessage.mock.calls.findLast(
+          ([value]) => (value as { type?: string }).type === 'liveRegionSnippets'
+        )?.[0]
+      ).toMatchObject({ messages: [{ id: 'present', text: 'full edit — other translation' }] });
+      renderer.handleMessage({ data: { type: 'snapshotMessages', requestId: 17 } } as MessageEvent);
+      expect(
+        postMessage.mock.calls.findLast(
+          ([value]) => (value as { type?: string }).type === 'messageSnapshot'
+        )?.[0]
+      ).toMatchObject({
+        totalRendered: 1,
+        totalPresented: 1,
+        motionSnapshot: { activeMotions: [{ id: 'present', wasPresented: true }] },
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('counts every message permanently discarded by queue overflow', () => {
     const renderer = initializedRenderer();
     renderer.handleMessage({
@@ -739,18 +847,20 @@ describe('Worker renderer state synchronization', () => {
 
   it('reconciles cumulative stats once and publishes Worker-owned runtime state', () => {
     const { manager, observability, onStats, worker } = initializedManager();
-    const first = validStats();
+    const first = { ...validStats(), totalPresented: 2 };
 
     worker.emitMessage(first);
     worker.emitMessage(first);
     worker.emitMessage({
       ...first,
       totalRendered: 8,
+      totalPresented: 4,
       totalDrops: 4,
       laneUtilization: 0.75,
     });
 
     expect(observability.onMessagesRendered.mock.calls).toEqual([[5], [3]]);
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[2], [2]]);
     expect(observability.onMessagesDropped.mock.calls).toEqual([[3], [1]]);
     expect(observability.updateQueueDepth).toHaveBeenLastCalledWith(1);
     expect(observability.updateLaneUtilization).toHaveBeenLastCalledWith(0.75);
@@ -760,6 +870,101 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.activeMessageCount).toBe(2);
     expect(manager.laneUtilization).toBe(0.75);
 
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('reconciles final presentation counters from a recovery snapshot once', async () => {
+    const { manager, observability, worker } = initializedManager();
+    const recovery = manager.snapshotMessages(1_000);
+    const request = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number; epoch?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    if (request?.requestId === undefined || request.epoch === undefined) {
+      throw new Error('Expected snapshot request');
+    }
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: request.requestId,
+      epoch: request.epoch,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+      processedBatchSequence: 0,
+      totalRendered: 2,
+      totalPresented: 1,
+    });
+    await expect(recovery).resolves.toEqual([]);
+    expect(observability.onMessagesRendered.mock.calls).toEqual([[2]]);
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[1]]);
+
+    worker.emitMessage({
+      ...validStats(),
+      activeMessages: 0,
+      pendingQueueDepth: 0,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+      totalRendered: 2,
+      totalPresented: 1,
+      totalDrops: 0,
+    });
+    expect(observability.onMessagesRendered.mock.calls).toEqual([[2]]);
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[1]]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('treats timed-out retained Worker presentation as unknown for the current epoch', async () => {
+    const { manager, observability, worker } = initializedManager();
+    const original: ChatMessage = {
+      id: 'timed-out-presented',
+      text: 'original',
+      content: [{ type: 'text', content: 'original' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    expect(manager.sendToWorker(original, original.id)).toBe(true);
+    await flushMicrotasks();
+    worker.emitMessage({
+      ...validStats(),
+      activeMessages: 1,
+      pendingQueueDepth: 0,
+      activeMessageIds: [original.id],
+      pendingMessageIds: [],
+      totalRendered: 1,
+      totalPresented: 1,
+      totalDrops: 0,
+      processedBatchSequence: 1,
+    });
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[1]]);
+    const replacement = { ...original, text: 'edited', actionType: 'replace' as const };
+    expect(manager.sendToWorker(replacement, replacement.id, false)).toBe(true);
+    await flushMicrotasks();
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message: replacement, trackDrops: false, presentationAccounting: 'unknown' },
+    ]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('keeps unknown presentation attribution when the snapshot request cannot be posted', async () => {
+    const { manager, worker } = initializedManager();
+    const message: ChatMessage = {
+      id: 'snapshot-post-failed',
+      text: 'sent',
+      content: [{ type: 'text', content: 'sent' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    expect(manager.sendToWorker(message, message.id)).toBe(true);
+    await flushMicrotasks();
+    worker.postMessage.mockImplementationOnce(() => {
+      throw new Error('Worker unavailable');
+    });
+    await expect(manager.snapshotMessages(1_000)).resolves.toEqual([
+      { message, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1268,7 +1473,7 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.isCurrentMessage(sameBatchOriginal.id, sameBatchOriginal)).toBe(false);
     expect(manager.isCurrentMessage(sameBatchReplacement.id, sameBatchReplacement)).toBe(false);
     await expect(manager.snapshotMessages(0)).resolves.toEqual([
-      { message: original, trackDrops: true },
+      { message: original, trackDrops: true, presentationAccounting: 'unknown' },
     ]);
     manager.destroy();
     worker.acknowledgeDestroy();
@@ -1297,7 +1502,9 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 0,
     });
-    await expect(firstSnapshot).resolves.toEqual([{ message: unacknowledged, trackDrops: true }]);
+    await expect(firstSnapshot).resolves.toEqual([
+      { message: unacknowledged, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
 
     const expired = { ...unacknowledged, id: 'acknowledged-expired' };
     expect(manager.sendToWorker(expired, expired.id)).toBe(true);
@@ -1360,9 +1567,13 @@ describe('Worker renderer state synchronization', () => {
             pendingMessageIds: [],
             processedBatchSequence: 1,
           });
-          await expect(snapshot).resolves.toEqual([{ message, trackDrops: false }]);
+          await expect(snapshot).resolves.toEqual([
+            { message, trackDrops: false, presentationAccounting: 'unknown' },
+          ]);
         } else {
-          await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
+          await expect(snapshot).resolves.toEqual([
+            { message, trackDrops: true, presentationAccounting: 'unknown' },
+          ]);
         }
       } finally {
         manager.destroy();
@@ -1412,7 +1623,9 @@ describe('Worker renderer state synchronization', () => {
       expect(resolved).not.toHaveBeenCalled();
 
       worker.emitMessage(valid);
-      await expect(snapshot).resolves.toEqual([{ message, trackDrops: false }]);
+      await expect(snapshot).resolves.toEqual([
+        { message, trackDrops: false, presentationAccounting: 'unknown' },
+      ]);
       expect(resolved).toHaveBeenCalledTimes(1);
     } finally {
       manager.destroy();
@@ -1451,6 +1664,7 @@ describe('Worker renderer state synchronization', () => {
       startEpochMs: 11_000,
       fadeStartEpochMs: 10_900,
       speedTier: 1,
+      wasPresented: false,
     };
     worker.emitMessage({
       type: 'messageSnapshot',
@@ -1511,7 +1725,9 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 1,
     });
-    await expect(snapshot).resolves.toEqual([{ message, trackDrops: true }]);
+    await expect(snapshot).resolves.toEqual([
+      { message, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1537,7 +1753,9 @@ describe('Worker renderer state synchronization', () => {
       minimumPendingPriority: 0,
     });
 
-    await expect(manager.snapshotMessages(0)).resolves.toEqual([{ message, trackDrops: true }]);
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message, trackDrops: true, presentationAccounting: 'unknown' },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -1705,7 +1923,9 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
       processedBatchSequence: 2,
     });
-    await expect(activeSnapshot).resolves.toEqual([{ message: active, trackDrops: false }]);
+    await expect(activeSnapshot).resolves.toEqual([
+      { message: active, trackDrops: false, presentationAccounting: 'unknown' },
+    ]);
 
     const unacknowledged = makeChatMessage('snapshot-unacknowledged');
     expect(manager.sendToWorker(unacknowledged, unacknowledged.id, true)).toBe(true);
@@ -1722,7 +1942,7 @@ describe('Worker renderer state synchronization', () => {
       processedBatchSequence: 2,
     });
     await expect(unacknowledgedSnapshot).resolves.toEqual([
-      { message: unacknowledged, trackDrops: true },
+      { message: unacknowledged, trackDrops: true, presentationAccounting: 'unknown' },
     ]);
 
     const activeAtTimeout = makeChatMessage('snapshot-timeout-active');
@@ -1740,7 +1960,7 @@ describe('Worker renderer state synchronization', () => {
       pendingMessageIds: [],
     });
     await expect(manager.snapshotMessages(0)).resolves.toEqual([
-      { message: activeAtTimeout, trackDrops: false },
+      { message: activeAtTimeout, trackDrops: false, presentationAccounting: 'unknown' },
     ]);
     manager.destroy();
     worker.acknowledgeDestroy();
@@ -1814,6 +2034,7 @@ describe('Worker renderer state synchronization', () => {
       {
         message: expect.objectContaining({ id: 'pending-recovery' }),
         trackDrops: true,
+        presentationAccounting: 'unknown',
       },
     ]);
     manager.destroy();

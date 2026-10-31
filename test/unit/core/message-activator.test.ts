@@ -105,6 +105,9 @@ describe('MessageActivator', () => {
       cm.message = makeChatMessage({ id: 'test' });
       cm.renderMessage = makeChatMessage({ id: 'render-test' });
       cm.translatedText = '번역된 텍스트';
+      cm.wasPresented = true;
+      cm.presentationAccountingUnknown = true;
+      cm._lastDrawnFrame = 42;
       (cm as unknown as Record<string, unknown>).desaturatedUserColor = '#aaa';
 
       activator.releaseMessage(cm);
@@ -112,14 +115,20 @@ describe('MessageActivator', () => {
       expect(cm.message).toBe(EMPTY_CHAT_MESSAGE);
       expect(cm.renderMessage).toBe(EMPTY_CHAT_MESSAGE);
       expect(cm.translatedText).toBeNull();
+      expect(cm.wasPresented).toBeUndefined();
+      expect(cm.presentationAccountingUnknown).toBeUndefined();
+      expect(cm._lastDrawnFrame).toBeUndefined();
       expect((cm as unknown as Record<string, unknown>).desaturatedUserColor).toBeUndefined();
     });
 
     it('recycles same object back into pool', () => {
       const original = activator.acquireMessage();
+      original.wasPresented = true;
       activator.releaseMessage(original);
       const recycled = activator.acquireMessage();
       expect(recycled).toBe(original); // Same object reference
+      // A seek/refresh discards the old placement and starts a new presentation epoch.
+      expect(recycled.wasPresented).toBeUndefined();
     });
   });
 
@@ -134,6 +143,8 @@ describe('MessageActivator', () => {
 
       expect(callbacks.onActivated).toHaveBeenCalledTimes(1);
       expect(callbacks.onMessageRendered).toHaveBeenCalledTimes(1);
+      const activated = (callbacks.onActivated as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+      expect(activated.wasPresented).toBe(false);
     });
 
     it('uses topBottomDurationMs when no duration provided', () => {

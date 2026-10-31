@@ -39,6 +39,7 @@ import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { messageXAtElapsed, resolveEffectiveMotionMode } from '@renderer/layout/message-schedule';
 import { getRegularContentBounds } from '@renderer/layout/row-geometry';
 import { getMessagePriority } from '@renderer/message-priority';
+import { accessiblePresentationText, isPresentableFrame } from '@renderer/presentation';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
 import { rendererLayout } from '@util/design-tokens';
@@ -330,9 +331,11 @@ export function compactRemovedMessages(
 export function drawStage(
   ctx: CanvasRenderContext,
   renderCtx: CanvasRenderingContext2D,
-  buckets: CanvasMessage[][]
+  buckets: CanvasMessage[][],
+  frameId: number,
+  dims: OverlayDimensions
 ): void {
-  for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
+  for (let bucketIndex = 1; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
     const entries = buckets[bucketIndex];
     if (!entries || entries.length === 0) continue;
     const bucketOpacity = bucketIndex / (OPACITY_BUCKET_COUNT - 1);
@@ -342,6 +345,21 @@ export function drawStage(
       for (const msg of entries) {
         // oxlint-disable-next-line typescript/no-non-null-assertion -- the bucket pass sets this before drawStage runs.
         const elapsed = msg._frameElapsed!;
+        if (
+          !isPresentableFrame(
+            elapsed,
+            msg.duration,
+            msg.x,
+            msg.y,
+            msg.width,
+            msg.height,
+            dims.width,
+            dims.height,
+            bucketIndex,
+            msg.reflowHidden === true
+          )
+        )
+          continue;
         const snappedX = Math.floor(msg.x);
         const snappedY = Math.floor(msg.y);
 
@@ -531,6 +549,16 @@ export function drawStage(
             renderCtx.restore();
           }
         }
+        msg._lastDrawnFrame = frameId;
+        if (!msg.wasPresented) {
+          msg.wasPresented = true;
+          if (msg.presentationAccountingUnknown) {
+            ctx.observability.onPresentationAttributionUnknown();
+          } else {
+            ctx.observability.onMessagesPresented(1);
+          }
+          delete msg.presentationAccountingUnknown;
+        }
       }
     } finally {
       renderCtx.globalAlpha = 1;
@@ -549,12 +577,28 @@ export function drawStage(
 export function drawGlowStage(
   _ctx: CanvasRenderContext,
   renderCtx: CanvasRenderingContext2D,
-  buckets: CanvasMessage[][]
+  buckets: CanvasMessage[][],
+  dims: OverlayDimensions
 ): void {
-  for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
+  for (let bucketIndex = 1; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
     const entries = buckets[bucketIndex];
     if (!entries || entries.length === 0) continue;
     for (const msg of entries) {
+      if (
+        !isPresentableFrame(
+          msg._frameElapsed ?? -1,
+          msg.duration,
+          msg.x,
+          msg.y,
+          msg.width,
+          msg.height,
+          dims.width,
+          dims.height,
+          bucketIndex,
+          msg.reflowHidden === true
+        )
+      )
+        continue;
       if (!msg.message || msg.message.kind === 'text') continue;
       const renderMessage = msg.renderMessage;
       if (!renderMessage) continue;
@@ -596,24 +640,35 @@ export function drawGlowStage(
  * Throttled to at most once per 500ms to avoid flooding the live region
  * with updates at 60fps.
  */
-export function mirrorVisibleMessages(ctx: CanvasRenderContext): void {
-  const now = performance.now();
+export function mirrorVisibleMessages(
+  ctx: CanvasRenderContext,
+  now: number,
+  frameId: number
+): void {
   if (now - ctx.lastLiveRegionUpdate.value < LIVE_REGION_THROTTLE_MS) return;
   ctx.lastLiveRegionUpdate.value = now;
-  const count = Math.min(ctx.activeMessages.length, LIVE_REGION_MAX_MESSAGES);
-  if (count === 0) return;
   const messages: AccessibleChatMessage[] = [];
-  const start = ctx.activeMessages.length - count;
-  for (let i = start; i < ctx.activeMessages.length; i++) {
+  for (
+    let i = ctx.activeMessages.length - 1;
+    i >= 0 && messages.length < LIVE_REGION_MAX_MESSAGES;
+    i--
+  ) {
     const msg = ctx.activeMessages[i];
-    if (!msg) continue;
+    if (!msg || msg._lastDrawnFrame !== frameId) continue;
     const message = msg.message;
     if (!message.text && !message.author) continue;
     messages.push({
       id:
         message.id ??
-        `${message.timestamp}:${message.author ?? ''}:${message.kind}:${message.text}`,
-      text: message.canonicalText ?? message.text,
+        `${message.timestamp}:${message.author ?? ''}:${message.kind}:${message.canonicalText ?? message.text}`,
+      text: accessiblePresentationText(
+        message.canonicalText ?? message.text,
+        ctx.settings.translationMode === 'replace' || msg.translatedText !== message.text
+          ? msg.translatedText
+          : null,
+        ctx.settings.translationEnabled,
+        ctx.settings.translationMode
+      ),
       kind: message.kind,
       ...(message.author !== undefined ? { author: message.author } : {}),
       ...(message.superChat?.amount !== undefined
@@ -625,7 +680,7 @@ export function mirrorVisibleMessages(ctx: CanvasRenderContext): void {
     });
   }
   if (messages.length > 0) {
-    ctx.updateLiveRegion(messages);
+    ctx.updateLiveRegion(messages.reverse());
   }
 }
 

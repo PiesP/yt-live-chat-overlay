@@ -270,7 +270,10 @@ export function readInstalledLifecycleDomDiagnostic() {
     document.querySelectorAll('#yt-chat-overlay-debug > div'),
     (element) => element.textContent ?? ''
   );
-  const received = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
+  const received =
+    /^(?:Rcvd: (\d+) \| Alloc: (\d+) \| Shown≥(\d+) \| Uncertain: (\d+)|Rcvd: (\d+) \| Rndr: (\d+))$/u.exec(
+      lines[0] ?? ''
+    );
   const dropped = /^Drop: (\d+) /u.exec(lines[1] ?? '');
   const logLevel = document.querySelector<HTMLSelectElement>('select[name="logLevel"]')?.value;
   return {
@@ -279,8 +282,10 @@ export function readInstalledLifecycleDomDiagnostic() {
     debugCounts:
       received && dropped
         ? {
-            received: Number(received[1]),
-            rendered: Number(received[2]),
+            received: Number(received[1] ?? received[5]),
+            rendered: Number(received[2] ?? received[6]),
+            shownLowerBound: received[3] === undefined ? null : Number(received[3]),
+            presentationUncertain: received[4] === undefined ? null : Number(received[4]),
             dropped: Number(dropped[1]),
           }
         : null,
@@ -1296,7 +1301,9 @@ async function verifyIsolatedPaidCardInk(page: Page, output: string) {
     await response.json();
   }, index);
   await page.waitForFunction(() =>
-    document.querySelector('#yt-chat-overlay-debug')?.textContent?.includes('Rcvd: 1 | Rndr: 1')
+    /^(?:Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+|Rcvd: 1 \| Rndr: 1)$/u.test(
+      document.querySelector('#yt-chat-overlay-debug > div')?.textContent ?? ''
+    )
   );
   const resultHandle = await page.waitForFunction(
     (before) => {
@@ -1471,12 +1478,17 @@ async function verifySustainedViewingLifecycle(
           document.querySelectorAll('#yt-chat-overlay-debug > div'),
           (element) => element.textContent ?? ''
         );
-        const counters = /^Rcvd: (\d+) \| Rndr: (\d+)$/u.exec(lines[0] ?? '');
+        const counters =
+          /^(?:Rcvd: (\d+) \| Alloc: (\d+) \| Shown≥(\d+) \| Uncertain: (\d+)|Rcvd: (\d+) \| Rndr: (\d+))$/u.exec(
+            lines[0] ?? ''
+          );
         const drops = /^Drop: (\d+) /u.exec(lines[1] ?? '');
         if (!counters || !drops) return null;
         const counts = {
-          received: Number(counters[1]),
-          rendered: Number(counters[2]),
+          received: Number(counters[1] ?? counters[5]),
+          rendered: Number(counters[2] ?? counters[6]),
+          shownLowerBound: counters[3] === undefined ? null : Number(counters[3]),
+          presentationUncertain: counters[4] === undefined ? null : Number(counters[4]),
           dropped: Number(drops[1]),
         };
         return counts.received === expected.received && counts.dropped === expected.dropped

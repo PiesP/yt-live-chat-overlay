@@ -19,7 +19,7 @@ test('Firefox userscript ingests and renders a live-chat message', async ({ page
     showDebugOverlay: true,
   });
   const debugCounters = page.locator('#yt-chat-overlay-debug > div').first();
-  await expect(debugCounters).toHaveText('Rcvd: 0 | Rndr: 0');
+  await expect(debugCounters).toHaveText(/^Rcvd: 0 \| Alloc: 0 \| Shown≥\d+ \| Uncertain: \d+$/u);
 
   await page.evaluate(() => {
     const items = document.querySelector('yt-live-chat-item-list-renderer #items');
@@ -38,6 +38,6 @@ test('Firefox userscript ingests and renders a live-chat message', async ({ page
   });
 
   await expect(page.locator(`#${OVERLAY_ID} canvas`)).toBeAttached();
-  await expect(debugCounters).toHaveText('Rcvd: 1 | Rndr: 1');
+  await expect(debugCounters).toHaveText(/^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u);
   expect(runtimeErrors).toEqual([]);
 });
