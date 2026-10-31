@@ -205,6 +205,7 @@ describe('Canvas drain batch bookkeeping', () => {
     expect(trace(4)).toEqual({ paid: 10, ordinary: 2, firstOrdinaryCycle: 4, pending: 12 });
     expect(HIGH_PRIORITY_SUCCESS_SHARE).toBe(2);
     expect(fairDrainStartPriority([200, 0], 2)).toBe(0);
+    expect(fairDrainStartPriority([200, 0], 2, 200)).toBe(200);
     expect(fairDrainStartPriority([200, -50], 2)).toBeUndefined();
     expect(nextHigherPrioritySuccesses(1, 200)).toBe(2);
     expect(nextHigherPrioritySuccesses(2, 0)).toBe(0);
@@ -244,6 +245,17 @@ describe('Canvas drain batch bookkeeping', () => {
     expect(enqueue(make('backlog-old', 'text', true), -50)).toBe('enqueued');
     expect(enqueue(make('backlog-new', 'text', true), -50)).toBe('enqueued');
     expect(enqueue(make('backlog-latest', 'text', true), -50)).toBe('dropped');
+
+    queue.clear();
+    expect(enqueue({ ...make('due-replay-old', 'text'), videoOffsetMs: 100 }, 0)).toBe('enqueued');
+    expect(enqueue({ ...make('due-replay-new', 'text'), videoOffsetMs: 200 }, 0)).toBe('enqueued');
+    expect(enqueue({ ...make('due-replay-latest', 'text'), videoOffsetMs: 300 }, 0)).toBe(
+      'replaced'
+    );
+    expect(queue.toArray().map((entry) => entry.id)).toEqual([
+      'due-replay-new',
+      'due-replay-latest',
+    ]);
   });
 
   it('records placed, oversized, and transient results without reordering', () => {

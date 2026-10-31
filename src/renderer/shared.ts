@@ -678,9 +678,9 @@ export function enqueueWithOverflow(
   if (queue.size >= maxSize) {
     const lowest = queue.peekLowest();
     const lowestPriority = lowest ? RendererBase.getMessagePriority(lowest) : undefined;
-    // Keep one already-admitted live ordinary message through a paid burst.
-    // Equal-priority live ordinary overflow favors a current reaction instead
-    // of retaining the oldest waiting item indefinitely. Backlog stays FIFO.
+    // Keep one already-admitted priority-zero ordinary message through a paid
+    // burst. Equal-priority overflow favors a newer source-eligible message,
+    // including due replay; backlog stays FIFO.
     const replaceOrdinary = priority === 0 && lowestPriority === 0;
     const soleOrdinary =
       lowestPriority === 0 &&

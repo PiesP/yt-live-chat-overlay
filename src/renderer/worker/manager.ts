@@ -756,7 +756,7 @@ export class RenderWorkerManager {
       return this.prepareMessageForBatch(message, id, priority, trackDrops, false);
     }
 
-    // Keep paid/high-priority messages, one live ordinary opportunity, and
+    // Keep paid/high-priority messages, one priority-zero opportunity, and
     // known replacements as bounded raw
     // ingress. They are serialized only when a receipt proves capacity or the
     // Worker reports that the next priority can displace a queued entry.
@@ -877,7 +877,7 @@ export class RenderWorkerManager {
     }
 
     if (entry.priority === 0 && !entry.knownReplacement) {
-      // At equal priority keep the current live reaction. When every deferred
+      // At equal priority keep the newer source-eligible message. When every deferred
       // entry is paid, reserve one existing slot for ordinary service.
       const ordinaryIndex = this.deferredIngress.findIndex(
         (candidate) => !candidate.knownReplacement && candidate.priority === 0
@@ -927,7 +927,7 @@ export class RenderWorkerManager {
       const ordinaryIndex = this.deferredIngress.findIndex(
         (entry) => !entry.knownReplacement && entry.priority === 0
       );
-      const candidateIndex =
+      let candidateIndex =
         ordinaryIndex >= 0 &&
         this.higherPriorityIngressDispatches >= 2 &&
         !this.deferredIngress[0]?.knownReplacement
@@ -949,22 +949,29 @@ export class RenderWorkerManager {
         continue;
       }
       if (this.hasSaturationProbeInFlight()) return;
-      const canDisplace =
-        candidate.knownReplacement ||
+      const canDisplace = (entry: DeferredWorkerMessage): boolean =>
+        entry.knownReplacement ||
         this.minimumWorkerPendingPriority === null ||
-        candidate.priority > this.minimumWorkerPendingPriority ||
-        (candidate.priority === 0 && this.minimumWorkerPendingPriority === 0);
-      if (!canDisplace) return;
+        entry.priority > this.minimumWorkerPendingPriority ||
+        (entry.priority === 0 && this.minimumWorkerPendingPriority === 0);
+      if (!canDisplace(candidate)) {
+        // Ordinary gets the next real vacancy, but it must not prevent a paid
+        // entry from displacing lower-priority Worker pending work meanwhile.
+        candidateIndex = this.deferredIngress.findIndex(canDisplace);
+        if (candidateIndex < 0) return;
+      }
+      const dispatch = this.deferredIngress[candidateIndex];
+      if (!dispatch) return;
       this.deferredIngress.splice(candidateIndex, 1);
       this.prepareMessageForBatch(
-        candidate.message,
-        candidate.id,
-        candidate.priority,
-        candidate.trackDrops,
+        dispatch.message,
+        dispatch.id,
+        dispatch.priority,
+        dispatch.trackDrops,
         true
       );
       this.higherPriorityIngressDispatches =
-        candidate.priority === 0 ? 0 : Math.min(2, this.higherPriorityIngressDispatches + 1);
+        dispatch.priority === 0 ? 0 : Math.min(2, this.higherPriorityIngressDispatches + 1);
       return;
     }
   }
