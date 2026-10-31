@@ -416,7 +416,7 @@ test.describe('Settings Persistence', () => {
     await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
     await appendRenderableMessage(page, 'settings-import-reload-message');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
     expect(runtimeErrors).toEqual([]);
   });
@@ -440,7 +440,7 @@ test.describe('Settings Persistence', () => {
     await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
     await appendRenderableMessage(page, 'settings-preseed-startup-message');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
     expect(runtimeErrors).toEqual([]);
   });

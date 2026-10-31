@@ -22,6 +22,40 @@ for canonical fields. If grapheme segmentation is unavailable, truncation treats
 each text segment as indivisible and uses an ellipsis when it cannot fit. This
 can retain less text, while preserving the compact limit and whole characters.
 
+## Paid cards and preview
+
+`superChatLayout` selects `stacked` or `wide`. Both existing and new settings
+default to `stacked`; load, import, export, preview, reset and synchronization
+retain the selected value. Wide cards allocate the original localized amount
+before flexible author text. When the metadata cannot share a row, the amount
+uses a separate row. Author shortening respects graphemes. An exceptionally long
+amount fits its bounded badge through horizontal text fitting, which can reduce
+its apparent width; this is not a reading-time guarantee.
+
+Estimation, Main, Worker and the production settings preview use the same paid
+card plan and prepared paragraph rows. Original and dual translation share the
+configured total body-line budget. With a one-line budget, the original keeps
+that line; a dual translation has no additional visual row. Accessible text
+alternatives retain the bounded original and selected translation, as described
+below, and can be more complete than the Canvas projection. Replace mode uses
+the translation as the body. Amount-only and empty-body cases add no body gap.
+
+Sticker rows retain a fixed bounded reservation while images load. Loaded images
+preserve their aspect ratio; pending or failed images use the same visible alt
+placeholder in both renderers. Keeping the reservation avoids an asynchronous
+height change. Ordinary member-authored comments keep the regular layout;
+membership events keep their event card.
+
+Paid body, amount, metadata and translation share the card foreground. Automatic
+black/white selection compares RGB contrast on the selected card color; opacity
+and arbitrary video backgrounds still affect the final composite. Membership
+uses a shared border treatment, static under effective reduced motion. The old
+Main-only blurred glow is retired so decoration follows the same availability
+and content opacity in both renderers. Appearance preview includes paid,
+membership, author, emoji, translation and narrow-card samples using actual
+settings and the production drawing path. Text Color also controls ordinary
+body text, matching its label.
+
 ## Motion and geometry
 
 Canvas and OffscreenCanvas Worker rendering use the shared motion planner in
@@ -53,6 +87,23 @@ Fade-out uses the current committed motion's remaining time, so a shorter plan
 does not accidentally become transparent while it is still alive. Pause offsets
 apply to both clocks; geometry changes do not restart fade-in.
 
+Accessible alternatives follow completed drawing in the current frame. A comment
+must have entered its committed interval, intersect the viewport, and have
+positive quantized body opacity; hidden, future, expired and fully transparent
+comments are excluded. Pause uses the frozen logical time. Dual translation
+exposes the bounded canonical original and selected translation; replace mode
+exposes the translation, falling back to the original when unavailable. This is
+a rendering contract, not a screen-reader compatibility qualification.
+
+`totalRendered` retains its legacy allocation meaning. `totalPresented` counts
+the first completed eligible draw of a placement. Pause, reflow, same-ID updates
+and validated recovery preserve that attribution. Deliberate seek replay creates
+a new placement. When Worker recovery has only IDs or times out without a fresh
+snapshot, a later draw increments `totalPresentationUnknown` instead of guessing
+whether it was already counted. The confirmed presentation total is therefore a
+lower bound after uncertain recovery. Both counters reset with the existing
+session metrics; they do not retain an unbounded history of message IDs.
+
 Vertical geometry uses the saved `fontSize` in logical pixels for measurement,
 regular drawing, prewarming, lane creation and reflow in both renderers.
 Resizing/fullscreen changes capacity and paid-card width without resizing text.
@@ -61,7 +112,12 @@ Transparent regular comments keep outline/antialiasing and photo overflow withou
 decorative vertical card padding; visible backgrounds retain their card insets.
 Top-baseline font envelopes and cached actual-content bounds account for CJK,
 fallback fonts, combining marks and emoji. Outlined bitmaps preserve above-origin
-ink and its draw origin. Horizontal padding and wrapping are unchanged.
+ink and its draw origin. Ordinary scrolling remains single-line. Fixed modes,
+including effective reduced motion, use bounded prepared rows. Measurement and
+drawing share wrapping and paragraph bidi; actual image-emoji and fallback ink,
+horizontal bearings and outline insets contribute to the reserved rectangle.
+The Worker measures with its own drawing context before admission or updates,
+and the settings preview supplies its actual context to the same estimator.
 
 `laneSpacing` is additional logical-pixel separation outside each content
 rectangle. Its existing 0–20 range, 1px step and default zero remain unchanged.
@@ -70,11 +126,20 @@ factors 1, 0.75 and 0.5 select 1, 2 and 4 subdivisions of that pitch; an ordinar
 row reserves all its subdivisions, so finer grids do not claim more ordinary
 capacity or increase its pitch. Genuinely taller author, translation and paid
 content reserves `ceil((height + gap) / gridHeight)` slots. Its remaining discrete
-rounding space is centered around content, excluding the user gap. Reservations
+rounding space is centered around content, excluding the user gap. The final
+partial grid block can reduce that centering inset to keep real content inside
+the safe zone; it still reserves every required slot. Reservations
 and reflow use the same rule, including mixed-height neighbors that need vertical
 separation. Spread still spans the full safe zone and may
 leave unused rows or future reservations. The settings preview paints two
 rows with the shared estimate, reservation and drawing code.
+
+Admission checks the candidate's actual Y and height against both safe-zone
+edges. A smaller candidate may fit a partial block that cannot contain a normal
+row. Transient safe-zone capacity failures stay in the bounded pending queue;
+geometry, settings or replacement invalidate their deferral without a retry
+loop. Whole-viewport oversize remains a separate disposition. Zero usable
+capacity does not permanently discard an otherwise fitting row.
 
 ## Burst rates and Backlog selection
 

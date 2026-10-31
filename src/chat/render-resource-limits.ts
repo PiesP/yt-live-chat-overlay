@@ -17,6 +17,7 @@ export type RenderResourceField =
   | 'body'
   | 'contentSegments'
   | 'membershipHeader'
+  | 'stickerAlt'
   | 'translatedText';
 
 export interface RenderResourceViolation {
@@ -157,13 +158,23 @@ export function getRenderMessageResourceViolation(value: unknown): RenderResourc
     if (amount.violation) return amount.violation;
   }
   const amount = inspectField(directAmount ?? nestedAmount, 'amount');
+  const nestedSticker =
+    nestedSuperChat && isRecord(nestedSuperChat.sticker) ? nestedSuperChat.sticker : null;
+  const directStickerAlt = readOptionalString(value, 'superChatStickerAlt');
+  const nestedStickerAlt = nestedSticker ? readOptionalString(nestedSticker, 'alt') : null;
+  for (const stickerValue of [directStickerAlt, nestedStickerAlt]) {
+    const sticker = inspectField(stickerValue, 'stickerAlt');
+    if (sticker.violation) return sticker.violation;
+  }
+  const stickerAlt = inspectField(directStickerAlt ?? nestedStickerAlt, 'stickerAlt');
 
   const aggregateCodePoints =
     bodyCodePoints +
     author.codePoints +
     translated.codePoints +
     membershipHeader.codePoints +
-    amount.codePoints;
+    amount.codePoints +
+    stickerAlt.codePoints;
   return aggregateCodePoints > MAX_RENDER_FIELD_CODE_POINTS
     ? { field: 'aggregate', reason: 'aggregate-code-points' }
     : null;

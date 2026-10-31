@@ -6,6 +6,7 @@ import { LruMap } from '@piesp/browser-core/util';
 import { drawLeftRoundedRect, renderPaidCard } from '@renderer/canvas/card-renderers';
 import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
+import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
@@ -43,6 +44,8 @@ function createMockCtx(): { ctx: CanvasRenderingContext2D; ops: PathOp[] } {
     restore: vi.fn(() => {}),
     fill: vi.fn(() => {}),
     stroke: vi.fn(() => {}),
+    strokeText: vi.fn(() => {}),
+    fillText: vi.fn(() => {}),
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 1,
@@ -131,6 +134,175 @@ describe('drawLeftRoundedRect', () => {
   });
 });
 
+describe('bounded amount rendering', () => {
+  it('passes a contained text width to Canvas without altering the localized amount', () => {
+    const amount = 'X'.repeat(22);
+    const fillText = vi.fn();
+    const gradient = { addColorStop: vi.fn() } as unknown as CanvasGradient;
+    const ctx = {
+      font: 'bold 24px sans-serif',
+      direction: 'ltr',
+      textAlign: 'left',
+      textBaseline: 'top',
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      createLinearGradient: vi.fn(() => gradient),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arcTo: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      strokeText: vi.fn(),
+      fillText,
+      measureText: vi.fn((text: string) => ({
+        width: text === amount ? 220 : text.length * 10,
+        actualBoundingBoxAscent: 10,
+        actualBoundingBoxDescent: 3,
+      })),
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+    } as unknown as CanvasRenderingContext2D;
+    const msg: ChatMessage = {
+      kind: 'superchat',
+      authorType: 'normal',
+      timestamp: 0,
+      text: '',
+      content: [],
+      superChat: { tier: 'blue', amount },
+    };
+    const cache = { get: (): undefined => undefined, set: (): boolean => false };
+    renderPaidCard(
+      ctx,
+      msg,
+      240,
+      80,
+      0,
+      0,
+      0,
+      SUPERCHAT_CARD_CONFIG,
+      DEFAULT_SETTINGS,
+      cache as never,
+      cache as never,
+      cache as never,
+      cache as never,
+      () => 'bold 24px sans-serif',
+      new Map()
+    );
+    expect(fillText).toHaveBeenCalledWith(amount, 36, expect.any(Number), 168);
+  });
+});
+
+describe('Super Chat sticker image ownership', () => {
+  const message: ChatMessage = {
+    kind: 'superchat',
+    authorType: 'normal',
+    timestamp: 0,
+    text: '',
+    content: [],
+    superChat: {
+      tier: 'blue',
+      amount: '',
+      sticker: { url: 'https://example.test/cat.png', alt: '猫ステッカー' },
+    },
+  };
+  const plan = preparePaidCardPlan({
+    kind: 'superchat',
+    width: 240,
+    fontSize: 24,
+    fontWeight: 'bold',
+    fontFamily: 'sans-serif',
+    paddingH: 24,
+    paddingV: 20,
+    showAuthor: false,
+    showAmount: false,
+    content: [],
+    maxBodyLines: 3,
+    outlineWidthPx: 0,
+    wide: true,
+    sticker: true,
+    measure: (value) => value.length * 8,
+  });
+
+  function paint(image?: { complete: boolean; naturalWidth: number; naturalHeight: number }) {
+    const fillText = vi.fn();
+    const drawImage = vi.fn();
+    const gradient = { addColorStop: vi.fn() } as unknown as CanvasGradient;
+    const ctx = {
+      font: 'bold 24px sans-serif',
+      direction: 'ltr',
+      textAlign: 'left',
+      textBaseline: 'top',
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      createLinearGradient: vi.fn(() => gradient),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arcTo: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      strokeText: vi.fn(),
+      fillText,
+      drawImage,
+      measureText: vi.fn((value: string) => ({
+        width: Array.from(value).length * 8,
+        actualBoundingBoxAscent: 10,
+        actualBoundingBoxDescent: 3,
+      })),
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+    } as unknown as CanvasRenderingContext2D;
+    const noCache = { get: (): undefined => undefined, set: (): boolean => false };
+    renderPaidCard(
+      ctx,
+      message,
+      plan.width,
+      plan.height,
+      0,
+      0,
+      0,
+      SUPERCHAT_CARD_CONFIG,
+      DEFAULT_SETTINGS,
+      noCache as never,
+      noCache as never,
+      { get: () => image } as never,
+      noCache as never,
+      () => 'bold 24px sans-serif',
+      new Map()
+    );
+    return { fillText, drawImage };
+  }
+
+  it('uses the reserved sticker row for pending and failed images without a body gap', () => {
+    expect(plan.bodyY).toBeUndefined();
+    expect(plan.stickerY).toBe(20);
+    expect(plan.height).toBe(20 + plan.stickerSize + 20);
+    for (const image of [undefined, { complete: true, naturalWidth: 0, naturalHeight: 0 }]) {
+      const painted = paint(image);
+      expect(painted.drawImage).not.toHaveBeenCalled();
+      expect(painted.fillText.mock.calls.map(([value]) => value).join('')).toContain(
+        '猫ステッカー'
+      );
+    }
+  });
+
+  it('aspect-fits a loaded non-square bitmap instead of drawing the fallback', () => {
+    const painted = paint({ complete: true, naturalWidth: 80, naturalHeight: 40 });
+    expect(painted.fillText).not.toHaveBeenCalled();
+    expect(painted.drawImage).toHaveBeenCalledOnce();
+    const call = painted.drawImage.mock.calls[0];
+    expect(call?.[3]).toBe(plan.stickerSize);
+    expect(call?.[4]).toBe(plan.stickerSize / 2);
+  });
+});
+
 describe('renderPaidCard canvas state', () => {
   it('restores the caller font after rendering an amount badge', () => {
     class MockOffscreenCanvas {
@@ -163,6 +335,8 @@ describe('renderPaidCard canvas state', () => {
       arcTo: vi.fn(),
       fill: vi.fn(),
       stroke: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn(),
       measureText: vi.fn(() => ({
         width: 36,
         actualBoundingBoxAscent: 10,

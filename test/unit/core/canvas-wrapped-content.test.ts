@@ -23,7 +23,6 @@ import {
   renderWrappedContentSegments,
   type TextBitmapCache,
 } from '@renderer/canvas/shared';
-import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import { estimateMessageDimensions } from '@renderer/shared';
@@ -284,9 +283,7 @@ describe('renderWrappedContentSegments', () => {
       8,
       100
     );
-    expect(card.height).toBe(
-      rendererLayout.superchat.paddingV * 2 + SUPERCHAT_CARD_CONFIG.body.marginTop + prepared.height
-    );
+    expect(card.height).toBe(rendererLayout.superchat.paddingV * 2 + prepared.height);
   });
 
   it('keeps separately measured CJK word gaps inside the wrapped line width', () => {

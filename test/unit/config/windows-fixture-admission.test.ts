@@ -140,20 +140,35 @@ describe('installed Windows fixture admission', () => {
       textContent: 'private message',
     }));
     entries.push({ dataset: { messageId: 'unrelated' }, textContent: 'private unrelated content' });
-    const state = runInNewContext(`(${readInstalledLifecycleDomDiagnostic.toString()})()`, {
-      window: { __ytChatOverlay: {} },
-      document: {
-        querySelectorAll: (selector: string) =>
-          selector.includes('yt-chat-overlay-debug')
-            ? [{ textContent: 'Rcvd: 12 | Rndr: 10' }, { textContent: 'Drop: 2 (16.7%)' }]
-            : entries,
-        querySelector: () => ({ value: 'debug' }),
-      },
-    });
+    const diagnostic = (counterLine: string) =>
+      runInNewContext(`(${readInstalledLifecycleDomDiagnostic.toString()})()`, {
+        window: { __ytChatOverlay: {} },
+        document: {
+          querySelectorAll: (selector: string) =>
+            selector.includes('yt-chat-overlay-debug')
+              ? [{ textContent: counterLine }, { textContent: 'Drop: 2 (16.7%)' }]
+              : entries,
+          querySelector: () => ({ value: 'debug' }),
+        },
+      });
+    const state = diagnostic('Rcvd: 12 | Alloc: 10 | Shown≥8 | Uncertain: 2');
     expect(state).toMatchObject({
       pageAppHandleVisible: true,
       uiLogLevel: 'debug',
-      debugCounts: { received: 12, rendered: 10, dropped: 2 },
+      debugCounts: {
+        received: 12,
+        rendered: 10,
+        shownLowerBound: 8,
+        presentationUncertain: 2,
+        dropped: 2,
+      },
+    });
+    expect(diagnostic('Rcvd: 12 | Rndr: 10').debugCounts).toEqual({
+      received: 12,
+      rendered: 10,
+      shownLowerBound: null,
+      presentationUncertain: null,
+      dropped: 2,
     });
     expect(state.sustainedIds).toHaveLength(16);
     expect(JSON.stringify(state)).not.toContain('private');

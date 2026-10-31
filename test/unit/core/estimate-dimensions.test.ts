@@ -21,7 +21,7 @@ vi.mock('@renderer/text-measure', () => ({
 }));
 
 import type { ChatMessage } from '@app-types';
-import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { MEMBERSHIP_CARD_CONFIG } from '@renderer/card-config';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
 import { rendererLayout, spacing } from '@util/design-tokens';
@@ -242,7 +242,7 @@ describe('estimateMessageDimensions — superchat', () => {
     expect(dims.height).toBeGreaterThan(0);
   });
 
-  it('reserves the body margin when the amount badge is hidden', () => {
+  it('adds a body gap only when the amount badge precedes the body', () => {
     const message = makeMessage({
       kind: 'superchat',
       text: 'Thanks!',
@@ -272,11 +272,7 @@ describe('estimateMessageDimensions — superchat', () => {
       Math.round(16 * rendererLayout.authorFontScale) + rendererLayout.superchatBadge.paddingV * 2;
 
     expect(withBadge.height - withoutBadge.height).toBe(badgeHeight + spacing.xs);
-    expect(withoutBadge.height).toBe(
-      rendererLayout.superchat.paddingV * 2 +
-        SUPERCHAT_CARD_CONFIG.body.marginTop +
-        Math.round(16 * 1.2)
-    );
+    expect(withoutBadge.height).toBe(rendererLayout.superchat.paddingV * 2 + Math.round(16 * 1.2));
   });
 });
 
@@ -306,9 +302,7 @@ describe('estimateMessageDimensions — membership', () => {
 
     const dims = estimateMessageDimensions(msg, 16, false);
 
-    expect(dims.height).toBe(
-      rendererLayout.membership.paddingV * 2 + spacing.xs + Math.round(16 * 1.2)
-    );
+    expect(dims.height).toBe(rendererLayout.membership.paddingV * 2 + Math.round(16 * 1.2));
   });
 
   it('lets a long membership header determine the card width', () => {
