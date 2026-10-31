@@ -1364,7 +1364,9 @@ async function runBackend(options: {
     assert(delivered.has(key), `Matrix batch ${key} was not delivered`);
   };
   try {
-    await page.setViewportSize({ width: 960, height: 540 });
+    // The six simultaneous content rows exceed the ordinary 482px player.
+    // Give this phase room to publish every due draw within its fixed wait.
+    await page.setViewportSize({ width: 960, height: 1000 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.route('**/*', async (route) => {
       const url = new globalThis.URL(route.request().url());
@@ -1533,6 +1535,10 @@ async function runBackend(options: {
       });
       return previous;
     });
+    const contentStyle = await page.addStyleTag({
+      content: '#movie_player { height: 800px !important; aspect-ratio: auto !important; }',
+    });
+    await waitForProbeConfig(page, backend, { viewportWidth: 960, playerHeight: 800 });
     await send('content');
     await observeVisible(IDS[0]);
     try {
@@ -1584,6 +1590,7 @@ async function runBackend(options: {
         'Multiline image-emoji source ink was not observed'
       )
     );
+    await contentStyle.evaluate((element) => element.parentNode?.removeChild(element));
 
     const narrowStyle = await page.addStyleTag({
       content: '#movie_player { height: 320px !important; aspect-ratio: auto !important; }',
@@ -2310,6 +2317,7 @@ async function runOverloadBackend(options: {
   const page = await context.newPage();
   const delivered = new Set<string>();
   let currentCase: OverloadCase | null = null;
+  let failureStage = 'setup';
   let replayRequests = 0;
   const cases: Array<Record<string, unknown>> = [];
   const baselineFindings: string[] = [];
@@ -2522,6 +2530,7 @@ async function runOverloadBackend(options: {
     });
     for (const name of OVERLOAD_CASES) {
       currentCase = name;
+      failureStage = `${name}:navigation`;
       replayRequests = 0;
       const caps = OVERLOAD_SETTINGS[name];
       const fixtureUrl =
@@ -2570,13 +2579,16 @@ async function runOverloadBackend(options: {
           }),
         { ...caps, name }
       );
+      failureStage = `${name}:scene`;
       await setScene(page, 'bright');
+      failureStage = `${name}:probe-config`;
       await waitForProbeConfig(page, backend, {
         viewportWidth: 960,
         playerHeight: caps.playerHeight,
         fontSize: caps.fontSize,
         ...(name === 'zero-membership' ? { safeTop: 0.25 } : {}),
       });
+      failureStage = `${name}:observations`;
       const snapshots: Array<{ stage: string; trace: ReturnType<typeof overloadTrace> }> = [];
       const ids =
         name === 'vacancy'
@@ -2725,10 +2737,39 @@ async function runOverloadBackend(options: {
       });
     }
   } catch (error) {
+    const diagnostic = page.isClosed()
+      ? null
+      : await page
+          .evaluate((selectedBackend) => {
+            const probe = window.__ytPlacementProbe;
+            const worker = probe?.workers.find((record) => record.ready);
+            const selected = selectedBackend === 'worker' ? worker?.sample : probe;
+            const frame = selected?.latestRenderFrame;
+            const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+            return {
+              viewportWidth: innerWidth,
+              playerHeight: player?.height ?? null,
+              workerReady: Boolean(worker),
+              sourceHooked: probe?.sourceHooked ?? false,
+              canvasSourceHooked: probe?.canvasSourceHooked ?? false,
+              config: selected?.exact?.config ?? null,
+              frame: frame
+                ? {
+                    complete: frame.complete,
+                    logicalWidth: frame.logicalWidth,
+                    logicalHeight: frame.logicalHeight,
+                  }
+                : null,
+            };
+          }, backend)
+          .catch(() => null);
     return {
       status: 'failed' as const,
       backend,
       mode,
+      currentCase,
+      failureStage,
+      diagnostic,
       cases,
       baselineFindings,
       cleanupErrors,

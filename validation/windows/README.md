@@ -10,9 +10,11 @@ the controller does not support combining `--scenario` and `--installation`.
 The artifact Main profile remains a separate route.
 
 The matrix uses fixed Unicode boundary, paid, RTL, narrow fixed/reduced-motion,
-motion, and zero-capacity/restoration inputs. It waits for all three canonical
-accessible tails before the content capture and requires the deferred zero-capacity
-ID itself to draw after restoration. It then navigates to fresh owned pages for
+motion, and zero-capacity/restoration inputs. Its initial 960-by-1000 viewport
+holds an 800px player so the six simultaneous content rows can be due together.
+It waits for all three canonical accessible tails before the content capture
+and requires the deferred zero-capacity ID itself to draw after restoration.
+It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
 detailed videos at 400px and 960px viewport widths; recorded player bounds are
 the actual overlay size. The presentation workload includes a
