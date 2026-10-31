@@ -808,9 +808,14 @@ describe('Windows placement timing probe', () => {
     expect(result).toMatchObject({ first: 4, stacked: 4, wide: 6, count: 2, retainedRow: id });
   });
 
-  it.each([0, 2])(
-    'observes Canvas queue, committed motion, and %i actual unknown presentations',
-    (unknownPresentations) => {
+  it.each([
+    [0, 'WINDOWS195_BACKLOG_LONG'],
+    [2, 'WINDOWS195_BACKLOG_LONG'],
+    [0, 'W193P'],
+    [0, 'W204P'],
+  ] as const)(
+    'observes Canvas queue, committed motion, and %i unknown presentations for %s',
+    (unknownPresentations, id) => {
       const source = `(() => {
       class RendererBase {}
       function getRegularCardInsets() { return { vertical: 1 }; }
@@ -836,7 +841,7 @@ describe('Windows placement timing probe', () => {
         renderFrame() {}
       };
       function main() { const renderer = new CanvasRenderer();
-        const message = { id: 'WINDOWS195_BACKLOG_LONG', isBacklog: true };
+        const message = { id: '${id}', isBacklog: ${id === 'WINDOWS195_BACKLOG_LONG'} };
         renderer.enqueueMessage(message); renderer.placeQueuedMessage(message);
         renderer.drainQueue(); renderer.renderFrame(); }
       main();
@@ -853,6 +858,7 @@ describe('Windows placement timing probe', () => {
       });
       const exact = state.exact as {
         peaks: { pending: number; active: number };
+        activeNow: Array<{ id: string }>;
         dispositions: Array<{
           id: string;
           laneHeight: number;
@@ -866,17 +872,20 @@ describe('Windows placement timing probe', () => {
       expect(state.canvasSourceHooked).toBe(true);
       expect(exact.peaks).toEqual({ pending: 1, active: 1 });
       expect(exact.dispositions[0]).toMatchObject({
-        id: 'WINDOWS195_BACKLOG_LONG',
+        id,
         laneHeight: 34,
         travelDistancePx: 3580,
         burstSpeedMultiplier: null,
       });
       expect(exact.presentationCount).toBe(1);
+      expect(state.ingress).toMatchObject({ [id]: 1001 });
+      expect(exact.activeNow).toContainEqual(expect.objectContaining({ id }));
       expect(exact.totalPresentationUnknown).toBe(unknownPresentations);
       expect(exact.drains).toEqual([
         { atEpochMs: 1001, workMs: 0, pendingBefore: 0, activeBefore: 1, activeAfter: 1 },
       ]);
-      expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
+      if (id === 'WINDOWS195_BACKLOG_LONG')
+        expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
     }
   );
 
@@ -1275,8 +1284,10 @@ describe('Windows placement timing probe', () => {
     });
   });
 
-  it('hooks the emitted Worker instance and records exact drain and queue residence', () => {
-    const source = `var sample = {
+  it.each(['WINDOWS193_SHORT', 'W193P', 'W204P'])(
+    'hooks emitted Worker placement and queue residence for %s',
+    (id) => {
+      const source = `var sample = {
       pendingQueue: [], activeMessages: [], numLanes: 10, laneHeight: 20,
       enqueueMessage(message) { this.pendingQueue.push(message); return true; },
       activateMessage(message) { this.activeMessages.push({ ...message, x: 10, y: 5,
@@ -1286,66 +1297,67 @@ describe('Windows placement timing probe', () => {
       drainQueue() { const message = this.pendingQueue.shift(); if (message) this.activateMessage(message); },
       renderFrame() { this.drainQueue(); }, handleMessage() {},
     }; self.onmessage=e=>{sample.handleMessage(e)};`;
-    expect(workerProbeSuffix(`${source}\n//# sourceMappingURL=renderer.js.map`)).toBeNull();
-    const suffix = workerProbeSuffix(source);
-    expect(suffix).toContain('(sample)');
-    const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
-    const messages: Array<{
-      sample?: {
-        exact?: {
-          drops: Record<string, number>;
-          drains: unknown[];
-          frames: unknown[];
-          dispositions: Array<{ queueResidenceMs: number }>;
-        };
-      };
-    }> = [];
-    let now = 1;
-    const sandbox = {
-      performance: { timeOrigin: 1000, now: () => now++ },
-      requestAnimationFrame: (_callback: (time: number) => void) => 1,
-      addEventListener: (
-        type: string,
-        listener: (event: { origin: string; data: unknown }) => void
-      ) => {
-        listeners[type] = listener;
-      },
-      postMessage: (message: {
+      expect(workerProbeSuffix(`${source}\n//# sourceMappingURL=renderer.js.map`)).toBeNull();
+      const suffix = workerProbeSuffix(source);
+      expect(suffix).toContain('(sample)');
+      const listeners: Record<string, (event: { origin: string; data: unknown }) => void> = {};
+      const messages: Array<{
         sample?: {
           exact?: {
             drops: Record<string, number>;
             drains: unknown[];
             frames: unknown[];
+            activeNow: Array<{ id: string }>;
             dispositions: Array<{ queueResidenceMs: number }>;
           };
         };
-      }) => {
-        messages.push(message);
-      },
-    };
-    runInNewContext(
-      `self = globalThis; ${workerProbePrelude(['WINDOWS193_SHORT'])}${source}${suffix}`,
-      sandbox
-    );
-    runInNewContext(
-      `sample.enqueueMessage({ id: 'WINDOWS193_SHORT' }); sample.renderFrame();
+      }> = [];
+      let now = 1;
+      const sandbox = {
+        performance: { timeOrigin: 1000, now: () => now++ },
+        requestAnimationFrame: (_callback: (time: number) => void) => 1,
+        addEventListener: (
+          type: string,
+          listener: (event: { origin: string; data: unknown }) => void
+        ) => {
+          listeners[type] = listener;
+        },
+        postMessage: (message: {
+          sample?: {
+            exact?: {
+              drops: Record<string, number>;
+              drains: unknown[];
+              frames: unknown[];
+              activeNow: Array<{ id: string }>;
+              dispositions: Array<{ queueResidenceMs: number }>;
+            };
+          };
+        }) => {
+          messages.push(message);
+        },
+      };
+      runInNewContext(`self = globalThis; ${workerProbePrelude([id])}${source}${suffix}`, sandbox);
+      runInNewContext(
+        `sample.enqueueMessage({ id: '${id}' }); sample.renderFrame();
       sample.recordDrop({ id: 'WINDOWS193_DROP' }, 'reflow_capacity');
       sample.recordDrop({ id: 'WINDOWS193_UNTRACKED', trackDrops: false }, 'oversized');`,
-      sandbox
-    );
-    listeners.message?.({ origin: '', data: { type: 'ytPlacementFlush' } });
-    const exact = messages.at(-1)?.sample?.exact;
-    expect(exact?.drains).toHaveLength(1);
-    expect(exact?.frames).toHaveLength(1);
-    expect(exact?.dispositions[0]).toMatchObject({
-      kind: 'activated',
-      id: 'WINDOWS193_SHORT',
-      queueResidenceMs: expect.any(Number),
-    });
-    expect(exact?.drops).toEqual({ reflow_capacity: 1 });
-    expect(runInNewContext('sample.lastDrop', sandbox)).toEqual([
-      'WINDOWS193_UNTRACKED',
-      'oversized',
-    ]);
-  });
+        sandbox
+      );
+      listeners.message?.({ origin: '', data: { type: 'ytPlacementFlush' } });
+      const exact = messages.at(-1)?.sample?.exact;
+      expect(exact?.drains).toHaveLength(1);
+      expect(exact?.frames).toHaveLength(1);
+      expect(exact?.dispositions[0]).toMatchObject({
+        kind: 'activated',
+        id,
+        queueResidenceMs: expect.any(Number),
+      });
+      expect(exact?.activeNow).toContainEqual(expect.objectContaining({ id }));
+      expect(exact?.drops).toEqual({ reflow_capacity: 1 });
+      expect(runInNewContext('sample.lastDrop', sandbox)).toEqual([
+        'WINDOWS193_UNTRACKED',
+        'oversized',
+      ]);
+    }
+  );
 });

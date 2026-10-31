@@ -1843,7 +1843,8 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     else exact.overflow++;
   };
   const isFixture = (id: unknown): id is string =>
-    typeof id === 'string' && /^WINDOWS(193|195|196|204|380)_/.test(id);
+    typeof id === 'string' &&
+    (/^WINDOWS(193|195|196|204|380)_/.test(id) || id === 'W193P' || id === 'W204P');
   let inEnqueue = false;
   let inDrain = false;
   const nativeEnqueue = renderer.enqueueMessage;
@@ -2203,7 +2204,8 @@ function attachCanvasRendererProbe(
     else exact.overflow++;
   };
   const isFixture = (id: unknown): id is string =>
-    typeof id === 'string' && /^WINDOWS(193|195|196|204|380)_/.test(id);
+    typeof id === 'string' &&
+    (/^WINDOWS(193|195|196|204|380)_/.test(id) || id === 'W193P' || id === 'W204P');
   const nativeEnqueue = Renderer.prototype.enqueueMessage;
   Renderer.prototype.enqueueMessage = function (message, ...args) {
     const before = this.pendingQueue.toArray();
