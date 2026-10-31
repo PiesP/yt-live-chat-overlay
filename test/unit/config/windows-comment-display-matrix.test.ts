@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 
 import { resolveLimits } from '../../../src/settings/limits.ts';
 import {
+  assertPaidCaptureFrame,
+  assertDetailedPresentationReady,
   assertBackend,
   assertCoherentVisibleFrame,
   assertCommittedVisibleItem,
@@ -30,12 +32,14 @@ import {
   overloadTrace,
   overflowSeedAdmissionFinding,
   paidRowBudget,
+  planPaidCaptureWait,
   planRoleVisibilityWait,
   planVisibleItemWait,
   presentationItem,
   presentationGeometry,
   snapshot,
   waitForPaidPlan,
+  waitForPaidCapture,
   validateMatrixMode,
   waitForIngress,
   waitForOverflowSeedProcessed,
@@ -47,6 +51,263 @@ const source = MATRIX_BATCHES.content.map(
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('binds presentation capture to full or source-limited near-full paid ink', async () => {
+    const id = 'WINDOWS380_DETAILED_PAID';
+    const makeSample = (
+      backend: 'main' | 'worker',
+      viewportWidth: number,
+      logicalWidth: number,
+      cardWidth: number,
+      x: number,
+      velocity: number
+    ) => {
+      const row = {
+        id,
+        x,
+        y: 100,
+        width: cardWidth,
+        height: 200,
+        startAtEpochMs: 1000,
+        endAtEpochMs: 16000,
+        actualVelocityPxPerMs: velocity,
+      };
+      return {
+        backend,
+        sourcePrefixed: true,
+        sourceHooked: true,
+        canvasSourceHooked: backend === 'main',
+        workerReady: backend === 'worker',
+        viewport: { width: viewportWidth, height: 1100, dpr: 1 },
+        overlay: { width: logicalWidth, height: 898, left: 0, top: 0 },
+        frame: {
+          frameId: 7,
+          startedAtEpochMs: 1100,
+          complete: true,
+          cleared: true,
+          truncated: false,
+          logicalWidth,
+          logicalHeight: 898,
+          backingRatioX: 1,
+          backingRatioY: 1,
+          active: [row],
+          draws: [
+            {
+              id,
+              section: 'body' as const,
+              alpha: 0.65,
+              rect: { left: x + 10, top: 120, right: x + 100, bottom: 150 },
+            },
+            {
+              id,
+              section: 'translation' as const,
+              alpha: 0.65,
+              rect: { left: x + 10, top: 160, right: x + 100, bottom: 190 },
+            },
+          ],
+          cardPlans: [
+            {
+              id,
+              kind: 'superchat',
+              height: 200,
+              maxBodyLines: 4,
+              bodyRows: 1,
+              bodyY: 20,
+              bodyHeight: 30,
+              translationRows: 1,
+              translationY: 60,
+              translationHeight: 30,
+              borderAlpha: null,
+              borderStyle: null,
+            },
+          ],
+          config: {
+            superChatLayout: 'stacked',
+            reducedMotion: false,
+            ignoreReducedMotion: false,
+          },
+        },
+        layout: 'stacked',
+        firstEntry: { [id]: 1001 },
+        ingress: {},
+        dispositions: [],
+        pendingNow: [],
+        queuedNow: [],
+        retained: null,
+        activeNow: [row],
+        frames: [],
+        drains: [],
+        ink: [],
+        stats: [],
+        accessibility: {},
+        fixtureText: {},
+        measuredPlans: {},
+        presentationCount: 1,
+        totalPresentationUnknown: null,
+        presentationCounterAvailable: true,
+        overflow: 0,
+      } satisfies Parameters<typeof planPaidCaptureWait>[0];
+    };
+    for (const backend of ['main', 'worker'] as const) {
+      const partial = makeSample(backend, 960, 858, 598, 816, 0.10373333333333333);
+      const fullWait = planPaidCaptureWait(partial, id, 20_000);
+      expect(fullWait).toMatchObject({ requiredVisibleFraction: 1, zeroFullExposureWindow: false });
+      expect(fullWait.targetWindowMs).toBeGreaterThan(2500);
+      expect(fullWait.timeoutMs).toBeGreaterThan(10_000);
+      expect(() => assertPaidCaptureFrame(partial, id, 'stacked', fullWait, true)).toThrow();
+      const full = makeSample(backend, 960, 858, 598, 200, 0.10373333333333333);
+      expect(
+        assertPaidCaptureFrame(full, id, 'stacked', fullWait, true).actualVisibleFraction
+      ).toBe(1);
+      let predicate = '';
+      let input: unknown;
+      const page = {
+        waitForFunction: async (callback: (arg: unknown) => unknown, arg: unknown) => {
+          predicate = callback.toString();
+          input = arg;
+        },
+      } as unknown as Parameters<typeof waitForPaidCapture>[0];
+      const browserMatches = (candidate: typeof partial, viewportWidth: number) => {
+        const selected = {
+          latestRenderFrame: candidate.frame,
+          exact: { config: { superChatLayout: 'stacked' } },
+        };
+        const probe = {
+          workers: backend === 'worker' ? [{ ready: true, sample: selected }] : [],
+          ...selected,
+          requestFlushIfDue: () => {},
+        };
+        return runInNewContext(`(${predicate})(${JSON.stringify(input)})`, {
+          window: { __ytPlacementProbe: probe },
+          innerWidth: viewportWidth,
+        });
+      };
+      await waitForPaidCapture(page, backend, id, 'stacked', fullWait, true);
+      expect(browserMatches(partial, 960)).toBe(false);
+      expect(browserMatches(full, 960)).toBe(true);
+      const renewedEpoch = makeSample(backend, 960, 858, 598, 200, 0.10373333333333333);
+      renewedEpoch.frame.active[0]!.startAtEpochMs = 2000;
+      expect(browserMatches(renewedEpoch, 960)).toBe(false);
+      expect(() => assertPaidCaptureFrame(renewedEpoch, id, 'stacked', fullWait, true)).toThrow();
+      expect(() =>
+        assertPaidCaptureFrame(
+          makeSample(backend, 960, 858, 598, -1, 0.10373333333333333),
+          id,
+          'stacked',
+          fullWait,
+          true
+        )
+      ).toThrow();
+      const narrowPartial = makeSample(backend, 400, 335, 335, 304, 0.051333333333333335);
+      const narrowWait = planPaidCaptureWait(narrowPartial, id, 20_000);
+      expect(narrowWait).toMatchObject({
+        requiredVisibleFraction: 0.95,
+        zeroFullExposureWindow: true,
+      });
+      expect(narrowWait.targetWindowMs).toBeGreaterThan(300);
+      const nearFull = makeSample(backend, 400, 335, 335, 10, 0.051333333333333335);
+      expect(
+        assertPaidCaptureFrame(nearFull, id, 'stacked', narrowWait, true).actualVisibleFraction
+      ).toBeGreaterThan(0.95);
+      await waitForPaidCapture(page, backend, id, 'stacked', narrowWait, true);
+      expect(browserMatches(narrowPartial, 400)).toBe(false);
+      expect(browserMatches(nearFull, 400)).toBe(true);
+      expect(() =>
+        assertPaidCaptureFrame(narrowPartial, id, 'stacked', narrowWait, true)
+      ).toThrow();
+      const exitingNearFull = makeSample(backend, 400, 335, 335, -10, 0.051333333333333335);
+      expect(() =>
+        assertPaidCaptureFrame(exitingNearFull, id, 'stacked', narrowWait, true)
+      ).toThrow();
+      expect(
+        assertPaidCaptureFrame(exitingNearFull, id, 'stacked', narrowWait, true, true)
+          .actualVisibleFraction
+      ).toBeGreaterThan(0.95);
+      expect(() =>
+        assertPaidCaptureFrame(
+          makeSample(backend, 400, 335, 335, -18, 0.051333333333333335),
+          id,
+          'stacked',
+          narrowWait,
+          true,
+          true
+        )
+      ).toThrow();
+      expect(() =>
+        assertPaidCaptureFrame(
+          makeSample(backend, 400, 335, 335, -1, 0.051333333333333335),
+          id,
+          'stacked',
+          narrowWait,
+          true
+        )
+      ).toThrow();
+      expect(planPaidCaptureWait(partial, id, 58_000).timeoutMs).toBe(0);
+      expect(() =>
+        planPaidCaptureWait(
+          { ...partial, frame: { ...partial.frame, config: { superChatLayout: 'wide' } } },
+          id,
+          20_000
+        )
+      ).toThrow();
+      expect(() =>
+        planPaidCaptureWait(
+          {
+            ...partial,
+            frame: {
+              ...partial.frame,
+              active: [{ ...partial.frame.active[0]!, startAtEpochMs: 2000 }],
+            },
+          },
+          id,
+          20_000
+        )
+      ).toThrow();
+    }
+  });
+
+  it('requires the recorded detailed-wide role composition before the minimum-line reflow', () => {
+    const name = 'detailed-960-wide';
+    const observation = {
+      name,
+      scene: 'detailed',
+      layout: 'wide',
+      paid: { drawAlpha: 0.65 },
+      translatedDraw: true,
+      items: [
+        { role: 'sticker', proof: { alpha: 0.65 } },
+        { role: 'membership', proof: { alpha: 0.65 } },
+        { role: 'ordinary', proof: { alpha: 0.65 } },
+      ],
+    };
+    expect(() => assertDetailedPresentationReady(observation, name, 'wide')).not.toThrow();
+    expect(() => assertDetailedPresentationReady(undefined, name, 'wide')).toThrow();
+    expect(() =>
+      assertDetailedPresentationReady({ ...observation, layout: 'stacked' }, name, 'wide')
+    ).toThrow();
+    expect(() =>
+      assertDetailedPresentationReady({ ...observation, paid: { drawAlpha: 0 } }, name, 'wide')
+    ).toThrow();
+    expect(() =>
+      assertDetailedPresentationReady(
+        { ...observation, items: observation.items.filter((item) => item.role !== 'membership') },
+        name,
+        'wide'
+      )
+    ).toThrow();
+    expect(() =>
+      assertDetailedPresentationReady(
+        {
+          ...observation,
+          items: observation.items.map((item) =>
+            item.role === 'membership' ? { ...item, proof: { alpha: 0 } } : item
+          ),
+        },
+        name,
+        'wide'
+      )
+    ).toThrow();
+  });
+
   it('waits for current-frame minimum paid body and translation viewport ink', async () => {
     const id = 'WINDOWS380_DETAILED_PAID';
     const makeDraw = (section: 'body' | 'translation', left: number, alpha = 0.65) => ({
@@ -981,12 +1242,16 @@ describe('Windows comment display matrix contract', () => {
     const probe = {
       workers: [],
       latestRenderFrame: frame,
-      exact: { activeNow: frame.active },
+      exact: { activeNow: frame.active, config: { fontSize: 50 } },
       firstEntry: { [id]: 1001 },
       ingress: {},
     };
+    let effectiveFontSize = 50;
     const sandbox = {
-      window: { __ytPlacementProbe: probe },
+      window: {
+        __ytPlacementProbe: probe,
+        __ytChatOverlay: { getSettings: () => ({ fontSize: effectiveFontSize }) },
+      },
       document: {
         querySelector: () => ({
           getBoundingClientRect: () => ({ width: 960, height: 540, left: 0, top: 0 }),
@@ -1002,6 +1267,14 @@ describe('Windows comment display matrix contract', () => {
         runInNewContext(`(${callback.toString()})(${JSON.stringify(input)})`, sandbox),
     } as unknown as Parameters<typeof snapshot>[0];
     const observed = await snapshot(page, 'main');
+    expect(resolveLimits('fontSize')).toMatchObject({ min: 14, max: 50 });
+    expect(observed).toMatchObject({ effectiveFontSize: 50, probeFontSize: 50 });
+    effectiveFontSize = 14;
+    probe.exact.config.fontSize = 14;
+    expect(await snapshot(page, 'main')).toMatchObject({
+      effectiveFontSize: 14,
+      probeFontSize: 14,
+    });
     expect(observed.frame?.truncated).toBe(false);
     expect(observed.frame?.draws).toHaveLength(50);
     expect(observed.frame?.draws.at(-2)?.section).toBe('translation');

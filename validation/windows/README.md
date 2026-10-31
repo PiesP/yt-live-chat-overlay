@@ -84,11 +84,21 @@ fraction, queue residence, and ordinary-row presence. These are diagnostics,
 not a reading-time or blanket contrast verdict. The trace keeps first-visible,
 allocation, and unknown-presentation counts separate. The numeric unknown count
 comes from Main observability; the Worker-local probe reports `null` because it
-cannot infer unknown attribution across fallback and recovery. Exact original-plus-
+cannot infer unknown attribution across fallback and recovery.
+
+The six presentation PNGs
+wait for a current complete paid frame: the entire card at 960 pixels, or at
+least 95% on the entering side at 400 pixels where full-card exposure is zero.
+The before and after frame proofs bracket each PNG; the narrow after proof may
+be on the exiting side while still showing at least 95%. Each layout uses its
+own observed start, end, position, and velocity after the settings transition;
+the planned wait fails when that window or the backend deadline has passed.
+Exact original-plus-
 translation line counts and total-height budget, effect alpha, and overload-policy
 acceptance are recorded separately from the PNG review. The detailed paid card
 records the production `preparePaidCardPlan` output for four total body rows and
-for the supported two-row setting minimum. The live effective setting and completed
+for the supported two-row setting minimum after the matched wide composition has
+captured all four positive role proofs. The live effective setting and completed
 frame plan must agree; the minimum case waits until both original and selected
 translation have positive-alpha viewport ink in one current frame. Their rows
 share the selected total row budget and stay inside the committed card. The

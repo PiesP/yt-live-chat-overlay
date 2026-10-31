@@ -73,6 +73,8 @@ const MAX_OVERLOAD_RECORDS = 128;
 const PRESENTATION_VIEWPORT_HEIGHT = 1100;
 const PRESENTATION_PLAYER_HEIGHT = 900;
 const MIN_PAID_BODY_LINES = resolveLimits('superChatMaxBodyLines').min;
+const MIN_FONT_SIZE = resolveLimits('fontSize').min;
+const MAX_FONT_SIZE = resolveLimits('fontSize').max;
 const ROLE_BASE_WAIT_MS = 5000;
 const MATRIX_CLEANUP_RESERVE_MS = 1000;
 
@@ -111,13 +113,27 @@ type MatrixFrame = {
   logicalHeight: number | null;
   backingRatioX: number;
   backingRatioY: number;
-  active: Array<{ id: string; x: number; y: number; width: number; height: number }>;
+  active: Array<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    startAtEpochMs?: number | null;
+    endAtEpochMs?: number | null;
+  }>;
   draws: MatrixDraw[];
   cardPlans: CardPlanObservation[];
-  config: { reducedMotion?: boolean | null; ignoreReducedMotion?: boolean | null };
+  config: {
+    superChatLayout?: string | null;
+    reducedMotion?: boolean | null;
+    ignoreReducedMotion?: boolean | null;
+  };
 };
 type MatrixSnapshot = {
   backend: Backend;
+  effectiveFontSize?: number | null;
+  probeFontSize?: number | null;
   sourcePrefixed: boolean;
   sourceHooked: boolean;
   canvasSourceHooked: boolean;
@@ -188,6 +204,102 @@ type RoleWaitObservation = RoleWaitBudget & {
   startedAtEpochMs: number;
   outcome: 'visible' | 'failed' | 'budget-exhausted';
 };
+type PaidCaptureWait = {
+  id: string;
+  requiredVisibleFraction: number;
+  zeroFullExposureWindow: boolean;
+  observedFrameAtEpochMs: number;
+  plannedStartAtEpochMs: number;
+  plannedEndAtEpochMs: number;
+  observedX: number;
+  observedWidth: number;
+  logicalWidth: number;
+  actualVelocityPxPerMs: number;
+  estimatedTargetAtEpochMs: number;
+  targetWindowMs: number;
+  requestedMs: number;
+  remainingMs: number;
+  timeoutMs: number;
+  startedAtEpochMs: number;
+  outcome: 'visible' | 'failed' | 'budget-exhausted';
+};
+
+/** Derive the visual capture window from this source-owned scrolling card. */
+export function planPaidCaptureWait(
+  snapshot: MatrixSnapshot,
+  id: string,
+  elapsedBackendMs: number
+): PaidCaptureWait {
+  assert(Number.isFinite(elapsedBackendMs) && elapsedBackendMs >= 0);
+  const frame = snapshot.frame;
+  const row = snapshot.activeNow.find((entry) => entry.id === id);
+  const frameRow = frame?.active.find((entry) => entry.id === id);
+  const logicalWidth = Number(frame?.logicalWidth);
+  assert(
+    frame?.complete &&
+      !frame.truncated &&
+      frame.config.superChatLayout === snapshot.layout &&
+      row &&
+      frameRow &&
+      frameRow.width === row.width &&
+      frameRow.startAtEpochMs === row.startAtEpochMs &&
+      frameRow.endAtEpochMs === row.endAtEpochMs,
+    `${id} lacks a current paid placement in the selected layout`
+  );
+  const velocity = row.actualVelocityPxPerMs;
+  const start = row.startAtEpochMs;
+  const end = row.endAtEpochMs;
+  assert(
+    Number.isFinite(logicalWidth) &&
+      logicalWidth > 0 &&
+      row.width > 0 &&
+      row.width <= logicalWidth &&
+      typeof velocity === 'number' &&
+      Number.isFinite(velocity) &&
+      velocity > 0 &&
+      typeof start === 'number' &&
+      Number.isFinite(start) &&
+      typeof end === 'number' &&
+      Number.isFinite(end),
+    `${id} has no source-measured scrolling capture window`
+  );
+  const zeroFullExposureWindow = row.width === logicalWidth;
+  assert(
+    !zeroFullExposureWindow || snapshot.viewport.width === 400,
+    `${id} has zero full-card exposure outside the narrow scene`
+  );
+  const requiredVisibleFraction = zeroFullExposureWindow ? 0.95 : 1;
+  const targetX = logicalWidth - row.width * requiredVisibleFraction;
+  assert(row.x >= 0, `${id} passed the entering-side capture window`);
+  const etaMs =
+    Math.max(0, start - frame.startedAtEpochMs) + Math.max(0, row.x - targetX) / velocity;
+  const estimatedTargetAtEpochMs = frame.startedAtEpochMs + etaMs;
+  const targetWindowMs = targetX / velocity;
+  assert(targetWindowMs >= 100, `${id} has no sampleable entering-side capture window`);
+  const requestedMs = Math.ceil(etaMs) + ROLE_BASE_WAIT_MS;
+  const remainingMs = Math.max(0, MAX_RUN_MS - elapsedBackendMs - MATRIX_CLEANUP_RESERVE_MS);
+  const timeoutMs =
+    etaMs < remainingMs && estimatedTargetAtEpochMs < end ? Math.min(requestedMs, remainingMs) : 0;
+  return {
+    id,
+    requiredVisibleFraction,
+    zeroFullExposureWindow,
+    observedFrameAtEpochMs: frame.startedAtEpochMs,
+    plannedStartAtEpochMs: start,
+    plannedEndAtEpochMs: end,
+    observedX: row.x,
+    observedWidth: row.width,
+    logicalWidth,
+    actualVelocityPxPerMs: velocity,
+    estimatedTargetAtEpochMs,
+    targetWindowMs,
+    requestedMs,
+    remainingMs,
+    timeoutMs,
+    startedAtEpochMs: Date.now(),
+    outcome: timeoutMs > 0 ? 'failed' : 'budget-exhausted',
+  };
+}
 
 /** Budget a source-planned role without extending the backend deadline. */
 export function planRoleVisibilityWait(
@@ -1085,6 +1197,8 @@ export async function snapshot(
       }
       return {
         backend: selectedBackend,
+        effectiveFontSize: window.__ytChatOverlay?.getSettings().fontSize ?? null,
+        probeFontSize: exact?.config?.fontSize ?? null,
         sourcePrefixed: probe.sourcePrefixed,
         sourceHooked: probe.sourceHooked,
         canvasSourceHooked: probe.canvasSourceHooked === true,
@@ -1112,6 +1226,7 @@ export async function snapshot(
               draws: draws.slice(0, frameDrawLimit),
               cardPlans: cardPlans.slice(0, 24),
               config: {
+                superChatLayout: frame.config?.superChatLayout ?? null,
                 reducedMotion: frame.config?.reducedMotion ?? null,
                 ignoreReducedMotion: frame.config?.ignoreReducedMotion ?? null,
               },
@@ -1212,6 +1327,95 @@ export function presentationGeometry(snapshot: MatrixSnapshot, id: string) {
   };
 }
 
+type PaidCaptureFrameProof = {
+  id: string;
+  frameId: number;
+  frameStartedAtEpochMs: number;
+  layout: 'stacked' | 'wide';
+  requiredVisibleFraction: number;
+  actualVisibleFraction: number;
+  zeroFullExposureWindow: boolean;
+  active: { x: number; y: number; width: number; height: number };
+  bodyInk: { alpha: number; rect: Rect };
+  translationInk: { alpha: number; rect: Rect } | null;
+};
+
+/** Bind a presentation PNG to the current fully or narrowly near-full paid card. */
+export function assertPaidCaptureFrame(
+  snapshot: MatrixSnapshot,
+  id: string,
+  layout: 'stacked' | 'wide',
+  target: PaidCaptureWait,
+  requireTranslation: boolean,
+  allowNarrowExit = false
+): PaidCaptureFrameProof {
+  const { row, frameId } = assertCommittedVisibleItem(snapshot, id);
+  const frame = snapshot.frame;
+  assert(frame);
+  assert.equal(snapshot.layout, layout);
+  assert.equal(frame.config.superChatLayout, layout);
+  assert(frame.active.some((entry) => entry.id === id));
+  assert(
+    frame.cardPlans.some((plan) => plan.id === id),
+    `${id} lacks a current paid card plan`
+  );
+  const width = Number(frame.logicalWidth);
+  const height = Number(frame.logicalHeight);
+  assert.equal(width, target.logicalWidth, `${id} changed capture viewport`);
+  assert.equal(row.width, target.observedWidth, `${id} changed capture card width`);
+  assert.equal(row.startAtEpochMs, target.plannedStartAtEpochMs, `${id} changed capture epoch`);
+  assert.equal(row.endAtEpochMs, target.plannedEndAtEpochMs, `${id} changed capture expiry`);
+  assert(
+    (row.x >= 0 || (allowNarrowExit && target.zeroFullExposureWindow)) &&
+      row.y >= 0 &&
+      row.y + row.height <= height
+  );
+  const visibleWidth = Math.max(0, Math.min(width, row.x + row.width) - Math.max(0, row.x));
+  const actualVisibleFraction = visibleWidth / row.width;
+  assert(
+    target.zeroFullExposureWindow
+      ? row.width === width && actualVisibleFraction >= 0.95
+      : row.x + row.width <= width && actualVisibleFraction === 1,
+    `${id} has not reached its source-measured capture window`
+  );
+  const visibleInk = (section: 'body' | 'translation') => {
+    const draw = frame.draws.find(
+      (entry) =>
+        entry.id === id &&
+        entry.section === section &&
+        entry.alpha > 0 &&
+        entry.rect &&
+        entry.rect.left < width &&
+        entry.rect.right > 0 &&
+        entry.rect.top < height &&
+        entry.rect.bottom > 0
+    );
+    assert(draw?.rect, `${id} lacks positive ${section} viewport ink`);
+    assert(
+      draw.rect.left >= row.x - 2 &&
+        draw.rect.right <= row.x + row.width + 2 &&
+        draw.rect.top >= row.y - 2 &&
+        draw.rect.bottom <= row.y + row.height + 2,
+      `${id} ${section} ink exceeds committed card bounds`
+    );
+    return { alpha: draw.alpha, rect: draw.rect };
+  };
+  const bodyInk = visibleInk('body');
+  const translationInk = requireTranslation ? visibleInk('translation') : null;
+  return {
+    id,
+    frameId,
+    frameStartedAtEpochMs: frame.startedAtEpochMs,
+    layout,
+    requiredVisibleFraction: target.requiredVisibleFraction,
+    actualVisibleFraction,
+    zeroFullExposureWindow: target.zeroFullExposureWindow,
+    active: { x: row.x, y: row.y, width: row.width, height: row.height },
+    bodyInk,
+    translationInk,
+  };
+}
+
 export function presentationItem(
   snapshot: MatrixSnapshot,
   id: string,
@@ -1235,6 +1439,48 @@ export function presentationItem(
     firstVisibleAtEpochMs: snapshot.firstEntry[id] ?? null,
     card: { x: proof.row.x, y: proof.row.y, width: proof.row.width, height: proof.row.height },
   };
+}
+
+/** Guard the same-owner four-role evidence before changing the detailed line budget. */
+export function assertDetailedPresentationReady(
+  observation: Record<string, unknown> | undefined,
+  expectedName: string,
+  expectedLayout: 'stacked' | 'wide'
+): void {
+  assert(
+    observation?.name === expectedName &&
+      observation.scene === 'detailed' &&
+      observation.layout === expectedLayout
+  );
+  const paid = observation.paid;
+  assert(
+    paid &&
+      typeof paid === 'object' &&
+      'drawAlpha' in paid &&
+      typeof paid.drawAlpha === 'number' &&
+      paid.drawAlpha > 0 &&
+      observation.translatedDraw === true
+  );
+  const items = observation.items;
+  assert(Array.isArray(items) && items.length === 3);
+  for (const role of ['sticker', 'membership', 'ordinary']) {
+    assert(
+      items.some(
+        (item) =>
+          item !== null &&
+          typeof item === 'object' &&
+          'role' in item &&
+          item.role === role &&
+          'proof' in item &&
+          item.proof !== null &&
+          typeof item.proof === 'object' &&
+          'alpha' in item.proof &&
+          typeof item.proof.alpha === 'number' &&
+          item.proof.alpha > 0
+      ),
+      `${expectedName} lacks positive ${role} proof before minimum-line reflow`
+    );
+  }
 }
 
 /** The measured production plan and the same complete frame must agree on reserved ink. */
@@ -1661,6 +1907,88 @@ export async function waitForPaidPlan(
   );
 }
 
+export async function waitForPaidCapture(
+  page: Page,
+  backend: Backend,
+  id: string,
+  layout: 'stacked' | 'wide',
+  target: PaidCaptureWait,
+  requireTranslation: boolean
+): Promise<void> {
+  assert(target.timeoutMs > 0, 'Paid capture wait needs a positive bounded timeout');
+  await page.waitForFunction(
+    ({
+      selectedBackend,
+      messageId,
+      expectedLayout,
+      expectedStart,
+      expectedEnd,
+      nearFullNarrow,
+      translationRequired,
+    }) => {
+      const probe = window.__ytPlacementProbe;
+      const worker = probe?.workers.find((record) => record.ready);
+      const selected = selectedBackend === 'worker' ? worker?.sample : probe;
+      const frame = selected?.latestRenderFrame;
+      const width = Number(frame?.logicalWidth);
+      const height = Number(frame?.logicalHeight);
+      const row = frame?.active.find((entry) => entry.id === messageId);
+      const visibleWidth = row
+        ? Math.max(0, Math.min(width, row.x + row.width) - Math.max(0, row.x))
+        : 0;
+      const visibleInk = (section: 'body' | 'translation') =>
+        frame?.draws.some(
+          (draw) =>
+            draw.id === messageId &&
+            draw.section === section &&
+            draw.alpha > 0 &&
+            draw.rect &&
+            draw.rect.left < width &&
+            draw.rect.right > 0 &&
+            draw.rect.top < height &&
+            draw.rect.bottom > 0 &&
+            row &&
+            draw.rect.left >= row.x - 2 &&
+            draw.rect.right <= row.x + row.width + 2 &&
+            draw.rect.top >= row.y - 2 &&
+            draw.rect.bottom <= row.y + row.height + 2
+        ) === true;
+      const matched = Boolean(
+        frame?.complete &&
+        frame.cleared &&
+        !frame.truncated &&
+        frame.config.superChatLayout === expectedLayout &&
+        selected?.exact?.config?.superChatLayout === expectedLayout &&
+        frame.cardPlans.some((plan) => plan.id === messageId) &&
+        row &&
+        row.startAtEpochMs === expectedStart &&
+        row.endAtEpochMs === expectedEnd &&
+        row.x >= 0 &&
+        row.y >= 0 &&
+        row.y + row.height <= height &&
+        row.width > 0 &&
+        (nearFullNarrow
+          ? innerWidth === 400 && row.width === width && visibleWidth / row.width >= 0.95
+          : row.x + row.width <= width && visibleWidth === row.width) &&
+        visibleInk('body') &&
+        (!translationRequired || visibleInk('translation'))
+      );
+      if (!matched && selectedBackend === 'worker' && worker) probe.requestFlushIfDue(worker);
+      return matched;
+    },
+    {
+      selectedBackend: backend,
+      messageId: id,
+      expectedLayout: layout,
+      expectedStart: target.plannedStartAtEpochMs,
+      expectedEnd: target.plannedEndAtEpochMs,
+      nearFullNarrow: target.zeroFullExposureWindow,
+      translationRequired: requireTranslation,
+    },
+    { polling: 100, timeout: target.timeoutMs }
+  );
+}
+
 async function waitForProbeConfig(
   page: Page,
   backend: Backend,
@@ -1856,12 +2184,14 @@ async function runBackend(options: {
     failureStage?: string;
     currentRoleWait?: RoleWaitObservation | null;
     minimumLineWait?: RoleWaitObservation | null;
+    currentCaptureWait?: PaidCaptureWait | null;
     errorType?: string;
     errorMessage?: string;
   };
   const startedAt = Date.now();
   let currentRoleWait: RoleWaitObservation | null = null;
   let minimumLineWait: RoleWaitObservation | null = null;
+  let currentCaptureWait: PaidCaptureWait | null = null;
   const restorationWaitObservations: Array<{ id: string; wait: RoleWaitObservation }> = [];
   let restorationProof: ReturnType<typeof assertRestoredVisibility> | null = null;
   const check = <T>(predicate: () => T): T | undefined => {
@@ -1954,10 +2284,15 @@ async function runBackend(options: {
         baselineFindings.push(`No measured paid plan for ${id} at ${lines} lines`);
     }
   };
-  const capture = async (name: string, includeScreenshot = true) => {
+  const capture = async (
+    name: string,
+    includeScreenshot = true,
+    guard?: (observed: MatrixSnapshot) => void
+  ) => {
     assert(phases.length < MAX_PHASES_PER_BACKEND, 'Matrix phase budget exceeded');
     const filename = includeScreenshot ? `comment-display-${backend}-${name}.png` : null;
     const observed = await snapshot(page, backend);
+    guard?.(observed);
     if (filename) {
       assert(screenshotCount < MAX_CAPTURES_PER_BACKEND, 'Matrix capture budget exceeded');
       await page.screenshot({ path: join(output, filename), animations: 'disabled' });
@@ -2230,13 +2565,15 @@ async function runBackend(options: {
     const narrowStyle = await page.addStyleTag({
       content: '#movie_player { height: 320px !important; aspect-ratio: auto !important; }',
     });
-    await page.evaluate(() =>
-      window.__ytChatOverlay?.applySettings({ danmakuMode: 'top', fontSize: 48, laneSpacing: 0 })
+    await page.evaluate(
+      (fontSize) =>
+        window.__ytChatOverlay?.applySettings({ danmakuMode: 'top', fontSize, laneSpacing: 0 }),
+      MAX_FONT_SIZE
     );
     await waitForProbeConfig(page, backend, {
       viewportWidth: 320,
       playerHeight: 320,
-      fontSize: 48,
+      fontSize: MAX_FONT_SIZE,
       laneSpacing: 0,
       mode: 'top',
       reducedMotion: false,
@@ -2244,6 +2581,10 @@ async function runBackend(options: {
     await send('narrow');
     await observeVisible(IDS[0]);
     const narrow = await capture('narrow-fixed');
+    check(() => {
+      assert.equal(narrow.effectiveFontSize, MAX_FONT_SIZE);
+      assert.equal(narrow.probeFontSize, MAX_FONT_SIZE);
+    });
     const narrowDraw = check(() => assertCoherentVisibleFrame(narrow, IDS[0]));
     check(() =>
       assert(
@@ -2259,13 +2600,15 @@ async function runBackend(options: {
     const reducedStyle = await page.addStyleTag({
       content: '#movie_player { height: 320px !important; aspect-ratio: auto !important; }',
     });
-    await page.evaluate(() =>
-      window.__ytChatOverlay?.applySettings({ danmakuMode: 'scroll', fontSize: 48, laneSpacing: 0 })
+    await page.evaluate(
+      (fontSize) =>
+        window.__ytChatOverlay?.applySettings({ danmakuMode: 'scroll', fontSize, laneSpacing: 0 }),
+      MIN_FONT_SIZE
     );
     await waitForProbeConfig(page, backend, {
       viewportWidth: 320,
       playerHeight: 320,
-      fontSize: 48,
+      fontSize: MIN_FONT_SIZE,
       laneSpacing: 0,
       mode: 'scroll',
       reducedMotion: true,
@@ -2274,6 +2617,10 @@ async function runBackend(options: {
     await send('reduced');
     await observeVisible(IDS[9]);
     const reduced = await capture('reduced-motion-fixed', false);
+    check(() => {
+      assert.equal(reduced.effectiveFontSize, MIN_FONT_SIZE);
+      assert.equal(reduced.probeFontSize, MIN_FONT_SIZE);
+    });
     const reducedDraw = check(() => assertCoherentVisibleFrame(reduced, IDS[9]));
     check(() =>
       assert(
@@ -2761,7 +3108,35 @@ async function runBackend(options: {
         if (scene === 'detailed') await observeTranslation(paidId);
         if (scene === 'detailed') await observePlan(paidId, 4);
         const name = `${scene}-${width}-${layout}`;
-        const observed = await capture(name);
+        failureStage = `presentation:${scene}:${width}:${layout}:capture-window`;
+        const capturePlanning = await snapshot(page, backend);
+        const captureWait = planPaidCaptureWait(capturePlanning, paidId, Date.now() - startedAt);
+        currentCaptureWait = captureWait;
+        assert(captureWait.timeoutMs > 0, `${name} has no bounded paid capture window`);
+        await waitForPaidCapture(page, backend, paidId, layout, captureWait, scene === 'detailed');
+        const observed = await capture(name, true, (sample) => {
+          assertPaidCaptureFrame(sample, paidId, layout, captureWait, scene === 'detailed');
+        });
+        const captureProofBefore = assertPaidCaptureFrame(
+          observed,
+          paidId,
+          layout,
+          captureWait,
+          scene === 'detailed'
+        );
+        const captureProofAfter = assertPaidCaptureFrame(
+          await snapshot(page, backend),
+          paidId,
+          layout,
+          captureWait,
+          scene === 'detailed',
+          true
+        );
+        assert(
+          captureProofAfter.active.x <= captureProofBefore.active.x + 1,
+          `${name} changed motion during the PNG capture`
+        );
+        captureWait.outcome = 'visible';
         assertBackend(observed, backend);
         const paid = check(() => presentationGeometry(observed, paidId));
         const translatedDraw = observed.frame?.draws.some(
@@ -2783,34 +3158,6 @@ async function runBackend(options: {
         if (scene === 'detailed') {
           const budget = check(() => paidRowBudget(observed, paidId, 4));
           rowBudgetObservations.push({ name, lines: 4, budget });
-          if (layout === 'stacked') {
-            failureStage = `presentation:${scene}:${width}:${layout}:minimum-lines`;
-            await page.evaluate(
-              (minimum) =>
-                window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: minimum }),
-              MIN_PAID_BODY_LINES
-            );
-            const effectiveMinimum = await page.evaluate(
-              () => window.__ytChatOverlay?.getSettings().superChatMaxBodyLines
-            );
-            assert.equal(
-              effectiveMinimum,
-              MIN_PAID_BODY_LINES,
-              'Installed paid-line minimum changed'
-            );
-            await observePlan(paidId, MIN_PAID_BODY_LINES, true);
-            const minimumLines = await snapshot(page, backend);
-            rowBudgetObservations.push({
-              name: `${name}-minimum-lines`,
-              lines: MIN_PAID_BODY_LINES,
-              effectiveLines: effectiveMinimum,
-              budget: check(() => paidRowBudget(minimumLines, paidId, MIN_PAID_BODY_LINES)),
-            });
-            await page.evaluate(() =>
-              window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: 4 })
-            );
-            await observePlan(paidId, 4);
-          }
         }
         const ordinaryId = PRESENTATION_IDS[scene].ordinary;
         const itemObservations: Array<{
@@ -2893,6 +3240,9 @@ async function runBackend(options: {
           logicalWidth: observed.frame?.logicalWidth ?? null,
           logicalHeight: observed.frame?.logicalHeight ?? null,
           paid,
+          captureWait,
+          captureProofBefore,
+          captureProofAfter,
           items: itemObservations,
           translatedDraw: translatedDraw ?? false,
           ordinary: ordinary
@@ -2907,6 +3257,36 @@ async function runBackend(options: {
           frameId: observed.frame?.frameId ?? null,
           overflow: observed.overflow,
         });
+        if (scene === 'detailed' && layout === (wideSupported ? 'wide' : 'stacked')) {
+          check(() =>
+            assertDetailedPresentationReady(presentationObservations.at(-1), name, layout)
+          );
+          failureStage = `presentation:${scene}:${width}:${layout}:minimum-lines`;
+          await page.evaluate(
+            (minimum) => window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: minimum }),
+            MIN_PAID_BODY_LINES
+          );
+          const effectiveMinimum = await page.evaluate(
+            () => window.__ytChatOverlay?.getSettings().superChatMaxBodyLines
+          );
+          assert.equal(
+            effectiveMinimum,
+            MIN_PAID_BODY_LINES,
+            'Installed paid-line minimum changed'
+          );
+          await observePlan(paidId, MIN_PAID_BODY_LINES, true);
+          const minimumLines = await snapshot(page, backend);
+          rowBudgetObservations.push({
+            name: `${name}-minimum-lines`,
+            lines: MIN_PAID_BODY_LINES,
+            effectiveLines: effectiveMinimum,
+            budget: check(() => paidRowBudget(minimumLines, paidId, MIN_PAID_BODY_LINES)),
+          });
+          await page.evaluate(() =>
+            window.__ytChatOverlay?.applySettings({ superChatMaxBodyLines: 4 })
+          );
+          await observePlan(paidId, 4);
+        }
         if (scene === 'bright' && layout === 'stacked') {
           failureStage = `presentation:${scene}:${width}:${layout}:membership-effect`;
           const memberId = PRESENTATION_IDS.bright.membership;
@@ -3082,6 +3462,7 @@ async function runBackend(options: {
       restorationWaitObservations,
       restorationProof,
       minimumLineWait,
+      currentCaptureWait,
       effectObservations,
       baselineFindings,
       cleanupErrors,
@@ -3109,6 +3490,7 @@ async function runBackend(options: {
       failureStage,
       currentRoleWait,
       minimumLineWait,
+      currentCaptureWait,
       errorType: error instanceof Error ? error.name : typeof error,
       errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 400),
     };
