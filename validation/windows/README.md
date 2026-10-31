@@ -9,6 +9,22 @@ owned YouTube-shaped fixture. Do not select a focused installation scenario:
 the controller does not support combining `--scenario` and `--installation`.
 The artifact Main profile remains a separate route.
 
+For the #387 Manager FIFO follow-up, place exactly
+`{"scenario":"manager-ingress-fifo"}` in
+`validation/windows/inputs/manager-ingress-fifo.json` before bundling a clean
+committed checkout. Run the headed installed Edge extension profile without a
+controller `--scenario` option or public URL. This focused route skips the full
+visual matrix. It uses one source response to capture the production Manager,
+then its public send method and real Worker pause/resume to hold a paid-only
+pending depth of 50 while 80 old and four new ordinary IDs enter the 80-slot
+Manager buffer. The JSON receipt records the actual Worker backend, bundle and
+source/core/build hashes, retained IDs, four Manager drops, ordered Worker
+ingress after capacity returns, and owned browser cleanup. A timeout or missing
+receipt keeps the partial observation failed; this fixture does not claim a
+new visual, public YouTube, or timing-performance result. Remove only this
+task-owned selector after its source-bound attempt and retain the external
+receipt.
+
 The matrix uses fixed Unicode boundary, paid, RTL, narrow fixed/reduced-motion,
 motion, and zero-capacity/restoration inputs. Its initial 960-by-1000 viewport
 holds an 800px player so the six simultaneous content rows can be due together.

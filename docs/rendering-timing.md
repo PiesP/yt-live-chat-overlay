@@ -211,6 +211,9 @@ If that ordinary entry cannot displace current Worker work, another eligible
 higher-priority entry can proceed. Dispatch is distinct from successful placement
 and actual presentation. Recovery's temporary ingress buffer retains FIFO and
 same-ID coalescing to preserve snapshot and replacement ownership.
+When the full Manager buffer admits a new ID by evicting an older entry, it
+appends the newcomer after the surviving entries of equal priority. A known
+same-ID replacement keeps its existing slot.
 
 There is no waiting-age TTL. Queue sizes bound retained count, not waiting time;
 parser timestamps are not an eligible-running-time clock. User/video/visibility

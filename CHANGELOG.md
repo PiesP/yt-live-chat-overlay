@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Worker ingress freshness** — Preserve fresh ordinary messages and FIFO order when the full Manager buffer evicts older messages under paid Worker backpressure.
+- **Main placement settings** — Apply changed maximum wait, headway and exit padding to new lane placements while retaining existing reservations.
 - **Saturated comment queues** — Give ordinary comments successful-placement opportunities during recurring compatible vacancies, preserve paid priority and time-budget rotation, and favor fresh ordinary arrivals at equal-priority overflow. Existing queue bounds, pause/replay eligibility and motion speeds remain compatible.
 - **Comment bounds** — Share measured wrapping and emoji/outline ink bounds across Canvas, Worker and preview. Fixed and reduced-motion comments fit the available width; partial safe-zone rows reserve their actual space, and transient zero capacity defers comments until geometry changes.
 - **Visible comment reporting** — Publish accessible comment text after an eligible draw, including the selected translation. Distinguish allocation, confirmed first presentation and uncertain Worker recovery in diagnostics; pause, reflow and replacement preserve presentation attribution.

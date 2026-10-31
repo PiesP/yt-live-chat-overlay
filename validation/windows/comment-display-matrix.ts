@@ -562,6 +562,13 @@ const OVERFLOW_SEED_BATCHES = Object.fromEntries(
     ),
   ])
 ) as Record<`overflowSeed${number}`, ReturnType<typeof textAction>[]>;
+const MANAGER_FIFO_IDS = {
+  bootstrap: 'WINDOWS387_FIFO_PAID_BOOTSTRAP',
+  paid: Array.from({ length: 50 }, (_, index) => `WINDOWS387_FIFO_PAID_${index}`),
+  old: Array.from({ length: 80 }, (_, index) => `WINDOWS387_FIFO_OLD_${index}`),
+  fresh: Array.from({ length: 4 }, (_, index) => `WINDOWS387_FIFO_NEW_${index}`),
+};
+const MANAGER_FIFO_ALL_IDS = Object.values(MANAGER_FIFO_IDS).flat();
 
 export const OVERLOAD_BATCHES = Object.freeze({
   vacancySeed: [
@@ -667,6 +674,8 @@ type ManagerProbeRead = {
   } | null;
   events: Array<Record<string, string | number | boolean | string[] | null>>;
   omittedEvents: number;
+  nativePostedOrdinaryIds: string[];
+  omittedNativePostedOrdinaryIds: number;
 };
 
 /** Pure entry insertion observes the real manager and native Worker transport. */
@@ -682,6 +691,8 @@ export function attachWorkerManagerProbe(
   const nativeReceipt = prototype.applyBatchReceipt;
   const events: ManagerProbeRead['events'] = [];
   let omittedEvents = 0;
+  const nativePostedOrdinaryIds: string[] = [];
+  let omittedNativePostedOrdinaryIds = 0;
   let probeError: string | null = null;
   let owner: Record<string, unknown> | null = null;
   let hookedWorker: Record<string, unknown> | null = null;
@@ -729,6 +740,14 @@ export function attachWorkerManagerProbe(
         .map((item) => asRecord(item)?.id)
         .filter((id): id is string => typeof id === 'string' && knownIds.has(id))
         .slice(0, 128);
+      if (outcome === 'returned') {
+        for (const id of fixtureMessageIds) {
+          if (!id.startsWith('WINDOWS387_FIFO_OLD_') && !id.startsWith('WINDOWS387_FIFO_NEW_'))
+            continue;
+          if (nativePostedOrdinaryIds.length < 128) nativePostedOrdinaryIds.push(id);
+          else omittedNativePostedOrdinaryIds++;
+        }
+      }
       record({
         kind: 'native-post',
         outcome,
@@ -848,13 +867,47 @@ export function attachWorkerManagerProbe(
       manager,
       events: events.slice(),
       omittedEvents,
+      nativePostedOrdinaryIds: nativePostedOrdinaryIds.slice(),
+      omittedNativePostedOrdinaryIds,
     };
   };
   if (target.__ytMatrixManagerProbe !== undefined) {
     fail('manager-probe-already-installed');
     return;
   }
-  target.__ytMatrixManagerProbe = { read };
+  target.__ytMatrixManagerProbe = {
+    read,
+    sendFixture(id: string, kind: 'text' | 'superchat') {
+      if (!owner || !knownIds.has(id) || typeof owner.sendToWorker !== 'function')
+        throw new Error('Manager fixture owner or ID is unavailable');
+      const message = {
+        id,
+        text: id,
+        content: [{ type: 'text', content: id }],
+        timestamp: Date.now(),
+        author: id,
+        authorType: 'normal',
+        kind,
+        ...(kind === 'superchat' ? { superChat: { amount: '25.00', tier: 'green' } } : {}),
+      };
+      return Reflect.apply(owner.sendToWorker, owner, [message, id, true]) === true;
+    },
+    setPaused(paused: boolean) {
+      if (!owner || typeof owner.setPaused !== 'function')
+        throw new Error('Manager fixture owner is unavailable');
+      Reflect.apply(owner.setPaused, owner, [paused]);
+    },
+    droppedCount() {
+      const deps = owner && asRecord(owner.deps);
+      const reporter = deps && asRecord(deps.observability);
+      if (!reporter || typeof reporter.getMetrics !== 'function')
+        throw new Error('Manager observability is unavailable');
+      const metrics = asRecord(Reflect.apply(reporter.getMetrics, reporter, []));
+      const count = finite(metrics?.totalDropped);
+      if (count === null) throw new Error('Manager drop count is unavailable');
+      return count;
+    },
+  };
   if (typeof nativeSend !== 'function' || typeof nativeReceipt !== 'function') {
     fail('manager-prototype-shape');
     return;
@@ -912,7 +965,11 @@ export function attachWorkerManagerProbe(
   };
 }
 
-export function instrumentWorkerManagerPageScript(source: string, mode: MatrixMode): string | null {
+export function instrumentWorkerManagerPageScript(
+  source: string,
+  mode: MatrixMode,
+  ids: readonly string[] = OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_'))
+): string | null {
   const marker = '\n\tmain();\n';
   if (
     source.split(marker).length !== 2 ||
@@ -924,7 +981,7 @@ export function instrumentWorkerManagerPageScript(source: string, mode: MatrixMo
     return null;
   return source.replace(
     marker,
-    `\n\t;(${attachWorkerManagerProbe.toString()})(RenderWorkerManager, globalThis, ${JSON.stringify(OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_')))}, ${mode === 'candidate'});` +
+    `\n\t;(${attachWorkerManagerProbe.toString()})(RenderWorkerManager, globalThis, ${JSON.stringify(ids)}, ${mode === 'candidate'});` +
       marker
   );
 }
@@ -2116,7 +2173,7 @@ async function waitForProbeConfig(
   );
 }
 
-export async function waitForIngress(page: Page, backend: Backend, id: string) {
+export async function waitForIngress(page: Page, backend: Backend, id: string, timeoutMs = 5000) {
   await page.waitForFunction(
     ({ selectedBackend, messageId }) => {
       const probe = window.__ytPlacementProbe;
@@ -2127,7 +2184,7 @@ export async function waitForIngress(page: Page, backend: Backend, id: string) {
       return ingressed;
     },
     { selectedBackend: backend, messageId: id },
-    { polling: 100, timeout: 5000 }
+    { polling: 100, timeout: timeoutMs }
   );
 }
 
@@ -3631,6 +3688,7 @@ type OverloadCase =
   | 'vacancy'
   | 'impossible'
   | 'overflow'
+  | 'manager-fifo'
   | 'pause-hidden-resume'
   | 'future-membership'
   | 'zero-membership';
@@ -3647,6 +3705,7 @@ const OVERLOAD_SETTINGS: Record<
   vacancy: { active: 30, queue: 50, playerHeight: 540, fontSize: 32, durationMs: 1000 },
   impossible: { active: 300, queue: 200, playerHeight: 140, fontSize: 48, durationMs: 1000 },
   overflow: { active: 30, queue: 50, playerHeight: 100, fontSize: 32, durationMs: 30000 },
+  'manager-fifo': { active: 30, queue: 50, playerHeight: 540, fontSize: 32, durationMs: 1000 },
   'pause-hidden-resume': {
     active: 300,
     queue: 1000,
@@ -3669,7 +3728,9 @@ const OVERLOAD_SETTINGS: Record<
     durationMs: 1000,
   },
 };
-const OVERLOAD_CASES = Object.keys(OVERLOAD_SETTINGS) as OverloadCase[];
+const OVERLOAD_CASES = (Object.keys(OVERLOAD_SETTINGS) as OverloadCase[]).filter(
+  (name) => name !== 'manager-fifo'
+);
 
 async function runOverloadBackend(options: {
   context: BrowserContext;
@@ -3679,8 +3740,13 @@ async function runOverloadBackend(options: {
   mode: MatrixMode;
   html: string;
   media: Buffer;
+  focusedManagerFifo?: boolean;
 }) {
-  const { context, root, extensionId, backend, mode, html, media } = options;
+  const { context, root, extensionId, backend, mode, html, media, focusedManagerFifo } = options;
+  assert(
+    !focusedManagerFifo || backend === 'worker',
+    'Manager FIFO fixture needs the actual Worker'
+  );
   const page = await context.newPage();
   const delivered = new Set<string>();
   const deliveredIds = new Set<string>();
@@ -3730,7 +3796,9 @@ async function runOverloadBackend(options: {
         );
     }
   };
-  const send = async (key: keyof typeof OVERLOAD_BATCHES | `overflowSeed${number}`) => {
+  const send = async (
+    key: keyof typeof OVERLOAD_BATCHES | `overflowSeed${number}` | 'managerFifoBootstrap'
+  ) => {
     await page.evaluate(async (batch) => {
       const response = await fetch(
         `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows380=${batch}`,
@@ -3740,6 +3808,27 @@ async function runOverloadBackend(options: {
       await response.json();
     }, key);
     assert(delivered.has(key), `Overload batch ${key} was not delivered`);
+  };
+  const sendManagerFixture = async (ids: readonly string[], kind: 'text' | 'superchat') => {
+    const accepted = await page.evaluate(
+      ({ messageIds, messageKind }) => {
+        const probe = (
+          window as typeof window & {
+            __ytMatrixManagerProbe?: {
+              sendFixture: (id: string, kind: 'text' | 'superchat') => boolean;
+            };
+          }
+        ).__ytMatrixManagerProbe;
+        if (!probe) throw new Error('Manager fixture control is unavailable');
+        return messageIds.map((id) => ({ id, accepted: probe.sendFixture(id, messageKind) }));
+      },
+      { messageIds: ids, messageKind: kind }
+    );
+    assert(
+      accepted.every((entry) => entry.accepted),
+      'Manager rejected a fixture message'
+    );
+    for (const id of ids) deliveredIds.add(id);
   };
   const readRawManagerProbe = async (): Promise<ManagerProbeRead | null> =>
     page.evaluate(
@@ -3819,9 +3908,11 @@ async function runOverloadBackend(options: {
       ) {
         const key = url.searchParams.get('windows380');
         const actions =
-          key && Object.hasOwn(OVERLOAD_BATCHES, key) && !delivered.has(key)
-            ? OVERLOAD_BATCHES[key as keyof typeof OVERLOAD_BATCHES]
-            : [];
+          key === 'managerFifoBootstrap' && !delivered.has(key)
+            ? [overloadPaidAction(MANAGER_FIFO_IDS.bootstrap, 'Manager FIFO Worker bootstrap')]
+            : key && Object.hasOwn(OVERLOAD_BATCHES, key) && !delivered.has(key)
+              ? OVERLOAD_BATCHES[key as keyof typeof OVERLOAD_BATCHES]
+              : [];
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -3841,7 +3932,10 @@ async function runOverloadBackend(options: {
             },
           },
         });
-        if (actions.length && key) markDelivered(key as keyof typeof OVERLOAD_BATCHES);
+        if (actions.length && key === 'managerFifoBootstrap') {
+          delivered.add(key);
+          deliveredIds.add(MANAGER_FIFO_IDS.bootstrap);
+        } else if (actions.length && key) markDelivered(key as keyof typeof OVERLOAD_BATCHES);
         return;
       }
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document')
@@ -3854,9 +3948,9 @@ async function runOverloadBackend(options: {
     });
     await page.addInitScript({
       content: canvasProbePrelude({
-        tokens: OVERLOAD_IDS,
+        tokens: focusedManagerFifo ? MANAGER_FIFO_ALL_IDS : OVERLOAD_IDS,
         forceFallback: backend === 'main',
-        workerPrelude: workerProbePrelude(OVERLOAD_IDS),
+        workerPrelude: workerProbePrelude(focusedManagerFifo ? MANAGER_FIFO_ALL_IDS : OVERLOAD_IDS),
         observeCardPlans: true,
       }),
     });
@@ -3934,7 +4028,7 @@ async function runOverloadBackend(options: {
         },
       };
     });
-    for (const name of OVERLOAD_CASES) {
+    for (const name of focusedManagerFifo ? (['manager-fifo'] as const) : OVERLOAD_CASES) {
       currentCase = name;
       currentSnapshots = [];
       currentVacancyService = null;
@@ -3957,9 +4051,13 @@ async function runOverloadBackend(options: {
           instrumentedSource,
         });
         await nativeProbe.assertReady();
-      } else if (name === 'overflow') {
+      } else if (name === 'overflow' || name === 'manager-fifo') {
         const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
-        const instrumentedSource = instrumentWorkerManagerPageScript(source, mode);
+        const instrumentedSource = instrumentWorkerManagerPageScript(
+          source,
+          mode,
+          name === 'manager-fifo' ? MANAGER_FIFO_ALL_IDS : undefined
+        );
         assert(instrumentedSource, 'Packaged Worker manager source shape changed');
         nativeProbe = await installNativePageScriptProbe({
           context,
@@ -4026,11 +4124,13 @@ async function runOverloadBackend(options: {
             ? OVERLOAD_IDS.filter((id) => id.includes('_IMPOSSIBLE_'))
             : name === 'overflow'
               ? OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_'))
-              : name === 'future-membership'
-                ? OVERLOAD_IDS.filter((id) => id.includes('_FUTURE_'))
-                : name === 'zero-membership'
-                  ? OVERLOAD_IDS.filter((id) => id.includes('_ZERO_'))
-                  : OVERLOAD_IDS.filter((id) => id.includes('_PAUSE_'));
+              : name === 'manager-fifo'
+                ? MANAGER_FIFO_ALL_IDS
+                : name === 'future-membership'
+                  ? OVERLOAD_IDS.filter((id) => id.includes('_FUTURE_'))
+                  : name === 'zero-membership'
+                    ? OVERLOAD_IDS.filter((id) => id.includes('_ZERO_'))
+                    : OVERLOAD_IDS.filter((id) => id.includes('_PAUSE_'));
       const observe = async (stage: string) => {
         const measured = await snapshot(page, backend, MAX_OVERLOAD_RECORDS);
         assertBackend(measured, backend);
@@ -4038,7 +4138,7 @@ async function runOverloadBackend(options: {
         snapshots.push({
           stage,
           trace,
-          ...(backend === 'worker' && name === 'overflow'
+          ...(backend === 'worker' && (name === 'overflow' || name === 'manager-fifo')
             ? { managerProbe: await readManagerProbe(true) }
             : {}),
         });
@@ -4136,6 +4236,137 @@ async function runOverloadBackend(options: {
             'Impossible paid card blocked fitting ordinary ink'
           )
         );
+      } else if (name === 'manager-fifo') {
+        failureStage = 'manager-fifo:bootstrap';
+        await send('managerFifoBootstrap');
+        await waitForIngress(page, backend, MANAGER_FIFO_IDS.bootstrap);
+        await readManagerProbe(true);
+        await page.waitForFunction((id) => {
+          const worker = window.__ytPlacementProbe?.workers.find((record) => record.ready);
+          const manager = (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { read: () => ManagerProbeRead };
+            }
+          ).__ytMatrixManagerProbe?.read().manager;
+          return (
+            Number.isFinite(worker?.sample?.firstEntry?.[id]) &&
+            manager?.latestWorkerPendingDepth === 0 &&
+            manager.unacknowledgedBatches?.length === 0
+          );
+        }, MANAGER_FIFO_IDS.bootstrap);
+        await page.evaluate(() => {
+          const probe = (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { setPaused: (paused: boolean) => void };
+            }
+          ).__ytMatrixManagerProbe;
+          if (!probe) throw new Error('Manager fixture control is unavailable');
+          probe.setPaused(true);
+        });
+        const paidBefore = await readManagerProbe(true);
+        assert.equal(paidBefore.manager?.latestWorkerPendingDepth, 0);
+        failureStage = 'manager-fifo:paid-saturation';
+        await sendManagerFixture(MANAGER_FIFO_IDS.paid, 'superchat');
+        await page.waitForFunction(() => {
+          const read = (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { read: () => ManagerProbeRead };
+            }
+          ).__ytMatrixManagerProbe?.read();
+          return (
+            read?.manager?.latestWorkerPendingDepth === 50 &&
+            read.manager.minimumWorkerPendingPriority === 200 &&
+            read.manager.unacknowledgedBatches?.length === 0
+          );
+        });
+        const saturated = await readManagerProbe(true);
+        const dropBefore = await page.evaluate(() =>
+          (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { droppedCount: () => number };
+            }
+          ).__ytMatrixManagerProbe?.droppedCount()
+        );
+        assert(typeof dropBefore === 'number');
+        failureStage = 'manager-fifo:old-buffer';
+        await sendManagerFixture(MANAGER_FIFO_IDS.old, 'text');
+        const oldFull = await readManagerProbe(true);
+        assert.deepEqual(
+          oldFull.manager?.deferredIngress?.map((entry) => entry.id),
+          MANAGER_FIFO_IDS.old
+        );
+        assert.equal(oldFull.manager?.deferredIngressCount, 80);
+        assert.equal(oldFull.manager?.latestWorkerPendingDepth, 50);
+        failureStage = 'manager-fifo:new-overflow';
+        await sendManagerFixture(MANAGER_FIFO_IDS.fresh, 'text');
+        const freshFull = await readManagerProbe(true);
+        const expectedRetained = [...MANAGER_FIFO_IDS.old.slice(4), ...MANAGER_FIFO_IDS.fresh];
+        assert.deepEqual(
+          freshFull.manager?.deferredIngress?.map((entry) => entry.id),
+          expectedRetained
+        );
+        assert.equal(freshFull.manager?.deferredIngressCount, 80);
+        const dropAfter = await page.evaluate(() =>
+          (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { droppedCount: () => number };
+            }
+          ).__ytMatrixManagerProbe?.droppedCount()
+        );
+        assert(typeof dropAfter === 'number');
+        assert.equal(dropAfter - dropBefore, 4);
+        const full = await observe('paid-worker-and-full-manager');
+        assert.equal(full.backend, 'worker');
+        failureStage = 'manager-fifo:capacity-return';
+        await page.evaluate(() => {
+          const probe = (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { setPaused: (paused: boolean) => void };
+            }
+          ).__ytMatrixManagerProbe;
+          if (!probe) throw new Error('Manager fixture control is unavailable');
+          probe.setPaused(false);
+        });
+        await waitForIngress(page, backend, MANAGER_FIFO_IDS.fresh[3] ?? '', 60_000);
+        const drained = await observe('post-vacancy-worker-ingress');
+        const ingressIds = expectedRetained.filter((id) => Number.isFinite(drained.ingress[id]));
+        assert.deepEqual(
+          ingressIds,
+          expectedRetained,
+          'Retained rows did not reach Worker ingress'
+        );
+        const orderedIngress = expectedRetained.map((id) => drained.ingress[id] ?? 0);
+        assert(
+          orderedIngress.every((at, index) => {
+            const previous = orderedIngress[index - 1];
+            return index === 0 || (previous !== undefined && at >= previous);
+          }),
+          'Equal-priority Worker ingress was reordered after capacity returned'
+        );
+        await page.waitForFunction(() => {
+          const manager = (
+            window as typeof window & {
+              __ytMatrixManagerProbe?: { read: () => ManagerProbeRead };
+            }
+          ).__ytMatrixManagerProbe?.read().manager;
+          return manager?.deferredIngressCount === 0 && manager.unacknowledgedBatches?.length === 0;
+        });
+        const finalManager = await readManagerProbe(true);
+        assert.equal(finalManager.manager?.deferredIngressCount, 0);
+        assert.equal(finalManager.manager?.unacknowledgedBatches?.length, 0);
+        assert.equal(finalManager.omittedNativePostedOrdinaryIds, 0);
+        assert.deepEqual(finalManager.nativePostedOrdinaryIds, expectedRetained);
+        currentOverflowInput = {
+          paidWorkerDepth: saturated.manager?.latestWorkerPendingDepth,
+          paidWorkerMinimumPriority: saturated.manager?.minimumWorkerPendingPriority,
+          oldFullIds: oldFull.manager?.deferredIngress?.map((entry) => entry.id),
+          freshFullIds: freshFull.manager?.deferredIngress?.map((entry) => entry.id),
+          managerDropDelta: dropAfter - dropBefore,
+          postVacancyIngressIds: ingressIds,
+          nativePostedOrdinaryIds: finalManager.nativePostedOrdinaryIds,
+          finalManagerDeferredCount: finalManager.manager?.deferredIngressCount,
+          finalUnacknowledgedBatches: finalManager.manager?.unacknowledgedBatches?.length,
+        };
       } else if (name === 'overflow') {
         for (let batch = 0; batch < 20; batch++) {
           failureStage = `overflow:old-${batch}:transport`;
@@ -4398,15 +4629,18 @@ async function runOverloadBackend(options: {
       });
     }
   } catch (error) {
-    if (currentCase === 'overflow' && !page.isClosed()) {
+    if ((currentCase === 'overflow' || currentCase === 'manager-fifo') && !page.isClosed()) {
       const measured = await snapshot(page, backend, MAX_OVERLOAD_RECORDS).catch(() => null);
       if (measured) {
-        const ids = OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_'));
+        const ids =
+          currentCase === 'manager-fifo'
+            ? MANAGER_FIFO_ALL_IDS
+            : OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_'));
         const managerProbe =
           backend === 'worker' ? await readRawManagerProbe().catch(() => null) : null;
         currentSnapshots.push({
           stage: `failed-${failureStage}`,
-          trace: overloadTrace(measured, ids, OVERLOAD_SETTINGS.overflow, deliveredIds),
+          trace: overloadTrace(measured, ids, OVERLOAD_SETTINGS[currentCase], deliveredIds),
           ...(managerProbe ? { managerProbe } : {}),
         });
       }
@@ -4502,9 +4736,14 @@ async function runOverloadBackend(options: {
             },
             {
               selectedBackend: backend,
-              caseIds: OVERLOAD_IDS.filter((id) =>
-                currentCase ? id.includes(`_${currentCase.toUpperCase().split('-')[0]}_`) : false
-              ),
+              caseIds:
+                currentCase === 'manager-fifo'
+                  ? MANAGER_FIFO_ALL_IDS
+                  : OVERLOAD_IDS.filter((id) =>
+                      currentCase
+                        ? id.includes(`_${currentCase.toUpperCase().split('-')[0]}_`)
+                        : false
+                    ),
             }
           )
           .catch(() => null);
@@ -4713,6 +4952,81 @@ export async function runCommentDisplayMatrix(options: {
   };
   await writeFile(
     join(options.output, 'comment-display-matrix.json'),
+    JSON.stringify(result, null, 2)
+  );
+  return result;
+}
+
+/** Select only the installed Worker Manager FIFO follow-up in a fresh VM bundle. */
+export async function readManagerIngressFifoSelector(root: string): Promise<boolean> {
+  const path = join(root, 'validation/windows/inputs/manager-ingress-fifo.json');
+  let source: string;
+  try {
+    source = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(JSON.parse(source), { scenario: 'manager-ingress-fifo' });
+  return true;
+}
+
+/** Execute the #387 queue sequence without repeating the full visual matrix. */
+export async function runManagerIngressFifo(options: {
+  context: BrowserContext;
+  root: string;
+  output: string;
+  extensionId: string;
+}) {
+  const paths = [
+    'validation/windows/comment-display-matrix.ts',
+    'validation/windows/placement-timing.ts',
+    'validation/windows/native-page-script-probe.ts',
+    'validation/windows/visible-watch.ts',
+    'validation/windows/inputs/manager-ingress-fifo.json',
+    'test/visual/preview.html',
+    'validation/windows/fixtures/viewing-bright.mp4',
+  ];
+  const [bundle, profile, pageScript, ...sources] = await Promise.all([
+    readFile(join(options.root, 'bundle.json'), 'utf8'),
+    readFile(join(options.root, 'validation/windows/profile.json')),
+    readFile(join(options.root, 'dist-extension/page-script.js')),
+    ...paths.map((path) => readFile(join(options.root, path))),
+  ]);
+  const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+  const fixtureSha256 = Object.fromEntries(
+    paths.map((path, index) => {
+      const bytes = sources[index];
+      assert(bytes, `Manager FIFO fixture source is unavailable: ${path}`);
+      return [path, digest(bytes)];
+    })
+  );
+  const identity = {
+    ...bindMatrixIdentity(JSON.parse(bundle), digest(profile), digest(pageScript), fixtureSha256),
+    bundleSha256: digest(bundle),
+  };
+  const preview = sources[paths.indexOf('test/visual/preview.html')];
+  const media = sources[paths.indexOf('validation/windows/fixtures/viewing-bright.mp4')];
+  assert(preview && media);
+  const worker = await runOverloadBackend({
+    context: options.context,
+    root: options.root,
+    extensionId: options.extensionId,
+    backend: 'worker',
+    mode: 'candidate',
+    html: buildVisibleWatchHtml(preview.toString('utf8'), 'Manager FIFO Worker fixture'),
+    media,
+    focusedManagerFifo: true,
+  });
+  const result = {
+    status: worker.status,
+    identity,
+    worker,
+    scope: 'Installed extension, actual Worker, paid pending 50 and Manager deferred 80',
+    visualReview: 'not-required',
+  };
+  await writeFile(
+    join(options.output, 'manager-ingress-fifo.json'),
     JSON.stringify(result, null, 2)
   );
   return result;
