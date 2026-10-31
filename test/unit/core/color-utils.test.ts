@@ -162,28 +162,30 @@ describe('computeReadableTextColor', () => {
     expect(computeReadableTextColor('rgb(0, 0, 0)')).toBe('#ffffff');
   });
 
-  it('handles the boundary (mid-gray)', () => {
-    // Mid-gray ~128,128,128 → luminance ≈ 0.215 → dark → white text
-    const result = computeReadableTextColor('#808080');
-    expect(result).toBe('#ffffff');
+  it('chooses the stronger contrast for middle grays', () => {
+    // #808080 has black/white contrast about 5.32/3.95; #777777 about 4.69/4.48.
+    expect(computeReadableTextColor('#808080')).toBe('#000000');
+    expect(computeReadableTextColor('#777777')).toBe('#000000');
+    expect(computeReadableTextColor('#757575')).toBe('#ffffff');
+    expect(computeReadableTextColor('#767676')).toBe('#000000');
   });
 
-  it('uses every RGB channel when classifying colors near the luminance boundary', () => {
+  it('compares contrast for chromatic backgrounds across every RGB channel', () => {
     expect(computeReadableTextColor('#0AD85F')).toBe('#000000');
-    expect(computeReadableTextColor('#D90AFA')).toBe('#ffffff');
+    expect(computeReadableTextColor('#D90AFA')).toBe('#000000');
     expect(computeReadableTextColor('#48D70A')).toBe('#000000');
   });
 
   it.each([
     // Low- and high-branch transfer cases for red, green, then blue.
-    'rgb(1, 201, 254)',
-    'rgb(11, 206, 231)',
-    'rgb(151, 10, 255)',
-    'rgb(0, 182, 248)',
-    'rgb(0, 211, 10)',
-    'rgb(0, 199, 253)',
-  ])('applies the WCAG transfer curve to every channel for %s', (color) => {
-    expect(computeReadableTextColor(color)).toBe('#ffffff');
+    ['rgb(1, 201, 254)', '#000000'],
+    ['rgb(11, 206, 231)', '#000000'],
+    ['rgb(151, 10, 255)', '#ffffff'],
+    ['rgb(0, 182, 248)', '#000000'],
+    ['rgb(0, 211, 10)', '#000000'],
+    ['rgb(0, 199, 253)', '#000000'],
+  ])('chooses the stronger black/white contrast on %s', (color, expected) => {
+    expect(computeReadableTextColor(color)).toBe(expected);
   });
 });
 

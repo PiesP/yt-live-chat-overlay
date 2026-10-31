@@ -325,7 +325,7 @@ export const ZH_CN: Record<string, string> = {
 
   // ── Author grid ──
   Color: '颜色',
-  'appearance.authorsNameColor': '名称颜色',
+  'appearance.authorsNameColor': '文字颜色',
   'appearance.authorsBackground': '背景',
   Show: '显示',
   'appearance.authorsShowName': '显示名称',

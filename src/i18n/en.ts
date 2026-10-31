@@ -183,7 +183,7 @@ export const EN: Record<string, string> = {
   'app.settingsCategories': 'Settings categories',
   'app.title': 'Chat Overlay',
   'appearance.authors': 'Author Colors & Visibility',
-  'appearance.authorsNameColor': 'Name Color',
+  'appearance.authorsNameColor': 'Text Color',
   'appearance.authorsBackground': 'Background',
   'appearance.authorsShowName': 'Show Name',
   'appearance.membershipMaxLines': 'Membership Max Lines',

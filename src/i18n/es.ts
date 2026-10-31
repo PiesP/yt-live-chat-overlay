@@ -367,7 +367,7 @@ export const ES: Record<string, string> = {
 
   // ── Author grid ──
   Color: 'Color',
-  'appearance.authorsNameColor': 'Color del nombre',
+  'appearance.authorsNameColor': 'Color del texto',
   'appearance.authorsBackground': 'Fondo',
   Show: 'Mostrar',
   'appearance.authorsShowName': 'Mostrar nombre',
