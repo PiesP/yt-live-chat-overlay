@@ -8,11 +8,13 @@
  * duplicate text measurement and dimension estimation logic.
  */
 
-import type { ChatMessage, FontWeight, TranslationMode } from '@app-types';
+import type { ChatMessage, DanmakuMode, FontWeight, TranslationMode } from '@app-types';
+import type { TextDirection } from '@renderer/canvas/bidi-layout';
 import {
   buildWrappedLines,
   measureEmojiAdvanceWidth,
   measureTextAdvanceWidth,
+  prepareWrappedContent,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
@@ -33,16 +35,29 @@ import type { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
+/** Measurement dependency lets the Worker prepare rows with its own canvas. */
+export interface DimensionMeasurement {
+  width: (text: string, font: string, direction?: TextDirection) => number;
+  height: (font: string, fontSize: number) => number;
+  context?: Parameters<typeof getRegularContentBounds>[3];
+}
+
+const defaultMeasurement: DimensionMeasurement = {
+  width: measureTextWidth,
+  height: measureTextHeight,
+};
+
 /** Measure pixel width of all text + emoji content segments. */
 function measureContentWidth(
   message: ChatMessage,
   font: string,
   fontSize: number,
-  letterSpacing: string
+  letterSpacing: string,
+  measurement: DimensionMeasurement
 ): number {
   let width = 0;
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-  const measureText = (text: string): number => measureTextWidth(text, font);
+  const measureText = (text: string): number => measurement.width(text, font);
 
   if (message.content.length > 0) {
     for (const seg of message.content) {
@@ -66,6 +81,13 @@ interface MessageDimensions {
   height: number;
 }
 
+/** Fixed comments show a bounded paragraph; scrolling comments retain one lightweight row. */
+export const REGULAR_FIXED_MAX_LINES = 3;
+
+function isFixedMode(mode: DanmakuMode): boolean {
+  return mode === 'top' || mode === 'bottom';
+}
+
 /** Estimate message dimensions without DOM reflow. */
 export function estimateMessageDimensions(
   message: ChatMessage,
@@ -79,7 +101,9 @@ export function estimateMessageDimensions(
   outlineWidthPx = 0,
   availableWidth?: number,
   minimumPaidCardWidth?: number,
-  backgroundColor = '#00000000'
+  backgroundColor = '#00000000',
+  mode: DanmakuMode = 'scroll',
+  measurement: DimensionMeasurement = defaultMeasurement
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -94,7 +118,8 @@ export function estimateMessageDimensions(
       fontWeight,
       showSuperChatAmount,
       availableWidth,
-      minimumPaidCardWidth
+      minimumPaidCardWidth,
+      measurement
     );
   }
   if (message.kind === 'membership') {
@@ -106,7 +131,8 @@ export function estimateMessageDimensions(
       fontWeight,
       fontFamily,
       availableWidth,
-      minimumPaidCardWidth
+      minimumPaidCardWidth,
+      measurement
     );
   }
   return estimateRegularMessageDimensions(
@@ -118,7 +144,10 @@ export function estimateMessageDimensions(
     fontFamily,
     letterSpacing,
     outlineWidthPx,
-    backgroundColor
+    backgroundColor,
+    availableWidth,
+    mode,
+    measurement
   );
 }
 
@@ -131,38 +160,67 @@ function estimateRegularMessageDimensions(
   fontFamily: string,
   letterSpacing: string,
   outlineWidthPx: number,
-  backgroundColor: string
+  backgroundColor: string,
+  availableWidth?: number,
+  mode: DanmakuMode = 'scroll',
+  measurement: DimensionMeasurement = defaultMeasurement
 ): MessageDimensions {
-  const textWidth = measureContentWidth(message, font, fontSize, letterSpacing);
-  const textHeight = getRegularContentBounds(message, font, fontSize).height;
   const insets = getRegularCardInsets(
     fontSize,
     outlineWidthPx,
     showAuthor && !!message.author && !!message.authorPhotoUrl,
     hasRegularBackground(backgroundColor)
   );
+  const fixed = isFixedMode(mode) && availableWidth !== undefined;
+  const innerWidth = Math.max(0, (availableWidth ?? 0) - insets.horizontal * 2);
+  const bodyLayout = fixed
+    ? prepareWrappedContent(
+        message.content.length
+          ? toSharedContentSegments(message.content)
+          : [{ type: 'text', content: message.text }],
+        innerWidth,
+        REGULAR_FIXED_MAX_LINES,
+        font,
+        fontSize,
+        (text, direction) => measurement.width(text, font, direction),
+        measurement.context
+      )
+    : null;
+  const textWidth =
+    bodyLayout?.width ?? measureContentWidth(message, font, fontSize, letterSpacing, measurement);
+  const textHeight =
+    bodyLayout?.height ??
+    getRegularContentBounds(message, font, fontSize, measurement.context).height;
+  const boundWidth = (width: number): number =>
+    fixed ? Math.min(Math.max(1, availableWidth), width) : width;
 
   if (!showAuthor || !message.author) {
     return {
-      width: textWidth + insets.horizontal * 2,
+      width: boundWidth(textWidth + insets.horizontal * 2),
       height: textHeight + insets.vertical * 2,
     };
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
-  const authorNameWidth = measureTextWidth(message.author, authorFont);
+  const authorNameWidth = fixed
+    ? Math.min(
+        measurement.width(message.author, authorFont),
+        Math.max(0, innerWidth - getAuthorPhotoSlotWidth(message.authorPhotoUrl))
+      )
+    : measurement.width(message.author, authorFont);
   const authorSectionWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl) + authorNameWidth;
   const totalWidth = Math.max(authorSectionWidth, textWidth) + insets.horizontal * 2;
   const nameHeight = getRegularContentBounds(
     { text: message.author, content: [] },
     authorFont,
-    authorFontSize
+    authorFontSize,
+    measurement.context
   ).height;
   const authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   return {
-    width: totalWidth,
+    width: boundWidth(totalWidth),
     height: insets.vertical * 2 + authorSectionHeight + spacing.xs + textHeight,
   };
 }
@@ -177,10 +235,10 @@ function estimateSuperChatDimensions(
   fontWeight: FontWeight = 'bold',
   showSuperChatAmount: boolean = true,
   availableWidth?: number,
-  minimumWidth?: number
+  minimumWidth?: number,
+  measurement: DimensionMeasurement = defaultMeasurement
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
-  const bodyLineHeight = measureTextHeight(font, fontSize);
   const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
 
   let authorSectionWidth = 0;
@@ -188,12 +246,12 @@ function estimateSuperChatDimensions(
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
-    const rawNameWidth = measureTextWidth(message.author, authorFont);
+    const rawNameWidth = measurement.width(message.author, authorFont);
     const photoSlotWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl);
     const maxNameWidth = Math.max(1, widthBounds.max - paddingH * 2 - photoSlotWidth);
     const authorNameWidth = Math.min(rawNameWidth, rendererLayout.authorNameMaxWidth, maxNameWidth);
     authorSectionWidth = photoSlotWidth + authorNameWidth;
-    const nameHeight = measureTextHeight(authorFont, authorFontSize);
+    const nameHeight = measurement.height(authorFont, authorFontSize);
     authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
   }
 
@@ -203,7 +261,7 @@ function estimateSuperChatDimensions(
   if (showSuperChatAmount && badgeText) {
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold', fontFamily);
-    const badgeTextWidth = measureTextWidth(badgeText, badgeFont);
+    const badgeTextWidth = measurement.width(badgeText, badgeFont);
     badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
     badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
   }
@@ -218,7 +276,7 @@ function estimateSuperChatDimensions(
     toSharedContentSegments(message.content),
     Math.max(1, maxInnerWidth),
     emojiSize,
-    (t: string) => measureTextWidth(t, font)
+    (t: string) => measurement.width(t, font)
   );
   const maxLineWidth = pass1Result.maxLineWidth;
 
@@ -229,28 +287,19 @@ function estimateSuperChatDimensions(
     Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
   );
 
-  // Pass 2: re-wrap at actual card inner width to get line count.
-  // Skip when Pass 1 already covers the worst case:
-  //  - Card is at maxWidth → same inner width as Pass 1.
-  //  - Content fits in 0-1 lines → line count won't change at narrower width.
-  const pass1LineCount = pass1Result.lines.length;
+  // Resolve the actual visible rows at the final card width.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  let lineCount: number;
-  if (actualInnerWidth === maxInnerWidth || pass1LineCount <= 1) {
-    lineCount = Math.min(pass1LineCount, maxBodyLines);
-  } else {
-    const pass2Result = buildWrappedLines(
-      toSharedContentSegments(message.content),
-      actualInnerWidth,
-      emojiSize,
-      (t: string) => measureTextWidth(t, font)
-    );
-    lineCount = Math.min(pass2Result.lines.length, maxBodyLines);
-  }
-  // Per-line rounding matches the renderer, which rounds each line's
-  // height individually via Math.ceil(measureTextHeight(...)).
-  const lineHeight = Math.ceil(bodyLineHeight);
-  const textHeight = lineHeight * lineCount;
+  const bodyLayout = prepareWrappedContent(
+    toSharedContentSegments(message.content),
+    actualInnerWidth,
+    maxBodyLines,
+    font,
+    fontSize,
+    (text, direction) => measurement.width(text, font, direction),
+    measurement.context
+  );
+  const lineCount = bodyLayout.lines.length;
+  const textHeight = bodyLayout.height;
 
   let stickerHeight = 0;
   if (message.superChat?.sticker) {
@@ -275,10 +324,10 @@ function estimateMembershipDimensions(
   fontWeight: FontWeight,
   fontFamily: string,
   availableWidth?: number,
-  minimumWidth?: number
+  minimumWidth?: number,
+  measurement: DimensionMeasurement = defaultMeasurement
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.membership;
-  const bodyLineHeight = measureTextHeight(font, fontSize);
   const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
 
   let authorSectionWidth = 0;
@@ -289,13 +338,13 @@ function estimateMembershipDimensions(
     const photoSlotWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl);
     const maxNameWidth = Math.max(1, widthBounds.max - paddingH * 2 - photoSlotWidth);
     const authorNameWidth = Math.min(
-      measureTextWidth(message.author, authorFont),
+      measurement.width(message.author, authorFont),
       rendererLayout.authorNameMaxWidth,
       maxNameWidth
     );
     authorSectionWidth = photoSlotWidth + authorNameWidth;
     authorSectionHeight = getAuthorRowHeight(
-      measureTextHeight(authorFont, authorFontSize),
+      measurement.height(authorFont, authorFontSize),
       message.authorPhotoUrl
     );
   }
@@ -306,8 +355,11 @@ function estimateMembershipDimensions(
   if (message.membershipHeader) {
     const headerFontSize = Math.round(fontSize * 0.8);
     const headerFont = getFontString(headerFontSize, fontWeight, fontFamily);
-    headerHeight = measureTextHeight(headerFont, headerFontSize);
-    headerWidth = Math.min(measureTextWidth(message.membershipHeader, headerFont), widthBounds.max);
+    headerHeight = measurement.height(headerFont, headerFontSize);
+    headerWidth = Math.min(
+      measurement.width(message.membershipHeader, headerFont),
+      widthBounds.max
+    );
   }
 
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
@@ -316,7 +368,7 @@ function estimateMembershipDimensions(
     toSharedContentSegments(message.content),
     maxInnerWidth,
     emojiSize,
-    (text: string) => measureTextWidth(text, font)
+    (text: string) => measurement.width(text, font)
   );
   const contentWidth = Math.max(authorSectionWidth, headerWidth, pass1Result.maxLineWidth);
   const width = Math.min(
@@ -328,15 +380,17 @@ function estimateMembershipDimensions(
   // what renderMembership will produce. Uses buildWrappedLines (SSOT with
   // renderWrappedContentSegments) for consistent emoji piece widths.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const passResult = buildWrappedLines(
+  const bodyLayout = prepareWrappedContent(
     toSharedContentSegments(message.content),
     actualInnerWidth,
-    emojiSize,
-    (t: string) => measureTextWidth(t, font)
+    maxBodyLines,
+    font,
+    fontSize,
+    (text, direction) => measurement.width(text, font, direction),
+    measurement.context
   );
-  const bodyLineCount = Math.min(passResult.lines.length, maxBodyLines);
-  // Per-line rounding matches the renderer (rounds each line individually).
-  const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;
+  const bodyLineCount = bodyLayout.lines.length;
+  const textHeight = bodyLayout.height;
 
   // Include author-to-body gap when author section is present (matching renderMembership)
   const headerSectionHeight =
@@ -365,6 +419,8 @@ export interface MessageDimensionOptions {
   outlineWidthPx?: number;
   availableWidth?: number;
   backgroundColor?: string;
+  mode?: DanmakuMode;
+  measurement?: DimensionMeasurement;
 }
 
 export interface TranslatedMessageDimensions extends MessageDimensions {
@@ -390,6 +446,8 @@ export function estimateTranslatedMessageDimensions(
     outlineWidthPx = 0,
     availableWidth,
     backgroundColor = '#00000000',
+    mode: motionMode = 'scroll',
+    measurement = defaultMeasurement,
   } = options;
   const estimate = (candidate: ChatMessage, minimumPaidCardWidth?: number): MessageDimensions =>
     estimateMessageDimensions(
@@ -404,7 +462,9 @@ export function estimateTranslatedMessageDimensions(
       outlineWidthPx,
       availableWidth,
       minimumPaidCardWidth,
-      backgroundColor
+      backgroundColor,
+      motionMode,
+      measurement
     );
   const base = estimate(message);
   if (!translatedText || (mode === 'dual' && translatedText === message.text)) {
@@ -422,15 +482,46 @@ export function estimateTranslatedMessageDimensions(
 
   const translationFontSize = Math.max(1, Math.round(fontSize * TRANSLATION_FONT_SCALE));
   const translationFont = getFontString(translationFontSize, 'normal', fontFamily);
-  const translationLineHeight =
-    message.kind === 'text'
-      ? getRegularContentBounds(
-          { text: translatedText, content: [] },
+  const translationLayout =
+    isFixedMode(motionMode) || message.kind !== 'text'
+      ? prepareWrappedContent(
+          [{ type: 'text', content: translatedText }],
+          Math.max(
+            0,
+            (availableWidth ?? base.width) -
+              (message.kind === 'text'
+                ? getRegularCardInsets(
+                    fontSize,
+                    outlineWidthPx,
+                    false,
+                    hasRegularBackground(backgroundColor)
+                  ).horizontal * 2
+                : (message.kind === 'superchat'
+                    ? rendererLayout.superchat
+                    : rendererLayout.membership
+                  ).paddingH * 2)
+          ),
+          message.kind === 'text'
+            ? REGULAR_FIXED_MAX_LINES
+            : message.kind === 'superchat'
+              ? (maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines)
+              : (maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines),
           translationFont,
-          translationFontSize
-        ).height
-      : Math.ceil(measureTextHeight(translationFont, translationFontSize));
-  const translationTextWidth = measureTextWidth(translatedText, translationFont);
+          translationFontSize,
+          (text, direction) => measurement.width(text, translationFont, direction),
+          measurement.context
+        )
+      : null;
+  const translationLineHeight =
+    translationLayout?.height ??
+    getRegularContentBounds(
+      { text: translatedText, content: [] },
+      translationFont,
+      translationFontSize,
+      measurement.context
+    ).height;
+  const translationTextWidth =
+    translationLayout?.width ?? measurement.width(translatedText, translationFont);
 
   if (message.kind === 'text') {
     const insets = getRegularCardInsets(
@@ -440,7 +531,13 @@ export function estimateTranslatedMessageDimensions(
       hasRegularBackground(backgroundColor)
     );
     return {
-      width: Math.max(base.width, Math.ceil(translationTextWidth) + insets.horizontal * 2),
+      width:
+        isFixedMode(motionMode) && availableWidth !== undefined
+          ? Math.min(
+              availableWidth,
+              Math.max(base.width, Math.ceil(translationTextWidth) + insets.horizontal * 2)
+            )
+          : Math.max(base.width, Math.ceil(translationTextWidth) + insets.horizontal * 2),
       height: base.height + TRANSLATION_GAP_PX + translationLineHeight,
       translationHeight: translationLineHeight,
     };
@@ -455,17 +552,18 @@ export function estimateTranslatedMessageDimensions(
   );
   const primary = estimate(message, desiredWidth);
   const innerWidth = Math.max(1, primary.width - padding.paddingH * 2);
-  const wrapped = buildWrappedLines(
+  const wrapped = prepareWrappedContent(
     [{ type: 'text', content: translatedText }],
     innerWidth,
-    Math.round(translationFontSize * rendererLayout.emojiSize),
-    (text: string) => measureTextWidth(text, translationFont)
-  );
-  const maxLines =
     message.kind === 'superchat'
       ? (maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines)
-      : (maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines);
-  const translationHeight = Math.min(wrapped.lines.length, maxLines) * translationLineHeight;
+      : (maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines),
+    translationFont,
+    translationFontSize,
+    (text, direction) => measurement.width(text, translationFont, direction),
+    measurement.context
+  );
+  const translationHeight = wrapped.height;
 
   return {
     width: primary.width,

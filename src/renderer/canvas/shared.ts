@@ -9,14 +9,14 @@
  * and renderer-worker.ts.
  */
 
-import type { FontWeight } from '@app-types';
+import type { DanmakuMode, FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
-import type { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import {
   resolveTextDirection,
   resolveVisualInlineLines,
   resolveVisualInlinePieces,
   type TextDirection,
+  type VisualInlinePiece,
 } from '@renderer/canvas/bidi-layout';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
@@ -431,6 +431,107 @@ function measureWrappedLineWidth(line: readonly SharedRenderPiece[], spaceWidth:
     width += piece.width;
   }
   return width;
+}
+
+export interface PreparedWrappedContent {
+  lines: VisualInlinePiece<SharedEmojiPiece>[][];
+  lineHeight: number;
+  above: number;
+  height: number;
+  width: number;
+  truncated: boolean;
+}
+
+/** Prepare the same logical and visual rows used by Canvas and OffscreenCanvas. */
+export function prepareWrappedContent(
+  segments: readonly SharedContentSegment[],
+  maxWidth: number,
+  maxLines: number,
+  font: string,
+  fontSize: number,
+  measureTextFn: (text: string, direction?: TextDirection) => number,
+  context?: Parameters<typeof measureTextTopBounds>[3]
+): PreparedWrappedContent {
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const measure = (text: string): number => measureTextFn(text, resolveTextDirection(text));
+  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, measure);
+  const visibleLineCount = Math.min(lines.length, Math.max(0, maxLines));
+  const truncated = lines.length > visibleLineCount;
+  const spaceWidth = measureTextFn(' ', 'ltr');
+  const ellipsis = '\u2026';
+  const ellipsisWidth = measureTextFn(ellipsis, 'ltr');
+  let visibleWidth = 0;
+  const logicalLines = lines.map((sourceLine, lineIndex) => {
+    const needsEllipsis = lineIndex === visibleLineCount - 1 && truncated;
+    const overflows =
+      lineIndex < visibleLineCount && measureWrappedLineWidth(sourceLine, spaceWidth) > maxWidth;
+    const showEllipsis = (needsEllipsis || overflows) && ellipsisWidth <= maxWidth;
+    const line =
+      needsEllipsis || overflows
+        ? fitWrappedLineToWidth(
+            sourceLine,
+            Math.max(0, maxWidth - (showEllipsis ? ellipsisWidth : 0)),
+            spaceWidth,
+            measure
+          )
+        : sourceLine;
+    if (lineIndex < visibleLineCount)
+      visibleWidth = Math.max(
+        visibleWidth,
+        measureWrappedLineWidth(line, spaceWidth) + (showEllipsis ? ellipsisWidth : 0)
+      );
+    const pieces: Array<
+      { type: 'text'; text: string } | { type: 'object'; value: SharedEmojiPiece; width: number }
+    > = [];
+    for (const [pieceIndex, piece] of line.entries()) {
+      if (pieceIndex > 0 && piece.spaceBefore) pieces.push({ type: 'text', text: ' ' });
+      if (piece.type === 'text') pieces.push({ type: 'text', text: piece.text });
+      else pieces.push({ type: 'object', value: piece, width: piece.width });
+    }
+    if (showEllipsis) pieces.push({ type: 'text', text: ellipsis });
+    return {
+      pieces,
+      ...(lineIndex > 0 && sourceLine[0]?.spaceBefore ? { separatorBefore: ' ' } : {}),
+    };
+  });
+  // Resolve the entire paragraph, including hidden lines, before selecting rows.
+  const visualLines = resolveVisualInlineLines(logicalLines, measureTextFn, visibleLineCount);
+  const visualWidth = visualLines.reduce(
+    (widest, line) =>
+      Math.max(
+        widest,
+        line.reduce((width, piece) => width + piece.width, 0)
+      ),
+    visibleWidth
+  );
+  const base = measureTextTopBounds(font, fontSize, undefined, context);
+  let above = base.above;
+  let below = base.below;
+  for (const line of visualLines) {
+    for (const piece of line) {
+      if (piece.type !== 'text') continue;
+      const bounds = measureTextTopBounds(font, fontSize, piece.text, context);
+      above = Math.max(above, bounds.above);
+      below = Math.max(below, bounds.below);
+    }
+  }
+  const lineHeight = Math.max(
+    1,
+    Math.ceil(measureTextHeight(font, fontSize)),
+    above + below,
+    emojiSize
+  );
+  return {
+    lines: visualLines,
+    lineHeight,
+    above,
+    height: lineHeight * visibleLineCount,
+    width: Math.min(maxWidth, visualWidth),
+    truncated:
+      truncated ||
+      visualWidth > maxWidth ||
+      lines.some((line) => measureWrappedLineWidth(line, spaceWidth) > maxWidth),
+  };
 }
 
 /**
@@ -1173,6 +1274,11 @@ export function drawAuthorSection<T>(
     (regularNameBounds?.above ?? 0);
 
   // Truncate author name with ellipsis if it exceeds the allowed width
+  if (maxNameWidth !== undefined && maxNameWidth <= 0) {
+    ctx.font = prevFont;
+    ctx.textBaseline = prevTextBaseline;
+    return startY + sectionHeight;
+  }
   let displayName = message.author;
   if (maxNameWidth !== undefined && maxNameWidth > 0) {
     ctx.font = nameFont;
@@ -1247,6 +1353,7 @@ export interface RegularMessageRenderConfig {
   backgroundColor: string;
   messageWidth: number;
   messageHeight: number;
+  mode?: DanmakuMode;
 }
 
 /**
@@ -1271,7 +1378,7 @@ export function renderRegularMessage(
   authorPhotoCache: ImageCacheLike,
   isValidAuthorPhoto: (photo: unknown) => boolean,
   getFontFn: (fontSize: number) => string,
-  measureTextFn: (text: string) => number,
+  measureTextFn: (text: string, direction?: TextDirection) => number,
   overrideText?: string | null,
   letterSpacing = '0px'
 ): void {
@@ -1288,6 +1395,13 @@ export function renderRegularMessage(
     messageHeight,
   } = config;
   renderRegularMessageBackground(ctx, x, y, messageWidth, messageHeight, backgroundColor);
+  const fixedMode = config.mode === 'top' || config.mode === 'bottom';
+  if (fixedMode) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, messageWidth, messageHeight);
+    ctx.clip();
+  }
   const insets = getRegularCardInsets(
     fontSize,
     outlineWidthPx,
@@ -1305,7 +1419,12 @@ export function renderRegularMessage(
       textX,
       textY,
       color,
-      undefined,
+      fixedMode
+        ? Math.max(
+            0,
+            messageWidth - insets.horizontal * 2 - getAuthorPhotoSlotWidth(message.authorPhotoUrl)
+          )
+        : undefined,
       authorFontSize,
       fontWeight,
       fontFamily,
@@ -1326,6 +1445,30 @@ export function renderRegularMessage(
   }
 
   const displayed = overrideText ? { text: overrideText, content: [] } : message;
+  if (fixedMode) {
+    renderWrappedContentSegments(
+      ctx,
+      overrideText
+        ? [{ type: 'text', content: overrideText }]
+        : message.content.length > 0
+          ? message.content
+          : [{ type: 'text', content: message.text }],
+      textX,
+      textY,
+      Math.max(0, messageWidth - insets.horizontal * 2),
+      3,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      emojiCache,
+      getFontFn,
+      measureTextFn
+    );
+    ctx.restore();
+    return;
+  }
   const textAbove = getRegularContentBounds(displayed, getFontFn(fontSize), fontSize, ctx).above;
   textY += textAbove;
 
@@ -1391,7 +1534,7 @@ export function renderRegularMessage(
  */
 export function renderWrappedContentSegments<
   TTextBitmapCache extends TextBitmapCache,
-  TEmojiCache extends ResizableByteLimitedCache<CanvasImageSource>,
+  TEmojiCache extends ImageCacheLike,
 >(
   ctx: AnyCanvasContext,
   segments: readonly SharedContentSegment[],
@@ -1406,7 +1549,8 @@ export function renderWrappedContentSegments<
   textBitmapCache: TTextBitmapCache,
   emojiCache: TEmojiCache,
   getFontFn: (fontSize: number) => string,
-  measureTextFn?: (text: string, direction?: TextDirection) => number
+  measureTextFn?: (text: string, direction?: TextDirection) => number,
+  prepared?: PreparedWrappedContent
 ): number {
   if (segments.length === 0) return y;
 
@@ -1417,65 +1561,25 @@ export function renderWrappedContentSegments<
     measureTextFn ??
     ((text: string, direction: TextDirection = 'ltr') => measureTextWidth(text, font, direction));
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-  const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
-  const spaceWidth = measureWrappedText(' ', 'ltr');
-  const ellipsis = '\u2026';
-  const ellipsisWidth = measureWrappedText(ellipsis, 'ltr');
-
-  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, (t: string) =>
-    measureWrappedText(t, resolveTextDirection(t))
-  );
-
-  // ── Resolve the whole paragraph, then render up to maxLines ──────────
-  const visibleLineCount = Math.min(lines.length, Math.max(0, maxLines));
+  const layout =
+    prepared ??
+    prepareWrappedContent(segments, maxWidth, maxLines, font, fontSize, measureWrappedText, ctx);
+  const visibleLineCount = layout.lines.length;
   if (visibleLineCount === 0) {
     ctx.restore();
     return y;
   }
-  const isTruncated = lines.length > visibleLineCount;
-  const logicalLines = lines.map((sourceLine, lineIndex) => {
-    const isLastVisibleLine = lineIndex === visibleLineCount - 1;
-    const needsEllipsis = isLastVisibleLine && isTruncated;
-    const canRenderEllipsis = needsEllipsis && ellipsisWidth <= maxWidth;
-    const line = needsEllipsis
-      ? fitWrappedLineToWidth(
-          sourceLine,
-          Math.max(0, maxWidth - (canRenderEllipsis ? ellipsisWidth : 0)),
-          spaceWidth,
-          (text: string) => measureWrappedText(text, resolveTextDirection(text))
-        )
-      : sourceLine;
-    const pieces: Array<
-      { type: 'text'; text: string } | { type: 'object'; value: SharedEmojiPiece; width: number }
-    > = [];
-    for (const [pieceIndex, piece] of line.entries()) {
-      const prefix = pieceIndex > 0 && piece.spaceBefore ? ' ' : '';
-      // Keep the collapsed gap separate so rendering uses the same
-      // measure(' ') + measure(word) contract as buildWrappedLines(). Some
-      // fallback-font runs (notably CJK on Windows) shape " word" wider than
-      // those independently measured pieces and can otherwise escape the line.
-      if (prefix) pieces.push({ type: 'text', text: prefix });
-      if (piece.type === 'text') pieces.push({ type: 'text', text: piece.text });
-      else pieces.push({ type: 'object', value: piece, width: piece.width });
-    }
-    if (canRenderEllipsis) pieces.push({ type: 'text', text: ellipsis });
-    return {
-      pieces,
-      ...(lineIndex > 0 && sourceLine[0]?.spaceBefore ? { separatorBefore: ' ' } : {}),
-    };
-  });
-  const visualLines = resolveVisualInlineLines(
-    logicalLines,
-    (text, direction) => measureWrappedText(text, direction),
-    visibleLineCount
-  );
+  ctx.beginPath();
+  ctx.rect(x, y, Math.max(0, maxWidth), layout.height);
+  ctx.clip();
   let cursorY = y;
 
   for (let li = 0; li < visibleLineCount; li++) {
-    const visualPieces = visualLines[li];
+    const visualPieces = layout.lines[li];
     if (!visualPieces) continue;
     let cursorX = x;
-    const emojiLineY = cursorY + Math.round((lineHeight - emojiSize) / 2);
+    const emojiLineY = cursorY + Math.round((layout.lineHeight - emojiSize) / 2);
+    const textY = cursorY + layout.above;
 
     for (const piece of visualPieces) {
       if (piece.type === 'text') {
@@ -1483,7 +1587,7 @@ export function renderWrappedContentSegments<
           ctx,
           piece.text,
           cursorX,
-          cursorY,
+          textY,
           color,
           fontSize,
           outlineWidthPx,
@@ -1501,6 +1605,7 @@ export function renderWrappedContentSegments<
         const cached = emojiPiece.emojiUrl ? emojiCache.get(emojiPiece.emojiUrl) : undefined;
         const img =
           cached != null &&
+          isCanvasImageSource(cached) &&
           (('naturalWidth' in cached && cached.naturalWidth > 0) ||
             ('width' in cached && (cached as { width: number }).width > 0))
             ? cached
@@ -1513,7 +1618,7 @@ export function renderWrappedContentSegments<
             ctx,
             emojiPiece.emojiFallbackText,
             cursorX,
-            cursorY,
+            textY,
             color,
             fontSize,
             outlineWidthPx,
@@ -1527,7 +1632,7 @@ export function renderWrappedContentSegments<
             ctx,
             emojiPiece.emojiAlt,
             cursorX,
-            cursorY,
+            textY,
             color,
             fontSize,
             outlineWidthPx,
@@ -1541,7 +1646,7 @@ export function renderWrappedContentSegments<
       }
     }
 
-    cursorY += lineHeight;
+    cursorY += layout.lineHeight;
   }
 
   ctx.restore();

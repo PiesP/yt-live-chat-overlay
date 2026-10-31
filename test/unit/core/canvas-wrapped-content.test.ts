@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 vi.mock('@renderer/text-measure', () => ({
   getFontString: (fontSize: number): string => `bold ${fontSize}px sans-serif`,
   measureTextHeight: (): number => 20,
+  measureTextTopBounds: (): { above: number; below: number } => ({ above: 0, below: 20 }),
   measureTextWidth: (text: string): number => (text === 'i' ? 4 : text.length * 10),
 }));
 
@@ -17,6 +18,9 @@ import {
 
 function createContext(): CanvasRenderingContext2D {
   return {
+    beginPath: vi.fn(),
+    rect: vi.fn(),
+    clip: vi.fn(),
     drawImage: vi.fn(),
     fillText: vi.fn(),
     getTransform: vi.fn(() => ({ a: 1 })),
@@ -32,6 +36,32 @@ function createContext(): CanvasRenderingContext2D {
 }
 
 describe('renderWrappedContentSegments', () => {
+  it('reserves every loaded image emoji row and contains the last image', () => {
+    const ctx = createContext();
+    const image = { width: 38, height: 38 } as CanvasImageSource;
+    const bottom = renderWrappedContentSegments(
+      ctx,
+      [1, 2, 3].map((index) => ({ type: 'emoji', emojiUrl: `emoji://${index}` })),
+      24,
+      20,
+      42,
+      3,
+      '#ffffff',
+      32,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      { get: () => image },
+      () => 'bold 32px sans-serif'
+    );
+    const draws = (ctx.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(draws).toHaveLength(3);
+    const imageBottoms = draws.map(([, , y, , height]) => Number(y) + Number(height));
+    expect(Number(draws[1]?.[2]) - Number(draws[0]?.[2])).toBeGreaterThanOrEqual(38);
+    expect(Number(draws[2]?.[2]) - Number(draws[1]?.[2])).toBeGreaterThanOrEqual(38);
+    expect(bottom).toBeGreaterThanOrEqual(imageBottoms.at(-1) ?? Infinity);
+  });
+
   it('keeps separately measured CJK word gaps inside the wrapped line width', () => {
     const ctx = createContext();
     const measureText = (text: string): number => {
