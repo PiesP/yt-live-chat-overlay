@@ -179,7 +179,9 @@ function makeDrainCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderCon
     expiredMessagesScratch: [],
     messageActivator: {} as CanvasRenderContext['messageActivator'],
     cachedOpacityConfig: {} as CanvasRenderContext['cachedOpacityConfig'],
-    observability: {} as CanvasRenderContext['observability'],
+    observability: {
+      onMessagesPresented: vi.fn(),
+    } as unknown as CanvasRenderContext['observability'],
     isReducedMotionActive: false,
     lastLiveRegionUpdate: { value: 0 },
     updateLiveRegion: vi.fn(),
@@ -295,6 +297,99 @@ describe('drawStage', () => {
     mocks.renderSegment.mockClear();
   });
 
+  it('records first presentation only after an eligible completed draw and mirrors that frame', () => {
+    const original: ChatMessage = {
+      id: 'same-id',
+      text: 'short…',
+      canonicalText: 'full original',
+      kind: 'text',
+      content: [{ type: 'text', content: 'short…' }],
+      timestamp: 1,
+      authorType: 'normal',
+    };
+    const message = {
+      message: original,
+      renderMessage: original,
+      duration: 1_000,
+      width: 100,
+      height: 20,
+      x: 20,
+      y: 20,
+      speedTier: 1,
+      _frameElapsed: -1,
+    };
+    const presented = vi.fn();
+    const updateLiveRegion = vi.fn();
+    const ctx = makeDrainCtx({
+      settings: { ...DEFAULT_SETTINGS, translationEnabled: true, translationMode: 'dual' },
+      activeMessages: [message] as never[],
+      observability: {
+        onMessagesPresented: presented,
+      } as unknown as CanvasRenderContext['observability'],
+      updateLiveRegion,
+      imageFetchManager: {
+        emojiCache: { get: vi.fn() },
+        authorPhotoCache: { get: vi.fn() },
+        stickerCache: { get: vi.fn() },
+      } as unknown as CanvasRenderContext['imageFetchManager'],
+    });
+    const renderCtx = {
+      globalAlpha: 1,
+      measureText: vi.fn(() => ({
+        actualBoundingBoxAscent: 0,
+        actualBoundingBoxDescent: 16,
+        width: 100,
+      })),
+      save: vi.fn(),
+      restore: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    const buckets = Array.from({ length: 32 }, () => [] as (typeof message)[]);
+    const dims = { width: 640, height: 360 };
+
+    buckets[1]!.push(message);
+    drawStage(ctx, renderCtx, buckets as never, 1, dims);
+    message._frameElapsed = 100;
+    message.x = 640;
+    drawStage(ctx, renderCtx, buckets as never, 2, dims);
+    message.x = 20;
+    buckets[1]!.length = 0;
+    buckets[0]!.push(message);
+    drawStage(ctx, renderCtx, buckets as never, 3, dims);
+    expect(presented).not.toHaveBeenCalled();
+    mirrorVisibleMessages(ctx, 1_000, 3);
+    expect(updateLiveRegion).not.toHaveBeenCalled();
+
+    buckets[0]!.length = 0;
+    buckets[1]!.push(message);
+    drawStage(ctx, renderCtx, buckets as never, 4, dims);
+    mirrorVisibleMessages(ctx, 1_500, 4);
+    expect(presented).toHaveBeenCalledOnce();
+    expect(updateLiveRegion.mock.lastCall?.[0]).toMatchObject([
+      { id: 'same-id', text: 'full original' },
+    ]);
+
+    Object.assign(message, { reflowHidden: true });
+    drawStage(ctx, renderCtx, buckets as never, 5, dims);
+    mirrorVisibleMessages(ctx, 2_000, 5);
+    expect(updateLiveRegion).toHaveBeenCalledOnce();
+    Object.assign(message, {
+      reflowHidden: false,
+      message: { ...original, text: 'edited', canonicalText: 'full edit' },
+      translatedText: 'translation',
+    });
+    drawStage(ctx, renderCtx, buckets as never, 6, dims);
+    mirrorVisibleMessages(ctx, 2_500, 6);
+    expect(presented).toHaveBeenCalledOnce();
+    expect(updateLiveRegion.mock.lastCall?.[0]).toMatchObject([
+      { id: 'same-id', text: 'full edit — translation' },
+    ]);
+
+    message._frameElapsed = 1_000;
+    drawStage(ctx, renderCtx, buckets as never, 7, dims);
+    mirrorVisibleMessages(ctx, 3_000, 7);
+    expect(updateLiveRegion).toHaveBeenCalledTimes(2);
+  });
+
   it('passes author background color and unchanged bounds to regular message rendering', () => {
     const original: ChatMessage = {
       id: 'moderator-message',
@@ -334,7 +429,7 @@ describe('drawStage', () => {
     const buckets = Array.from({ length: 21 }, () => [] as (typeof message)[]);
     buckets[20]!.push(message);
 
-    drawStage(ctx, renderCtx, buckets as never);
+    drawStage(ctx, renderCtx, buckets as never, 1_000, { width: 640, height: 360 });
 
     expect(mocks.renderRegularMessage).toHaveBeenCalledOnce();
     expect(mocks.renderRegularMessage).toHaveBeenCalledWith(
@@ -418,7 +513,7 @@ describe('drawStage', () => {
     const buckets = Array.from({ length: 21 }, () => [] as (typeof message)[]);
     buckets[20]!.push(message);
 
-    drawStage(ctx, renderCtx, buckets as never);
+    drawStage(ctx, renderCtx, buckets as never, 1_000, { width: 640, height: 360 });
 
     expect(mocks.renderSegment.mock.calls[0]?.[2]).toBe(22);
     expect(mocks.renderSegment.mock.calls[0]?.[3]).toBe(43);
@@ -478,7 +573,7 @@ describe('drawStage', () => {
     const buckets = Array.from({ length: 21 }, () => [] as (typeof message)[]);
     buckets[20]!.push(message);
 
-    drawStage(ctx, renderCtx, buckets as never);
+    drawStage(ctx, renderCtx, buckets as never, 1_000, { width: 640, height: 360 });
 
     const paidMessage = mocks.renderPaidCard.mock.calls[0]?.[1] as ChatMessage;
     expect(paidMessage.text).toBe('Translated');
@@ -501,6 +596,7 @@ function makeCompactCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderC
     observability: {
       updateActiveMessages: vi.fn(),
       updateQueueDepth: vi.fn(),
+      onMessagesPresented: vi.fn(),
     } as unknown as CanvasRenderContext['observability'],
     // Stubs
     settings: {} as CanvasRenderContext['settings'],
@@ -612,12 +708,15 @@ describe('mirrorVisibleMessages', () => {
     const updateLiveRegion = vi.fn();
     const ctx = makeCompactCtx({
       activeMessages: [
-        { message: { id: 'one', text: 'short…', canonicalText: 'short and long' } },
+        {
+          message: { id: 'one', text: 'short…', canonicalText: 'short and long' },
+          _lastDrawnFrame: 1_000,
+        },
       ] as never[],
       lastLiveRegionUpdate: { value: 0 },
       updateLiveRegion,
     });
-    mirrorVisibleMessages(ctx);
+    mirrorVisibleMessages(ctx, 1_000, 1_000);
     expect(updateLiveRegion.mock.calls[0]?.[0]).toMatchObject([
       { id: 'one', text: 'short and long' },
     ]);
@@ -631,7 +730,7 @@ describe('mirrorVisibleMessages', () => {
       updateLiveRegion,
     });
 
-    mirrorVisibleMessages(ctx);
+    mirrorVisibleMessages(ctx, performance.now(), 1);
     expect(updateLiveRegion).not.toHaveBeenCalled();
   });
 
@@ -640,14 +739,14 @@ describe('mirrorVisibleMessages', () => {
     const updateLiveRegion = vi.fn();
     const ctx = makeCompactCtx({
       activeMessages: [
-        { message: { text: 'first message' } },
-        { message: { text: 'second message' } },
+        { message: { text: 'first message' }, _lastDrawnFrame: 1_000 },
+        { message: { text: 'second message' }, _lastDrawnFrame: 1_000 },
       ] as never[],
       lastLiveRegionUpdate: { value: 0 }, // never updated
       updateLiveRegion,
     });
 
-    mirrorVisibleMessages(ctx);
+    mirrorVisibleMessages(ctx, 1_000, 1_000);
     expect(updateLiveRegion).toHaveBeenCalled();
     const messages = updateLiveRegion.mock.calls[0]![0] as Array<{
       id: string;
@@ -665,7 +764,7 @@ describe('mirrorVisibleMessages', () => {
       updateLiveRegion,
     });
 
-    mirrorVisibleMessages(ctx);
+    mirrorVisibleMessages(ctx, 1_000, 1_000);
     expect(updateLiveRegion).not.toHaveBeenCalled();
   });
 });

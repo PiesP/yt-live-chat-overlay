@@ -152,6 +152,10 @@ export interface CanvasMessage {
   motion?: MessageMotionPlan;
   /** No legal safe-zone lane currently fits; retain the clock until expiry. */
   reflowHidden?: boolean;
+  /** Set only after a drawable frame completes; retained across reflow and replacement. */
+  wasPresented?: boolean;
+  /** Frame clock of the most recent eligible, completed draw. */
+  _lastDrawnFrame?: number;
   message: ChatMessage;
   /** Position/animation start time (includes stagger delay). */
   startTime: number;

@@ -346,6 +346,7 @@ export class CanvasRenderer extends RendererBase {
 
   /** Last timestamp when updateLiveRegion was called, for throttling. */
   private lastLiveRegionUpdateRef = { value: 0 };
+  private presentationFrameId = 0;
 
   constructor(
     overlay: Overlay,
@@ -1368,6 +1369,7 @@ export class CanvasRenderer extends RendererBase {
 
     // ── Cleanup + opacity buckets (merged single pass) ──
     const cleanupResult = cleanupAndBucketStage(rctx, now, dims, mode);
+    const frameId = ++this.presentationFrameId;
 
     // Post-cleanup: compact array + clean lane map for expired messages
     if (cleanupResult.anyRemoved) {
@@ -1377,16 +1379,16 @@ export class CanvasRenderer extends RendererBase {
     // ── Glow stage: membership card pulsing borders ──
     // Drive glow by cardConfig.decoration over all buckets, not just nearBuckets,
     // so pulsing-border glow works even when depth layers are disabled.
-    drawGlowStage(rctx, ctx, cleanupResult.farBuckets);
-    drawGlowStage(rctx, ctx, cleanupResult.midBuckets);
-    drawGlowStage(rctx, ctx, cleanupResult.nearBuckets);
+    drawGlowStage(rctx, ctx, cleanupResult.farBuckets, dims);
+    drawGlowStage(rctx, ctx, cleanupResult.midBuckets, dims);
+    drawGlowStage(rctx, ctx, cleanupResult.nearBuckets, dims);
 
-    drawStage(rctx, ctx, cleanupResult.farBuckets);
-    drawStage(rctx, ctx, cleanupResult.midBuckets);
-    drawStage(rctx, ctx, cleanupResult.nearBuckets);
+    drawStage(rctx, ctx, cleanupResult.farBuckets, frameId, dims);
+    drawStage(rctx, ctx, cleanupResult.midBuckets, frameId, dims);
+    drawStage(rctx, ctx, cleanupResult.nearBuckets, frameId, dims);
 
     // ── Live region mirroring: expose last 10 visible messages to AT ──
-    mirrorVisibleMessages(rctx);
+    mirrorVisibleMessages(rctx, now, frameId);
 
     this.observability.recordRenderFrame(performance.now() - t0);
   }
@@ -2611,6 +2613,7 @@ export class CanvasRenderer extends RendererBase {
           message.motion = motion;
           message.trackDrops = saved.trackDrops ?? entry.trackDrops;
           message.fadeStartTime = fadeStartTime;
+          message.wasPresented = saved.wasPresented === true;
           message.slotCount = saved.laneSlotCount;
           this.activeMessages.push(message);
         },

@@ -17,6 +17,8 @@ export interface FrameTimings {
 export interface SessionMetrics {
   totalReceived: number;
   totalRendered: number;
+  /** First eligible frames completed by either renderer, distinct from allocation. */
+  totalPresented: number;
   totalDropped: number;
   dropRate: number;
   queueDepth: number;

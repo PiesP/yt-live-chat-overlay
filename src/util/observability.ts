@@ -74,6 +74,7 @@ export class ObservabilityReporter {
     this.metrics = {
       totalReceived: 0,
       totalRendered: 0,
+      totalPresented: 0,
       totalDropped: 0,
       dropRate: 0,
       queueDepth: 0,
@@ -119,6 +120,14 @@ export class ObservabilityReporter {
     this.metrics.totalRendered = Math.min(
       Number.MAX_SAFE_INTEGER,
       this.metrics.totalRendered + count
+    );
+  }
+
+  onMessagesPresented(count: number): void {
+    if (!Number.isSafeInteger(count) || count <= 0) return;
+    this.metrics.totalPresented = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      this.metrics.totalPresented + count
     );
   }
 
@@ -308,7 +317,7 @@ export class ObservabilityReporter {
     if (!this.debugOverlayEl) return;
     const m = this.getMetrics();
     const lines = [
-      `Rcvd: ${m.totalReceived} | Rndr: ${m.totalRendered}`,
+      `Rcvd: ${m.totalReceived} | Alloc: ${m.totalRendered} | Shown: ${m.totalPresented}`,
       `Drop: ${m.totalDropped} (${(m.dropRate * 100).toFixed(1)}%)`,
       `Queue: ${m.queueDepth} | Burst: ${m.burstLevel}`,
       `Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%`,

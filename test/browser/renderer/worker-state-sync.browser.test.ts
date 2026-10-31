@@ -187,6 +187,7 @@ function initializedManager(
     onMessageDropped: vi.fn(),
     onMessagesDropped: vi.fn(),
     onMessagesRendered: vi.fn(),
+    onMessagesPresented: vi.fn(),
     updateActiveMessages: vi.fn(),
     updateQueueDepth: vi.fn(),
     updateLaneUtilization: vi.fn(),
@@ -637,6 +638,113 @@ describe('Worker renderer state synchronization', () => {
     }
   });
 
+  it('counts and announces only completed visible Worker frames across future entry and replacement', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    try {
+      const renderer = initializedRenderer({
+        ...DEFAULT_SETTINGS,
+        translationEnabled: true,
+        translationMode: 'dual',
+      });
+      renderer.handleMessage({
+        data: { type: 'addMessages', messages: [makeWorkerMessage('present')], batchSequence: 1 },
+      } as MessageEvent);
+      const internals = renderer as unknown as {
+        activeMessages: Array<{
+          startTime: number;
+          fadeStartTime: number;
+          startX: number;
+          duration: number;
+          text: string;
+          canonicalText?: string;
+          translatedText?: string | null;
+          reflowHidden?: boolean;
+          wasPresented?: boolean;
+        }>;
+        opacityConfig: { baseOpacity: number };
+        statsFrameCounter: number;
+        renderFrame(): void;
+        postStats(force: boolean): void;
+      };
+      internals.renderFrame();
+      const message = internals.activeMessages[0];
+      expect(message).toBeDefined();
+      if (!message) return;
+      message.startTime = 5_000;
+      message.fadeStartTime = 1_000;
+      message.duration = 10_000;
+      internals.renderFrame();
+      message.startTime = 1_000;
+      message.startX = 2_000;
+      nowSpy.mockReturnValue(2_000);
+      internals.renderFrame();
+      message.startX = 640;
+      internals.opacityConfig.baseOpacity = 0.001;
+      internals.renderFrame();
+      internals.postStats(true);
+      expect(latestStats()).toMatchObject({ totalRendered: 1, totalPresented: 0 });
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) => (value as { type?: string }).type === 'liveRegionSnippets'
+        )
+      ).toBe(false);
+
+      internals.opacityConfig.baseOpacity = 1;
+      message.canonicalText = 'full original';
+      message.translatedText = 'translation';
+      internals.statsFrameCounter = 29;
+      internals.renderFrame();
+      expect(message.wasPresented).toBe(true);
+      expect(
+        postMessage.mock.calls.findLast(
+          ([value]) => (value as { type?: string }).type === 'liveRegionSnippets'
+        )?.[0]
+      ).toMatchObject({ messages: [{ id: 'present', text: 'full original — translation' }] });
+
+      message.reflowHidden = true;
+      internals.statsFrameCounter = 29;
+      internals.renderFrame();
+      message.reflowHidden = false;
+      renderer.handleMessage({
+        data: {
+          type: 'addMessages',
+          batchSequence: 2,
+          messages: [
+            {
+              ...makeWorkerMessage('present'),
+              actionType: 'replace',
+              text: 'edited',
+              canonicalText: 'full edit',
+              translatedText: 'other translation',
+              content: [{ type: 'text', content: 'edited' }],
+            },
+          ],
+        },
+      } as MessageEvent);
+      internals.statsFrameCounter = 29;
+      internals.renderFrame();
+      internals.postStats(true);
+      expect(latestStats()?.totalPresented).toBe(1);
+      expect(
+        postMessage.mock.calls.findLast(
+          ([value]) => (value as { type?: string }).type === 'liveRegionSnippets'
+        )?.[0]
+      ).toMatchObject({ messages: [{ id: 'present', text: 'full edit — other translation' }] });
+      renderer.handleMessage({ data: { type: 'snapshotMessages', requestId: 17 } } as MessageEvent);
+      expect(
+        postMessage.mock.calls.findLast(
+          ([value]) => (value as { type?: string }).type === 'messageSnapshot'
+        )?.[0]
+      ).toMatchObject({
+        totalRendered: 1,
+        totalPresented: 1,
+        motionSnapshot: { activeMotions: [{ id: 'present', wasPresented: true }] },
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('counts every message permanently discarded by queue overflow', () => {
     const renderer = initializedRenderer();
     renderer.handleMessage({
@@ -739,18 +847,20 @@ describe('Worker renderer state synchronization', () => {
 
   it('reconciles cumulative stats once and publishes Worker-owned runtime state', () => {
     const { manager, observability, onStats, worker } = initializedManager();
-    const first = validStats();
+    const first = { ...validStats(), totalPresented: 2 };
 
     worker.emitMessage(first);
     worker.emitMessage(first);
     worker.emitMessage({
       ...first,
       totalRendered: 8,
+      totalPresented: 4,
       totalDrops: 4,
       laneUtilization: 0.75,
     });
 
     expect(observability.onMessagesRendered.mock.calls).toEqual([[5], [3]]);
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[2], [2]]);
     expect(observability.onMessagesDropped.mock.calls).toEqual([[3], [1]]);
     expect(observability.updateQueueDepth).toHaveBeenLastCalledWith(1);
     expect(observability.updateLaneUtilization).toHaveBeenLastCalledWith(0.75);
@@ -760,6 +870,45 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.activeMessageCount).toBe(2);
     expect(manager.laneUtilization).toBe(0.75);
 
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('reconciles final presentation counters from a recovery snapshot once', async () => {
+    const { manager, observability, worker } = initializedManager();
+    const recovery = manager.snapshotMessages(1_000);
+    const request = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number; epoch?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    if (request?.requestId === undefined || request.epoch === undefined) {
+      throw new Error('Expected snapshot request');
+    }
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: request.requestId,
+      epoch: request.epoch,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+      processedBatchSequence: 0,
+      totalRendered: 2,
+      totalPresented: 1,
+    });
+    await expect(recovery).resolves.toEqual([]);
+    expect(observability.onMessagesRendered.mock.calls).toEqual([[2]]);
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[1]]);
+
+    worker.emitMessage({
+      ...validStats(),
+      activeMessages: 0,
+      pendingQueueDepth: 0,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+      totalRendered: 2,
+      totalPresented: 1,
+      totalDrops: 0,
+    });
+    expect(observability.onMessagesRendered.mock.calls).toEqual([[2]]);
+    expect(observability.onMessagesPresented.mock.calls).toEqual([[1]]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });

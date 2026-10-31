@@ -218,6 +218,7 @@ export class RenderWorkerManager {
   private _activeMessageCount = 0;
   private _laneUtilization = 0;
   private lastWorkerTotalRendered = 0;
+  private lastWorkerTotalPresented = 0;
   private lastWorkerTotalDrops = 0;
   private lastWorkerDropReasons: WorkerDropReasonCounts | null = null;
   private lastWorkerProcessedBatchSequence = 0;
@@ -549,6 +550,22 @@ export class RenderWorkerManager {
             if (data.epoch !== undefined && data.epoch !== request.epoch) {
               request.resolve(this.takeKnownMessages(request.knownMessages));
               break;
+            }
+            if (
+              data.totalRendered !== undefined &&
+              data.totalRendered >= this.lastWorkerTotalRendered
+            ) {
+              const delta = data.totalRendered - this.lastWorkerTotalRendered;
+              if (delta > 0) this.deps.observability.onMessagesRendered(delta);
+              this.lastWorkerTotalRendered = data.totalRendered;
+            }
+            if (
+              data.totalPresented !== undefined &&
+              data.totalPresented >= this.lastWorkerTotalPresented
+            ) {
+              const delta = data.totalPresented - this.lastWorkerTotalPresented;
+              if (delta > 0) this.deps.observability.onMessagesPresented(delta);
+              this.lastWorkerTotalPresented = data.totalPresented;
             }
             request.resolve(
               this.takeSnapshotMessages(
@@ -1295,6 +1312,8 @@ export class RenderWorkerManager {
       : null;
     if (
       stats.totalRendered < this.lastWorkerTotalRendered ||
+      (stats.totalPresented !== undefined &&
+        stats.totalPresented < this.lastWorkerTotalPresented) ||
       stats.totalDrops < this.lastWorkerTotalDrops ||
       stats.processedBatchSequence < this.lastWorkerProcessedBatchSequence ||
       stats.processedBatchSequence > this.nextBatchSequence ||
@@ -1322,6 +1341,11 @@ export class RenderWorkerManager {
     const renderedDelta = stats.totalRendered - this.lastWorkerTotalRendered;
     if (renderedDelta > 0) this.deps.observability.onMessagesRendered(renderedDelta);
     this.lastWorkerTotalRendered = stats.totalRendered;
+    if (stats.totalPresented !== undefined) {
+      const presentedDelta = stats.totalPresented - this.lastWorkerTotalPresented;
+      if (presentedDelta > 0) this.deps.observability.onMessagesPresented(presentedDelta);
+      this.lastWorkerTotalPresented = stats.totalPresented;
+    }
 
     const dropDelta = stats.totalDrops - this.lastWorkerTotalDrops;
     if (dropDelta > 0) {
@@ -1409,6 +1433,7 @@ export class RenderWorkerManager {
     this._queueDepth = 0;
     this._laneUtilization = 0;
     this.lastWorkerTotalRendered = 0;
+    this.lastWorkerTotalPresented = 0;
     this.lastWorkerTotalDrops = 0;
     this.lastWorkerDropReasons = null;
     this.lastWorkerProcessedBatchSequence = 0;

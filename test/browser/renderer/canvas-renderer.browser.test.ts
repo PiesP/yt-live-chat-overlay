@@ -1933,6 +1933,7 @@ describe('CanvasRenderer', () => {
       vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
       vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
       const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
+      const presented = vi.spyOn(renderer.observability, 'onMessagesPresented');
       const origin = performance.timeOrigin;
       vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
         ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
@@ -1951,6 +1952,7 @@ describe('CanvasRenderer', () => {
             startEpochMs: origin + start,
             fadeStartEpochMs: origin + start,
             speedTier: backlog ? 3 : 1,
+            wasPresented: laneIndex === 0,
             epoch: 0,
             capturedAtEpochMs: origin + 1000,
             effectiveNowEpochMs: origin + 1000,
@@ -1967,6 +1969,8 @@ describe('CanvasRenderer', () => {
       expect(internals.activeMessages).toHaveLength(2);
       expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
       const [visible, future] = internals.activeMessages;
+      expect(visible?.wasPresented).toBe(true);
+      expect(future?.wasPresented).toBe(false);
       expect(visible?.startTime).toBe(0);
       expect(future?.startTime).toBe(2000);
       const effectiveNow = paused ? 1000 : 1500;
@@ -1985,6 +1989,7 @@ describe('CanvasRenderer', () => {
         expect(reflowed[1]?.startTime).toBe(2000);
       }
       expect(rendered).not.toHaveBeenCalled();
+      expect(presented).not.toHaveBeenCalled();
       if (paused) {
         clock = 5000;
         renderer.resume();

@@ -121,6 +121,7 @@ import {
   getRowSlotCount,
   rowsNeedVerticalClearance,
 } from '@renderer/layout/row-geometry';
+import { accessiblePresentationText, isPresentableFrame } from '@renderer/presentation';
 import { resolveRequiredRenderAssets } from '@renderer/render-assets';
 import {
   computeAgeFadeRate,
@@ -506,6 +507,7 @@ export class WorkerRenderer {
   private collidedLanes = new Set<number>();
   /** Cumulative messages placed into the active render set for this Worker instance. */
   private totalRendered = 0;
+  private totalPresented = 0;
   private totalDrops = 0;
   private readonly dropReasons: WorkerDropReasonCounts = {
     queue_priority: 0,
@@ -564,6 +566,7 @@ export class WorkerRenderer {
     messageHeight: 0,
   };
   private statsFrameCounter = 0;
+  private presentationFrameId = 0;
   private idleSince: number | null = null;
 
   /** CSS-pixel dimensions (not DPR-multiplied). Set by init/resize handlers. */
@@ -920,6 +923,7 @@ export class WorkerRenderer {
                 startEpochMs: origin + message.startTime + message.pausedDuration,
                 fadeStartEpochMs: origin + message.fadeStartTime + message.pausedDuration,
                 speedTier: message.speedTier,
+                wasPresented: message.wasPresented === true,
               })),
             };
             self.postMessage({
@@ -929,6 +933,8 @@ export class WorkerRenderer {
               activeMessageIds: this.activeMessages.map((message) => message.id),
               pendingMessageIds: this.pendingQueue.map((message) => message.id),
               processedBatchSequence: this.processedBatchSequence,
+              totalRendered: this.totalRendered,
+              totalPresented: this.totalPresented,
               motionSnapshot,
             });
             break;
@@ -1209,6 +1215,7 @@ export class WorkerRenderer {
       activeMessages: this.activeMessages.length,
       pendingQueueDepth: this.pendingQueue.length,
       totalRendered: this.totalRendered,
+      totalPresented: this.totalPresented,
       totalDrops: this.totalDrops,
       dropReasons: { ...this.dropReasons },
       processedBatchSequence: this.processedBatchSequence,
@@ -1733,6 +1740,7 @@ export class WorkerRenderer {
 
     const cfg = this.config;
     const now = performance.now();
+    const frameId = ++this.presentationFrameId;
     const width = this.logicalWidth;
     const height = this.logicalHeight;
     const pendingDepthBeforeDrain = this.pendingQueue.length;
@@ -1863,7 +1871,7 @@ export class WorkerRenderer {
     const getFont = this.boundGetFont;
     // Render FAR → MID → NEAR for correct z-order
     for (const tierBucket of this.tierOpacityBuckets) {
-      for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
+      for (let bucketIndex = 1; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
         const entries = tierBucket[bucketIndex];
         if (!entries || entries.length === 0) continue;
         this.ctx.globalAlpha = bucketIndex / (OPACITY_BUCKETS - 1);
@@ -1875,8 +1883,22 @@ export class WorkerRenderer {
               msg.colorOverride = renderColor;
             }
             const sx = Math.floor(msg.x);
-            if (sx + msg.width <= 0) continue;
             const sy = Math.floor(msg.y);
+            if (
+              !isPresentableFrame(
+                msg._frameElapsed ?? -1,
+                msg.duration,
+                msg.x,
+                msg.y,
+                msg.width,
+                msg.height,
+                width,
+                height,
+                bucketIndex,
+                msg.reflowHidden === true
+              )
+            )
+              continue;
 
             // Temporal frame blending: render ghost at previous position for FAR-tier
             if (
@@ -2054,6 +2076,11 @@ export class WorkerRenderer {
                 this.ctx.restore();
               }
             }
+            msg._lastDrawnFrame = frameId;
+            if (!msg.wasPresented) {
+              msg.wasPresented = true;
+              this.totalPresented = Math.min(Number.MAX_SAFE_INTEGER, this.totalPresented + 1);
+            }
           }
         } finally {
           this.ctx.globalAlpha = 1;
@@ -2068,8 +2095,7 @@ export class WorkerRenderer {
     // Mirrors the main-thread renderer's mirrorVisibleMessages() behaviour.
     if (this.statsFrameCounter % 30 === 0) {
       const maxSnippets = 10;
-      const count = Math.min(this.activeMessages.length, maxSnippets);
-      if (count > 0) {
+      if (this.activeMessages.length > 0) {
         const messages: Array<{
           id: string;
           text: string;
@@ -2078,14 +2104,20 @@ export class WorkerRenderer {
           superChatAmount?: string;
           membershipHeader?: string;
         }> = [];
-        const start = this.activeMessages.length - count;
-        for (let i = start; i < this.activeMessages.length; i++) {
+        for (let i = this.activeMessages.length - 1; i >= 0 && messages.length < maxSnippets; i--) {
           const msg = this.activeMessages[i];
-          if (!msg || (!msg.text && !msg.author)) continue;
+          if (!msg || msg._lastDrawnFrame !== frameId || (!msg.text && !msg.author)) continue;
           const kind = msg.kind === 'superchat' || msg.kind === 'membership' ? msg.kind : 'text';
           messages.push({
             id: msg.id,
-            text: msg.canonicalText ?? msg.text,
+            text: accessiblePresentationText(
+              msg.canonicalText ?? msg.text,
+              cfg.translationMode === 'replace' || msg.translatedText !== msg.text
+                ? msg.translatedText
+                : null,
+              cfg.translationEnabled,
+              cfg.translationMode
+            ),
             kind,
             ...(msg.author !== undefined ? { author: msg.author } : {}),
             ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),
@@ -2095,7 +2127,7 @@ export class WorkerRenderer {
           });
         }
         if (messages.length > 0) {
-          self.postMessage({ type: 'liveRegionSnippets', messages });
+          self.postMessage({ type: 'liveRegionSnippets', messages: messages.reverse() });
         }
       }
     }
