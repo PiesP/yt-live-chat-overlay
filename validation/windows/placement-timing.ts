@@ -371,6 +371,7 @@ declare global {
 }
 
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows193Placement';
+const TRANSLATED_TEXT = 'WINDOWS193_SHORT TRANSLATED 日本語';
 const MIXED_IDS: [string, string] = ['WINDOWS204_MIX_REGULAR', 'W204P'];
 const TOKENS = [
   'WINDOWS193_SHORT',
@@ -1297,6 +1298,61 @@ export function measureAllocationRowPitch(
     .map((y, index) => y - (ys[index] ?? y))
     .filter((pitch) => pitch > 0);
   return pitches.length ? Math.min(...pitches) : null;
+}
+
+/** A measured translation must paint the intended text within the same live row. */
+export function translatedRowEvidence(
+  before: ActiveRow,
+  after: ActiveRow | undefined,
+  frame: FrameView | null,
+  translatedText: string
+): boolean {
+  if (
+    !after ||
+    after.id !== before.id ||
+    after.width < before.width ||
+    after.height <= before.height ||
+    Math.abs(after.endAtEpochMs - before.endAtEpochMs) >= 1 ||
+    !frame?.complete ||
+    !frame.cleared ||
+    frame.truncated ||
+    !Number.isFinite(frame.logicalWidth) ||
+    !Number.isFinite(frame.logicalHeight) ||
+    !Number.isFinite(frame.startedAtEpochMs) ||
+    !Number.isFinite(frame.finishedAtEpochMs) ||
+    !Array.isArray(frame.active) ||
+    !Array.isArray(frame.draws)
+  )
+    return false;
+  const row = frame.active.find((entry) => entry?.id === after.id);
+  if (
+    !row ||
+    ![row.x, row.y, row.width, row.height, row.startAtEpochMs, row.endAtEpochMs].every(
+      Number.isFinite
+    ) ||
+    Number(frame.startedAtEpochMs) < Number(row.startAtEpochMs) ||
+    Number(frame.finishedAtEpochMs) >= Number(row.endAtEpochMs)
+  )
+    return false;
+  return frame.draws.some((draw) => {
+    const rect = draw?.rect;
+    return Boolean(
+      draw?.id === after.id &&
+      draw.frameId === frame.frameId &&
+      draw.alpha &&
+      draw.alpha > 0 &&
+      draw.textSnippet?.includes(translatedText) &&
+      rect &&
+      rect.left >= Number(row.x) - 1 &&
+      rect.right <= Number(row.x) + Number(row.width) + 1 &&
+      rect.top >= Number(row.y) - 1 &&
+      rect.bottom <= Number(row.y) + Number(row.height) + 1 &&
+      rect.left < Number(frame.logicalWidth) &&
+      rect.right > 0 &&
+      rect.top < Number(frame.logicalHeight) &&
+      rect.bottom > 0
+    );
+  });
 }
 
 /** Sampled row origins in one completed frame, not proven adjacency or a historical ink join. */
@@ -3552,6 +3608,22 @@ async function runScenario({
         regularInsets: gap0.regularInsets,
         queue: gap0.stats,
       });
+      // The next sample needs fresh lane reservations. A still-active gap0
+      // cohort can legitimately make a gap8 scroll row reuse the only free lane.
+      let clearedGap0 = false;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const prior = await issueSnapshot();
+        if (
+          Array.isArray(prior.exact.pendingNow) &&
+          !prior.exact.activeNow.some((entry) => entry.id.startsWith('WINDOWS196_GAP0_')) &&
+          !prior.exact.pendingNow.some((id) => id.startsWith('WINDOWS196_GAP0_'))
+        ) {
+          clearedGap0 = true;
+          break;
+        }
+        await page.waitForTimeout(250);
+      }
+      assert(clearedGap0, 'Gap0 cohort did not complete before the independent gap8 sample');
       await page.evaluate(() => {
         const probe = window.__ytPlacementProbe;
         probe.bounds.length = 0;
@@ -4037,14 +4109,16 @@ async function runScenario({
       await page.evaluate(applyFixtureSettings, { translationEnabled: true });
       const enabled = await workerSnapshot();
       assert(Number.isInteger(enabled.config.translationGeneration));
+      const enabledActive = enabled.activeNow.find((entry) => entry.id === TOKENS[0]);
+      assert(enabledActive, 'Translation fixture row expired before the update');
       await page.evaluate(
-        ({ id, width, height, generation }) => {
+        ({ id, width, height, generation, translatedText }) => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
           if (!record) throw new Error('Renderer Worker is unavailable for translation');
           record.worker.postMessage({
             type: 'updateTranslation',
             id,
-            translatedText: 'Fixture translation only',
+            translatedText,
             width,
             height,
             translationHeight: 32,
@@ -4056,22 +4130,43 @@ async function runScenario({
           width: active.width + 80,
           height: active.height + 32,
           generation: enabled.config.translationGeneration,
+          translatedText: TRANSLATED_TEXT,
         }
       );
       await page.waitForFunction(
-        ({ id, width }) =>
-          window.__ytPlacementProbe.workers
-            .find((record) => record.ready)
-            ?.sample?.exact?.activeNow?.some((entry) => entry.id === id && entry.width >= width),
-        { id: TOKENS[0], width: active.width + 80 },
+        ({ id, height, translatedText }) => {
+          const sample = window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample;
+          const frame = sample?.latestRenderFrame;
+          return Boolean(
+            sample?.exact?.activeNow?.some((entry) => entry.id === id && entry.height > height) &&
+            frame?.complete &&
+            frame.cleared &&
+            !frame.truncated &&
+            frame.draws.some(
+              (draw) =>
+                draw.id === id &&
+                draw.alpha > 0 &&
+                draw.textSnippet?.includes(translatedText) &&
+                draw.rect &&
+                draw.rect.left < Number(frame.logicalWidth) &&
+                draw.rect.right > 0 &&
+                draw.rect.top < Number(frame.logicalHeight) &&
+                draw.rect.bottom > 0
+            )
+          );
+        },
+        { id: TOKENS[0], height: active.height, translatedText: TRANSLATED_TEXT },
         { timeout: 10_000 }
       );
       const translated = await workerSnapshot();
+      const translatedFrame = await page.evaluate(
+        () =>
+          window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample
+            ?.latestRenderFrame ?? null
+      );
       const translatedActive = translated.activeNow.find((entry) => entry.id === TOKENS[0]);
       assert(
-        translatedActive &&
-          translatedActive.width >= active.width + 80 &&
-          translatedActive.height >= active.height + 32,
+        translatedRowEvidence(enabledActive, translatedActive, translatedFrame, TRANSLATED_TEXT),
         'Injected production translation protocol did not reflow active geometry'
       );
       await page.evaluate(applyFixtureSettings, { translationEnabled: false });

@@ -1551,7 +1551,7 @@ async function runBackend(options: {
       app.applySettings({
         danmakuMode: 'top',
         fontSize: 32,
-        laneSpacing: 4,
+        laneSpacing: 0,
         safeTop: 0,
         safeBottom: 0,
         showDebugOverlay: true,
@@ -1568,8 +1568,17 @@ async function runBackend(options: {
     await waitForProbeConfig(page, backend, { viewportWidth: 960, playerHeight: 800 });
     await send('content');
     await observeVisible(IDS[0]);
+    await observeVisible(IDS[4]);
     try {
       await waitForAccessibleTails(page, IDS.slice(0, 3));
+      await page.waitForFunction(
+        (id) =>
+          [...document.querySelectorAll<HTMLElement>('.yt-live-chat-overlay-live-region > p')]
+            .find((entry) => entry.dataset.messageId === id)
+            ?.textContent?.includes('مرحبا') === true,
+        IDS[4],
+        { timeout: 5000 }
+      );
     } catch (error) {
       if (mode === 'candidate') throw error;
       if (baselineFindings.length < 24)
@@ -1579,6 +1588,7 @@ async function runBackend(options: {
     assertBackend(content, backend);
     check(() => {
       assertCoherentVisibleFrame(content, IDS[0]);
+      assertCoherentVisibleFrame(content, IDS[4]);
       assert(
         content.presentationCount !== null && content.presentationCount > 0,
         'Actual first-presentation accounting is unavailable'
@@ -2347,6 +2357,11 @@ async function runOverloadBackend(options: {
   const page = await context.newPage();
   const delivered = new Set<string>();
   let currentCase: OverloadCase | null = null;
+  let currentSnapshots: Array<{
+    stage: string;
+    trace: ReturnType<typeof overloadTrace>;
+    outcome?: 'ordinary-waiting' | 'ordinary-already-served';
+  }> = [];
   let failureStage = 'setup';
   let replayRequests = 0;
   const cases: Array<Record<string, unknown>> = [];
@@ -2560,6 +2575,7 @@ async function runOverloadBackend(options: {
     });
     for (const name of OVERLOAD_CASES) {
       currentCase = name;
+      currentSnapshots = [];
       failureStage = `${name}:navigation`;
       replayRequests = 0;
       const caps = OVERLOAD_SETTINGS[name];
@@ -2619,7 +2635,7 @@ async function runOverloadBackend(options: {
         ...(name === 'zero-membership' ? { safeTop: 0.25 } : {}),
       });
       failureStage = `${name}:observations`;
-      const snapshots: Array<{ stage: string; trace: ReturnType<typeof overloadTrace> }> = [];
+      const snapshots = currentSnapshots;
       const ids =
         name === 'vacancy'
           ? OVERLOAD_IDS.filter((id) => id.includes('_VACANCY_'))
@@ -2644,11 +2660,22 @@ async function runOverloadBackend(options: {
         await waitForIngress(page, backend, 'WINDOWS380_LOAD_VACANCY_ORDINARY');
         await page.waitForTimeout(450);
         const seed = await observe('seed');
-        assert(
-          seed.pendingNow.includes('WINDOWS380_LOAD_VACANCY_ORDINARY') &&
-            !Number.isFinite(seed.firstEntry.WINDOWS380_LOAD_VACANCY_ORDINARY),
-          'Vacancy seed did not establish an actual ordinary waiter'
+        const ordinaryId = 'WINDOWS380_LOAD_VACANCY_ORDINARY';
+        const ordinary = snapshots.at(-1)?.trace.records.find((record) => record.id === ordinaryId);
+        const ordinaryWaiting =
+          seed.pendingNow.includes(ordinaryId) && !Number.isFinite(seed.firstEntry[ordinaryId]);
+        const ordinaryServed = Boolean(
+          Number.isFinite(ordinary?.rendererIngressAtEpochMs) &&
+          Number.isFinite(ordinary?.reservedAtEpochMs) &&
+          Number.isFinite(ordinary?.firstVisibleAtEpochMs)
         );
+        assert(
+          ordinaryWaiting || ordinaryServed,
+          'Vacancy seed established neither an ordinary waiter nor completed visible service'
+        );
+        const seedRecord = snapshots.at(-1);
+        if (seedRecord)
+          seedRecord.outcome = ordinaryWaiting ? 'ordinary-waiting' : 'ordinary-already-served';
         await send('vacancyMoreA');
         await page.waitForTimeout(550);
         await send('vacancyMoreB');
@@ -2767,6 +2794,16 @@ async function runOverloadBackend(options: {
       });
     }
   } catch (error) {
+    if (currentCase && currentSnapshots.length > 0)
+      cases.push({
+        name: currentCase,
+        backend,
+        caps: OVERLOAD_SETTINGS[currentCase],
+        snapshots: currentSnapshots,
+        delivered: [...delivered],
+        partial: true,
+        elapsedMs: Date.now() - startedAt,
+      });
     const diagnostic = page.isClosed()
       ? null
       : await page

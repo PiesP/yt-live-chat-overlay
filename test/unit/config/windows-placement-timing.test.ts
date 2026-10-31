@@ -30,6 +30,7 @@ import {
   spacingFixtureIds,
   summarizeExactWorkerProbe,
   summarizeSamples,
+  translatedRowEvidence,
   workerProbePrelude,
   workerProbeSuffix,
 } from '../../../validation/windows/placement-timing.ts';
@@ -73,6 +74,73 @@ function spacingSnapshot(renderer: string, gap: number, origins: number[], offsc
 }
 
 describe('Windows placement timing probe', () => {
+  it('requires a full translated draw on the original live row and expiry', () => {
+    const before = {
+      id: 'WINDOWS193_SHORT',
+      x: 20,
+      y: 40,
+      width: 368,
+      height: 42,
+      startAtEpochMs: 900,
+      endAtEpochMs: 1100,
+    };
+    const after = { ...before, height: 77 };
+    const draw = {
+      id: before.id,
+      frameId: 7,
+      alpha: 0.5,
+      textSnippet: 'WINDOWS193_SHORT TRANSLATED 日本語',
+      rect: { left: 25, top: 83, right: 320, bottom: 108 },
+    };
+    const frame = {
+      frameId: 7,
+      complete: true,
+      cleared: true,
+      truncated: false,
+      startedAtEpochMs: 1000,
+      finishedAtEpochMs: 1001,
+      logicalWidth: 800,
+      logicalHeight: 400,
+      active: [after],
+      draws: [draw],
+    };
+    const expected = draw.textSnippet;
+    expect(translatedRowEvidence(before, after, frame, expected)).toBe(true);
+    expect(
+      translatedRowEvidence(before, after, { ...frame, draws: [{ ...draw, alpha: 0 }] }, expected)
+    ).toBe(false);
+    expect(
+      translatedRowEvidence(
+        before,
+        after,
+        { ...frame, draws: [{ ...draw, id: 'OTHER' }] },
+        expected
+      )
+    ).toBe(false);
+    expect(
+      translatedRowEvidence(
+        before,
+        after,
+        { ...frame, draws: [{ ...draw, textSnippet: 'WINDOWS193_SHORT' }] },
+        expected
+      )
+    ).toBe(false);
+    expect(
+      translatedRowEvidence(
+        before,
+        after,
+        { ...frame, draws: [{ ...draw, rect: { ...draw.rect, right: 900 } }] },
+        expected
+      )
+    ).toBe(false);
+    expect(translatedRowEvidence(before, { ...after, endAtEpochMs: 1200 }, frame, expected)).toBe(
+      false
+    );
+    expect(translatedRowEvidence(before, after, { ...frame, complete: false }, expected)).toBe(
+      false
+    );
+  });
+
   it('covers fixed, reduced-motion, safe-zone, congestion and translation states with unique receipts', () => {
     const names = PLACEMENT_SCENARIOS.map((scenario: { name: string }) => scenario.name);
     expect(new Set(names).size).toBe(names.length);
