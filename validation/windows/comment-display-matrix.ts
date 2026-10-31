@@ -3732,6 +3732,59 @@ const OVERLOAD_CASES = (Object.keys(OVERLOAD_SETTINGS) as OverloadCase[]).filter
   (name) => name !== 'manager-fifo'
 );
 
+export async function prepareManagerFifoBackground(
+  context: BrowserContext,
+  extensionId: string,
+  html: string
+): Promise<{ warmupPage: Page | null; activation: 'already-running' | 'owned-fixture' }> {
+  const expectedUrl = `chrome-extension://${extensionId}/background.js`;
+  const exactWorkers = () =>
+    context.serviceWorkers().filter((worker) => worker.url() === expectedUrl);
+  const existing = exactWorkers();
+  assert(existing.length <= 1, 'Installed extension background identity is ambiguous');
+  if (existing.length === 1) {
+    assert.equal(await existing[0]?.evaluate('chrome.runtime.id'), extensionId);
+    return { warmupPage: null, activation: 'already-running' };
+  }
+
+  // A fresh loadUnpacked return can precede MV3 activation. A separate owned
+  // watch document wakes the exact installed extension before its scoped
+  // page-script probe is inserted for the measured document.
+  const warmupPage = await context.newPage();
+  const warmupUrl = 'https://www.youtube.com/watch?v=windows387BackgroundWarmup';
+  try {
+    await warmupPage.route('**/*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.protocol === 'chrome-extension:' && url.hostname === extensionId)
+        return route.continue();
+      if (url.href === warmupUrl && route.request().resourceType() === 'document')
+        return route.fulfill({ status: 200, contentType: 'text/html', body: html });
+      return route.fulfill({ status: 204 });
+    });
+    await warmupPage.goto(warmupUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const worker =
+      exactWorkers()[0] ??
+      (await context.waitForEvent('serviceworker', {
+        predicate: (candidate) => candidate.url() === expectedUrl,
+        timeout: 15_000,
+      }));
+    assert.equal(exactWorkers().length, 1, 'Exact installed background worker is unavailable');
+    assert.equal(worker.url(), expectedUrl);
+    assert.equal(await worker.evaluate('chrome.runtime.id'), extensionId);
+    return { warmupPage, activation: 'owned-fixture' };
+  } catch (error) {
+    try {
+      await warmupPage.close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Manager FIFO background activation and warmup cleanup failed'
+      );
+    }
+    throw error;
+  }
+}
+
 async function runOverloadBackend(options: {
   context: BrowserContext;
   root: string;
@@ -3776,6 +3829,8 @@ async function runOverloadBackend(options: {
   const baselineFindings: string[] = [];
   const cleanupErrors: string[] = [];
   let nativeProbe: NativePageScriptProbe | undefined;
+  let backgroundWarmupPage: Page | null = null;
+  let backgroundActivation: 'already-running' | 'owned-fixture' | null = null;
   let originalSettings:
     | Parameters<NonNullable<Window['__ytChatOverlay']>['applySettings']>[0]
     | undefined;
@@ -4059,6 +4114,11 @@ async function runOverloadBackend(options: {
           name === 'manager-fifo' ? MANAGER_FIFO_ALL_IDS : undefined
         );
         assert(instrumentedSource, 'Packaged Worker manager source shape changed');
+        if (name === 'manager-fifo') {
+          const background = await prepareManagerFifoBackground(context, extensionId, html);
+          backgroundWarmupPage = background.warmupPage;
+          backgroundActivation = background.activation;
+        }
         nativeProbe = await installNativePageScriptProbe({
           context,
           root,
@@ -4068,6 +4128,10 @@ async function runOverloadBackend(options: {
         });
         managerProbeProvenance = nativeProbe.provenance;
         await nativeProbe.assertReady();
+        if (backgroundWarmupPage) {
+          await backgroundWarmupPage.close();
+          backgroundWarmupPage = null;
+        }
       }
       await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page
@@ -4624,6 +4688,7 @@ async function runOverloadBackend(options: {
         ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
         ...(currentOverflowInput ? { overflowInput: currentOverflowInput } : {}),
         ...(managerProbeProvenance ? { managerProbeProvenance } : {}),
+        ...(name === 'manager-fifo' ? { backgroundActivation } : {}),
         delivered: [...delivered],
         elapsedMs: Date.now() - startedAt,
       });
@@ -4654,6 +4719,7 @@ async function runOverloadBackend(options: {
         ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
         ...(currentOverflowInput ? { overflowInput: currentOverflowInput } : {}),
         ...(managerProbeProvenance ? { managerProbeProvenance } : {}),
+        ...(currentCase === 'manager-fifo' ? { backgroundActivation } : {}),
         delivered: [...delivered],
         partial: true,
         elapsedMs: Date.now() - startedAt,
@@ -4762,6 +4828,13 @@ async function runOverloadBackend(options: {
     };
   } finally {
     clearTimeout(deadline);
+    if (backgroundWarmupPage) {
+      try {
+        await backgroundWarmupPage.close();
+      } catch (error) {
+        cleanupErrors.push(`Owned background warmup page closure: ${String(error).slice(0, 240)}`);
+      }
+    }
     if (nativeProbe) {
       try {
         await nativeProbe.restore();

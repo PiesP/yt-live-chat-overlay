@@ -36,6 +36,7 @@ import {
   overloadTrace,
   overflowSeedAdmissionFinding,
   paidRowBudget,
+  prepareManagerFifoBackground,
   readManagerIngressFifoSelector,
   planPaidCaptureWait,
   planRoleVisibilityWait,
@@ -71,6 +72,91 @@ describe('Windows comment display matrix contract', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it('warms only the exact installed background worker and retains the owned page until probe setup', async () => {
+    const extensionId = 'a'.repeat(32);
+    const exactUrl = `chrome-extension://${extensionId}/background.js`;
+    const matching = { url: () => exactUrl, evaluate: vi.fn(async () => extensionId) };
+    const foreign = { url: () => 'chrome-extension://foreign/background.js' };
+    const workers: Array<typeof matching | typeof foreign> = [foreign];
+    const page = {
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+    const context = {
+      serviceWorkers: () => workers,
+      newPage: vi.fn(async () => page),
+      waitForEvent: vi.fn(
+        async (_name: string, options: { predicate: (worker: unknown) => boolean }) => {
+          expect(options.predicate(foreign)).toBe(false);
+          expect(options.predicate(matching)).toBe(true);
+          workers.push(matching);
+          return matching;
+        }
+      ),
+    } as unknown as Parameters<typeof prepareManagerFifoBackground>[0];
+    const ready = await prepareManagerFifoBackground(context, extensionId, '<html></html>');
+    expect(ready.activation).toBe('owned-fixture');
+    expect(ready.warmupPage).toBe(page);
+    expect(page.close).not.toHaveBeenCalled();
+    expect(matching.evaluate).toHaveBeenCalledWith('chrome.runtime.id');
+    await ready.warmupPage?.close();
+    expect(page.close).toHaveBeenCalledTimes(1);
+    const reused = await prepareManagerFifoBackground(context, extensionId, '<html></html>');
+    expect(reused).toEqual({ warmupPage: null, activation: 'already-running' });
+    expect(
+      (context as unknown as { newPage: ReturnType<typeof vi.fn> }).newPage
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a failed Manager FIFO warmup when the exact worker never appears', async () => {
+    const page = {
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+    const context = {
+      serviceWorkers: () => [],
+      newPage: async () => page,
+      waitForEvent: async () => {
+        throw new Error('Exact worker activation timed out');
+      },
+    } as unknown as Parameters<typeof prepareManagerFifoBackground>[0];
+    await expect(
+      prepareManagerFifoBackground(context, 'a'.repeat(32), '<html></html>')
+    ).rejects.toThrow('Exact worker activation timed out');
+    expect(page.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains both Manager FIFO activation and warmup cleanup failures', async () => {
+    const activationError = new Error('Exact worker activation timed out');
+    const cleanupError = new Error('Owned warmup page did not close');
+    const page = {
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => {}),
+      close: vi.fn(async () => {
+        throw cleanupError;
+      }),
+    };
+    const context = {
+      serviceWorkers: () => [],
+      newPage: async () => page,
+      waitForEvent: async () => {
+        throw activationError;
+      },
+    } as unknown as Parameters<typeof prepareManagerFifoBackground>[0];
+    let failure: unknown;
+    try {
+      await prepareManagerFifoBackground(context, 'a'.repeat(32), '<html></html>');
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) throw new Error('Expected both failures');
+    expect(failure.errors).toEqual([activationError, cleanupError]);
+    expect(page.close).toHaveBeenCalledTimes(1);
   });
 
   it('retains the exact ordered ordinary IDs from returned native Worker posts', () => {

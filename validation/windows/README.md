@@ -14,7 +14,10 @@ For the #387 Manager FIFO follow-up, place exactly
 `validation/windows/inputs/manager-ingress-fifo.json` before bundling a clean
 committed checkout. Run the headed installed Edge extension profile without a
 controller `--scenario` option or public URL. This focused route skips the full
-visual matrix. It uses one source response to capture the production Manager,
+visual matrix. If the freshly installed MV3 background worker has not started,
+an owned routed watch page activates it; the fixture checks its exact extension
+URL and runtime ID before inserting the source-bound page probe and closes the
+warmup page afterward. It uses one source response to capture the production Manager,
 then its public send method and real Worker pause/resume to hold a paid-only
 pending depth of 50 while 80 old and four new ordinary IDs enter the 80-slot
 Manager buffer. The JSON receipt records the actual Worker backend, bundle and
