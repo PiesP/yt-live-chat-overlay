@@ -2,7 +2,7 @@
 
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';
-import { SETTINGS_VERSION } from '@settings/schema';
+import { normalizeStoredSettings, SETTINGS_VERSION, STORAGE_KEY } from '@settings/schema';
 import { Settings } from '@settings/store';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
@@ -22,6 +22,50 @@ function currentRecord(fontSize: number): string {
 }
 
 describe('Settings persistence', () => {
+  it('round-trips the card layout through preview, save, reload, sync, import and reset', async () => {
+    let stored = currentRecord(48);
+    let onRemote: ((value: string) => void) | undefined;
+    const setItem = vi.fn(async (_key: string, value: string) => {
+      stored = value;
+    });
+    vi.mocked(getStorageAdapter).mockReturnValue({
+      getItem: vi.fn(async () => stored),
+      setItem,
+    });
+    vi.mocked(getCrossTabSyncAdapter).mockReturnValue({
+      addListener: vi.fn((callback) => {
+        onRemote = (value) => callback(STORAGE_KEY, value);
+      }),
+      removeListener: vi.fn(),
+    });
+    const first = new Settings();
+    await first.initialize();
+    expect(first.get()).toMatchObject({ fontSize: 48, superChatLayout: 'stacked' });
+    expect(setItem).not.toHaveBeenCalled();
+    first.preview({ superChatLayout: 'wide' });
+    expect(first.get().superChatLayout).toBe('wide');
+    first.set({ superChatLayout: 'wide' });
+    expect(await first.persistNow()).toBe('saved');
+    const exported = stored;
+    expect(JSON.parse(exported).superChatLayout).toBe('wide');
+    await first.destroy();
+
+    const reloaded = new Settings();
+    await reloaded.initialize();
+    expect(reloaded.get().superChatLayout).toBe('wide');
+    stored = JSON.stringify({ ...JSON.parse(stored), superChatLayout: 'stacked' });
+    onRemote?.(stored);
+    await vi.waitFor(() => expect(reloaded.get().superChatLayout).toBe('stacked'));
+    reloaded.set(normalizeStoredSettings(JSON.parse(exported)));
+    expect(await reloaded.persistNow()).toBe('saved');
+    expect(JSON.parse(stored).superChatLayout).toBe('wide');
+    reloaded.reset();
+    expect(await reloaded.persistNow()).toBe('saved');
+    expect(reloaded.get().superChatLayout).toBe('stacked');
+    expect(JSON.parse(stored).superChatLayout).toBe('stacked');
+    await reloaded.destroy();
+  });
+
   it('treats an unreadable first load differently from a verified missing record', async () => {
     let available = false;
     let stored: string | null = JSON.stringify({ fontSize: 48 });

@@ -169,6 +169,10 @@ export const JA: Record<string, string> = {
   'danmaku.fontFamilyDesc': 'コメントテキストのフォント',
   'danmaku.fontCustomDesc':
     'CSS font-family 値。例: "Noto Sans KR", sans-serif。フォントがなければシステム既定値。',
+  'appearance.superchatLayout': 'スーパーチャットのレイアウト',
+  'appearance.superchatLayoutStacked': '縦型',
+  'appearance.superchatLayoutWide': '横型',
+  'appearance.superchatLayoutDesc': '横型は、幅に余裕があると投稿者名と金額を同じ行に表示します。',
   'appearance.superchatOpacityDesc': 'スパーチャットカードの背景不透明度',
   'appearance.superchatMaxLinesDesc': '本文の最大行数、超過分は省略 (2-10)',
   'appearance.membershipMaxLinesDesc': 'メンバーシップメッセージの本文最大行数 (1-5)',

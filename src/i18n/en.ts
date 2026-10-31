@@ -200,6 +200,11 @@ export const EN: Record<string, string> = {
   'appearance.superchatMaxLines': 'SuperChat Max Lines',
   'appearance.superchatMaxLinesDesc': 'Max body text lines before truncation (2-10)',
   'appearance.superchatOpacity': 'SuperChat Opacity (%)',
+  'appearance.superchatLayout': 'Super Chat Layout',
+  'appearance.superchatLayoutStacked': 'Stacked',
+  'appearance.superchatLayoutWide': 'Wide',
+  'appearance.superchatLayoutDesc':
+    'Wide places the author and amount in one header when space allows.',
   'appearance.superchatOpacityDesc': 'Background opacity of Super Chat cards',
   'chat.messages': 'Chat messages',
   'chat.membership': 'Membership',

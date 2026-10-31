@@ -289,6 +289,15 @@ export const PANES: PaneDef[] = [
       {
         title: 'appearance.cards',
         fields: [
+          sel(
+            'appearance.superchatLayout',
+            'superChatLayout',
+            [
+              ['stacked', 'appearance.superchatLayoutStacked'],
+              ['wide', 'appearance.superchatLayoutWide'],
+            ],
+            'appearance.superchatLayoutDesc'
+          ),
           range(
             'appearance.superchatOpacity',
             'superChatOpacity',

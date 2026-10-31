@@ -173,6 +173,11 @@ export const ES: Record<string, string> = {
   'danmaku.fontFamilyDesc': 'Familia tipográfica del texto',
   'danmaku.fontCustomDesc':
     'Valor CSS font-family, ej. "Noto Sans KR", sans-serif. Si no se encuentra, usa la fuente del sistema.',
+  'appearance.superchatLayout': 'Diseño de Super Chat',
+  'appearance.superchatLayoutStacked': 'Vertical',
+  'appearance.superchatLayoutWide': 'Ancho',
+  'appearance.superchatLayoutDesc':
+    'El diseño ancho reúne el autor y el importe en una cabecera cuando hay espacio.',
   'appearance.superchatOpacityDesc': 'Opacidad del fondo de tarjetas Super Chat',
   'appearance.superchatMaxLinesDesc': 'Máximo de líneas antes de truncar (2-10)',
   'appearance.membershipMaxLinesDesc': 'Máximo de líneas para mensajes de membresía (1-5)',

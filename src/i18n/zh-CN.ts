@@ -158,6 +158,10 @@ export const ZH_CN: Record<string, string> = {
   'danmaku.fontFamilyDesc': '评论文字字体',
   'danmaku.fontCustomDesc':
     'CSS font-family 值，例如 "Noto Sans KR", sans-serif。字体不存在时使用系统默认。',
+  'appearance.superchatLayout': '超级留言布局',
+  'appearance.superchatLayoutStacked': '纵向',
+  'appearance.superchatLayoutWide': '横向',
+  'appearance.superchatLayoutDesc': '空间足够时，横向布局将作者和金额显示在同一行。',
   'appearance.superchatOpacityDesc': '超级留言卡片的背景不透明度',
   'appearance.superchatMaxLinesDesc': '正文最大行数，超出部分截断 (2-10)',
   'appearance.membershipMaxLinesDesc': '会员消息正文最大行数 (1-5)',
