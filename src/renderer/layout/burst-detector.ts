@@ -55,6 +55,9 @@ export class BurstDetector {
   private static readonly IDLE_STOP_THRESHOLD_MS = 15_000;
   private samples: number[] = [];
   private runningSum = 0;
+  private sampleDurations: number[] = [];
+  private runningDurationMs = 0;
+  private lastSampleTime = 0;
   private currentLevel: BurstLevel = 'normal';
   private lastBurstTime: number = 0;
   private burstStartTime: number = 0;
@@ -115,8 +118,11 @@ export class BurstDetector {
         this.postResumeSkipCount++;
       } else {
         const intervalMs = now - this.lastMessageTime;
-        const instantRate = 1000 / Math.max(1, intervalMs); // msg/s, avoid div-by-zero
-        this.emaRate = EMA_ALPHA * instantRate + (1 - EMA_ALPHA) * this.emaRate;
+        // A batch with one timestamp contains no measured inter-arrival rate.
+        if (intervalMs > 0) {
+          const instantRate = 1000 / intervalMs;
+          this.emaRate = EMA_ALPHA * instantRate + (1 - EMA_ALPHA) * this.emaRate;
+        }
       }
     }
     this.lastMessageTime = now;
@@ -126,19 +132,29 @@ export class BurstDetector {
   start(): void {
     if (this.sampleInterval) return;
     this.lastMessageTimestamp = performance.now();
+    this.lastSampleTime = this.lastMessageTimestamp;
     this.sampleInterval = setInterval(() => {
+      const now = performance.now();
       // Check for idle timeout — stop sampling if no messages for a while.
-      if (performance.now() - this.lastMessageTimestamp > BurstDetector.IDLE_STOP_THRESHOLD_MS) {
-        this.stop();
+      if (now - this.lastMessageTimestamp > BurstDetector.IDLE_STOP_THRESHOLD_MS) {
+        this.pause();
+        this.emaRate = 0;
         return;
       }
 
+      const elapsedMs = now - this.lastSampleTime;
+      if (elapsedMs <= 0) return;
+      this.lastSampleTime = now;
+
       const count = this.samplesSinceLastCheck;
       this.samples.push(count);
+      this.sampleDurations.push(elapsedMs);
       this.runningSum += count;
+      this.runningDurationMs += elapsedMs;
       if (this.samples.length > this.rateSampleWindow) {
         const removed = this.samples.shift() ?? 0;
         this.runningSum -= removed;
+        this.runningDurationMs -= this.sampleDurations.shift() ?? 0;
       }
       this.samplesSinceLastCheck = 0;
       this.evaluate();
@@ -171,6 +187,8 @@ export class BurstDetector {
     this.postResumeSkipCount = 0;
     this.samples = [];
     this.runningSum = 0;
+    this.sampleDurations = [];
+    this.runningDurationMs = 0;
     this.currentLevel = 'normal';
     this.lastBurstTime = 0;
     this.burstStartTime = 0;
@@ -183,6 +201,8 @@ export class BurstDetector {
   resume(): void {
     this.samples = [];
     this.runningSum = 0;
+    this.sampleDurations = [];
+    this.runningDurationMs = 0;
     this.postResumeSkipCount = 0;
     this.lastBurstTime = 0;
     this.burstStartTime = 0;
@@ -238,7 +258,7 @@ export class BurstDetector {
     if (this.samples.length === 0) return;
 
     const now = performance.now();
-    const avgRate = this.samples.length > 0 ? this.runningSum / this.samples.length : 0;
+    const avgRate = (this.runningSum * 1000) / this.runningDurationMs;
 
     const newLevel: BurstLevel =
       avgRate > this.extremeThreshold
@@ -292,6 +312,9 @@ export class BurstDetector {
     this.stop();
     this.lastMessageTimestamp = 0;
     this.samples = [];
+    this.sampleDurations = [];
+    this.runningSum = 0;
+    this.runningDurationMs = 0;
     this.emaRate = 0;
     this.lastMessageTime = 0;
     this.lastBurstTime = 0;

@@ -146,7 +146,7 @@ export const ES: Record<string, string> = {
   'danmaku.bottom': 'Fijo abajo',
   'advanced.backlogPlayback': 'Basado en reproducción (recomendado)',
   'advanced.backlogRecent': 'Solo recientes',
-  'advanced.backlogFull': 'Completo (mostrar todo)',
+  'advanced.backlogFull': 'Período completo (muestreo y límite de capacidad)',
   'advanced.backlogNone': 'Ninguno (omitir historial)',
   Off: 'Apagado',
   'advanced.authorRateLimitNormal': 'Normal (5 mensajes / 5s)',
@@ -214,7 +214,7 @@ export const ES: Record<string, string> = {
   'advanced.fadeDuration': 'Duración fundido (ms)',
   'advanced.minPollInterval': 'Intervalo mín. sondeo (ms)',
   'advanced.maxPollInterval': 'Intervalo máx. sondeo (ms)',
-  'advanced.backlogInjectionRate': 'Velocidad máx. (msg/s)',
+  'advanced.backlogInjectionRate': 'Velocidad objetivo máx. (msg/s)',
   'advanced.backlogSpeed': 'Multiplicador velocidad',
   'advanced.backlogRecentWindow': 'Ventana (min)',
   'advanced.logLevel': 'Nivel de registro',
@@ -233,7 +233,7 @@ export const ES: Record<string, string> = {
   'advanced.maxPollIntervalDesc':
     'Intervalo máximo de sondeo del chat en milisegundos (1000-30000)',
   'advanced.backlogInjectionRateDesc':
-    'Velocidad máxima de inyección de mensajes del historial por segundo (0-50)',
+    'Límite del objetivo aleatorio de inyección (0-50 msg/s); 0 pausa la inyección',
   'advanced.backlogSpeedDesc':
     'Multiplicador de velocidad de animación para mensajes del historial (1-5)',
   'advanced.backlogRecentWindowDesc':
@@ -298,7 +298,7 @@ export const ES: Record<string, string> = {
   'advanced.burstElevatedDesc': 'Umbral de mensajes por segundo para el nivel de ráfaga elevado',
   'advanced.burstHighDesc': 'Umbral de mensajes por segundo para el nivel de ráfaga alto',
   'advanced.burstExtremeDesc': 'Umbral de mensajes por segundo para el nivel de ráfaga extremo',
-  'advanced.tuningBacklogInjectionMaxDesc': 'Límite máximo de velocidad de inyección del historial',
+  'advanced.tuningBacklogInjectionMaxDesc': 'Límite adicional del objetivo aleatorio de inyección',
   'advanced.tuningDensityRampDesc':
     'Duración de la rampa de densidad para la inyección del historial en milisegundos',
   'advanced.tuningPollFallbackDesc': 'Retraso alternativo del sondeo en vivo en milisegundos',
@@ -331,7 +331,8 @@ export const ES: Record<string, string> = {
   'advanced.tuningEmojiTimeoutDesc': 'Tiempo de espera para operaciones de obtención de emojis',
   'advanced.tuningDensityRampMaxDesc':
     'Duración máxima de la rampa de densidad para la inyección del historial',
-  'advanced.tuningInjectionRateMinDesc': 'Tasa mínima de inyección del historial (msg/s)',
+  'advanced.tuningInjectionRateMinDesc':
+    'Objetivo aleatorio mínimo (msg/s), limitado por el máximo; 0 pausa la inyección',
   'advanced.tuningSpeedBoostMaxDesc':
     'Factor máximo de aumento de velocidad para compensación de ráfagas',
   'advanced.tuningSpeedBoostDenomDesc':
