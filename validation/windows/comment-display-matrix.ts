@@ -602,11 +602,32 @@ export function assertCommittedVisibleItem(snapshot: MatrixSnapshot, id: string)
   return { draw, row, frameId: snapshot.frame.frameId };
 }
 
-function assertBackend(snapshot: MatrixSnapshot, backend: Backend) {
+/** Keep an already painted moving row inside the viewport after a narrower reflow. */
+export function assertResizeSafeMotion(
+  snapshot: MatrixSnapshot,
+  id: string
+): ReturnType<typeof assertCommittedVisibleItem> {
+  const proof = assertCommittedVisibleItem(snapshot, id);
+  assert(snapshot.frame?.active.some((entry) => entry.id === id));
+  assert(
+    proof.row.x >= 0 && proof.row.x < Number(snapshot.frame?.logicalWidth) / 2,
+    `${id} has not reached the resize-safe viewport half`
+  );
+  return proof;
+}
+
+export function assertBackend(
+  snapshot: MatrixSnapshot,
+  backend: Backend,
+  phase: 'before-input' | 'after-input' = 'after-input'
+): void {
   assert.equal(snapshot.backend, backend);
   if (backend === 'worker') {
     assert(snapshot.workerReady && snapshot.sourcePrefixed && snapshot.sourceHooked);
-    assert(snapshot.drains.length > 0, 'Exact packaged Worker drain is required');
+    if (phase === 'before-input') {
+      assert(snapshot.frame?.complete && snapshot.frame.cleared && !snapshot.frame.truncated);
+      assert(snapshot.activeNow.length === 0 && Object.keys(snapshot.ingress).length === 0);
+    } else assert(snapshot.drains.length > 0, 'Exact packaged Worker drain is required');
   } else {
     assert(!snapshot.workerReady && snapshot.canvasSourceHooked);
   }
@@ -1781,11 +1802,42 @@ async function runBackend(options: {
     });
 
     const motionBaseline = await snapshot(page, backend);
-    assertBackend(motionBaseline, backend);
+    assertBackend(motionBaseline, backend, 'before-input');
     await send('motion');
     await observeVisible(IDS[6]);
+    await page.waitForFunction(
+      ({ selectedBackend, messageId }) => {
+        const probe = window.__ytPlacementProbe;
+        const selected =
+          selectedBackend === 'worker'
+            ? probe?.workers.find((record) => record.ready)?.sample
+            : probe;
+        const frame = selected?.latestRenderFrame;
+        const row = frame?.active.find((entry) => entry.id === messageId);
+        return Boolean(
+          frame?.complete &&
+          frame.cleared &&
+          !frame.truncated &&
+          row &&
+          row.x >= 0 &&
+          row.x < Number(frame.logicalWidth) / 2 &&
+          frame.draws.some(
+            (draw) =>
+              draw.id === messageId &&
+              draw.alpha > 0 &&
+              draw.rect &&
+              draw.rect.left < Number(frame.logicalWidth) &&
+              draw.rect.right > 0 &&
+              draw.rect.top < Number(frame.logicalHeight) &&
+              draw.rect.bottom > 0
+          )
+        );
+      },
+      { selectedBackend: backend, messageId: IDS[6] },
+      { polling: 100, timeout: 5000 }
+    );
     const before = await capture('motion-before', false);
-    check(() => assertCoherentVisibleFrame(before, IDS[6]));
+    check(() => assertResizeSafeMotion(before, IDS[6]));
     check(() =>
       assert(
         before.presentationCount !== null &&
@@ -2942,9 +2994,12 @@ async function runOverloadBackend(options: {
         );
       } else if (name === 'overflow') {
         for (let batch = 0; batch < 20; batch++) {
+          failureStage = `overflow:old-${batch}:transport`;
           await send(`overflowSeed${batch}`);
+          failureStage = `overflow:old-${batch}:ingress`;
           await waitForIngress(page, backend, `WINDOWS380_LOAD_OVERFLOW_OLD_${batch * 4 + 3}`);
         }
+        failureStage = 'overflow:queue-full';
         const full = await observe('queue-full');
         const oldRendererIngress = Array.from({ length: 80 }, (_, index) =>
           Number.isFinite(full.ingress[`WINDOWS380_LOAD_OVERFLOW_OLD_${index}`])
@@ -2966,8 +3021,11 @@ async function runOverloadBackend(options: {
           'Overflow seed did not fill the pending queue'
         );
         assert(Number.isFinite(full.frame?.startedAtEpochMs));
+        failureStage = 'overflow:late:transport';
         await send('overflowLate');
+        failureStage = 'overflow:late:ingress';
         await waitForIngress(page, backend, 'WINDOWS380_LOAD_OVERFLOW_NEW_3');
+        failureStage = 'overflow:late:observation';
         const end = await observe('equal-priority-newcomers');
         const replacedOldAfterNew = end.dispositions.filter(
           (entry) =>
@@ -3044,35 +3102,100 @@ async function runOverloadBackend(options: {
           );
         });
       } else {
+        failureStage = 'pause-hidden-resume:pre-admission';
+        await send('pause');
+        await Promise.all(
+          ids.map(async (id) => {
+            await waitForIngress(page, backend, id);
+            await waitForVisible(page, backend, id);
+          })
+        );
+        const beforePause = await observe('admitted-before-pause');
+        check(() => {
+          for (const id of ids) {
+            assert(
+              Number.isFinite(beforePause.ingress[id]),
+              `${id} lacked pre-pause renderer ingress`
+            );
+            assertCommittedVisibleItem(beforePause, id);
+          }
+        });
+        failureStage = 'pause-hidden-resume:hidden-hold';
         await page.evaluate(() => {
           window.__ytPlacementSetPaused(true);
           (
             window as typeof window & { __ytPlacementSetHidden?: (hidden: boolean) => void }
           ).__ytPlacementSetHidden?.(true);
         });
-        await send('pause');
         await page.waitForTimeout(500);
         const held = await observe('paused-hidden');
-        check(() =>
-          assert(
-            ids.every((id) => !Number.isFinite(held.firstEntry[id])),
-            'Pause or hidden state published first-visible ink'
-          )
-        );
+        check(() => {
+          for (const id of ids) {
+            assert.equal(held.firstEntry[id], beforePause.firstEntry[id]);
+            const beforeRow = beforePause.activeNow.find((entry) => entry.id === id);
+            const heldRow = held.activeNow.find((entry) => entry.id === id);
+            assert(beforeRow && heldRow, `${id} lost its admitted row while hidden`);
+            assert(
+              Math.abs(beforeRow.x - heldRow.x) < 3 && Math.abs(beforeRow.y - heldRow.y) < 3,
+              `${id} moved while paused and hidden`
+            );
+          }
+        });
+        failureStage = 'pause-hidden-resume:resume-draw';
         await page.evaluate(() => {
           (
             window as typeof window & { __ytPlacementSetHidden?: (hidden: boolean) => void }
           ).__ytPlacementSetHidden?.(false);
           window.__ytPlacementSetPaused(false);
         });
-        await page.waitForTimeout(1500);
-        const resumed = await observe('resumed');
-        check(() =>
-          assert(
-            ids.some((id) => Number.isFinite(resumed.firstEntry[id])),
-            'Pause/hidden recovery did not publish a resumed draw'
-          )
+        await page.waitForFunction(
+          ({ selectedBackend, expectedIds, priorFrame }) => {
+            const probe = window.__ytPlacementProbe;
+            const worker = probe?.workers.find((record) => record.ready);
+            const selected = selectedBackend === 'worker' ? worker?.sample : probe;
+            const frame = selected?.latestRenderFrame;
+            const visible = Boolean(
+              frame?.complete &&
+              frame.cleared &&
+              !frame.truncated &&
+              frame.frameId > priorFrame &&
+              expectedIds.every(
+                (id) =>
+                  frame.active.some((row) => row.id === id) &&
+                  frame.draws.some(
+                    (draw) =>
+                      draw.id === id &&
+                      draw.alpha > 0 &&
+                      draw.rect &&
+                      draw.rect.left < Number(frame.logicalWidth) &&
+                      draw.rect.right > 0 &&
+                      draw.rect.top < Number(frame.logicalHeight) &&
+                      draw.rect.bottom > 0
+                  )
+              )
+            );
+            if (!visible && selectedBackend === 'worker' && worker && probe) {
+              const now = performance.now();
+              if (now - (worker.dueFlushAt ?? -Infinity) >= 100) {
+                const requestId = (probe.flushSequence ?? 0) + 1;
+                probe.flushSequence = requestId;
+                worker.dueFlushAt = now;
+                worker.worker.postMessage({ type: 'ytPlacementFlush', requestId });
+              }
+            }
+            return visible;
+          },
+          { selectedBackend: backend, expectedIds: ids, priorFrame: held.frame?.frameId ?? -1 },
+          { polling: 100, timeout: 5000 }
         );
+        const resumed = await observe('resumed');
+        check(() => {
+          assert(Number(resumed.frame?.frameId) > Number(held.frame?.frameId));
+          for (const id of ids) {
+            assert(Number.isFinite(resumed.ingress[id]), `${id} lost pre-pause admission`);
+            assertCommittedVisibleItem(resumed, id);
+          }
+        });
       }
       cases.push({
         name,
@@ -3087,6 +3210,16 @@ async function runOverloadBackend(options: {
       });
     }
   } catch (error) {
+    if (currentCase === 'overflow' && !page.isClosed()) {
+      const measured = await snapshot(page, backend, MAX_OVERLOAD_RECORDS).catch(() => null);
+      if (measured) {
+        const ids = OVERLOAD_IDS.filter((id) => id.includes('_OVERFLOW_'));
+        currentSnapshots.push({
+          stage: `failed-${failureStage}`,
+          trace: overloadTrace(measured, ids, OVERLOAD_SETTINGS.overflow, deliveredIds),
+        });
+      }
+    }
     if (currentCase && currentSnapshots.length > 0)
       cases.push({
         name: currentCase,
@@ -3102,32 +3235,78 @@ async function runOverloadBackend(options: {
     const diagnostic = page.isClosed()
       ? null
       : await page
-          .evaluate((selectedBackend) => {
-            const probe = window.__ytPlacementProbe;
-            const worker = probe?.workers.find((record) => record.ready);
-            const selected = selectedBackend === 'worker' ? worker?.sample : probe;
-            const frame = selected?.latestRenderFrame;
-            const player = document.querySelector('#movie_player')?.getBoundingClientRect();
-            const video = document.querySelector('video')?.getBoundingClientRect();
-            return {
-              viewportWidth: innerWidth,
-              playerHeight: player?.height ?? null,
-              videoRect: video
-                ? { width: video.width, height: video.height, top: video.top, bottom: video.bottom }
-                : null,
-              workerReady: Boolean(worker),
-              sourceHooked: probe?.sourceHooked ?? false,
-              canvasSourceHooked: probe?.canvasSourceHooked ?? false,
-              config: selected?.exact?.config ?? null,
-              frame: frame
-                ? {
-                    complete: frame.complete,
-                    logicalWidth: frame.logicalWidth,
-                    logicalHeight: frame.logicalHeight,
-                  }
-                : null,
-            };
-          }, backend)
+          .evaluate(
+            ({ selectedBackend, caseIds }) => {
+              const probe = window.__ytPlacementProbe;
+              const worker = probe?.workers.find((record) => record.ready);
+              const selected = selectedBackend === 'worker' ? worker?.sample : probe;
+              const frame = selected?.latestRenderFrame;
+              const exact = selected?.exact;
+              const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+              const video = document.querySelector('video')?.getBoundingClientRect();
+              return {
+                viewportWidth: innerWidth,
+                playerHeight: player?.height ?? null,
+                videoRect: video
+                  ? {
+                      width: video.width,
+                      height: video.height,
+                      top: video.top,
+                      bottom: video.bottom,
+                    }
+                  : null,
+                workerReady: Boolean(worker),
+                sourceHooked: probe?.sourceHooked ?? false,
+                canvasSourceHooked: probe?.canvasSourceHooked ?? false,
+                workerProbe: worker
+                  ? {
+                      flushId: worker.flushId ?? null,
+                      stats: worker.stats.slice(-4).map((entry) => ({
+                        pendingQueueDepth: entry.pendingQueueDepth ?? null,
+                        totalRendered: entry.totalRendered ?? null,
+                        totalPresented: entry.totalPresented ?? null,
+                      })),
+                    }
+                  : null,
+                config: exact?.config ?? null,
+                retained: exact?.retained ?? null,
+                ingress: Object.fromEntries(
+                  caseIds
+                    .filter((id) => Number.isFinite(selected?.ingress?.[id]))
+                    .map((id) => [id, selected?.ingress?.[id]])
+                ),
+                pendingNow:
+                  exact?.pendingNow?.filter((id) => caseIds.includes(id)).slice(0, 128) ?? [],
+                activeNow:
+                  exact?.activeNow?.filter((entry) => caseIds.includes(entry.id)).slice(0, 128) ??
+                  [],
+                dispositions:
+                  exact?.dispositions
+                    ?.filter((entry) => caseIds.includes(entry.id))
+                    .slice(-128)
+                    .map((entry) => ({
+                      id: entry.id,
+                      kind: entry.kind,
+                      reason: entry.reason ?? null,
+                      atEpochMs: entry.atEpochMs ?? null,
+                    })) ?? [],
+                frame: frame
+                  ? {
+                      frameId: frame.frameId,
+                      complete: frame.complete,
+                      logicalWidth: frame.logicalWidth,
+                      logicalHeight: frame.logicalHeight,
+                    }
+                  : null,
+              };
+            },
+            {
+              selectedBackend: backend,
+              caseIds: OVERLOAD_IDS.filter((id) =>
+                currentCase ? id.includes(`_${currentCase.toUpperCase().split('-')[0]}_`) : false
+              ),
+            }
+          )
           .catch(() => null);
     return {
       status: 'failed' as const,

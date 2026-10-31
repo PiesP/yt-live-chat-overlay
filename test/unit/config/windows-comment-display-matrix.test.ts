@@ -6,10 +6,12 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vite-plus/test';
 
 import {
+  assertBackend,
   assertCoherentVisibleFrame,
   assertCommittedVisibleItem,
   assertNoVisibleCardInk,
   assertPreviewComparison,
+  assertResizeSafeMotion,
   assertRestoredVisibility,
   bindMatrixIdentity,
   classifyMatrixRuntime,
@@ -283,6 +285,44 @@ describe('Windows comment display matrix contract', () => {
       presentationCounterAvailable: true,
       overflow: 0,
     } satisfies Parameters<typeof paidRowBudget>[0];
+    const emptyBeforeInput = {
+      ...sample,
+      frame: { ...sample.frame, active: [], draws: [] },
+      firstEntry: {},
+      ingress: {},
+      activeNow: [],
+      drains: [],
+    };
+    expect(() => assertBackend(emptyBeforeInput, 'worker', 'before-input')).not.toThrow();
+    expect(() => assertBackend(emptyBeforeInput, 'worker')).toThrow(/drain/);
+    expect(() =>
+      assertBackend({ ...emptyBeforeInput, sourceHooked: false }, 'worker', 'before-input')
+    ).toThrow();
+    expect(() =>
+      assertBackend(
+        { ...emptyBeforeInput, frame: { ...emptyBeforeInput.frame, complete: false } },
+        'worker',
+        'before-input'
+      )
+    ).toThrow();
+    expect(() => assertResizeSafeMotion(sample, id)).not.toThrow();
+    expect(() =>
+      assertResizeSafeMotion(
+        {
+          ...sample,
+          activeNow: sample.activeNow.map((row) => ({ ...row, x: 700 })),
+          frame: {
+            ...sample.frame,
+            active: sample.frame.active.map((row) => ({ ...row, x: 700 })),
+            draws: sample.frame.draws.slice(0, 1).map((draw) => ({
+              ...draw,
+              rect: { left: 705, top: 30, right: 800, bottom: 42 },
+            })),
+          },
+        },
+        id
+      )
+    ).toThrow(/resize-safe/);
     expect(paidRowBudget(sample, id, 4).plan.translationRows).toBe(2);
     expect(membershipEffect(sample, member).borderAlpha).toBe(0.75);
     const bodyDraw = sample.frame.draws[0]!;
