@@ -16,6 +16,12 @@ The existing 4096-code-point field and aggregate limits, 512-segment limit, and
 translation request budgets still apply to accepted input. Paid and membership
 bodies retain their existing full source and line-limited display behavior.
 
+The aggregate budget counts the longest body representation once, alongside the
+existing author and metadata fields. It does not grant an additional body budget
+for canonical fields. If grapheme segmentation is unavailable, truncation treats
+each text segment as indivisible and uses an ellipsis when it cannot fit. This
+can retain less text, while preserving the compact limit and whole characters.
+
 ## Motion and geometry
 
 Canvas and OffscreenCanvas Worker rendering use the shared motion planner in
