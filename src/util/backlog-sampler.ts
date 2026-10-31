@@ -43,8 +43,8 @@ export class BacklogSampler {
 
   /**
    * Split messages into priority (SuperChat/Membership) and regular groups.
-   * Priority messages are emitted immediately during backlog injection;
-   * regular messages go through the throttled queue.
+   * Priority messages precede ordinary messages in the same throttled
+   * injection queue; both remain subject to the configured rate.
    */
   extractPriorityMessages(messages: ChatMessage[]): {
     priority: ChatMessage[];
