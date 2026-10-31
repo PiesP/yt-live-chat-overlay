@@ -23,6 +23,7 @@ const RED_PNG = Buffer.from(
 );
 const MAX_EVENTS = 40;
 const MAX_DRAWS = 60;
+const MAX_CASE_TRACE = 64;
 
 type AssetKind = 'emoji' | 'author' | 'sticker';
 type RoutePlan = 'png' | 'http404' | 'cors' | 'malformed' | 'connectionreset';
@@ -47,6 +48,59 @@ type NativeDraw = {
   canvasDimensions: number[];
   sampledRectangle: { x: number; y: number; width: number; height: number } | null;
 };
+type CaseTrace = {
+  caseId: string;
+  reason: string;
+  atMs: number;
+  renderFrames: number;
+  settings: {
+    danmakuMode: string;
+    topBottomDurationMs: number;
+    fontSize: number;
+    safeTop: number;
+    safeBottom: number;
+    laneSpacing: number;
+    superChatLayout: string;
+    superChatMaxBodyLines: number;
+    showSuperChatAmount: boolean;
+    showSuperChatAuthor: boolean;
+    maxConcurrentMessages: number;
+    outlineEnabled: boolean;
+    outlineWidthPx: number;
+    outlineOpacity: number;
+  } | null;
+  geometry: {
+    width: number;
+    height: number;
+    usableHeight: number;
+    laneHeight: number;
+    laneCount: number;
+    estimated: { width: number; height: number } | null;
+  } | null;
+  pendingCount: number | null;
+  activeCount: number | null;
+  ownedPendingIds: string[] | null;
+  ownedActiveIds: string[] | null;
+  targetPending: boolean | null;
+  targetActive: {
+    width: number;
+    height: number;
+    y: number;
+    startTime: number;
+    duration: number;
+    pausedDuration: number;
+    reflowHidden: boolean;
+    wasPresented: boolean;
+    lastDrawnFrame: number | null;
+  } | null;
+  imageEvent: 'load' | 'error' | null;
+  imageCacheHit: boolean | null;
+  imageLoading: boolean | null;
+  imageDrawn: boolean;
+  positivePixel: boolean;
+  textObserved: boolean;
+  placement: { placed: boolean; oversized: boolean } | null;
+};
 type NativeState = {
   workerAttempts: Array<{ url: string; type: string; error: string }>;
   workerOverflow: number;
@@ -59,8 +113,36 @@ type NativeState = {
       emojiFetching: Set<string>;
       imageLoading: Set<string>;
     };
-    activeMessages: Array<{ message: { id?: string } }>;
-    settings: { danmakuMode: string; topBottomDurationMs: number };
+    activeMessages: Array<{
+      message: { id?: string };
+      width: number;
+      height: number;
+      y: number;
+      startTime: number;
+      duration: number;
+      pausedDuration: number;
+      reflowHidden?: boolean;
+      wasPresented?: boolean;
+      _lastDrawnFrame?: number;
+    }>;
+    pendingQueue: { size: number; toArray(): Array<{ id?: string }> };
+    dimensionCache: Map<string, { width: number; height: number }>;
+    overlay: { getDimensions(): { width: number; height: number } | null };
+    laneAllocator: { getLaneHeight(): number; getLaneCount(): number };
+    settings: {
+      danmakuMode: string;
+      topBottomDurationMs: number;
+      fontSize: number;
+      safeTop: number;
+      safeBottom: number;
+      laneSpacing: number;
+      superChatLayout: string;
+      superChatMaxBodyLines: number;
+      showSuperChatAmount: boolean;
+      showAuthor: { superChat: boolean };
+      maxConcurrentMessages: number;
+      outline: { enabled: boolean; widthPx: number; opacity: number };
+    };
     workerManager: { workerRef: Worker | null };
   } | null;
   renderFrames: number;
@@ -71,6 +153,33 @@ type NativeState = {
   drawOverflow: number;
   textDraws: string[];
   textOverflow: number;
+  currentCase: {
+    id: string;
+    messageId: string;
+    url: string;
+    textToken: string;
+    kind: AssetKind;
+  } | null;
+  caseTrace: CaseTrace[];
+  caseTraceOverflow: number;
+  probeErrors: string[];
+  caseCounters: Record<
+    string,
+    {
+      ingressCalls: number;
+      enqueueCalls: number;
+      queuedAfterEnqueue: number;
+      absentAfterEnqueue: number;
+      placementAttempts: number;
+      placed: number;
+      oversized: number;
+      retryable: number;
+      lastPlacementAtMs: number | null;
+    }
+  >;
+  captureCase: (reason: string, placement?: CaseTrace['placement']) => CaseTrace | null;
+  observeCase: (reason: string, placement?: CaseTrace['placement']) => void;
+  safeObserveCase: (reason: string, placement?: CaseTrace['placement']) => void;
 };
 
 declare global {
@@ -195,11 +304,14 @@ function installPagePrelude({
   imagePrefix,
   maxEvents,
   maxDraws,
+  maxCaseTrace,
 }: {
   imagePrefix: string;
   maxEvents: number;
   maxDraws: number;
+  maxCaseTrace: number;
 }): void {
+  const lastTraceSignatures = new Map<string, string>();
   const state: NativeState = {
     workerAttempts: [],
     workerOverflow: 0,
@@ -212,6 +324,159 @@ function installPagePrelude({
     drawOverflow: 0,
     textDraws: [],
     textOverflow: 0,
+    currentCase: null,
+    caseTrace: [],
+    caseTraceOverflow: 0,
+    probeErrors: [],
+    caseCounters: {},
+    captureCase(reason, placement = null) {
+      const current = state.currentCase;
+      if (!current) return null;
+      const renderer = state.renderer;
+      const settings = renderer?.settings;
+      const dims = renderer?.overlay.getDimensions();
+      const pending = renderer?.pendingQueue.toArray() ?? [];
+      const active = renderer?.activeMessages ?? [];
+      const target = active.find((entry) => entry.message.id === current.messageId);
+      const cache =
+        current.kind === 'author'
+          ? renderer?.imageFetchManager.authorPhotoCache
+          : current.kind === 'sticker'
+            ? renderer?.imageFetchManager.stickerCache
+            : renderer?.imageFetchManager.emojiCache;
+      const draws = state.draws.filter((entry) => entry.url === current.url);
+      return {
+        caseId: current.id,
+        reason,
+        atMs: performance.now(),
+        renderFrames: state.renderFrames,
+        settings: settings
+          ? {
+              danmakuMode: settings.danmakuMode,
+              topBottomDurationMs: settings.topBottomDurationMs,
+              fontSize: settings.fontSize,
+              safeTop: settings.safeTop,
+              safeBottom: settings.safeBottom,
+              laneSpacing: settings.laneSpacing,
+              superChatLayout: settings.superChatLayout,
+              superChatMaxBodyLines: settings.superChatMaxBodyLines,
+              showSuperChatAmount: settings.showSuperChatAmount,
+              showSuperChatAuthor: settings.showAuthor.superChat,
+              maxConcurrentMessages: settings.maxConcurrentMessages,
+              outlineEnabled: settings.outline.enabled,
+              outlineWidthPx: settings.outline.widthPx,
+              outlineOpacity: settings.outline.opacity,
+            }
+          : null,
+        geometry:
+          dims && settings && renderer
+            ? {
+                width: dims.width,
+                height: dims.height,
+                usableHeight: dims.height * (1 - settings.safeTop - settings.safeBottom),
+                laneHeight: renderer.laneAllocator.getLaneHeight(),
+                laneCount: renderer.laneAllocator.getLaneCount(),
+                estimated: renderer.dimensionCache.get(current.messageId) ?? null,
+              }
+            : null,
+        pendingCount: renderer?.pendingQueue.size ?? null,
+        activeCount: renderer?.activeMessages.length ?? null,
+        ownedPendingIds: renderer
+          ? pending
+              .map((entry) => entry.id)
+              .filter((id): id is string => id?.startsWith('WINDOWS306_MAIN_') === true)
+              .slice(0, 12)
+          : null,
+        ownedActiveIds: renderer
+          ? active
+              .map((entry) => entry.message.id)
+              .filter((id): id is string => id?.startsWith('WINDOWS306_MAIN_') === true)
+              .slice(0, 12)
+          : null,
+        targetPending: renderer ? pending.some((entry) => entry.id === current.messageId) : null,
+        targetActive: target
+          ? {
+              width: target.width,
+              height: target.height,
+              y: target.y,
+              startTime: target.startTime,
+              duration: target.duration,
+              pausedDuration: target.pausedDuration,
+              reflowHidden: target.reflowHidden === true,
+              wasPresented: target.wasPresented === true,
+              lastDrawnFrame: target._lastDrawnFrame ?? null,
+            }
+          : null,
+        imageEvent: state.imageEvents.find((entry) => entry.url === current.url)?.type ?? null,
+        imageCacheHit: cache?.has(current.url) ?? null,
+        imageLoading: renderer?.imageFetchManager.imageLoading.has(current.url) ?? null,
+        imageDrawn: draws.length > 0,
+        positivePixel: draws.some((entry) => entry.imagePixelChanged),
+        textObserved: state.textDraws.some((entry) => entry.includes(current.textToken)),
+        placement,
+      };
+    },
+    observeCase(reason, placement = null) {
+      if (state.currentCase) {
+        const counts = (state.caseCounters[state.currentCase.id] ??= {
+          ingressCalls: 0,
+          enqueueCalls: 0,
+          queuedAfterEnqueue: 0,
+          absentAfterEnqueue: 0,
+          placementAttempts: 0,
+          placed: 0,
+          oversized: 0,
+          retryable: 0,
+          lastPlacementAtMs: null,
+        });
+        if (reason === 'ingress') counts.ingressCalls++;
+        if (reason === 'enqueue-return') {
+          counts.enqueueCalls++;
+          if (
+            state.renderer?.pendingQueue
+              .toArray()
+              .some((entry) => entry.id === state.currentCase?.messageId)
+          )
+            counts.queuedAfterEnqueue++;
+          else counts.absentAfterEnqueue++;
+        }
+        if (reason === 'placement' && placement) {
+          counts.placementAttempts++;
+          counts.lastPlacementAtMs = performance.now();
+          if (placement.placed) counts.placed++;
+          else if (placement.oversized) counts.oversized++;
+          else counts.retryable++;
+        }
+      }
+      const observation = state.captureCase(reason, placement);
+      if (!observation) return;
+      const group = reason.startsWith('frame-') ? 'frame' : reason;
+      const signature = JSON.stringify({
+        ...observation,
+        reason: null,
+        atMs: null,
+        renderFrames: null,
+        targetActive: observation.targetActive
+          ? { ...observation.targetActive, lastDrawnFrame: null }
+          : null,
+      });
+      const key = `${observation.caseId}:${group}`;
+      if (lastTraceSignatures.get(key) === signature) return;
+      lastTraceSignatures.set(key, signature);
+      if (state.caseTrace.length >= maxCaseTrace) {
+        state.caseTrace.shift();
+        state.caseTraceOverflow++;
+      }
+      state.caseTrace.push(observation);
+    },
+    safeObserveCase(reason, placement = null) {
+      try {
+        state.observeCase(reason, placement);
+      } catch (error) {
+        if (state.probeErrors.length < 8)
+          state.probeErrors.push(error instanceof Error ? error.name : typeof error);
+      }
+    },
   };
   window.__ytMainImageRecovery = state;
   Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
@@ -262,6 +527,7 @@ function installPagePrelude({
           };
           if (state.imageEvents.length < maxEvents) state.imageEvents.push(observation);
           else state.imageEventOverflow++;
+          if (state.currentCase?.url === url) state.safeObserveCase(`image-${type}`);
         };
         this.addEventListener('load', () => record('load'), { once: true });
         this.addEventListener('error', () => record('error'), { once: true });
@@ -480,6 +746,12 @@ async function snapshot(page: Page) {
       renderFrames: state.renderFrames,
       nativeWorker: state.renderer?.workerManager.workerRef !== null,
       activeIds: state.renderer?.activeMessages.map((entry) => entry.message.id ?? null) ?? [],
+      currentCaseId: state.currentCase?.id ?? null,
+      currentCase: state.captureCase('snapshot'),
+      caseTrace: state.caseTrace,
+      caseTraceOverflow: state.caseTraceOverflow,
+      caseCounters: state.caseCounters,
+      probeErrors: state.probeErrors,
       imageEvents: state.imageEvents,
       imageEventOverflow: state.imageEventOverflow,
       draws: state.draws,
@@ -509,6 +781,9 @@ export async function runMainImageRecoveryFixture({
     source.includes('var CanvasRenderer = class CanvasRenderer'),
     'Packaged Main renderer changed'
   );
+  assert(source.includes('placeQueuedMessage('), 'Packaged Main placement hook changed');
+  assert(source.includes('addMessage(message)'), 'Packaged Main ingress hook changed');
+  assert(source.includes('enqueueMessage(message,'), 'Packaged Main queue hook changed');
   const instrumented = source.replace(
     ENTRY_MARKER,
     '\n\tconst mainImageState = window.__ytMainImageRecovery;\n' +
@@ -516,8 +791,32 @@ export async function runMainImageRecoveryFixture({
       '\tconst nativeMainFrame = CanvasRenderer.prototype.renderFrame;\n' +
       '\tCanvasRenderer.prototype.renderFrame = function(...args) {\n' +
       '\t\tmainImageState.renderer = this;\n' +
+      "\t\tmainImageState.safeObserveCase('frame-before');\n" +
       '\t\tmainImageState.renderFrames++;\n' +
-      '\t\treturn nativeMainFrame.apply(this, args);\n' +
+      '\t\ttry { return nativeMainFrame.apply(this, args); }\n' +
+      "\t\tfinally { mainImageState.safeObserveCase('frame-after'); }\n" +
+      '\t};\n' +
+      '\tconst nativeAddMessage = CanvasRenderer.prototype.addMessage;\n' +
+      '\tCanvasRenderer.prototype.addMessage = function(message, ...args) {\n' +
+      '\t\tconst owned = message?.id === mainImageState.currentCase?.messageId;\n' +
+      "\t\tif (owned) { mainImageState.renderer = this; mainImageState.safeObserveCase('ingress'); }\n" +
+      '\t\ttry { return nativeAddMessage.call(this, message, ...args); }\n' +
+      "\t\tfinally { if (owned) mainImageState.safeObserveCase('ingress-return'); }\n" +
+      '\t};\n' +
+      '\tconst nativeEnqueueMessage = CanvasRenderer.prototype.enqueueMessage;\n' +
+      '\tCanvasRenderer.prototype.enqueueMessage = function(message, ...args) {\n' +
+      '\t\tconst owned = message?.id === mainImageState.currentCase?.messageId;\n' +
+      '\t\tconst result = nativeEnqueueMessage.call(this, message, ...args);\n' +
+      "\t\tif (owned) { mainImageState.renderer = this; mainImageState.safeObserveCase('enqueue-return'); }\n" +
+      '\t\treturn result;\n' +
+      '\t};\n' +
+      '\tconst nativePlaceQueuedMessage = CanvasRenderer.prototype.placeQueuedMessage;\n' +
+      '\tCanvasRenderer.prototype.placeQueuedMessage = function(message, ...args) {\n' +
+      '\t\tconst placement = nativePlaceQueuedMessage.call(this, message, ...args);\n' +
+      '\t\tif (message.id === mainImageState.currentCase?.messageId) {\n' +
+      "\t\t\tmainImageState.safeObserveCase('placement', { placed: placement.placed, oversized: placement.oversized });\n" +
+      '\t\t}\n' +
+      '\t\treturn placement;\n' +
       '\t};\n' +
       `\tmainImageState.sourceBound = true;${ENTRY_MARKER}`
   );
@@ -650,6 +949,7 @@ export async function runMainImageRecoveryFixture({
       imagePrefix: IMAGE_PREFIX,
       maxEvents: MAX_EVENTS,
       maxDraws: MAX_DRAWS,
+      maxCaseTrace: MAX_CASE_TRACE,
     });
     nativePageProbe = await installNativePageScriptProbe({
       context,
@@ -685,6 +985,8 @@ export async function runMainImageRecoveryFixture({
       app.applySettings({
         danmakuMode: 'top',
         topBottomDurationMs: 2_000,
+        safeTop: 0,
+        safeBottom: 0,
         showAuthor: { ...settings.showAuthor, normal: true, superChat: true },
         showDebugOverlay: true,
         allowShortTextMessages: true,
@@ -696,8 +998,28 @@ export async function runMainImageRecoveryFixture({
     });
     await page.waitForFunction(
       () => {
-        const settings = window.__ytMainImageRecovery?.renderer?.settings;
-        return settings?.danmakuMode === 'top' && settings.topBottomDurationMs === 2_000;
+        const renderer = window.__ytMainImageRecovery?.renderer;
+        const settings = renderer?.settings;
+        const dimensions = renderer?.overlay.getDimensions();
+        if (!renderer || !settings || !dimensions) return false;
+        const usableHeight = dimensions.height * (1 - settings.safeTop - settings.safeBottom);
+        const laneHeight = renderer.laneAllocator.getLaneHeight();
+        // Candidate 15 measured the sticker row at 197px; keep the fixture's
+        // actual allocator geometry large enough before sending any case.
+        return (
+          settings.danmakuMode === 'top' &&
+          settings.topBottomDurationMs === 2_000 &&
+          settings.safeTop === 0 &&
+          settings.safeBottom === 0 &&
+          Number.isFinite(dimensions.width) &&
+          dimensions.width > 0 &&
+          Number.isFinite(usableHeight) &&
+          usableHeight > 197 &&
+          usableHeight === dimensions.height &&
+          Number.isFinite(laneHeight) &&
+          laneHeight > 0 &&
+          renderer.laneAllocator.getLaneCount() === Math.ceil(usableHeight / laneHeight)
+        );
       },
       undefined,
       { timeout: 5_000 }
@@ -712,16 +1034,23 @@ export async function runMainImageRecoveryFixture({
     assert.equal(initial.workerOverflow, 0);
 
     for (const entry of cases) {
-      await page.evaluate(async (id) => {
-        const response = await fetch(
-          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows306=${id}`,
-          { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }
-        );
-        if (!response.ok) throw new Error('Main fixture chat request failed');
-        await response.json();
-      }, entry.id);
-      assert(delivered.has(entry.id), `Main fixture batch ${entry.id} was not intercepted`);
       const messageId = `WINDOWS306_MAIN_${entry.id.toUpperCase().replaceAll('-', '_')}`;
+      await page.evaluate(
+        async ({ id, url, textToken, kind, messageId }) => {
+          const state = window.__ytMainImageRecovery;
+          if (!state) throw new Error('Main image prelude disappeared before case send');
+          state.currentCase = { id, url, textToken, kind, messageId };
+          state.safeObserveCase('send');
+          const response = await fetch(
+            `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows306=${id}`,
+            { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }
+          );
+          if (!response.ok) throw new Error('Main fixture chat request failed');
+          await response.json();
+        },
+        { ...entry, messageId }
+      );
+      assert(delivered.has(entry.id), `Main fixture batch ${entry.id} was not intercepted`);
       await page.waitForFunction(
         ({ url, id, textToken, expectSuccess, kind }) => {
           const state = window.__ytMainImageRecovery;
@@ -857,8 +1186,10 @@ export async function runMainImageRecoveryFixture({
         messageId,
         { timeout: 8_000 }
       );
+      await page.evaluate(() => window.__ytMainImageRecovery?.safeObserveCase('retired'));
     }
     const final = await snapshot(page);
+    assert.deepEqual(final.probeErrors, [], 'Main image diagnostic observation failed');
     assert.equal(final.imageEventOverflow, 0);
     assert.equal(final.drawOverflow, 0);
     assert.equal(final.textOverflow, 0);
@@ -896,12 +1227,16 @@ export async function runMainImageRecoveryFixture({
   } catch (error) {
     primaryError = error;
     try {
+      const failingCaseId = await page
+        .evaluate(() => window.__ytMainImageRecovery?.currentCase?.id ?? null)
+        .catch(() => null);
       await writeFile(
         join(output, 'main-image-recovery-failure.json'),
         JSON.stringify(
           {
             status: 'failed',
             failure: describeError(error),
+            failingCaseId,
             pageScriptProbeProvenance,
             completedCases: caseResults,
             imageRequests,

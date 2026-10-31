@@ -965,8 +965,9 @@ export async function runRecoveryContinuityFixture({
           };
           const paid: ChatMessage = {
             id: paidId,
-            text: 'WIN306_PAID',
-            content: [{ type: 'text', content: 'WIN306_PAID' }],
+            // Keep the unique body marker inside one narrow paid-card text run.
+            text: 'WIN306_P',
+            content: [{ type: 'text', content: 'WIN306_P' }],
             kind: 'superchat',
             timestamp: Date.now(),
             author: 'Paid donor',
@@ -1163,7 +1164,7 @@ export async function runRecoveryContinuityFixture({
           );
         return (
           state.textDraws.some((text) => text.includes('WIN306_NEW')) &&
-          state.textDraws.some((text) => text.includes('WIN306_PAID')) &&
+          state.textDraws.some((text) => text.includes('WIN306_P')) &&
           state.textDraws.some((text) => text.includes('WIN306_FUTURE')) &&
           drawn(newUrl) &&
           drawn(avatarUrl) &&

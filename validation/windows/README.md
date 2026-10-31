@@ -1,5 +1,192 @@
 # Windows acceptance profile
 
+## Comment display matrix (#380, #382–#387)
+
+The ordinary full installed Edge extension profile runs
+`comment-display-matrix.ts` after the maintained placement scenarios. It uses
+the installed packaged Worker and a separate forced Canvas fallback page on an
+owned YouTube-shaped fixture. Do not select a focused installation scenario:
+the controller does not support combining `--scenario` and `--installation`.
+The artifact Main profile remains a separate route.
+
+The matrix uses fixed Unicode boundary, paid, RTL, narrow fixed/reduced-motion,
+motion, and zero-capacity/restoration inputs. Its initial 960-by-1000 viewport
+holds an 800px player so the six simultaneous content rows can be due together.
+It waits for all three canonical accessible tails before the content capture
+and requires the deferred zero-capacity ID itself to draw after restoration.
+Both restoration IDs use their actual source-planned starts for bounded visible
+frame waits on Main and Worker. Each ID needs its own retained complete frame,
+positive-alpha ink inside committed bounds, and the restored layout; their
+planned intervals need not overlap. The final restored PNG shows its capture
+instant and does not claim that both rows were visible together.
+The 51-row zero-rate backlog must stay outside renderer ingress, then its first
+row must enter and paint after a same-page positive-rate update. A separate
+fresh page checks the positive cohort with its own distinct first-visible ID.
+Before the zero-rate batch, the same page expands to a measured 800px player
+inside a 720-by-1000 viewport so earlier fixed rows leave real lanes for the
+resumed backlog row. Its player bounds must fit the physical viewport. The
+fresh positive cohort returns to the 720-by-540 viewport before source input.
+It then navigates to fresh owned pages for
+matched stacked/wide presentation captures over the existing bright, dark, and
+detailed videos at 400px and 960px viewport widths. Each page uses a measured
+900px player inside a 1100px high physical viewport, with an actual config and
+viewport-fit barrier before source input. This provides measured lanes for paid,
+sticker, membership, and ordinary rows at 32px without changing source or
+scheduling policy; a row can still have a future planned start. Recorded viewport
+dimensions come from the live page and player bounds are the actual overlay size.
+The presentation workload includes a
+localized long amount, mixed RTL/CJK author, sticker, membership event, and
+ordinary comment. The videos must decode and advance before capture. Each backend
+is limited to 16 recorded phases, 12 PNG captures, 48 non-draw records per
+snapshot, 240 actual frame draws, and 60 seconds; the total PNG ceiling is 24.
+Reduced-motion fixed, pre-pause motion,
+paused motion, and zero-capacity phases retain their complete JSON observations
+without an additional PNG. This leaves room for the existing full-profile
+artifacts under the controller's unchanged 64-file collection limit.
+The motion row must enter the inner half of its current viewport before the
+same-ID pause and narrower reflow comparison. Pause motion is compared from a
+post-command snapshot after an ordered Worker flush, so movement before the
+command is excluded from the hold measurement. The horizontal resize holds the
+measured player height constant so its physical-row Y comparison has the same
+vertical geometry on both sides.
+On the detailed scene, a page-owned Translator stub records
+the accepted canonical tail and supplies a distinct selected translation; the
+probe requires its positive-alpha draw in the same complete frame. The fixture
+binds paid body and translation draws to the actual prepared plan row passed to
+the shared text painter, so fragmented text and reused glyph bitmaps retain the
+source card ID and section. A plan allocation alone never counts as a draw.
+Ordinary ink is bound at the actual regular painter call to its current active
+message, covering wrapped fixed rows and inline scrolling rows. Ambiguous shared
+content arrays are rejected. A snapshot that omits required active rows, plan
+rows, or frame draws is marked truncated and cannot establish complete-frame ink.
+The multiline emoji owner is checked in that same complete current frame and
+against its committed row; the capped historical ink ledger is diagnostic only.
+The fixture also opens the actual settings dialog and reads three drawn production Canvas
+preview samples under wide and stacked selections. `comment-display-matrix.json` binds the controller's exact
+source, core, build-log, bundle, profile, packaged page-script, fixture sources,
+preview, and video digests; review it with `result.json` and collected original PNGs.
+Candidate collection fails when the installed backend, complete coherent frame,
+positive-alpha viewport draw, bounded accessible source, display projection,
+placement continuity, first-presentation count, or restoration assertion fails.
+The resized motion row must still have a positive-alpha draw in its current
+complete frame and overlap the viewport with its committed rectangle. Every
+presentation scene and layout also checks source-bound sticker, membership,
+and ordinary ink against the committed card bounds. When those items are due
+in different frames, the fixture saves a separate JSON-only frame observation
+without increasing the PNG ceiling. The controlled 8-by-4 sticker image is
+attributed only after the matching scene's sticker ID entered the renderer;
+a visible text fallback remains a valid sticker observation.
+Activation and reservation alone do not count as presentation. A result with
+`visualReview: pending` still requires inspection of the original PNGs, including
+ink against actual text/image bounds. Presentation records include active width,
+height, actual velocity where available, geometric full-card exposure, visible
+fraction, queue residence, and ordinary-row presence. These are diagnostics,
+not a reading-time or blanket contrast verdict. The trace keeps first-visible,
+allocation, and unknown-presentation counts separate. The numeric unknown count
+comes from Main observability; the Worker-local probe reports `null` because it
+cannot infer unknown attribution across fallback and recovery.
+
+The six presentation PNGs
+wait for a current complete paid frame: the entire card at 960 pixels, or at
+least 95% on the entering side at 400 pixels where full-card exposure is zero.
+The before and after frame proofs bracket each PNG; the narrow after proof may
+be on the exiting side while still showing at least 95%. Each layout uses its
+own observed start, end, position, and velocity after the settings transition.
+The initial plan bounds the wait without treating its start time as immutable:
+the renderer may revise the current paid motion plan while the card approaches
+the capture window. A completed frame and its current active row must agree on
+the layout, width, start, and end during that wait. Immediately before the PNG,
+the fixture records a settled plan and any start/end revision from the initial
+plan; the before and after frame proofs must match the settled start/end exactly.
+The wait fails when the source-measured window or backend deadline has passed.
+Exact original-plus-
+translation line counts and total-height budget, effect alpha, and overload-policy
+acceptance are recorded separately from the PNG review. The detailed paid card
+records the production `preparePaidCardPlan` output for four total body rows and
+for the supported two-row setting minimum after the matched wide composition has
+captured all four positive role proofs. The live effective setting and completed
+frame plan must agree; the minimum case waits until both original and selected
+translation have positive-alpha viewport ink in one current frame. Their rows
+share the selected total row budget and stay inside the committed card. The
+separate direct planner unit test retains its one-row fallback boundary. Main
+and Worker role visibility waits use each actual source-planned start plus five seconds,
+bounded by the unchanged 60-second backend deadline, and record the planned
+start, budget, and outcome. The bright membership card records its actual border
+stroke alpha and body draw alpha in two completed frames at least 250 logical
+milliseconds apart
+under effective reduced motion; the border alpha must remain stable. A zero-row
+membership deferred for zero usable rows and a prefetched future replay membership must publish
+neither a positive-alpha draw nor an observed border stroke before eligibility.
+
+A separate JSON-only overload envelope uses the same installed extension and
+source-hashed probes after the 60-second/16-PNG display matrix. Its limit is
+120 seconds and 128 records per backend, with no extra PNGs. It exercises paid
+arrivals around an ordinary seed and recurring one-second vacancies. The seed is
+classified as waiting, reserved for a future frame, or already visibly served;
+the final snapshot still requires its first visible draw. A distinct later
+ordinary arrival follows the first renewed paid batch; its ingress,
+reservation, and first visible draw are recorded beside subsequent paid service.
+The same envelope also exercises source-measured unplaceable paid height beside
+fitting ordinary content,
+equal-priority overflow from 20 source-owned responses of four distinct authors
+and IDs each into a measured full pending queue under the 30/50 caps, controlled
+pause/hidden/resume, and future replay
+buffering, plus a separate zero-row membership deferral. Active/queue caps
+cover 30/50, 300/200 (the default caps), and 300/1000 settings.
+The pause case admits and paints both source IDs before hiding, checks their
+first-visible times and positions during the hold, then requires a later
+complete-frame draw of those same IDs after resume.
+Records separate fixture delivery, renderer ingress, pending queue, reservation,
+first positive-alpha draw, completion, and attributed discard reasons. Per-kind
+delay/residence summaries, active/pending occupancy, frame/drain work, and
+bounded retained counts carry probe-overhead and attribution limits. The hidden
+case uses a controlled Document visibility getter and event, not an OS tab
+switch. Worker Manager backpressure before worker ingress may be unattributed
+per ID; compare delivered and renderer-ingress counts rather than assigning a
+reason. These timing samples do not isolate probe overhead or establish GPU or
+FPS behavior.
+For the overflow case, a source-bound insertion immediately before the packaged
+page-script entry observes the actual Worker Manager instance. Its bounded ring
+records fixture-ID sends, native `addMessages` posts, and batch receipts with
+timestamps and sequence numbers; snapshots include Manager queue and receipt
+state before and after the late arrivals. Each four-row source response waits
+for the last row's actual Manager send result or renderer ingress before the
+next response. The candidate requires all 80 old rows to enter the Worker;
+the baseline records any smaller ingress count with the measured Manager
+deferred count and recent rejected sends while still requiring a full pending
+queue. Missing pre-#387 Manager fields are
+recorded as `null` in the baseline. The candidate still requires late renderer
+ingress and older-row replacement; a baseline without late ingress records a
+policy finding. Neither HTTP delivery nor a Manager send is counted as Worker
+renderer ingress. Worker waiters request the existing bounded probe flush at
+most once per 100ms after passive reports stop, while still requiring actual
+renderer ingress or positive frame ink. The replay clock holds at 9.999 seconds
+through future-case setup and releases to 10 seconds only after the due and
+future source responses arrive, so the due row cannot expire during setup.
+Probe errors fail the case and failed partial observations remain in the receipt.
+
+The original `f7ff6f0d` correctness baseline supports stacked cards only.
+When the current fixture is transplanted into a comparison checkout, the bundle
+source SHA identifies that checkout, not the original product commit. The
+original source lacks the shared paid plan required by this matrix. A planless
+packaged script produces an `unsupported` whole-matrix receipt with no Worker or
+Canvas observation; stacked-only support is a source-capability diagnostic, not
+a completed runtime tier. A missing plan in a candidate or wide-capable baseline
+fails closed. The mandatory policy comparison uses the corrected pre-#387
+wide-capable baseline and the final candidate after their product trees are
+bound separately. Do not pool that comparison with the older correctness
+baseline. All runtime observations still require source-bound execution and
+visual review before acceptance.
+
+The caller selects `candidate` by default. An explicitly prepared private
+comparison branch may select `baseline` through the existing `comparisonOnly`
+argument; it records observations and `baselineFindings` without changing product
+source or silently downgrading a candidate failure. Compare only records with
+the same fixture bytes, backend, workload, viewport, DPR, font, settings, and
+build/source/core identity. The fixture does not establish physical GPU,
+screen-reader, live-site, or native Translator acceptance. Existing replay,
+translation, pause, and recovery fixture records retain their separate scope.
+
 ## Native Translator cancellation prerequisite (#338)
 
 Create the ignored `validation/windows/inputs/translator-native-cancellation.json`

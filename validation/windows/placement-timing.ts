@@ -26,6 +26,7 @@ type ProbeOptions = {
   forceFallback?: boolean;
   workerPrelude?: string;
   attachProbeSource?: string;
+  observeCardPlans?: boolean;
 };
 type ChatAction = { addChatItemAction: { item: Record<string, unknown> } };
 type ScenarioOptions = {
@@ -43,6 +44,7 @@ type ScenarioOptions = {
 type WorkerProbeMessage = {
   id: string;
   height: number;
+  text?: string;
   isBacklog?: boolean;
   burstSpeedMultiplier?: number;
   trackDrops?: boolean;
@@ -69,9 +71,11 @@ type WorkerRendererProbe = {
   logicalHeight: number;
   laneHeight: number;
   numLanes: number;
+  totalPresented?: number;
   laneDensityFactor: number;
   config: {
     danmakuMode: string;
+    superChatLayout?: string;
     exitPaddingPx: number;
     reducedMotion: boolean;
     ignoreReducedMotion: boolean;
@@ -89,6 +93,8 @@ type WorkerRendererProbe = {
   } | null;
   pendingQueue: WorkerProbeMessage[];
   activeMessages: WorkerActive[];
+  messageById?: Map<string, unknown>;
+  imageFetchTasks?: Map<string, unknown>;
   enqueueMessage(message: WorkerProbeMessage): boolean;
   activateMessage(
     message: WorkerProbeMessage,
@@ -101,7 +107,7 @@ type WorkerRendererProbe = {
   drainQueue(...args: unknown[]): unknown;
   renderFrame(...args: unknown[]): unknown;
 };
-type CanvasProbeMessage = { id: string; isBacklog?: boolean };
+type CanvasProbeMessage = { id: string; isBacklog?: boolean; text?: string };
 type CanvasActive = ActiveRow & {
   message: CanvasProbeMessage;
   laneIndex: number;
@@ -112,6 +118,7 @@ type CanvasActive = ActiveRow & {
   motion?: {
     durationMs: number;
     actualVelocityPxPerMs: number;
+    isScrolling?: boolean;
     travelDistancePx: number;
     viewportEntryTime: number;
     visibleExitTime: number;
@@ -120,19 +127,26 @@ type CanvasActive = ActiveRow & {
 type CanvasObservability = {
   onMessageDropped?: (...args: unknown[]) => unknown;
   onMessagesDropped?: (...args: unknown[]) => unknown;
+  getMetrics?: () => { totalPresented?: number; totalPresentationUnknown?: number };
 };
 type CanvasRendererProbe = {
   ctx: CanvasContext;
+  totalPresented?: number;
   pendingQueue: { toArray(): CanvasProbeMessage[]; size: number };
   activeMessages: CanvasActive[];
+  imageFetchManager?: { getMetrics?: () => Record<string, unknown> };
   observability?: CanvasObservability;
   overlay: { getDimensions(): { width: number; height: number } | null };
   settings: {
     danmakuMode: string;
+    superChatLayout?: string;
+    ignoreReducedMotion?: boolean;
     laneSpacing: number;
     fontSize: number;
     safeTop: number;
     safeBottom: number;
+    maxConcurrentMessages: number;
+    queueMaxSize: number;
     speedPxPerSec: number;
     backlogSpeedMultiplier: number;
     outline: unknown;
@@ -140,8 +154,11 @@ type CanvasRendererProbe = {
   };
   laneAllocator: { getLaneHeight(): number; getLaneCount(): number };
   currentLaneDensityFactor: number;
+  reducedMotion?: boolean;
   enqueueMessage(message: CanvasProbeMessage, ...args: unknown[]): unknown;
   placeQueuedMessage(message: CanvasProbeMessage, ...args: unknown[]): { placed?: boolean } | null;
+  drainQueue?(...args: unknown[]): unknown;
+  drainQueueAsync?(...args: unknown[]): Promise<unknown>;
   renderFrame(...args: unknown[]): unknown;
 };
 type ActiveRow = {
@@ -157,17 +174,20 @@ type ActiveRow = {
 };
 type Draw = {
   id: string;
+  section?: 'body' | 'translation' | 'regular' | undefined;
   frameId: number;
   kind?: string;
   alpha: number;
   backingRatioX?: number;
   backingRatioY?: number;
   rect: Rect | null;
+  textSnippet?: string | null;
   japanese?: { text: string; rect: Rect | null } | null;
 };
 type FrameConfig = {
   renderer?: string;
   mode?: string | null;
+  superChatLayout?: string | null;
   fontSize?: number | null;
   laneSpacing?: number | null;
   laneDensityFactor?: number | null;
@@ -201,12 +221,28 @@ type RenderFrame = {
   config: FrameConfig;
   active: ActiveRow[];
   draws: Draw[];
+  cardPlans: Array<{
+    id: string;
+    kind: string;
+    height: number;
+    maxBodyLines: number;
+    bodyRows: number;
+    bodyY: number | null;
+    bodyHeight: number;
+    translationRows: number;
+    translationY: number | null;
+    translationHeight: number;
+    borderAlpha: number | null;
+    borderStyle: string | null;
+  }>;
+  lastStroke?: { context: CanvasContext; style: string; alpha: number };
 };
 type FrameTiming = {
   atEpochMs?: number;
   workMs: number;
   preClearMs?: number | null;
   pendingBefore?: number;
+  activeBefore?: number;
   activeAfter?: number;
 };
 type FrameView = Partial<Omit<RenderFrame, 'config' | 'active' | 'draws'>> & {
@@ -244,9 +280,15 @@ type ProbeExact = {
   dispositions: ProbeDisposition[];
   active?: ActiveRow[];
   activeNow: ActiveRow[];
+  pendingNow?: string[];
+  queuedNow?: Array<{ id: string; atEpochMs: number }>;
+  retained?: Record<string, number | null>;
   config: FrameConfig | null;
   drops: Record<string, number>;
   overflow: number;
+  fixtureText?: Record<string, string>;
+  presentationCount?: number | null;
+  totalPresentationUnknown?: number | null;
   samplesScope?: string;
   [key: string]: unknown;
 };
@@ -271,6 +313,7 @@ type WorkerRecord = {
   sample: ProbeSample | null;
   worker: Worker;
   flushId?: string | number;
+  dueFlushAt?: number;
 };
 type ProbeSample = {
   frames: FrameTiming[];
@@ -280,6 +323,8 @@ type ProbeSample = {
   ingress: Record<string, number>;
   exact?: ProbeExact;
   latestRenderFrame: RenderFrame | null;
+  firstCompleteFrames: Record<string, RenderFrame>;
+  measuredPlans?: Record<string, { width: number; height: number; maxBodyLines: number }>;
   overflow: number;
 };
 type ProbeState = ProbeSample & {
@@ -298,8 +343,15 @@ type ProbeState = ProbeSample & {
   renderFrameId: number;
   currentRenderFrame: RenderFrame | null;
   currentFrame: { startedAt: number; preClearMs: number | null } | null;
+  measuredPlans: Record<string, { width: number; height: number; maxBodyLines: number }>;
+  registerPlanSections: (plan: object, id: string, context: CanvasContext) => void;
+  wrapWrappedContent: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
+  wrapRegularMessage: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
+  wrapAuthorSection: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
+  setActiveRowsReader: (reader: (() => unknown[]) | null) => (() => unknown[]) | null;
   requestAtEpochMs?: number;
   flushSequence?: number;
+  requestFlushIfDue: (record: WorkerRecord) => void;
   canvasSourceHooked?: boolean;
   readRegularInsets?: (
     fontSize: number,
@@ -323,7 +375,8 @@ declare global {
 }
 
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows193Placement';
-const MIXED_IDS: [string, string] = ['WINDOWS204_MIX_REGULAR', 'WINDOWS204_MIX_PAID'];
+const TRANSLATED_TEXT = 'WINDOWS193_SHORT TRANSLATED 日本語';
+const MIXED_IDS: [string, string] = ['WINDOWS204_MIX_REGULAR', 'W204P'];
 const TOKENS = [
   'WINDOWS193_SHORT',
   'WINDOWS193_LONG',
@@ -337,7 +390,7 @@ const TOKENS = [
   'WINDOWS193_EXPANDED',
   'WINDOWS193_OVERRIDE_OFF',
   'WINDOWS193_SYSTEM_OFF',
-  'WINDOWS193_PAID',
+  'W193P',
   'WINDOWS196_GAP0_A',
   'WINDOWS196_GAP0_B',
   'WINDOWS196_GAP8_A',
@@ -394,6 +447,17 @@ function installProbeRuntime(options: ProbeOptions) {
   const ids = new Set(options.tokens);
   const bitmapIds = new WeakMap<object, string>();
   const bitmapInk = new WeakMap<object, BitmapInk>();
+  const planSections = new WeakMap<
+    object,
+    { id: string; section: 'body' | 'translation'; context: CanvasContext }
+  >();
+  let activeRowsReader: (() => unknown[]) | null = null;
+  let textOwner: {
+    id: string;
+    section: 'body' | 'translation' | 'regular';
+    context: CanvasContext;
+  } | null = null;
+  let drawingAuthor = false;
   const frameContexts = new WeakMap<RenderFrame, CanvasContext>();
   const state = {
     frames: [],
@@ -413,10 +477,100 @@ function installProbeRuntime(options: ProbeOptions) {
     videoEntry: {},
     renderFrameId: 0,
     latestRenderFrame: null,
+    firstCompleteFrames: {},
     currentRenderFrame: null,
     currentFrame: null,
+    measuredPlans: {},
   } as unknown as ProbeState;
   scope.__ytPlacementProbe = state;
+  state.requestFlushIfDue = (record) => {
+    const now = performance.now();
+    if (now - (record.dueFlushAt ?? -Infinity) < 100) return;
+    const requestId = (state.flushSequence ?? 0) + 1;
+    state.flushSequence = requestId;
+    record.dueFlushAt = now;
+    record.worker.postMessage({ type: 'ytPlacementFlush', requestId });
+  };
+  state.registerPlanSections = (plan, id, context) => {
+    if (!ids.has(id)) return;
+    const rows = plan as { body?: object; translation?: object };
+    if (rows.body) planSections.set(rows.body, { id, section: 'body', context });
+    if (rows.translation)
+      planSections.set(rows.translation, { id, section: 'translation', context });
+  };
+  state.setActiveRowsReader = (reader) => {
+    const previous = activeRowsReader;
+    activeRowsReader = reader;
+    return previous;
+  };
+  state.wrapRegularMessage = (render) =>
+    function (this: unknown, ...args: unknown[]) {
+      const context = args[0] as CanvasContext;
+      const message = args[1] as { id?: string; content?: object } | null;
+      const rows = activeRowsReader?.();
+      let owner: { id: string; section: 'regular'; context: CanvasContext } | null = null;
+      if (message && rows && rows.length <= MAX_SAMPLES && state.currentRenderFrame) {
+        const matching = rows.filter((candidate) => {
+          if (!candidate || typeof candidate !== 'object') return false;
+          const row = candidate as { message?: object; renderMessage?: object };
+          return candidate === message || row.message === message || row.renderMessage === message;
+        });
+        if (matching.length === 1) {
+          const row = matching[0] as { id?: string; message?: { id?: string } };
+          const id = row.id ?? row.message?.id;
+          const content = message.content;
+          const ambiguous =
+            Array.isArray(content) &&
+            rows.some((candidate) => {
+              if (!candidate || typeof candidate !== 'object' || candidate === row) return false;
+              const other = candidate as {
+                id?: string;
+                content?: object;
+                message?: { id?: string; content?: object };
+                renderMessage?: { content?: object };
+              };
+              const otherId = other.id ?? other.message?.id;
+              return (
+                otherId !== id &&
+                (other.renderMessage?.content ?? other.content ?? other.message?.content) ===
+                  content
+              );
+            });
+          if (id && ids.has(id) && (!message.id || message.id === id) && !ambiguous)
+            owner = { id, section: 'regular', context };
+        }
+      }
+      const previous = textOwner;
+      textOwner = owner;
+      try {
+        return Reflect.apply(render, this, args);
+      } finally {
+        textOwner = previous;
+      }
+    };
+  state.wrapAuthorSection = (render) =>
+    function (this: unknown, ...args: unknown[]) {
+      const previous = drawingAuthor;
+      drawingAuthor = true;
+      try {
+        return Reflect.apply(render, this, args);
+      } finally {
+        drawingAuthor = previous;
+      }
+    };
+  state.wrapWrappedContent = (render) =>
+    function (this: unknown, ...args: unknown[]) {
+      const context = args[0] as CanvasContext;
+      const prepared = args.at(-1);
+      const owner = prepared && typeof prepared === 'object' ? planSections.get(prepared) : null;
+      const previous = textOwner;
+      if (owner) textOwner = owner.context === context && state.currentRenderFrame ? owner : null;
+      try {
+        return Reflect.apply(render, this, args);
+      } finally {
+        textOwner = previous;
+      }
+    };
   const epochNow = () => performance.timeOrigin + performance.now();
   const tokenIn = (text: unknown) => options.tokens.find((token) => String(text).includes(token));
   const overlayContext = (ctx: CanvasContext) =>
@@ -495,6 +649,7 @@ function installProbeRuntime(options: ProbeOptions) {
       config,
       active: [],
       draws: [],
+      cardPlans: [],
     };
     if (ctx) frameContexts.set(frame, ctx);
     state.currentRenderFrame = frame;
@@ -522,7 +677,50 @@ function installProbeRuntime(options: ProbeOptions) {
       );
     if (active.length > MAX_SAMPLES) frame.truncated = true;
     frame.active = active.slice(0, MAX_SAMPLES);
+    delete frame.lastStroke;
     state.latestRenderFrame = frame;
+    const width = frame.logicalWidth;
+    const height = frame.logicalHeight;
+    if (frame.complete && !frame.truncated && width && height) {
+      const layout = frame.config.superChatLayout === 'wide' ? 'wide' : 'stacked';
+      for (const row of frame.active) {
+        if (!row.id.startsWith('WINDOWS380_') || !ids.has(row.id)) continue;
+        if (
+          row.width <= 0 ||
+          row.height <= 0 ||
+          row.x >= width ||
+          row.x + row.width <= 0 ||
+          row.y >= height ||
+          row.y + row.height <= 0
+        )
+          continue;
+        const key = `${row.id}|${layout}`;
+        if (
+          state.firstCompleteFrames[key] ||
+          Object.keys(state.firstCompleteFrames).length >= MAX_SAMPLES
+        )
+          continue;
+        const draws = frame.draws.filter((draw) => draw.id === row.id);
+        if (
+          !draws.some(
+            (draw) =>
+              draw.alpha > 0 &&
+              draw.rect &&
+              draw.rect.left < width &&
+              draw.rect.right > 0 &&
+              draw.rect.top < height &&
+              draw.rect.bottom > 0
+          )
+        )
+          continue;
+        state.firstCompleteFrames[key] = {
+          ...frame,
+          active: [row],
+          draws,
+          cardPlans: frame.cardPlans.filter((plan) => plan.id === row.id),
+        };
+      }
+    }
     if (state.currentRenderFrame === frame) state.currentRenderFrame = null;
   };
   const recordRect = (
@@ -547,11 +745,21 @@ function installProbeRuntime(options: ProbeOptions) {
       const japanese = ink?.japanese ?? null;
       frame.draws.push({
         id,
+        section:
+          ink?.section === 'body' || ink?.section === 'translation' || ink?.section === 'regular'
+            ? ink.section
+            : undefined,
         frameId: frame.frameId,
         kind,
         alpha: ctx.globalAlpha,
         ...ratios,
         rect: logicalRect(rect, ratios),
+        textSnippet:
+          typeof ink?.textSnippet === 'string'
+            ? ink.textSnippet
+            : typeof (ink?.sourceInk as BitmapInk | undefined)?.fill?.textSnippet === 'string'
+              ? ((ink?.sourceInk as BitmapInk | undefined)?.fill?.textSnippet as string)
+              : null,
         japanese: japanese
           ? {
               text: japanese.text,
@@ -587,16 +795,32 @@ function installProbeRuntime(options: ProbeOptions) {
     scope.OffscreenCanvasRenderingContext2D?.prototype,
   ].filter(Boolean);
   for (const prototype of canvasPrototypes) {
+    const nativeStroke = prototype.stroke;
+    prototype.stroke = function (this: CanvasContext, ...args) {
+      const frame = state.currentRenderFrame;
+      if (frame && overlayContext(this)) {
+        const style = String(this.strokeStyle);
+        const rgba = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/u.exec(style);
+        frame.lastStroke = {
+          context: this,
+          style,
+          alpha: rgba ? Number(rgba[1]) * this.globalAlpha : this.globalAlpha,
+        };
+      }
+      return Reflect.apply(nativeStroke, this, args);
+    } as CanvasRenderingContext2D['stroke'];
     const nativeFillText = prototype.fillText;
     prototype.fillText = function (text, x, y, ...rest) {
-      const id = tokenIn(text);
+      const id = drawingAuthor ? undefined : (textOwner?.id ?? tokenIn(text));
       const result = nativeFillText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
-        bitmapIds.set(this.canvas, id);
+        if (!textOwner) bitmapIds.set(this.canvas, id);
         const metrics = this.measureText(text);
         bitmapInk.set(this.canvas, {
           ...bitmapInk.get(this.canvas),
           fill: {
+            textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
             font: this.font,
             left: x - (metrics.actualBoundingBoxLeft ?? 0),
             top: y - metrics.actualBoundingBoxAscent,
@@ -633,21 +857,30 @@ function installProbeRuntime(options: ProbeOptions) {
           left + right,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
           'fill',
-          { font: this.font, lineWidth: this.lineWidth, japanese: japaneseRun(text, this, x, y) }
+          {
+            font: this.font,
+            lineWidth: this.lineWidth,
+            textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
+            japanese: japaneseRun(text, this, x, y),
+          }
         );
       }
       return result;
     };
     const nativeStrokeText = prototype.strokeText;
     prototype.strokeText = function (text, x, y, ...rest) {
-      const id = tokenIn(text);
+      const id = drawingAuthor ? undefined : (textOwner?.id ?? tokenIn(text));
       const result = nativeStrokeText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
+        if (!textOwner) bitmapIds.set(this.canvas, id);
         const metrics = this.measureText(text);
         const padding = this.lineWidth / 2;
         bitmapInk.set(this.canvas, {
           ...bitmapInk.get(this.canvas),
           stroke: {
+            textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
             font: this.font,
             lineWidth: this.lineWidth,
             left: x - (metrics.actualBoundingBoxLeft ?? 0) - padding,
@@ -688,7 +921,13 @@ function installProbeRuntime(options: ProbeOptions) {
           left + right + padding * 2,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
           'stroke',
-          { font: this.font, lineWidth: this.lineWidth, japanese: japaneseRun(text, this, x, y) }
+          {
+            font: this.font,
+            lineWidth: this.lineWidth,
+            textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
+            japanese: japaneseRun(text, this, x, y),
+          }
         );
       }
       return result;
@@ -699,7 +938,22 @@ function installProbeRuntime(options: ProbeOptions) {
       image: CanvasImageSource,
       ...args: number[]
     ) {
-      const id = bitmapIds.get(image);
+      const stickerId =
+        overlayContext(this) &&
+        'width' in image &&
+        'height' in image &&
+        image.width === 8 &&
+        image.height === 4
+          ? Object.keys(state.ingress).find(
+              (entry) =>
+                ids.has(entry) && /^WINDOWS380_(BRIGHT|DARK|DETAILED)_STICKER$/u.test(entry)
+            )
+          : undefined;
+      const id = drawingAuthor
+        ? undefined
+        : textOwner?.context === this
+          ? textOwner.id
+          : (bitmapIds.get(image) ?? stickerId);
       const result = Reflect.apply(nativeDrawImage, this, [image, ...args]);
       if (
         id &&
@@ -739,7 +993,11 @@ function installProbeRuntime(options: ProbeOptions) {
                   height: ((runBottom - runTop) * destHeight) / sourceHeight,
                 }
               : null;
-          recordRect(this, id, ...destination, 'bitmap', { sourceInk, japanese });
+          recordRect(this, id, ...destination, id === stickerId ? 'sticker-image' : 'bitmap', {
+            sourceInk,
+            section: textOwner?.context === this ? textOwner.section : undefined,
+            japanese,
+          });
         }
       }
       return result;
@@ -794,6 +1052,8 @@ function installProbeRuntime(options: ProbeOptions) {
                 ingress: state.ingress,
                 exact: state.exact,
                 latestRenderFrame: state.latestRenderFrame,
+                firstCompleteFrames: state.firstCompleteFrames,
+                measuredPlans: state.measuredPlans,
                 overflow: state.overflow,
               },
             });
@@ -834,6 +1094,8 @@ function installProbeRuntime(options: ProbeOptions) {
             ingress: state.ingress,
             exact: state.exact,
             latestRenderFrame: state.latestRenderFrame,
+            firstCompleteFrames: state.firstCompleteFrames,
+            measuredPlans: state.measuredPlans,
             overflow: state.overflow,
           },
         });
@@ -883,10 +1145,13 @@ function installProbeRuntime(options: ProbeOptions) {
           parts[0].includes('OffscreenCanvas')
         ) {
           state.sourcePrefixed = true;
-          const suffix = workerProbeSuffix(parts[0], options.attachProbeSource);
+          const source = options.observeCardPlans ? instrumentCardPlanCalls(parts[0]) : parts[0];
+          const suffix = source
+            ? workerProbeSuffix(source, options.attachProbeSource, options.observeCardPlans)
+            : null;
           state.sourceHooked = Boolean(suffix);
           return Reflect.construct(target, [
-            [options.workerPrelude, parts[0], suffix ?? ''],
+            [options.workerPrelude, source ?? parts[0], suffix ?? ''],
             optionsArg,
           ]);
         }
@@ -906,18 +1171,21 @@ function installProbeRuntime(options: ProbeOptions) {
           activeMessages?: number;
           pendingQueueDepth?: number;
           totalRendered?: number;
+          totalPresented?: number;
           totalDrops?: number;
           sample?: ProbeSample;
           requestId?: string | number;
         } | null;
         if (data?.type === 'ready') record.ready = true;
         if (data?.type === 'stats' && record.stats.length < 60) {
-          const { activeMessages, pendingQueueDepth, totalRendered, totalDrops } = data;
+          const { activeMessages, pendingQueueDepth, totalRendered, totalPresented, totalDrops } =
+            data;
           record.stats.push({
             atEpochMs: epochNow(),
             activeMessages,
             pendingQueueDepth,
             totalRendered,
+            totalPresented,
             totalDrops,
           });
         }
@@ -1042,6 +1310,61 @@ export function measureAllocationRowPitch(
     .map((y, index) => y - (ys[index] ?? y))
     .filter((pitch) => pitch > 0);
   return pitches.length ? Math.min(...pitches) : null;
+}
+
+/** A measured translation must paint the intended text within the same live row. */
+export function translatedRowEvidence(
+  before: ActiveRow,
+  after: ActiveRow | undefined,
+  frame: FrameView | null,
+  translatedText: string
+): boolean {
+  if (
+    !after ||
+    after.id !== before.id ||
+    after.width < before.width ||
+    after.height <= before.height ||
+    Math.abs(after.endAtEpochMs - before.endAtEpochMs) >= 1 ||
+    !frame?.complete ||
+    !frame.cleared ||
+    frame.truncated ||
+    !Number.isFinite(frame.logicalWidth) ||
+    !Number.isFinite(frame.logicalHeight) ||
+    !Number.isFinite(frame.startedAtEpochMs) ||
+    !Number.isFinite(frame.finishedAtEpochMs) ||
+    !Array.isArray(frame.active) ||
+    !Array.isArray(frame.draws)
+  )
+    return false;
+  const row = frame.active.find((entry) => entry?.id === after.id);
+  if (
+    !row ||
+    ![row.x, row.y, row.width, row.height, row.startAtEpochMs, row.endAtEpochMs].every(
+      Number.isFinite
+    ) ||
+    Number(frame.startedAtEpochMs) < Number(row.startAtEpochMs) ||
+    Number(frame.finishedAtEpochMs) >= Number(row.endAtEpochMs)
+  )
+    return false;
+  return frame.draws.some((draw) => {
+    const rect = draw?.rect;
+    return Boolean(
+      draw?.id === after.id &&
+      draw.frameId === frame.frameId &&
+      draw.alpha &&
+      draw.alpha > 0 &&
+      draw.textSnippet?.includes(translatedText) &&
+      rect &&
+      rect.left >= Number(row.x) - 1 &&
+      rect.right <= Number(row.x) + Number(row.width) + 1 &&
+      rect.top >= Number(row.y) - 1 &&
+      rect.bottom <= Number(row.y) + Number(row.height) + 1 &&
+      rect.left < Number(frame.logicalWidth) &&
+      rect.right > 0 &&
+      rect.top < Number(frame.logicalHeight) &&
+      rect.bottom > 0
+    );
+  });
 }
 
 /** Sampled row origins in one completed frame, not proven adjacency or a historical ink join. */
@@ -1431,6 +1754,58 @@ export function assertSpacingPhase(
   return { allocationPitchPx, visibleRowPitch };
 }
 
+/** Grid and completion records can legitimately omit a message ID. */
+export function matchingFixtureDispositions<T extends { id?: string; kind: string }>(
+  dispositions: readonly T[],
+  prefix: string,
+  kind?: string
+): T[] {
+  return dispositions.filter(
+    (entry) =>
+      typeof entry.id === 'string' &&
+      entry.id.startsWith(prefix) &&
+      (kind === undefined || entry.kind === kind)
+  );
+}
+
+/** A regular row may span multiple smaller grid cells after adaptive subdivision. */
+export function assertCompactRegularRows(
+  dispositions: readonly {
+    id?: string;
+    kind: string;
+    slotCount?: number | null;
+    laneHeight?: number | null;
+    height?: number | null;
+    laneSpacing?: number | null;
+  }[],
+  prefix = 'WINDOWS196_GAP0_'
+) {
+  const regular = matchingFixtureDispositions(dispositions, prefix, 'activated');
+  assert(
+    regular.length >= 2 &&
+      regular.every((entry) => {
+        const slotCount = entry.slotCount;
+        const laneHeight = entry.laneHeight;
+        const height = entry.height;
+        const laneSpacing = entry.laneSpacing;
+        return (
+          Number.isInteger(slotCount) &&
+          Number(slotCount) > 0 &&
+          Number.isFinite(laneHeight) &&
+          Number(laneHeight) > 0 &&
+          Number.isFinite(height) &&
+          Number(height) > 0 &&
+          Number.isFinite(laneSpacing) &&
+          Number(laneSpacing) >= 0 &&
+          Math.abs(
+            Number(slotCount) * Number(laneHeight) - (Number(height) + Number(laneSpacing))
+          ) < 0.01
+        );
+      }),
+    'Compact transparent regular comments reserved extra baseline rows'
+  );
+}
+
 export function assertBacklogMotion(
   disposition: unknown,
   renderer: string,
@@ -1509,8 +1884,20 @@ export function canvasProbePrelude({
   tokens = TOKENS,
   forceFallback = false,
   workerPrelude = workerProbePrelude(tokens),
-}: { tokens?: readonly string[]; forceFallback?: boolean; workerPrelude?: string } = {}) {
+  observeCardPlans = false,
+}: {
+  tokens?: readonly string[];
+  forceFallback?: boolean;
+  workerPrelude?: string;
+  observeCardPlans?: boolean;
+} = {}) {
   return (
+    `const observePaidPlan = ${observePaidPlan.toString()};\n` +
+    `const cardPlanFunctionName = ${cardPlanFunctionName.toString()};\n` +
+    `const wrappedContentFunctionName = ${wrappedContentFunctionName.toString()};\n` +
+    `const regularMessageFunctionName = ${regularMessageFunctionName.toString()};\n` +
+    `const authorSectionFunctionName = ${authorSectionFunctionName.toString()};\n` +
+    `const instrumentCardPlanCalls = ${instrumentCardPlanCalls.toString()};\n` +
     `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
     `;(${installProbeRuntime.toString()})(${JSON.stringify({
       worker: false,
@@ -1518,6 +1905,7 @@ export function canvasProbePrelude({
       forceFallback,
       workerPrelude,
       attachProbeSource: attachWorkerRendererProbe.toString(),
+      observeCardPlans,
     })});`
   );
 }
@@ -1526,14 +1914,158 @@ export function canvasProbePrelude({
 // scope, after the original onmessage assignment. Fail closed on bundle drift.
 export function workerProbeSuffix(
   source: string,
-  attachProbeSource = attachWorkerRendererProbe.toString()
+  attachProbeSource = attachWorkerRendererProbe.toString(),
+  observeCardPlans = false
 ) {
   const handler =
     /self\.onmessage=([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.handleMessage\(\1\)\};?\s*$/.exec(
       source
     );
   if (!handler) return null;
-  return `\n;(${attachProbeSource})(${handler[2]});\n`;
+  if (observeCardPlans && !source.includes('__ytObservePaidPlan(')) return null;
+  const wrappedName = observeCardPlans ? wrappedContentFunctionName(source) : null;
+  if (observeCardPlans && !wrappedName) return null;
+  const regularName = observeCardPlans ? regularMessageFunctionName(source) : null;
+  if (observeCardPlans && !regularName) return null;
+  const authorName =
+    observeCardPlans && regularName ? authorSectionFunctionName(source, regularName) : null;
+  if (observeCardPlans && !authorName) return null;
+  return (
+    `\n;(${attachProbeSource})(${handler[2]});\n` +
+    (observeCardPlans
+      ? `\nvar __ytObservePaidPlan = ${observePaidPlan.toString()};\n` +
+        `${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});\n` +
+        `${regularName} = globalThis.__ytPlacementProbe.wrapRegularMessage(${regularName});\n` +
+        `${authorName} = globalThis.__ytPlacementProbe.wrapAuthorSection(${authorName});\n`
+      : '')
+  );
+}
+
+/** Observe the production shared plan after its own measurement and before drawing. */
+function observePaidPlan<
+  T extends {
+    height: number;
+    body?: { lines: unknown[]; height: number };
+    translation?: { lines: unknown[]; height: number };
+    bodyY?: number;
+    translationY?: number;
+  },
+>(
+  prepare: (input: unknown) => T,
+  input: {
+    kind?: string;
+    content?: Array<{ content?: string }>;
+    context?: CanvasContext;
+    maxBodyLines?: number;
+  }
+): T {
+  const plan = prepare(input);
+  const state = (globalThis as typeof globalThis & { __ytPlacementProbe?: ProbeState })
+    .__ytPlacementProbe;
+  const frame = state?.currentRenderFrame;
+  const id = /WINDOWS380_[A-Z0-9_]+/u.exec(
+    input.content?.map((part) => part.content ?? '').join(' ') ?? ''
+  )?.[0];
+  if (frame && id && input.context) state.registerPlanSections(plan, id, input.context);
+  if (
+    state &&
+    id &&
+    (Object.hasOwn(state.measuredPlans, id) || Object.keys(state.measuredPlans).length < 128)
+  )
+    state.measuredPlans[id] = {
+      width: (plan as T & { width?: number }).width ?? 0,
+      height: plan.height,
+      maxBodyLines: input.maxBodyLines ?? 0,
+    };
+  if (frame && id && frame.cardPlans.length >= 24) frame.truncated = true;
+  if (frame && id && frame.cardPlans.length < 24) {
+    const border = frame.lastStroke?.context === input.context ? frame.lastStroke : null;
+    if (border) delete frame.lastStroke;
+    frame.cardPlans.push({
+      id,
+      kind: input.kind ?? 'unknown',
+      height: plan.height,
+      maxBodyLines: input.maxBodyLines ?? 0,
+      bodyRows: plan.body?.lines.length ?? 0,
+      bodyY: plan.bodyY ?? null,
+      bodyHeight: plan.body?.height ?? 0,
+      translationRows: plan.translation?.lines.length ?? 0,
+      translationY: plan.translationY ?? null,
+      translationHeight: plan.translation?.height ?? 0,
+      borderAlpha: border?.alpha ?? null,
+      borderStyle: border?.style ?? null,
+    });
+  }
+  return plan;
+}
+
+function cardPlanFunctionName(source: string): string | null {
+  const minified =
+    /function ([A-Za-z_$][\w$]*)\(e\)\{let t=Math\.max\(1,e\.width-e\.paddingH\*2\),n=e\.showAuthor/u.exec(
+      source
+    );
+  const name = source.includes('preparePaidCardPlan({') ? 'preparePaidCardPlan' : minified?.[1];
+  if (!name) return null;
+  const call = `${name}({`;
+  const count = source.split(call).length - 1;
+  if (
+    count < 1 ||
+    count > 6 ||
+    source.includes('__ytObservePaidPlan') ||
+    source.includes('__ytOriginalPaidPlan')
+  )
+    return null;
+  return name;
+}
+
+/** Bind the actual shared row painter, including minified Worker output, by its plan-row calls. */
+function wrappedContentFunctionName(source: string): string | null {
+  const body = new Set<string>();
+  const translation = new Set<string>();
+  for (const row of source.matchAll(/\.(body|translation)\)/gu)) {
+    const close = (row.index ?? 0) + row[0].length - 1;
+    let depth = 0;
+    for (let index = close; index >= Math.max(0, close - 1200); index--) {
+      if (source[index] === ')') depth++;
+      if (source[index] !== '(') continue;
+      depth--;
+      if (depth !== 0) continue;
+      const name = /[A-Za-z_$][\w$]*$/u.exec(source.slice(Math.max(0, index - 80), index))?.[0];
+      if (name && source.includes(`function ${name}(`))
+        (row[1] === 'body' ? body : translation).add(name);
+      break;
+    }
+  }
+  const matches = [...body].filter((name): name is string =>
+    Boolean(name && translation.has(name) && source.includes(`function ${name}(`))
+  );
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
+/** The shared regular painter is the source owner for both wrapped and inline text. */
+function regularMessageFunctionName(source: string): string | null {
+  if (source.includes('function renderRegularMessage(')) return 'renderRegularMessage';
+  const matches = [
+    ...source.matchAll(/function ([A-Za-z_$][\w$]*)\(e,t,n,r,i,a,o,s,c,l,u,d,f,p=`0px`\)\{/gu),
+  ]
+    .filter((match) => source.slice(match.index, match.index + 1800).includes('t.content.length>0'))
+    .map((match) => match[1]);
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
+function authorSectionFunctionName(source: string, regularName: string): string | null {
+  if (source.includes('function drawAuthorSection(')) return 'drawAuthorSection';
+  const start = source.indexOf(`function ${regularName}(`);
+  if (start < 0) return null;
+  const name = /D=([A-Za-z_$][\w$]*)\(e,t,E,D,v,w\?/u.exec(source.slice(start, start + 1600))?.[1];
+  return name && source.includes(`function ${name}(`) ? name : null;
+}
+
+export function instrumentCardPlanCalls(source: string): string | null {
+  const name = cardPlanFunctionName(source);
+  if (!name) return null;
+  const call = `${name}({`;
+  return source.replaceAll(call, `__ytObservePaidPlan(${name}, {`);
 }
 
 function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
@@ -1551,6 +2083,9 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     placementMisses: 0,
     drops: {},
     overflow: 0,
+    fixtureText: {},
+    // Worker has confirmed first-draw accounting but no attribution-unknown counter.
+    totalPresentationUnknown: null,
   };
   state.exact = exact;
   const queuedAt = new Map<string, number>();
@@ -1560,7 +2095,8 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     else exact.overflow++;
   };
   const isFixture = (id: unknown): id is string =>
-    typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
+    typeof id === 'string' &&
+    (/^WINDOWS(193|195|196|204|380)_/.test(id) || id === 'W193P' || id === 'W204P');
   let inEnqueue = false;
   let inDrain = false;
   const nativeEnqueue = renderer.enqueueMessage;
@@ -1569,12 +2105,27 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     try {
       const admitted = nativeEnqueue.call(this, message);
       if (
+        /^WINDOWS380_(COMBINING|MODIFIER|ZWJ)$/.test(message.id) &&
+        typeof message.text === 'string'
+      ) {
+        exact.fixtureText ??= {};
+        exact.fixtureText[message.id] = message.text.slice(0, 512);
+      }
+      if (
         admitted &&
         isFixture(message.id) &&
         this.pendingQueue.some((entry) => entry.id === message.id)
       ) {
         queuedAt.set(message.id, epochNow());
       }
+      exact.pendingNow = this.pendingQueue.slice(0, 128).map((entry) => entry.id);
+      exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+      exact.retained = {
+        pending: this.pendingQueue.length,
+        active: this.activeMessages.length,
+        indexed: this.messageById?.size ?? null,
+        imageFetchTasks: this.imageFetchTasks?.size ?? null,
+      };
       return admitted;
     } finally {
       inEnqueue = false;
@@ -1733,6 +2284,7 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
   const nativeFrame = renderer.renderFrame;
   renderer.renderFrame = function (...args) {
     const startedAt = performance.now();
+    const beforeActive = this.activeMessages.filter((message) => isFixture(message.id));
     const frame = state.beginRenderFrame({
       ctx: this.ctx,
       logicalWidth: this.logicalWidth,
@@ -1743,15 +2295,18 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
         laneSpacing: this.config?.laneSpacing ?? null,
       },
     });
+    const previousRows = state.setActiveRowsReader(() => this.activeMessages);
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
       successful = true;
       return result;
     } finally {
+      state.setActiveRowsReader(previousRows);
       bounded(exact.frames, { atEpochMs: epochNow(), workMs: performance.now() - startedAt });
       exact.config = {
         mode: this.config?.danmakuMode ?? null,
+        superChatLayout: this.config?.superChatLayout ?? null,
         reducedMotion: this.config?.reducedMotion ?? null,
         ignoreReducedMotion: this.config?.ignoreReducedMotion ?? null,
         translationGeneration: this.config?.translationGeneration ?? null,
@@ -1771,6 +2326,21 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
         laneHeight: this.laneHeight,
         laneCount: this.numLanes,
       };
+      exact.presentationCount =
+        typeof this.totalPresented === 'number' ? this.totalPresented : null;
+      const activeSet = new Set(this.activeMessages);
+      for (const message of beforeActive) {
+        if (
+          !activeSet.has(message) &&
+          performance.now() >= message.startTime + message.pausedDuration + message.duration
+        )
+          bounded(exact.dispositions, {
+            id: message.id,
+            kind: 'completed',
+            reason: 'expired-duration',
+            atEpochMs: epochNow(),
+          });
+      }
       const active = this.activeMessages.filter((message) => isFixture(message.id));
       exact.activeNow = active.slice(0, 100).map((message) => ({
         id: message.id,
@@ -1791,6 +2361,14 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
           performance.now() >= message.startTime + message.pausedDuration &&
           performance.now() < message.startTime + message.pausedDuration + message.duration,
       }));
+      exact.pendingNow = this.pendingQueue.slice(0, 128).map((message) => message.id);
+      exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+      exact.retained = {
+        pending: this.pendingQueue.length,
+        active: this.activeMessages.length,
+        indexed: this.messageById?.size ?? null,
+        imageFetchTasks: this.imageFetchTasks?.size ?? null,
+      };
       frame.failed = !successful;
       frame.config = { ...frame.config, ...exact.config };
       state.endRenderFrame(
@@ -1818,7 +2396,8 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
 // A changed bundle shape is an acceptance failure, never a silent fallback.
 export function instrumentCanvasPageScript(
   source: string,
-  probeSource = attachCanvasRendererProbe.toString()
+  probeSource = attachCanvasRendererProbe.toString(),
+  observeCardPlans = false
 ) {
   const marker = '\n\tmain();\n';
   if (
@@ -1827,9 +2406,27 @@ export function instrumentCanvasPageScript(
     source.split(marker).length !== 2
   )
     return null;
+  const cardPlanName = observeCardPlans ? cardPlanFunctionName(source) : null;
+  if (observeCardPlans && !cardPlanName) return null;
+  const wrappedName = observeCardPlans ? wrappedContentFunctionName(source) : null;
+  if (observeCardPlans && !wrappedName) return null;
+  const regularName = observeCardPlans ? regularMessageFunctionName(source) : null;
+  if (observeCardPlans && !regularName) return null;
+  const authorName =
+    observeCardPlans && regularName ? authorSectionFunctionName(source, regularName) : null;
+  if (observeCardPlans && !authorName) return null;
   return source.replace(
     marker,
-    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);${marker}`
+    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);` +
+      (observeCardPlans
+        ? `\n\tvar __ytOriginalPaidPlan = ${cardPlanName};` +
+          `\n\tvar __ytObservePaidPlan = ${observePaidPlan.toString()};` +
+          `\n\t${cardPlanName} = function(input) { return __ytObservePaidPlan(__ytOriginalPaidPlan, input); };` +
+          `\n\t${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});` +
+          `\n\t${regularName} = globalThis.__ytPlacementProbe.wrapRegularMessage(${regularName});` +
+          `\n\t${authorName} = globalThis.__ytPlacementProbe.wrapAuthorSection(${authorName});`
+        : '') +
+      marker
   );
 }
 
@@ -1855,11 +2452,14 @@ function attachCanvasRendererProbe(
     getRegularCardInsets(fontSize, outlineWidthPx, false, backgroundVisible);
   const exact: CanvasExact = {
     dispositions: [],
+    drains: [],
     activeNow: [],
     config: null,
     peaks: { pending: 0, active: 0 },
     drops: {},
     overflow: 0,
+    fixtureText: {},
+    totalPresentationUnknown: null,
   };
   state.exact = exact;
   const queuedAt = new Map<string, number>();
@@ -1868,16 +2468,76 @@ function attachCanvasRendererProbe(
     else exact.overflow++;
   };
   const isFixture = (id: unknown): id is string =>
-    typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
+    typeof id === 'string' &&
+    (/^WINDOWS(193|195|196|204|380)_/.test(id) || id === 'W193P' || id === 'W204P');
   const nativeEnqueue = Renderer.prototype.enqueueMessage;
   Renderer.prototype.enqueueMessage = function (message, ...args) {
-    const result = nativeEnqueue.call(this, message, ...args);
+    const before = this.pendingQueue.toArray();
+    const priorDrop = this.observability?.onMessageDropped;
+    let dropReason: string | null = null;
+    if (priorDrop && this.observability)
+      this.observability.onMessageDropped = (...dropArgs) => {
+        dropReason = typeof dropArgs[0] === 'string' ? dropArgs[0] : null;
+        return priorDrop.apply(this.observability, dropArgs);
+      };
+    if (isFixture(message.id)) {
+      state.ingress ??= {};
+      state.ingress[message.id] ??= performance.timeOrigin + performance.now();
+    }
+    let result: unknown;
+    try {
+      result = nativeEnqueue.call(this, message, ...args);
+    } finally {
+      if (priorDrop && this.observability) this.observability.onMessageDropped = priorDrop;
+    }
+    const after = this.pendingQueue.toArray();
+    const afterIds = new Set(after.map((entry) => entry.id));
+    for (const prior of before) {
+      if (isFixture(prior.id) && !afterIds.has(prior.id)) {
+        bounded({
+          id: prior.id,
+          kind: 'dropped',
+          reason: dropReason ?? 'queue_replaced',
+          atEpochMs: performance.timeOrigin + performance.now(),
+          queueResidenceMs: queuedAt.has(prior.id)
+            ? performance.timeOrigin + performance.now() - (queuedAt.get(prior.id) ?? 0)
+            : null,
+        });
+        queuedAt.delete(prior.id);
+      }
+    }
+    if (isFixture(message.id) && !afterIds.has(message.id))
+      bounded({
+        id: message.id,
+        kind: 'dropped',
+        reason: dropReason ?? 'unattributed',
+        atEpochMs: performance.timeOrigin + performance.now(),
+        queueResidenceMs: null,
+      });
+    if (
+      /^WINDOWS380_(COMBINING|MODIFIER|ZWJ)$/.test(message.id) &&
+      typeof message.text === 'string'
+    ) {
+      exact.fixtureText ??= {};
+      exact.fixtureText[message.id] = message.text.slice(0, 512);
+    }
     if (
       isFixture(message.id) &&
       this.pendingQueue.toArray().some((entry) => entry.id === message.id)
     ) {
       queuedAt.set(message.id, performance.timeOrigin + performance.now());
     }
+    exact.pendingNow = this.pendingQueue
+      .toArray()
+      .slice(0, 128)
+      .map((entry) => entry.id);
+    exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+    exact.retained = {
+      pending: this.pendingQueue.size,
+      active: this.activeMessages.length,
+      indexed: null,
+      imageFetchTasks: null,
+    };
     exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
     return result;
   };
@@ -1917,13 +2577,50 @@ function attachCanvasRendererProbe(
     }
     return result;
   };
+  const drainMethods = Renderer.prototype as unknown as Record<
+    string,
+    (...args: unknown[]) => unknown
+  >;
+  for (const method of ['drainQueue', 'drainQueueAsync'] as const) {
+    const native = drainMethods[method];
+    if (typeof native !== 'function') continue;
+    drainMethods[method] = function (this: CanvasRendererProbe, ...args: unknown[]) {
+      const startedAt = performance.now();
+      const before = this.pendingQueue.size;
+      const activeBefore = this.activeMessages.length;
+      const record = () => {
+        if (!exact.drains) return;
+        if (exact.drains.length < 240)
+          exact.drains.push({
+            atEpochMs: performance.timeOrigin + performance.now(),
+            workMs: performance.now() - startedAt,
+            pendingBefore: before,
+            activeBefore,
+            activeAfter: this.activeMessages.length,
+          });
+        else exact.overflow++;
+      };
+      let result: unknown;
+      try {
+        result = Reflect.apply(native, this, args);
+      } catch (error) {
+        record();
+        throw error;
+      }
+      if (result && typeof (result as Promise<unknown>).finally === 'function')
+        return (result as Promise<unknown>).finally(record);
+      record();
+      return result;
+    };
+  }
   const nativeFrame = Renderer.prototype.renderFrame;
   const observed = new WeakSet();
   Renderer.prototype.renderFrame = function (...args) {
+    const beforeActive = this.activeMessages.filter((entry) => isFixture(entry.message?.id));
     if (this.observability && !observed.has(this.observability)) {
       const observability = this.observability;
       observed.add(observability);
-      const dropMethods: [keyof CanvasObservability, 0 | 1][] = [
+      const dropMethods: ['onMessageDropped' | 'onMessagesDropped', 0 | 1][] = [
         ['onMessageDropped', 1],
         ['onMessagesDropped', 0],
       ];
@@ -1949,22 +2646,29 @@ function attachCanvasRendererProbe(
         laneSpacing: this.settings.laneSpacing,
       },
     });
+    const previousRows = state.setActiveRowsReader(() => this.activeMessages);
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
       successful = true;
       return result;
     } finally {
+      state.setActiveRowsReader(previousRows);
       exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
       exact.peaks.active = Math.max(exact.peaks.active, this.activeMessages.length);
       const dims = this.overlay.getDimensions();
       exact.config = {
         mode: this.settings.danmakuMode,
+        superChatLayout: this.settings.superChatLayout ?? null,
+        reducedMotion: this.reducedMotion ?? null,
+        ignoreReducedMotion: this.settings.ignoreReducedMotion ?? null,
         fontSize: this.settings.fontSize,
         laneSpacing: this.settings.laneSpacing,
         laneDensityFactor: this.currentLaneDensityFactor,
         safeTop: this.settings.safeTop,
         safeBottom: this.settings.safeBottom,
+        maxConcurrentMessages: this.settings.maxConcurrentMessages,
+        queueMaxSize: this.settings.queueMaxSize,
         speedPxPerSec: this.settings.speedPxPerSec,
         backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
         outline: this.settings.outline,
@@ -1974,6 +2678,26 @@ function attachCanvasRendererProbe(
         laneHeight: this.laneAllocator.getLaneHeight(),
         laneCount: this.laneAllocator.getLaneCount(),
       };
+      const presentationMetrics = this.observability?.getMetrics?.();
+      const presented = presentationMetrics?.totalPresented ?? this.totalPresented;
+      exact.presentationCount = typeof presented === 'number' ? presented : null;
+      exact.totalPresentationUnknown =
+        typeof presentationMetrics?.totalPresentationUnknown === 'number'
+          ? presentationMetrics.totalPresentationUnknown
+          : null;
+      const activeSet = new Set(this.activeMessages);
+      for (const entry of beforeActive) {
+        if (
+          !activeSet.has(entry) &&
+          performance.now() >= entry.startTime + entry.pausedDuration + entry.duration
+        )
+          bounded({
+            id: entry.message.id,
+            kind: 'completed',
+            reason: 'expired-duration',
+            atEpochMs: performance.timeOrigin + performance.now(),
+          });
+      }
       const active = this.activeMessages.filter((entry) => isFixture(entry.message?.id));
       exact.activeNow = active.slice(0, 100).map((entry) => ({
         id: entry.message.id,
@@ -1985,10 +2709,22 @@ function attachCanvasRendererProbe(
         slotCount: entry.slotCount,
         durationMs: entry.motion?.durationMs ?? null,
         actualVelocityPxPerMs: entry.motion?.actualVelocityPxPerMs ?? null,
+        isScrolling: entry.motion?.isScrolling ?? null,
         startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
         endAtEpochMs:
           performance.timeOrigin + entry.startTime + entry.pausedDuration + entry.duration,
       }));
+      exact.pendingNow = this.pendingQueue
+        .toArray()
+        .slice(0, 128)
+        .map((entry) => entry.id);
+      exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+      exact.retained = {
+        pending: this.pendingQueue.size,
+        active: this.activeMessages.length,
+        indexed: null,
+        imageFetchTasks: null,
+      };
       frame.failed = !successful;
       frame.config = { ...frame.config, ...exact.config };
       state.endRenderFrame(
@@ -2119,7 +2855,7 @@ async function runScenario({
         : mode === 'reverse'
           ? [TOKENS[2]]
           : TOKENS.slice(0, 2);
-  const paidId = mixedGap ? MIXED_IDS[1] : 'WINDOWS193_PAID';
+  const paidId = mixedGap ? MIXED_IDS[1] : 'W193P';
   assert(
     ids.every((id): id is string => typeof id === 'string') && typeof paidId === 'string',
     'Placement fixture token is unavailable'
@@ -2899,6 +3635,22 @@ async function runScenario({
         regularInsets: gap0.regularInsets,
         queue: gap0.stats,
       });
+      // The next sample needs fresh lane reservations. A still-active gap0
+      // cohort can legitimately make a gap8 scroll row reuse the only free lane.
+      let clearedGap0 = false;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const prior = await issueSnapshot();
+        if (
+          Array.isArray(prior.exact.pendingNow) &&
+          !prior.exact.activeNow.some((entry) => entry.id.startsWith('WINDOWS196_GAP0_')) &&
+          !prior.exact.pendingNow.some((id) => id.startsWith('WINDOWS196_GAP0_'))
+        ) {
+          clearedGap0 = true;
+          break;
+        }
+        await page.waitForTimeout(250);
+      }
+      assert(clearedGap0, 'Gap0 cohort did not complete before the independent gap8 sample');
       await page.evaluate(() => {
         const probe = window.__ytPlacementProbe;
         probe.bounds.length = 0;
@@ -2923,13 +3675,7 @@ async function runScenario({
         animations: 'disabled',
       });
       if (!comparisonOnly) {
-        const regular = gap0.exact.dispositions.filter(
-          (entry) => entry.kind === 'activated' && entry.id.startsWith('WINDOWS196_GAP0_')
-        );
-        assert(
-          regular.length >= 2 && regular.every((entry) => entry.slotCount === 1),
-          'Compact transparent regular comments reserved extra baseline rows'
-        );
+        assertCompactRegularRows(gap0.exact.dispositions);
       }
       phaseObservations.push({
         phase: 'gap8',
@@ -3004,9 +3750,7 @@ async function runScenario({
         motion: long,
         config: backlog.exact.config,
         queue: backlog.stats,
-        dispositions: backlog.exact.dispositions.filter((entry) =>
-          entry.id.startsWith('WINDOWS195_')
-        ),
+        dispositions: matchingFixtureDispositions(backlog.exact.dispositions, 'WINDOWS195_'),
       });
       await page.evaluate(() => window.__ytPlacementSetPaused(true));
       const pauseStart = await issueSnapshot();
@@ -3390,14 +4134,16 @@ async function runScenario({
       await page.evaluate(applyFixtureSettings, { translationEnabled: true });
       const enabled = await workerSnapshot();
       assert(Number.isInteger(enabled.config.translationGeneration));
+      const enabledActive = enabled.activeNow.find((entry) => entry.id === TOKENS[0]);
+      assert(enabledActive, 'Translation fixture row expired before the update');
       await page.evaluate(
-        ({ id, width, height, generation }) => {
+        ({ id, width, height, generation, translatedText }) => {
           const record = window.__ytPlacementProbe.workers.find((entry) => entry.ready);
           if (!record) throw new Error('Renderer Worker is unavailable for translation');
           record.worker.postMessage({
             type: 'updateTranslation',
             id,
-            translatedText: 'Fixture translation only',
+            translatedText,
             width,
             height,
             translationHeight: 32,
@@ -3409,22 +4155,43 @@ async function runScenario({
           width: active.width + 80,
           height: active.height + 32,
           generation: enabled.config.translationGeneration,
+          translatedText: TRANSLATED_TEXT,
         }
       );
       await page.waitForFunction(
-        ({ id, width }) =>
-          window.__ytPlacementProbe.workers
-            .find((record) => record.ready)
-            ?.sample?.exact?.activeNow?.some((entry) => entry.id === id && entry.width >= width),
-        { id: TOKENS[0], width: active.width + 80 },
+        ({ id, height, translatedText }) => {
+          const sample = window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample;
+          const frame = sample?.latestRenderFrame;
+          return Boolean(
+            sample?.exact?.activeNow?.some((entry) => entry.id === id && entry.height > height) &&
+            frame?.complete &&
+            frame.cleared &&
+            !frame.truncated &&
+            frame.draws.some(
+              (draw) =>
+                draw.id === id &&
+                draw.alpha > 0 &&
+                draw.textSnippet?.includes(translatedText) &&
+                draw.rect &&
+                draw.rect.left < Number(frame.logicalWidth) &&
+                draw.rect.right > 0 &&
+                draw.rect.top < Number(frame.logicalHeight) &&
+                draw.rect.bottom > 0
+            )
+          );
+        },
+        { id: TOKENS[0], height: active.height, translatedText: TRANSLATED_TEXT },
         { timeout: 10_000 }
       );
       const translated = await workerSnapshot();
+      const translatedFrame = await page.evaluate(
+        () =>
+          window.__ytPlacementProbe.workers.find((record) => record.ready)?.sample
+            ?.latestRenderFrame ?? null
+      );
       const translatedActive = translated.activeNow.find((entry) => entry.id === TOKENS[0]);
       assert(
-        translatedActive &&
-          translatedActive.width >= active.width + 80 &&
-          translatedActive.height >= active.height + 32,
+        translatedRowEvidence(enabledActive, translatedActive, translatedFrame, TRANSLATED_TEXT),
         'Injected production translation protocol did not reflow active geometry'
       );
       await page.evaluate(applyFixtureSettings, { translationEnabled: false });
@@ -3620,9 +4387,28 @@ export async function runPlacementTimingFixture({
       });
     }
   }
+  const commentDisplayMatrix =
+    selectedScenarios === undefined && !spacingOnly
+      ? await (
+          await import('./comment-display-matrix.ts')
+        ).runCommentDisplayMatrix({
+          context,
+          root,
+          output,
+          extensionId,
+          mode: comparisonOnly ? 'baseline' : 'candidate',
+        })
+      : null;
   return {
-    status: scenarios.every((scenario) => scenario.status === 'passed') ? 'passed' : 'failed',
+    status:
+      scenarios.every((scenario) => scenario.status === 'passed') &&
+      (commentDisplayMatrix === null ||
+        commentDisplayMatrix.status === 'passed' ||
+        (comparisonOnly && commentDisplayMatrix.status === 'observed'))
+        ? 'passed'
+        : 'failed',
     scenarios,
+    commentDisplayMatrix,
     comparisonOnly,
     selectedScenarios: selected.map((scenario) => scenario.name),
     spacingOnly,

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 
 import { expect, it } from 'vite-plus/test';
@@ -66,4 +68,28 @@ it('selects both native TypeScript entrypoints and their installation helper gra
     ...profile.assets,
     ...profile.installation.assets,
   ]);
+});
+
+it('loads the declared canonical settings asset from an isolated installation bundle', () => {
+  const asset = 'src/settings/limits.ts';
+  expect(profile.installation?.assets).toContain(asset);
+  const bundle = mkdtempSync(join(tmpdir(), 'yt-matrix-install-'));
+  try {
+    mkdirSync(join(bundle, dirname(asset)), { recursive: true });
+    copyFileSync(join(process.cwd(), asset), join(bundle, asset));
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--input-type=module',
+        '-e',
+        `import { resolveLimits } from './${asset}'; process.stdout.write(String(resolveLimits('superChatMaxBodyLines').min));`,
+      ],
+      { cwd: bundle, encoding: 'utf8' }
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(Number(result.stdout)).toBe(2);
+  } finally {
+    rmSync(bundle, { recursive: true, force: true });
+  }
 });
