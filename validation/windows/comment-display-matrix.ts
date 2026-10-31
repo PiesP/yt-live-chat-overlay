@@ -2611,8 +2611,7 @@ async function runOverloadBackend(options: {
                 },
               ]
             : [];
-        if (actions.length) markDelivered('future');
-        return route.fulfill({
+        await route.fulfill({
           status: 200,
           contentType: 'application/json',
           json: {
@@ -2630,6 +2629,8 @@ async function runOverloadBackend(options: {
             },
           },
         });
+        if (actions.length) markDelivered('future');
+        return;
       }
       if (
         url.hostname === 'www.youtube.com' &&
@@ -2640,8 +2641,7 @@ async function runOverloadBackend(options: {
           key && Object.hasOwn(OVERLOAD_BATCHES, key) && !delivered.has(key)
             ? OVERLOAD_BATCHES[key as keyof typeof OVERLOAD_BATCHES]
             : [];
-        if (actions.length && key) markDelivered(key as keyof typeof OVERLOAD_BATCHES);
-        return route.fulfill({
+        await route.fulfill({
           status: 200,
           contentType: 'application/json',
           json: {
@@ -2660,6 +2660,8 @@ async function runOverloadBackend(options: {
             },
           },
         });
+        if (actions.length && key) markDelivered(key as keyof typeof OVERLOAD_BATCHES);
+        return;
       }
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document')
         return route.fulfill({ status: 200, contentType: 'text/html', body: html });
