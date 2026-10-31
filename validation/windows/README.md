@@ -69,7 +69,7 @@ inside the committed card, and omit translated ink for the deliberate one-row
 fallback. The bright membership card records its actual border stroke alpha and
 body draw alpha in two completed frames at least 250 logical milliseconds apart
 under effective reduced motion; the border alpha must remain stable. A zero-row
-membership reservation and a prefetched future replay membership must publish
+membership deferred for zero usable rows and a prefetched future replay membership must publish
 neither a positive-alpha draw nor an observed border stroke before eligibility.
 
 A separate JSON-only overload envelope uses the same installed extension and
@@ -81,8 +81,10 @@ follows the first renewed paid batch; its ingress,
 reservation, and first visible draw are recorded beside subsequent paid service.
 The same envelope also exercises source-measured unplaceable paid height beside
 fitting ordinary content,
-equal-priority overflow, controlled pause/hidden/resume, and future replay
-reservation, plus a separate zero-row membership reservation. Active/queue caps
+equal-priority overflow from 20 source-owned responses of four distinct authors
+and IDs each into a measured full pending queue under the 30/50 caps, controlled
+pause/hidden/resume, and future replay
+buffering, plus a separate zero-row membership deferral. Active/queue caps
 cover 30/50, 300/200 (the default caps), and 300/1000 settings.
 Records separate fixture delivery, renderer ingress, pending queue, reservation,
 first positive-alpha draw, completion, and attributed discard reasons. Per-kind

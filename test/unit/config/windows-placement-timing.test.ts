@@ -18,6 +18,7 @@ import {
   findOverlappingActivePair,
   instrumentCardPlanCalls,
   instrumentCanvasPageScript,
+  matchingFixtureDispositions,
   MIXED_BURST_SETTINGS,
   MIXED_PRESSURE_CHUNK_SIZE,
   MIXED_PRESSURE_COUNT,
@@ -256,7 +257,18 @@ describe('Windows placement timing probe', () => {
     });
     const full = row('WINDOWS196_GAP0_A', 1, 44);
     const subdivided = row('WINDOWS196_GAP0_B', 2, 22);
-    expect(() => assertCompactRegularRows([full, subdivided])).not.toThrow();
+    const idless = { kind: 'completed', slotCount: 0, laneHeight: 44, height: 44, laneSpacing: 0 };
+    expect(() => assertCompactRegularRows([idless, full, subdivided])).not.toThrow();
+    expect(matchingFixtureDispositions([idless, full, subdivided], 'WINDOWS196_GAP0_')).toEqual([
+      full,
+      subdivided,
+    ]);
+    expect(
+      matchingFixtureDispositions(
+        [idless, { ...full, id: 'WINDOWS195_BACKLOG_LONG' }],
+        'WINDOWS195_'
+      )
+    ).toEqual([{ ...full, id: 'WINDOWS195_BACKLOG_LONG' }]);
     for (const invalid of [
       row(subdivided.id, 2, 44),
       row(subdivided.id, 1, 22),
@@ -1330,7 +1342,7 @@ describe('Windows placement timing probe', () => {
         placeQueuedMessage(message) {
           this.pendingQueue.items.shift(); this.activeMessages.push({ message, laneIndex: 1,
             x: 1280, y: 34, width: 2200, height: 34, slotCount: 1,
-            motion: { durationMs: 7160, actualVelocityPxPerMs: .5,
+            motion: { durationMs: 7160, actualVelocityPxPerMs: .5, isScrolling: true,
               travelDistancePx: 3580, viewportEntryTime: 100, visibleExitTime: 7260 } });
           return { placed: true };
         }
@@ -1378,6 +1390,7 @@ describe('Windows placement timing probe', () => {
       expect(exact.presentationCount).toBe(1);
       expect(state.ingress).toMatchObject({ [id]: 1001 });
       expect(exact.activeNow).toContainEqual(expect.objectContaining({ id }));
+      expect(exact.activeNow).toContainEqual(expect.objectContaining({ id, isScrolling: true }));
       expect(exact.totalPresentationUnknown).toBe(unknownPresentations);
       expect(exact.drains).toEqual([
         { atEpochMs: 1001, workMs: 0, pendingBefore: 0, activeBefore: 1, activeAfter: 1 },

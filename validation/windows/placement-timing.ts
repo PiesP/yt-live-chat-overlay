@@ -118,6 +118,7 @@ type CanvasActive = ActiveRow & {
   motion?: {
     durationMs: number;
     actualVelocityPxPerMs: number;
+    isScrolling?: boolean;
     travelDistancePx: number;
     viewportEntryTime: number;
     visibleExitTime: number;
@@ -144,6 +145,8 @@ type CanvasRendererProbe = {
     fontSize: number;
     safeTop: number;
     safeBottom: number;
+    maxConcurrentMessages: number;
+    queueMaxSize: number;
     speedPxPerSec: number;
     backlogSpeedMultiplier: number;
     outline: unknown;
@@ -1742,10 +1745,24 @@ export function assertSpacingPhase(
   return { allocationPitchPx, visibleRowPitch };
 }
 
+/** Grid and completion records can legitimately omit a message ID. */
+export function matchingFixtureDispositions<T extends { id?: string; kind: string }>(
+  dispositions: readonly T[],
+  prefix: string,
+  kind?: string
+): T[] {
+  return dispositions.filter(
+    (entry) =>
+      typeof entry.id === 'string' &&
+      entry.id.startsWith(prefix) &&
+      (kind === undefined || entry.kind === kind)
+  );
+}
+
 /** A regular row may span multiple smaller grid cells after adaptive subdivision. */
 export function assertCompactRegularRows(
   dispositions: readonly {
-    id: string;
+    id?: string;
     kind: string;
     slotCount?: number | null;
     laneHeight?: number | null;
@@ -1754,9 +1771,7 @@ export function assertCompactRegularRows(
   }[],
   prefix = 'WINDOWS196_GAP0_'
 ) {
-  const regular = dispositions.filter(
-    (entry) => entry.kind === 'activated' && entry.id.startsWith(prefix)
-  );
+  const regular = matchingFixtureDispositions(dispositions, prefix, 'activated');
   assert(
     regular.length >= 2 &&
       regular.every((entry) => {
@@ -2643,6 +2658,8 @@ function attachCanvasRendererProbe(
         laneDensityFactor: this.currentLaneDensityFactor,
         safeTop: this.settings.safeTop,
         safeBottom: this.settings.safeBottom,
+        maxConcurrentMessages: this.settings.maxConcurrentMessages,
+        queueMaxSize: this.settings.queueMaxSize,
         speedPxPerSec: this.settings.speedPxPerSec,
         backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
         outline: this.settings.outline,
@@ -2683,6 +2700,7 @@ function attachCanvasRendererProbe(
         slotCount: entry.slotCount,
         durationMs: entry.motion?.durationMs ?? null,
         actualVelocityPxPerMs: entry.motion?.actualVelocityPxPerMs ?? null,
+        isScrolling: entry.motion?.isScrolling ?? null,
         startAtEpochMs: performance.timeOrigin + entry.startTime + entry.pausedDuration,
         endAtEpochMs:
           performance.timeOrigin + entry.startTime + entry.pausedDuration + entry.duration,
@@ -3723,9 +3741,7 @@ async function runScenario({
         motion: long,
         config: backlog.exact.config,
         queue: backlog.stats,
-        dispositions: backlog.exact.dispositions.filter((entry) =>
-          entry.id.startsWith('WINDOWS195_')
-        ),
+        dispositions: matchingFixtureDispositions(backlog.exact.dispositions, 'WINDOWS195_'),
       });
       await page.evaluate(() => window.__ytPlacementSetPaused(true));
       const pauseStart = await issueSnapshot();

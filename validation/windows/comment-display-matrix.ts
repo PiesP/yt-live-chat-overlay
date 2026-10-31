@@ -139,6 +139,10 @@ type MatrixSnapshot = {
     y: number;
     width: number;
     height: number;
+    isScrolling?: boolean | null;
+    slotCount?: number | null;
+    startAtEpochMs?: number | null;
+    endAtEpochMs?: number | null;
     durationMs?: number | null;
     actualVelocityPxPerMs?: number | null;
   }>;
@@ -307,15 +311,21 @@ function presentationActions(scene: Scene) {
   ];
 }
 
+const COMBINING_ACTION = textAction(
+  IDS[0],
+  `${'A'.repeat(78 - IDS[0].length - 1)}e\u0301ZZZ CANONICAL_END`
+);
+
 export const MATRIX_BATCHES = Object.freeze({
   content: [
-    textAction(IDS[0], `${'A'.repeat(78 - IDS[0].length - 1)}e\u0301ZZZ CANONICAL_END`),
+    COMBINING_ACTION,
     textAction(IDS[1], `${'A'.repeat(78 - IDS[1].length - 1)}👍🏽Z CANONICAL_END`),
     textAction(IDS[2], `${'A'.repeat(77 - IDS[2].length - 1)}👨‍👩‍👧‍👦Z CANONICAL_END`),
     emojiAction(),
     textAction(IDS[4], 'مرحبا بالعالم 한국어 English'),
     paidAction(),
   ],
+  narrow: [COMBINING_ACTION],
   motion: [textAction(IDS[6], 'Moving comment with stable source identity')],
   zero: [textAction(IDS[7], 'Zero-capacity row must remain pending')],
   restored: [textAction(IDS[8], 'Rows become available again')],
@@ -352,9 +362,21 @@ function overloadPaidAction(id: string, body: string) {
   };
 }
 
+const OVERFLOW_SEED_BATCHES = Object.fromEntries(
+  Array.from({ length: 20 }, (_, batch) => [
+    `overflowSeed${batch}`,
+    Array.from({ length: 4 }, (_, offset) =>
+      textAction(
+        `WINDOWS380_LOAD_OVERFLOW_OLD_${batch * 4 + offset}`,
+        'Equal priority waiting content'
+      )
+    ),
+  ])
+) as Record<`overflowSeed${number}`, ReturnType<typeof textAction>[]>;
+
 export const OVERLOAD_BATCHES = Object.freeze({
   vacancySeed: [
-    ...Array.from({ length: 12 }, (_, index) =>
+    ...Array.from({ length: 4 }, (_, index) =>
       overloadPaidAction(`WINDOWS380_LOAD_VACANCY_PAID_${index}`, 'Recurring paid arrival')
     ),
     textAction('WINDOWS380_LOAD_VACANCY_ORDINARY', 'Compatible waiting ordinary'),
@@ -374,10 +396,10 @@ export const OVERLOAD_BATCHES = Object.freeze({
       textAction(`WINDOWS380_LOAD_IMPOSSIBLE_ORDINARY_${index}`, 'Fits a narrow lane')
     ),
   ],
-  overflowSeed: Array.from({ length: 60 }, (_, index) =>
-    textAction(`WINDOWS380_LOAD_OVERFLOW_OLD_${index}`, 'Equal priority waiting content')
-  ),
-  overflowLate: Array.from({ length: 8 }, (_, index) =>
+  // Four actions per real response stay on the live path even under high
+  // utilization; the combined cohort exceeds the 30 active/50 pending caps.
+  ...OVERFLOW_SEED_BATCHES,
+  overflowLate: Array.from({ length: 4 }, (_, index) =>
     textAction(`WINDOWS380_LOAD_OVERFLOW_NEW_${index}`, 'Later equal priority content')
   ),
   pause: [
@@ -892,18 +914,18 @@ export function membershipEffect(snapshot: MatrixSnapshot, id: string) {
   };
 }
 
-export function assertUndrawnReservation(snapshot: MatrixSnapshot, id: string) {
+export function assertNoVisibleCardInk(snapshot: MatrixSnapshot, id: string) {
   const frame = snapshot.frame;
   assert(frame?.complete && frame.cleared && !frame.truncated);
   assert(
     !frame.cardPlans.some((entry) => entry.id === id && entry.borderAlpha !== null),
-    'Reserved card generated a visible decoration stroke'
+    'Ineligible card generated a visible decoration stroke'
   );
   assert(
     !frame.draws.some((entry) => entry.id === id && entry.alpha > 0),
-    'Reserved card published visible ink'
+    'Ineligible card published visible ink'
   );
-  assert(!Number.isFinite(snapshot.firstEntry[id]), 'Reserved card entered the visible viewport');
+  assert(!Number.isFinite(snapshot.firstEntry[id]), 'Ineligible card entered the visible viewport');
 }
 
 /** Activation is a reservation; only the draw probe can establish first visibility. */
@@ -983,6 +1005,7 @@ export function overloadTrace(
     const completed = events.find((entry) => entry.kind === 'completed');
     const discarded = events.find((entry) => entry.kind === 'dropped');
     const queued = snapshot.queuedNow.find((entry) => entry.id === id);
+    const active = snapshot.activeNow.find((entry) => entry.id === id);
     const ingressAt = snapshot.ingress[id] ?? null;
     const firstVisibleAt = snapshot.firstEntry[id] ?? null;
     return {
@@ -999,6 +1022,8 @@ export function overloadTrace(
           ? reserved.atEpochMs - reserved.queueResidenceMs
           : null),
       reservedAtEpochMs: reserved?.atEpochMs ?? null,
+      plannedStartAtEpochMs: active?.startAtEpochMs ?? null,
+      plannedEndAtEpochMs: active?.endAtEpochMs ?? null,
       firstVisibleAtEpochMs: firstVisibleAt,
       firstVisibleDelayMs:
         ingressAt !== null && firstVisibleAt !== null ? firstVisibleAt - ingressAt : null,
@@ -1181,7 +1206,20 @@ async function waitForPaidPlan(page: Page, backend: Backend, id: string, lines: 
 async function waitForProbeConfig(
   page: Page,
   backend: Backend,
-  expected: { viewportWidth: number; playerHeight?: number; fontSize?: number; safeTop?: number }
+  expected: {
+    viewportWidth: number;
+    playerHeight?: number;
+    fontSize?: number;
+    safeTop?: number;
+    safeBottom?: number;
+    laneSpacing?: number;
+    mode?: 'top' | 'scroll';
+    reducedMotion?: boolean;
+    ignoreReducedMotion?: boolean;
+    layout?: 'stacked' | 'wide';
+    activeCap?: number;
+    queueCap?: number;
+  }
 ) {
   await page.waitForFunction(
     ({ selectedBackend, config }) => {
@@ -1199,7 +1237,19 @@ async function waitForProbeConfig(
         Math.abs(Number(frame.logicalHeight) - player.height) <= 2 &&
         (config.playerHeight === undefined || player.height === config.playerHeight) &&
         (config.fontSize === undefined || exact?.fontSize === config.fontSize) &&
-        (config.safeTop === undefined || exact?.safeTop === config.safeTop)
+        (config.safeTop === undefined || exact?.safeTop === config.safeTop) &&
+        (config.safeBottom === undefined || exact?.safeBottom === config.safeBottom) &&
+        (config.laneSpacing === undefined || exact?.laneSpacing === config.laneSpacing) &&
+        (config.mode === undefined || exact?.mode === config.mode) &&
+        (config.layout === undefined || exact?.superChatLayout === config.layout) &&
+        (config.activeCap === undefined || exact?.maxConcurrentMessages === config.activeCap) &&
+        (config.queueCap === undefined || exact?.queueMaxSize === config.queueCap) &&
+        (config.reducedMotion === undefined ||
+          (exact?.reducedMotion === config.reducedMotion &&
+            frame.config.reducedMotion === config.reducedMotion)) &&
+        (config.ignoreReducedMotion === undefined ||
+          (exact?.ignoreReducedMotion === config.ignoreReducedMotion &&
+            frame.config.ignoreReducedMotion === config.ignoreReducedMotion))
       );
       if (!matches && selectedBackend === 'worker' && worker && probe) {
         const now = performance.now();
@@ -1393,6 +1443,32 @@ async function runBackend(options: {
     }, key);
     assert(delivered.has(key), `Matrix batch ${key} was not delivered`);
   };
+  const openFresh = async () => {
+    if (backend === 'main') {
+      const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
+      const instrumentedSource = instrumentCanvasPageScript(source, undefined, true);
+      assert(instrumentedSource, 'Packaged Canvas page script shape changed');
+      nativeProbe = await installNativePageScriptProbe({
+        context,
+        root,
+        extensionId,
+        fixtureUrl: FIXTURE_URL,
+        instrumentedSource,
+      });
+      await nativeProbe.assertReady();
+    }
+    await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page
+      .locator('#yt-live-chat-overlay canvas')
+      .waitFor({ state: 'attached', timeout: 15_000 });
+    if (nativeProbe) {
+      await nativeProbe.assertInjected();
+      await page.waitForFunction(() => window.__ytPlacementProbe.canvasSourceHooked === true);
+      await nativeProbe.restore();
+      nativeProbe = undefined;
+    }
+    await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings));
+  };
   try {
     // The six simultaneous content rows exceed the ordinary 482px player.
     // Give this phase room to publish every due draw within its fixed wait.
@@ -1523,30 +1599,7 @@ async function runBackend(options: {
         },
       });
     }, PRESENTATION_IDS.detailed.paid);
-    if (backend === 'main') {
-      const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
-      const instrumentedSource = instrumentCanvasPageScript(source, undefined, true);
-      assert(instrumentedSource, 'Packaged Canvas page script shape changed');
-      nativeProbe = await installNativePageScriptProbe({
-        context,
-        root,
-        extensionId,
-        fixtureUrl: FIXTURE_URL,
-        instrumentedSource,
-      });
-      await nativeProbe.assertReady();
-    }
-    await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page
-      .locator('#yt-live-chat-overlay canvas')
-      .waitFor({ state: 'attached', timeout: 15_000 });
-    if (nativeProbe) {
-      await nativeProbe.assertInjected();
-      await page.waitForFunction(() => window.__ytPlacementProbe.canvasSourceHooked === true);
-      await nativeProbe.restore();
-      nativeProbe = undefined;
-    }
-    await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings));
+    await openFresh();
     previousSettings = await page.evaluate(() => {
       const app = window.__ytChatOverlay;
       if (!app) throw new Error('Matrix settings owner unavailable');
@@ -1568,7 +1621,14 @@ async function runBackend(options: {
     const contentStyle = await page.addStyleTag({
       content: '#movie_player { height: 800px !important; aspect-ratio: auto !important; }',
     });
-    await waitForProbeConfig(page, backend, { viewportWidth: 960, playerHeight: 800 });
+    await waitForProbeConfig(page, backend, {
+      viewportWidth: 960,
+      playerHeight: 800,
+      fontSize: 32,
+      laneSpacing: 0,
+      mode: 'top',
+      reducedMotion: false,
+    });
     await send('content');
     await observeVisible(IDS[0]);
     await observeVisible(IDS[4]);
@@ -1632,12 +1692,25 @@ async function runBackend(options: {
     );
     await contentStyle.evaluate((element) => element.parentNode?.removeChild(element));
 
+    // The six content rows become future reservations when reflowed into a
+    // 255-by-318 overlay. Exercise the same bounded input on a fresh owner.
+    await page.setViewportSize({ width: 320, height: 540 });
+    await openFresh();
     const narrowStyle = await page.addStyleTag({
       content: '#movie_player { height: 320px !important; aspect-ratio: auto !important; }',
     });
-    await page.setViewportSize({ width: 320, height: 540 });
-    await page.evaluate(() => window.__ytChatOverlay?.applySettings({ fontSize: 48 }));
-    await waitForProbeConfig(page, backend, { viewportWidth: 320, fontSize: 48 });
+    await page.evaluate(() =>
+      window.__ytChatOverlay?.applySettings({ danmakuMode: 'top', fontSize: 48, laneSpacing: 0 })
+    );
+    await waitForProbeConfig(page, backend, {
+      viewportWidth: 320,
+      playerHeight: 320,
+      fontSize: 48,
+      laneSpacing: 0,
+      mode: 'top',
+      reducedMotion: false,
+    });
+    await send('narrow');
     await observeVisible(IDS[0]);
     const narrow = await capture('narrow-fixed');
     const narrowDraw = check(() => assertCoherentVisibleFrame(narrow, IDS[0]));
@@ -1649,12 +1722,34 @@ async function runBackend(options: {
         'Fixed-mode ink exceeds the narrow viewport'
       )
     );
-    await page.evaluate(() => window.__ytChatOverlay?.applySettings({ danmakuMode: 'scroll' }));
+    await narrowStyle.evaluate((element) => element.parentNode?.removeChild(element));
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openFresh();
+    const reducedStyle = await page.addStyleTag({
+      content: '#movie_player { height: 320px !important; aspect-ratio: auto !important; }',
+    });
+    await page.evaluate(() =>
+      window.__ytChatOverlay?.applySettings({ danmakuMode: 'scroll', fontSize: 48, laneSpacing: 0 })
+    );
+    await waitForProbeConfig(page, backend, {
+      viewportWidth: 320,
+      playerHeight: 320,
+      fontSize: 48,
+      laneSpacing: 0,
+      mode: 'scroll',
+      reducedMotion: true,
+      ignoreReducedMotion: false,
+    });
     await send('reduced');
     await observeVisible(IDS[9]);
     const reduced = await capture('reduced-motion-fixed', false);
     const reducedDraw = check(() => assertCoherentVisibleFrame(reduced, IDS[9]));
+    check(() =>
+      assert(
+        reduced.activeNow.some((entry) => entry.id === IDS[9] && entry.isScrolling === false),
+        'Reduced-motion row was not committed in fixed mode'
+      )
+    );
     check(() =>
       assert(
         reducedDraw?.rect &&
@@ -1664,12 +1759,28 @@ async function runBackend(options: {
       )
     );
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await narrowStyle.evaluate((element) => element.parentNode?.removeChild(element));
+    await reducedStyle.evaluate((element) => element.parentNode?.removeChild(element));
     await page.setViewportSize({ width: 960, height: 540 });
-    await page.evaluate(() => window.__ytChatOverlay?.applySettings({ fontSize: 32 }));
-    await waitForProbeConfig(page, backend, { viewportWidth: 960, fontSize: 32 });
+    await openFresh();
+    await page.evaluate(() =>
+      window.__ytChatOverlay?.applySettings({
+        danmakuMode: 'scroll',
+        fontSize: 32,
+        laneSpacing: 0,
+        safeTop: 0,
+        safeBottom: 0,
+      })
+    );
+    await waitForProbeConfig(page, backend, {
+      viewportWidth: 960,
+      fontSize: 32,
+      laneSpacing: 0,
+      mode: 'scroll',
+      reducedMotion: false,
+    });
 
-    await page.evaluate(() => window.__ytChatOverlay?.applySettings({ danmakuMode: 'scroll' }));
+    const motionBaseline = await snapshot(page, backend);
+    assertBackend(motionBaseline, backend);
     await send('motion');
     await observeVisible(IDS[6]);
     const before = await capture('motion-before', false);
@@ -1677,7 +1788,7 @@ async function runBackend(options: {
     check(() =>
       assert(
         before.presentationCount !== null &&
-          before.presentationCount > Number(content.presentationCount),
+          before.presentationCount > Number(motionBaseline.presentationCount),
         'Visible motion did not advance first-presentation accounting'
       )
     );
@@ -1781,9 +1892,8 @@ async function runBackend(options: {
     check(() => assert.deepEqual(zeroSettings, { maximum: 0, minimum: 4 }));
     const zeroStarted = Date.now();
     await send('rateZero');
-    await waitForIngress(page, backend, IDS[10]);
-    await waitForIngress(page, backend, IDS[11]);
-    // Zero is a temporal ceiling: observe a bounded interval after the whole batch arrived.
+    // The source backlog controller holds a >50-item batch before renderer
+    // ingress when its maximum rate is zero.
     await page.waitForTimeout(1100);
     const zeroRate = await snapshot(page, backend);
     rateObservations.push({
@@ -1794,11 +1904,34 @@ async function runBackend(options: {
     });
     check(() =>
       assert(
-        !zeroRate.firstEntry[IDS[10]] && !zeroRate.firstEntry[IDS[11]],
-        'Zero maximum visibly admitted a marked initial backlog row'
+        !zeroRate.firstEntry[IDS[10]] &&
+          !zeroRate.firstEntry[IDS[11]] &&
+          !Number.isFinite(zeroRate.ingress[IDS[10]]) &&
+          !Number.isFinite(zeroRate.ingress[IDS[11]]),
+        'Zero maximum admitted a marked backlog row to the renderer'
       )
     );
-    await page.evaluate(() => window.__ytChatOverlay?.applySettings({ backlogMaxRate: 20 }));
+    // A fresh owned document keeps the positive cohort independent of the 51
+    // held zero-rate rows, so old eventual service cannot satisfy its proof.
+    await openFresh();
+    await page.evaluate(() =>
+      window.__ytChatOverlay?.applySettings({
+        danmakuMode: 'top',
+        fontSize: 32,
+        laneSpacing: 0,
+        safeTop: 0,
+        safeBottom: 0,
+        backlogMode: 'playback',
+        backlogMaxRate: 20,
+        backlogInjectionRateMin: 4,
+      })
+    );
+    await waitForProbeConfig(page, backend, {
+      viewportWidth: 720,
+      fontSize: 32,
+      laneSpacing: 0,
+      mode: 'top',
+    });
     const positiveSettings = await page.evaluate(() => {
       const settings = window.__ytChatOverlay?.getSettings();
       return { maximum: settings?.backlogMaxRate, minimum: settings?.backlogInjectionRateMin };
@@ -1806,21 +1939,8 @@ async function runBackend(options: {
     check(() => assert.deepEqual(positiveSettings, { maximum: 20, minimum: 4 }));
     const positiveStarted = Date.now();
     await send('ratePositive');
-    await page.waitForFunction(
-      (selectedBackend) => {
-        const probe = window.__ytPlacementProbe;
-        const selected =
-          selectedBackend === 'worker'
-            ? probe?.workers.find((record) => record.ready)?.sample
-            : probe;
-        return (
-          Number.isFinite(selected?.firstEntry?.WINDOWS380_RATE_ZERO_FIRST) ||
-          Number.isFinite(selected?.firstEntry?.WINDOWS380_RATE_POS_FIRST)
-        );
-      },
-      backend,
-      { timeout: 5000 }
-    );
+    await waitForIngress(page, backend, IDS[12]);
+    await observeVisible(IDS[12]);
     const positiveRate = await snapshot(page, backend);
     rateObservations.push({
       name: 'positive-delayed-backlog',
@@ -1836,8 +1956,9 @@ async function runBackend(options: {
     );
     check(() =>
       assert(
-        Number.isFinite(positiveRate.firstEntry[IDS[10]] ?? positiveRate.firstEntry[IDS[12]]),
-        'Positive rate did not visibly resume bounded backlog service'
+        Number.isFinite(positiveRate.firstEntry[IDS[12]]) &&
+          !Number.isFinite(positiveRate.firstEntry[IDS[10]]),
+        'Positive rate did not visibly serve its own bounded backlog cohort'
       )
     );
 
@@ -1887,8 +2008,10 @@ async function runBackend(options: {
           window.__ytChatOverlay?.applySettings({
             danmakuMode: 'scroll',
             fontSize: 32,
+            laneSpacing: 0,
             safeTop: 0,
             safeBottom: 0,
+            ignoreReducedMotion: false,
             showDebugOverlay: true,
             maxConcurrentMessages: 40,
             queueMaxSize: 80,
@@ -1903,6 +2026,20 @@ async function runBackend(options: {
         scene
       );
       await setScene(page, scene);
+      await waitForProbeConfig(page, backend, {
+        viewportWidth: width,
+        playerHeight: 540,
+        fontSize: 32,
+        laneSpacing: 0,
+        safeTop: 0,
+        safeBottom: 0,
+        mode: 'scroll',
+        reducedMotion: false,
+        ignoreReducedMotion: false,
+        ...(wideSupported ? { layout: 'stacked' as const } : {}),
+        activeCap: 40,
+        queueCap: 80,
+      });
       const paidId = PRESENTATION_IDS[scene].paid;
       const key = `presentation${scene[0]?.toUpperCase()}${scene.slice(1)}` as
         | 'presentationBright'
@@ -2366,6 +2503,7 @@ async function runOverloadBackend(options: {
     outcome?: 'ordinary-waiting' | 'ordinary-already-served';
   }> = [];
   let currentVacancyService: Record<string, unknown> | null = null;
+  let currentOverflowInput: Record<string, unknown> | null = null;
   let failureStage = 'setup';
   let replayRequests = 0;
   const cases: Array<Record<string, unknown>> = [];
@@ -2392,7 +2530,7 @@ async function runOverloadBackend(options: {
         );
     }
   };
-  const send = async (key: keyof typeof OVERLOAD_BATCHES) => {
+  const send = async (key: keyof typeof OVERLOAD_BATCHES | `overflowSeed${number}`) => {
     await page.evaluate(async (batch) => {
       const response = await fetch(
         `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?windows380=${batch}`,
@@ -2581,6 +2719,7 @@ async function runOverloadBackend(options: {
       currentCase = name;
       currentSnapshots = [];
       currentVacancyService = null;
+      currentOverflowInput = null;
       failureStage = `${name}:navigation`;
       replayRequests = 0;
       const caps = OVERLOAD_SETTINGS[name];
@@ -2637,7 +2776,11 @@ async function runOverloadBackend(options: {
         viewportWidth: 960,
         playerHeight: caps.playerHeight,
         fontSize: caps.fontSize,
-        ...(name === 'zero-membership' ? { safeTop: 0.25 } : {}),
+        safeTop: name === 'zero-membership' ? 0.25 : 0,
+        safeBottom: name === 'zero-membership' ? 0.5 : 0,
+        mode: name === 'future-membership' ? 'scroll' : 'top',
+        activeCap: caps.active,
+        queueCap: caps.queue,
       });
       failureStage = `${name}:observations`;
       const snapshots = currentSnapshots;
@@ -2693,22 +2836,25 @@ async function runOverloadBackend(options: {
         const endTrace = snapshots.at(-1)?.trace;
         const lateAfterA = afterATrace?.records.find((record) => record.id === lateId);
         const lateEnd = endTrace?.records.find((record) => record.id === lateId);
-        const paidService = endTrace?.records
-          .filter(
-            (record) =>
-              record.id.includes('_VACANCY_MORE_') && Number.isFinite(record.firstVisibleAtEpochMs)
-          )
+        const paidReservations = endTrace?.records
+          .filter((record) => record.id.includes('_VACANCY_MORE_'))
           .map((record) => ({
             id: record.id,
             rendererIngressAtEpochMs: record.rendererIngressAtEpochMs,
             reservedAtEpochMs: record.reservedAtEpochMs,
+            plannedStartAtEpochMs: record.plannedStartAtEpochMs,
+            plannedEndAtEpochMs: record.plannedEndAtEpochMs,
             firstVisibleAtEpochMs: record.firstVisibleAtEpochMs,
           }));
+        const paidService = paidReservations?.filter((record) =>
+          Number.isFinite(record.firstVisibleAtEpochMs)
+        );
         currentVacancyService = {
           seedOutcome: seedRecord?.outcome ?? null,
           seedOrdinary: ordinary ?? null,
           lateAfterA: lateAfterA ?? null,
           lateEnd: lateEnd ?? null,
+          paidReservations: paidReservations ?? [],
           paidService: paidService ?? [],
           afterAFrameId: afterA.frame?.frameId ?? null,
           endFrameId: end.frame?.frameId ?? null,
@@ -2757,12 +2903,42 @@ async function runOverloadBackend(options: {
           )
         );
       } else if (name === 'overflow') {
-        await send('overflowSeed');
-        await page.waitForTimeout(700);
-        await observe('queue-full');
+        for (let batch = 0; batch < 20; batch++) {
+          await send(`overflowSeed${batch}`);
+          await waitForIngress(page, backend, `WINDOWS380_LOAD_OVERFLOW_OLD_${batch * 4 + 3}`);
+        }
+        const full = await observe('queue-full');
+        const oldRendererIngress = Array.from({ length: 80 }, (_, index) =>
+          Number.isFinite(full.ingress[`WINDOWS380_LOAD_OVERFLOW_OLD_${index}`])
+        ).filter(Boolean).length;
+        currentOverflowInput = {
+          oldResponses: 20,
+          oldMessages: 80,
+          newerMessages: 4,
+          oldRendererIngress,
+          fullPending: full.pendingNow.length,
+        };
+        assert(
+          oldRendererIngress === 80,
+          'Overflow seed lacked renderer ingress for all 80 old rows'
+        );
+        assert.equal(
+          full.pendingNow.length,
+          caps.queue,
+          'Overflow seed did not fill the pending queue'
+        );
+        assert(Number.isFinite(full.frame?.startedAtEpochMs));
         await send('overflowLate');
-        await page.waitForTimeout(700);
+        await waitForIngress(page, backend, 'WINDOWS380_LOAD_OVERFLOW_NEW_3');
         const end = await observe('equal-priority-newcomers');
+        const replacedOldAfterNew = end.dispositions.filter(
+          (entry) =>
+            entry.id.startsWith('WINDOWS380_LOAD_OVERFLOW_OLD_') &&
+            entry.kind === 'dropped' &&
+            entry.reason === 'queue_replaced' &&
+            Number(entry.atEpochMs) > Number(full.frame?.startedAtEpochMs)
+        ).length;
+        currentOverflowInput.replacedOldAfterNew = replacedOldAfterNew;
         check(() =>
           assert(
             end.pendingNow.some((id) => id.includes('_OVERFLOW_NEW_')) ||
@@ -2770,6 +2946,12 @@ async function runOverloadBackend(options: {
                 (id) => id.includes('_OVERFLOW_NEW_') && Number.isFinite(end.firstEntry[id])
               ),
             'Equal-priority overflow retained no newer content'
+          )
+        );
+        check(() =>
+          assert(
+            replacedOldAfterNew > 0,
+            'Equal-priority newcomers did not replace an older queued row'
           )
         );
       } else if (name === 'future-membership') {
@@ -2780,11 +2962,20 @@ async function runOverloadBackend(options: {
           'Future membership was not delivered by the replay source'
         );
         const held = await observe('replay-time-10000');
-        check(() => assertUndrawnReservation(held, futureId));
+        check(() => {
+          assertNoVisibleCardInk(held, futureId);
+          assert(!Number.isFinite(held.ingress[futureId]) && !held.pendingNow.includes(futureId));
+        });
         await page.evaluate(() => window.__ytPlacementSetVideoTime(10.001));
         await page.waitForTimeout(200);
         const stillHeld = await observe('replay-time-10001');
-        check(() => assertUndrawnReservation(stillHeld, futureId));
+        check(() => {
+          assertNoVisibleCardInk(stillHeld, futureId);
+          assert(
+            !Number.isFinite(stillHeld.ingress[futureId]) &&
+              !stillHeld.pendingNow.includes(futureId)
+          );
+        });
         await page.evaluate(() => window.__ytPlacementSetVideoTime(11.5));
         await waitForVisible(page, backend, futureId);
         const due = await observe('replay-time-11500');
@@ -2803,8 +2994,17 @@ async function runOverloadBackend(options: {
         await send('zeroMembership');
         await waitForIngress(page, backend, zeroId);
         await page.waitForTimeout(250);
-        const zero = await observe('zero-row-reservation');
-        check(() => assertUndrawnReservation(zero, zeroId));
+        const zero = await observe('zero-row-deferred');
+        check(() => {
+          assertNoVisibleCardInk(zero, zeroId);
+          assert(zero.pendingNow.includes(zeroId), 'Zero-row membership was not deferred');
+          assert(
+            !zero.dispositions.some(
+              (entry) => entry.id === zeroId && ['activated', 'dropped'].includes(entry.kind)
+            ),
+            'Zero-row membership was activated or discarded'
+          );
+        });
       } else {
         await page.evaluate(() => {
           window.__ytPlacementSetPaused(true);
@@ -2843,6 +3043,7 @@ async function runOverloadBackend(options: {
         ids,
         snapshots,
         ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
+        ...(currentOverflowInput ? { overflowInput: currentOverflowInput } : {}),
         delivered: [...delivered],
         elapsedMs: Date.now() - startedAt,
       });
@@ -2855,6 +3056,7 @@ async function runOverloadBackend(options: {
         caps: OVERLOAD_SETTINGS[currentCase],
         snapshots: currentSnapshots,
         ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
+        ...(currentOverflowInput ? { overflowInput: currentOverflowInput } : {}),
         delivered: [...delivered],
         partial: true,
         elapsedMs: Date.now() - startedAt,

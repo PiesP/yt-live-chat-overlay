@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   assertCoherentVisibleFrame,
   assertCommittedVisibleItem,
-  assertUndrawnReservation,
+  assertNoVisibleCardInk,
   assertPreviewComparison,
   assertRestoredVisibility,
   bindMatrixIdentity,
@@ -150,6 +150,12 @@ describe('Windows comment display matrix contract', () => {
     }
   });
 
+  it('uses one fitting source row for narrow and reduced-motion owners', () => {
+    expect(MATRIX_BATCHES.narrow).toEqual([MATRIX_BATCHES.content[0]]);
+    expect(MATRIX_BATCHES.reduced).toHaveLength(1);
+    expect(JSON.stringify(MATRIX_BATCHES.reduced)).toContain('WINDOWS380_REDUCED');
+  });
+
   it('keeps overload workload IDs distinct and within the 128-record envelope', () => {
     const ids = Object.values(OVERLOAD_BATCHES).flatMap((batch) =>
       batch.map((action) => {
@@ -157,13 +163,20 @@ describe('Windows comment display matrix contract', () => {
         return renderer.id;
       })
     );
-    expect(ids.length).toBeGreaterThan(80);
-    expect(ids.length).toBeLessThanOrEqual(128);
+    expect(ids).toHaveLength(108);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain('WINDOWS380_LOAD_VACANCY_ORDINARY');
     expect(ids).toContain('WINDOWS380_LOAD_VACANCY_LATE_ORDINARY');
     expect(ids).toContain('WINDOWS380_LOAD_IMPOSSIBLE_PAID');
-    expect(ids).toContain('WINDOWS380_LOAD_OVERFLOW_NEW_7');
+    expect(ids).toContain('WINDOWS380_LOAD_OVERFLOW_NEW_3');
+    expect(OVERLOAD_BATCHES.vacancySeed).toHaveLength(5);
+    const oldBatches = Object.entries(OVERLOAD_BATCHES).filter(([key]) =>
+      key.startsWith('overflowSeed')
+    );
+    expect(oldBatches).toHaveLength(20);
+    for (const [, batch] of oldBatches) expect(batch).toHaveLength(4);
+    expect(OVERLOAD_BATCHES.overflowLate).toHaveLength(4);
+    expect(ids).toContain('WINDOWS380_LOAD_OVERFLOW_OLD_79');
     const moreA = OVERLOAD_BATCHES.vacancyMoreA.map((action) => {
       const renderer = Object.values(action.addChatItemAction.item)[0] as { id: string };
       return renderer.id;
@@ -350,9 +363,9 @@ describe('Windows comment display matrix contract', () => {
       },
     };
     expect(paidRowBudget(oneLine, id, 1).oneLineFallback).toBe(true);
-    expect(() => assertUndrawnReservation(sample, member)).toThrow();
+    expect(() => assertNoVisibleCardInk(sample, member)).toThrow();
     expect(() =>
-      assertUndrawnReservation(
+      assertNoVisibleCardInk(
         {
           ...sample,
           firstEntry: {},
@@ -391,6 +404,26 @@ describe('Windows comment display matrix contract', () => {
         ...sample,
         ingress: { [lateId]: 1100, [laterPaidId]: 1200 },
         firstEntry: { [lateId]: 1320, [laterPaidId]: 1280 },
+        activeNow: [
+          {
+            id: lateId,
+            x: 10,
+            y: 10,
+            width: 80,
+            height: 30,
+            startAtEpochMs: 1300,
+            endAtEpochMs: 2300,
+          },
+          {
+            id: laterPaidId,
+            x: 10,
+            y: 40,
+            width: 120,
+            height: 80,
+            startAtEpochMs: 1250,
+            endAtEpochMs: 2250,
+          },
+        ],
         dispositions: [
           {
             id: lateId,
@@ -419,6 +452,7 @@ describe('Windows comment display matrix contract', () => {
         kind: 'ordinary',
         rendererIngressAtEpochMs: 1100,
         reservedAtEpochMs: 1300,
+        plannedStartAtEpochMs: 1300,
         firstVisibleAtEpochMs: 1320,
       },
       {
@@ -426,6 +460,7 @@ describe('Windows comment display matrix contract', () => {
         kind: 'paid',
         rendererIngressAtEpochMs: 1200,
         reservedAtEpochMs: 1250,
+        plannedStartAtEpochMs: 1250,
         firstVisibleAtEpochMs: 1280,
       },
     ]);
