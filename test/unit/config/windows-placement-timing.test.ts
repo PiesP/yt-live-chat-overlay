@@ -13,6 +13,7 @@ import {
   assertSpacingPhase,
   canvasProbePrelude,
   findOverlappingActivePair,
+  instrumentCardPlanCalls,
   instrumentCanvasPageScript,
   MIXED_BURST_SETTINGS,
   MIXED_PRESSURE_CHUNK_SIZE,
@@ -700,8 +701,36 @@ describe('Windows placement timing probe', () => {
     expect(instrumentCanvasPageScript(source.replace('})();', '\n\tmain();\n})();'))).toBeNull();
   });
 
-  it('observes Canvas queue and committed motion from an emitted-script-shaped closure', () => {
-    const source = `(() => {
+  it('observes shared paid plans in readable and minified emitted shapes and rejects drift', () => {
+    const readable =
+      'function preparePaidCardPlan(input) { return { height: 1 }; }\n' +
+      'function paint() { return preparePaidCardPlan({ width: 1 }); }\n' +
+      'function getRegularCardInsets() {}\n' +
+      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n\tmain();\n})();';
+    const canvas = instrumentCanvasPageScript(readable, 'function probe() {}', true);
+    expect(canvas).toContain('__ytObservePaidPlan(preparePaidCardPlan, { width: 1 })');
+    expect(canvas).toContain('var __ytObservePaidPlan = function observePaidPlan');
+    const minified =
+      'function Mn(e){let t=Math.max(1,e.width-e.paddingH*2),n=e.showAuthor&&!!e.author;' +
+      'return {height:t}};function paint(){return Mn({width:1,paddingH:0})}' +
+      'self.onmessage=e=>{xr.handleMessage(e)};';
+    const worker = instrumentCardPlanCalls(minified);
+    expect(worker).toContain('__ytObservePaidPlan(Mn, {width:1,paddingH:0})');
+    expect(worker && workerProbeSuffix(worker, undefined, true)).toContain('__ytObservePaidPlan');
+    expect(() =>
+      runInNewContext(worker + workerProbeSuffix(worker!, undefined, true)!, {
+        self: {},
+        xr: { handleMessage() {} },
+      })
+    ).not.toThrow();
+    expect(instrumentCardPlanCalls(minified.replace('e.showAuthor', 'e.showName'))).toBeNull();
+    expect(workerProbeSuffix(minified, undefined, true)).toBeNull();
+  });
+
+  it.each([0, 2])(
+    'observes Canvas queue, committed motion, and %i actual unknown presentations',
+    (unknownPresentations) => {
+      const source = `(() => {
       class RendererBase {}
       function getRegularCardInsets() { return { vertical: 1 }; }
       var CanvasRenderer = class CanvasRenderer extends RendererBase {
@@ -711,6 +740,8 @@ describe('Windows placement timing probe', () => {
             toArray() { return this.items; } };
           this.laneAllocator = { getLaneHeight: () => 34, getLaneCount: () => 20 };
           this.overlay = { getDimensions: () => ({ width: 1280, height: 720 }) };
+          this.observability = { getMetrics: () => ({ totalPresented: 1,
+            totalPresentationUnknown: ${unknownPresentations} }) };
         }
         enqueueMessage(message) { this.pendingQueue.items.push(message); }
         placeQueuedMessage(message) {
@@ -720,42 +751,53 @@ describe('Windows placement timing probe', () => {
               travelDistancePx: 3580, viewportEntryTime: 100, visibleExitTime: 7260 } });
           return { placed: true };
         }
+        drainQueue() {}
         renderFrame() {}
       };
       function main() { const renderer = new CanvasRenderer();
         const message = { id: 'WINDOWS195_BACKLOG_LONG', isBacklog: true };
-        renderer.enqueueMessage(message); renderer.placeQueuedMessage(message); renderer.renderFrame(); }
+        renderer.enqueueMessage(message); renderer.placeQueuedMessage(message);
+        renderer.drainQueue(); renderer.renderFrame(); }
       main();
     })();`;
-    const state: Record<string, unknown> = {
-      beginRenderFrame: () => ({ frameId: 1, cleared: true }),
-      endRenderFrame: () => {},
-    };
-    const script = instrumentCanvasPageScript(source.replace('      main();', '\tmain();'));
-    expect(script).not.toBeNull();
-    runInNewContext(script!, {
-      __ytPlacementProbe: state,
-      performance: { timeOrigin: 1000, now: () => 1 },
-    });
-    const exact = state.exact as {
-      peaks: { pending: number; active: number };
-      dispositions: Array<{
-        id: string;
-        laneHeight: number;
-        travelDistancePx: number;
-        burstSpeedMultiplier: number | null;
-      }>;
-    };
-    expect(state.canvasSourceHooked).toBe(true);
-    expect(exact.peaks).toEqual({ pending: 1, active: 1 });
-    expect(exact.dispositions[0]).toMatchObject({
-      id: 'WINDOWS195_BACKLOG_LONG',
-      laneHeight: 34,
-      travelDistancePx: 3580,
-      burstSpeedMultiplier: null,
-    });
-    expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
-  });
+      const state: Record<string, unknown> = {
+        beginRenderFrame: () => ({ frameId: 1, cleared: true }),
+        endRenderFrame: () => {},
+      };
+      const script = instrumentCanvasPageScript(source.replace('      main();', '\tmain();'));
+      expect(script).not.toBeNull();
+      runInNewContext(script!, {
+        __ytPlacementProbe: state,
+        performance: { timeOrigin: 1000, now: () => 1 },
+      });
+      const exact = state.exact as {
+        peaks: { pending: number; active: number };
+        dispositions: Array<{
+          id: string;
+          laneHeight: number;
+          travelDistancePx: number;
+          burstSpeedMultiplier: number | null;
+        }>;
+        presentationCount: number | null;
+        totalPresentationUnknown: number | null;
+        drains: Array<{ workMs: number; pendingBefore: number }>;
+      };
+      expect(state.canvasSourceHooked).toBe(true);
+      expect(exact.peaks).toEqual({ pending: 1, active: 1 });
+      expect(exact.dispositions[0]).toMatchObject({
+        id: 'WINDOWS195_BACKLOG_LONG',
+        laneHeight: 34,
+        travelDistancePx: 3580,
+        burstSpeedMultiplier: null,
+      });
+      expect(exact.presentationCount).toBe(1);
+      expect(exact.totalPresentationUnknown).toBe(unknownPresentations);
+      expect(exact.drains).toEqual([
+        { atEpochMs: 1001, workMs: 0, pendingBefore: 0, activeBefore: 1, activeAfter: 1 },
+      ]);
+      expect(() => assertBacklogMotion(exact.dispositions[0], 'main')).not.toThrow();
+    }
+  );
 
   it.each(['main', 'worker'])(
     'joins native %s draws and row origins in the same complete frame',
@@ -851,7 +893,7 @@ describe('Windows placement timing probe', () => {
             this.canvas.width = 1600; this.canvas.height = 800;
             this.ctx.clearRect(0, 0, 800, 400);
             if (this.paint) {
-              this.ctx.fillText('東京 ${idA}', 10, 25);
+              this.ctx.fillText('東京 ${idA} MATRIX_TRANSLATED', 10, 25);
               if (this.distortRatio) this.canvas.width = 1800;
               this.ctx.fillText('東京 ${idB}', 10, 113);
             }
@@ -887,7 +929,7 @@ describe('Windows placement timing probe', () => {
         );
         listeners.message?.({ origin: '', data: { type: 'init', canvas: overlay } });
         runInNewContext(
-          `new FakeContext(bitmapA).fillText('東京 ${idA}', 0, 20);
+          `new FakeContext(bitmapA).fillText('東京 ${idA} MATRIX_TRANSLATED', 0, 20);
         new FakeContext(bitmapB).fillText('東京 ${idB}', 0, 20);
         sample.paint = true; sample.renderFrame();`,
           sandbox
@@ -895,6 +937,9 @@ describe('Windows placement timing probe', () => {
         expect(nativeDraws).toBeGreaterThan(0);
       }
       const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+      expect(
+        runInNewContext('__ytPlacementProbe.exact.totalPresentationUnknown', sandbox)
+      ).toBeNull();
       expect(frame).toMatchObject({
         frameId: 1,
         complete: true,
@@ -904,6 +949,7 @@ describe('Windows placement timing probe', () => {
         backingRatioY: 2,
       });
       expect(frame.draws[0].rect).toMatchObject({ left: 10 });
+      expect(frame.draws[0].textSnippet).toContain('MATRIX_TRANSLATED');
       expect(nativeDraws).toBeGreaterThan(0);
       if (renderer === 'main') {
         expect(measureVisibleRowPitch(frame)).toMatchObject({
@@ -1010,6 +1056,7 @@ describe('Windows placement timing probe', () => {
       root: process.cwd(),
       output: '/tmp',
       extensionId: 'fixture',
+      selectedScenarios: [...PLACEMENT_SCENARIOS.map((scenario) => scenario.name)],
     });
     expect(result.status).toBe('failed');
     expect(result.scenarios).toHaveLength(PLACEMENT_SCENARIOS.length);

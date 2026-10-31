@@ -26,6 +26,7 @@ type ProbeOptions = {
   forceFallback?: boolean;
   workerPrelude?: string;
   attachProbeSource?: string;
+  observeCardPlans?: boolean;
 };
 type ChatAction = { addChatItemAction: { item: Record<string, unknown> } };
 type ScenarioOptions = {
@@ -43,6 +44,7 @@ type ScenarioOptions = {
 type WorkerProbeMessage = {
   id: string;
   height: number;
+  text?: string;
   isBacklog?: boolean;
   burstSpeedMultiplier?: number;
   trackDrops?: boolean;
@@ -69,9 +71,11 @@ type WorkerRendererProbe = {
   logicalHeight: number;
   laneHeight: number;
   numLanes: number;
+  totalPresented?: number;
   laneDensityFactor: number;
   config: {
     danmakuMode: string;
+    superChatLayout?: string;
     exitPaddingPx: number;
     reducedMotion: boolean;
     ignoreReducedMotion: boolean;
@@ -89,6 +93,8 @@ type WorkerRendererProbe = {
   } | null;
   pendingQueue: WorkerProbeMessage[];
   activeMessages: WorkerActive[];
+  messageById?: Map<string, unknown>;
+  imageFetchTasks?: Map<string, unknown>;
   enqueueMessage(message: WorkerProbeMessage): boolean;
   activateMessage(
     message: WorkerProbeMessage,
@@ -101,7 +107,7 @@ type WorkerRendererProbe = {
   drainQueue(...args: unknown[]): unknown;
   renderFrame(...args: unknown[]): unknown;
 };
-type CanvasProbeMessage = { id: string; isBacklog?: boolean };
+type CanvasProbeMessage = { id: string; isBacklog?: boolean; text?: string };
 type CanvasActive = ActiveRow & {
   message: CanvasProbeMessage;
   laneIndex: number;
@@ -120,15 +126,20 @@ type CanvasActive = ActiveRow & {
 type CanvasObservability = {
   onMessageDropped?: (...args: unknown[]) => unknown;
   onMessagesDropped?: (...args: unknown[]) => unknown;
+  getMetrics?: () => { totalPresented?: number; totalPresentationUnknown?: number };
 };
 type CanvasRendererProbe = {
   ctx: CanvasContext;
+  totalPresented?: number;
   pendingQueue: { toArray(): CanvasProbeMessage[]; size: number };
   activeMessages: CanvasActive[];
+  imageFetchManager?: { getMetrics?: () => Record<string, unknown> };
   observability?: CanvasObservability;
   overlay: { getDimensions(): { width: number; height: number } | null };
   settings: {
     danmakuMode: string;
+    superChatLayout?: string;
+    ignoreReducedMotion?: boolean;
     laneSpacing: number;
     fontSize: number;
     safeTop: number;
@@ -140,8 +151,11 @@ type CanvasRendererProbe = {
   };
   laneAllocator: { getLaneHeight(): number; getLaneCount(): number };
   currentLaneDensityFactor: number;
+  reducedMotion?: boolean;
   enqueueMessage(message: CanvasProbeMessage, ...args: unknown[]): unknown;
   placeQueuedMessage(message: CanvasProbeMessage, ...args: unknown[]): { placed?: boolean } | null;
+  drainQueue?(...args: unknown[]): unknown;
+  drainQueueAsync?(...args: unknown[]): Promise<unknown>;
   renderFrame(...args: unknown[]): unknown;
 };
 type ActiveRow = {
@@ -163,11 +177,13 @@ type Draw = {
   backingRatioX?: number;
   backingRatioY?: number;
   rect: Rect | null;
+  textSnippet?: string | null;
   japanese?: { text: string; rect: Rect | null } | null;
 };
 type FrameConfig = {
   renderer?: string;
   mode?: string | null;
+  superChatLayout?: string | null;
   fontSize?: number | null;
   laneSpacing?: number | null;
   laneDensityFactor?: number | null;
@@ -201,12 +217,28 @@ type RenderFrame = {
   config: FrameConfig;
   active: ActiveRow[];
   draws: Draw[];
+  cardPlans: Array<{
+    id: string;
+    kind: string;
+    height: number;
+    maxBodyLines: number;
+    bodyRows: number;
+    bodyY: number | null;
+    bodyHeight: number;
+    translationRows: number;
+    translationY: number | null;
+    translationHeight: number;
+    borderAlpha: number | null;
+    borderStyle: string | null;
+  }>;
+  lastStroke?: { context: CanvasContext; style: string; alpha: number };
 };
 type FrameTiming = {
   atEpochMs?: number;
   workMs: number;
   preClearMs?: number | null;
   pendingBefore?: number;
+  activeBefore?: number;
   activeAfter?: number;
 };
 type FrameView = Partial<Omit<RenderFrame, 'config' | 'active' | 'draws'>> & {
@@ -244,9 +276,15 @@ type ProbeExact = {
   dispositions: ProbeDisposition[];
   active?: ActiveRow[];
   activeNow: ActiveRow[];
+  pendingNow?: string[];
+  queuedNow?: Array<{ id: string; atEpochMs: number }>;
+  retained?: Record<string, number | null>;
   config: FrameConfig | null;
   drops: Record<string, number>;
   overflow: number;
+  fixtureText?: Record<string, string>;
+  presentationCount?: number | null;
+  totalPresentationUnknown?: number | null;
   samplesScope?: string;
   [key: string]: unknown;
 };
@@ -280,6 +318,7 @@ type ProbeSample = {
   ingress: Record<string, number>;
   exact?: ProbeExact;
   latestRenderFrame: RenderFrame | null;
+  measuredPlans?: Record<string, { width: number; height: number; maxBodyLines: number }>;
   overflow: number;
 };
 type ProbeState = ProbeSample & {
@@ -298,6 +337,7 @@ type ProbeState = ProbeSample & {
   renderFrameId: number;
   currentRenderFrame: RenderFrame | null;
   currentFrame: { startedAt: number; preClearMs: number | null } | null;
+  measuredPlans: Record<string, { width: number; height: number; maxBodyLines: number }>;
   requestAtEpochMs?: number;
   flushSequence?: number;
   canvasSourceHooked?: boolean;
@@ -415,6 +455,7 @@ function installProbeRuntime(options: ProbeOptions) {
     latestRenderFrame: null,
     currentRenderFrame: null,
     currentFrame: null,
+    measuredPlans: {},
   } as unknown as ProbeState;
   scope.__ytPlacementProbe = state;
   const epochNow = () => performance.timeOrigin + performance.now();
@@ -495,6 +536,7 @@ function installProbeRuntime(options: ProbeOptions) {
       config,
       active: [],
       draws: [],
+      cardPlans: [],
     };
     if (ctx) frameContexts.set(frame, ctx);
     state.currentRenderFrame = frame;
@@ -522,6 +564,7 @@ function installProbeRuntime(options: ProbeOptions) {
       );
     if (active.length > MAX_SAMPLES) frame.truncated = true;
     frame.active = active.slice(0, MAX_SAMPLES);
+    delete frame.lastStroke;
     state.latestRenderFrame = frame;
     if (state.currentRenderFrame === frame) state.currentRenderFrame = null;
   };
@@ -552,6 +595,12 @@ function installProbeRuntime(options: ProbeOptions) {
         alpha: ctx.globalAlpha,
         ...ratios,
         rect: logicalRect(rect, ratios),
+        textSnippet:
+          typeof ink?.textSnippet === 'string'
+            ? ink.textSnippet
+            : typeof (ink?.sourceInk as BitmapInk | undefined)?.fill?.textSnippet === 'string'
+              ? ((ink?.sourceInk as BitmapInk | undefined)?.fill?.textSnippet as string)
+              : null,
         japanese: japanese
           ? {
               text: japanese.text,
@@ -587,6 +636,20 @@ function installProbeRuntime(options: ProbeOptions) {
     scope.OffscreenCanvasRenderingContext2D?.prototype,
   ].filter(Boolean);
   for (const prototype of canvasPrototypes) {
+    const nativeStroke = prototype.stroke;
+    prototype.stroke = function (this: CanvasContext, ...args) {
+      const frame = state.currentRenderFrame;
+      if (frame && overlayContext(this)) {
+        const style = String(this.strokeStyle);
+        const rgba = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/u.exec(style);
+        frame.lastStroke = {
+          context: this,
+          style,
+          alpha: rgba ? Number(rgba[1]) * this.globalAlpha : this.globalAlpha,
+        };
+      }
+      return Reflect.apply(nativeStroke, this, args);
+    } as CanvasRenderingContext2D['stroke'];
     const nativeFillText = prototype.fillText;
     prototype.fillText = function (text, x, y, ...rest) {
       const id = tokenIn(text);
@@ -597,6 +660,7 @@ function installProbeRuntime(options: ProbeOptions) {
         bitmapInk.set(this.canvas, {
           ...bitmapInk.get(this.canvas),
           fill: {
+            textSnippet: String(text).slice(0, 128),
             font: this.font,
             left: x - (metrics.actualBoundingBoxLeft ?? 0),
             top: y - metrics.actualBoundingBoxAscent,
@@ -633,7 +697,12 @@ function installProbeRuntime(options: ProbeOptions) {
           left + right,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
           'fill',
-          { font: this.font, lineWidth: this.lineWidth, japanese: japaneseRun(text, this, x, y) }
+          {
+            font: this.font,
+            lineWidth: this.lineWidth,
+            textSnippet: String(text).slice(0, 128),
+            japanese: japaneseRun(text, this, x, y),
+          }
         );
       }
       return result;
@@ -648,6 +717,7 @@ function installProbeRuntime(options: ProbeOptions) {
         bitmapInk.set(this.canvas, {
           ...bitmapInk.get(this.canvas),
           stroke: {
+            textSnippet: String(text).slice(0, 128),
             font: this.font,
             lineWidth: this.lineWidth,
             left: x - (metrics.actualBoundingBoxLeft ?? 0) - padding,
@@ -688,7 +758,12 @@ function installProbeRuntime(options: ProbeOptions) {
           left + right + padding * 2,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + padding * 2,
           'stroke',
-          { font: this.font, lineWidth: this.lineWidth, japanese: japaneseRun(text, this, x, y) }
+          {
+            font: this.font,
+            lineWidth: this.lineWidth,
+            textSnippet: String(text).slice(0, 128),
+            japanese: japaneseRun(text, this, x, y),
+          }
         );
       }
       return result;
@@ -699,7 +774,18 @@ function installProbeRuntime(options: ProbeOptions) {
       image: CanvasImageSource,
       ...args: number[]
     ) {
-      const id = bitmapIds.get(image);
+      const stickerId =
+        overlayContext(this) &&
+        'width' in image &&
+        'height' in image &&
+        image.width === 8 &&
+        image.height === 4
+          ? Object.keys(state.ingress).find(
+              (entry) =>
+                ids.has(entry) && /^WINDOWS380_(BRIGHT|DARK|DETAILED)_STICKER$/u.test(entry)
+            )
+          : undefined;
+      const id = bitmapIds.get(image) ?? stickerId;
       const result = Reflect.apply(nativeDrawImage, this, [image, ...args]);
       if (
         id &&
@@ -739,7 +825,10 @@ function installProbeRuntime(options: ProbeOptions) {
                   height: ((runBottom - runTop) * destHeight) / sourceHeight,
                 }
               : null;
-          recordRect(this, id, ...destination, 'bitmap', { sourceInk, japanese });
+          recordRect(this, id, ...destination, id === stickerId ? 'sticker-image' : 'bitmap', {
+            sourceInk,
+            japanese,
+          });
         }
       }
       return result;
@@ -794,6 +883,7 @@ function installProbeRuntime(options: ProbeOptions) {
                 ingress: state.ingress,
                 exact: state.exact,
                 latestRenderFrame: state.latestRenderFrame,
+                measuredPlans: state.measuredPlans,
                 overflow: state.overflow,
               },
             });
@@ -834,6 +924,7 @@ function installProbeRuntime(options: ProbeOptions) {
             ingress: state.ingress,
             exact: state.exact,
             latestRenderFrame: state.latestRenderFrame,
+            measuredPlans: state.measuredPlans,
             overflow: state.overflow,
           },
         });
@@ -883,10 +974,13 @@ function installProbeRuntime(options: ProbeOptions) {
           parts[0].includes('OffscreenCanvas')
         ) {
           state.sourcePrefixed = true;
-          const suffix = workerProbeSuffix(parts[0], options.attachProbeSource);
+          const source = options.observeCardPlans ? instrumentCardPlanCalls(parts[0]) : parts[0];
+          const suffix = source
+            ? workerProbeSuffix(source, options.attachProbeSource, options.observeCardPlans)
+            : null;
           state.sourceHooked = Boolean(suffix);
           return Reflect.construct(target, [
-            [options.workerPrelude, parts[0], suffix ?? ''],
+            [options.workerPrelude, source ?? parts[0], suffix ?? ''],
             optionsArg,
           ]);
         }
@@ -906,18 +1000,21 @@ function installProbeRuntime(options: ProbeOptions) {
           activeMessages?: number;
           pendingQueueDepth?: number;
           totalRendered?: number;
+          totalPresented?: number;
           totalDrops?: number;
           sample?: ProbeSample;
           requestId?: string | number;
         } | null;
         if (data?.type === 'ready') record.ready = true;
         if (data?.type === 'stats' && record.stats.length < 60) {
-          const { activeMessages, pendingQueueDepth, totalRendered, totalDrops } = data;
+          const { activeMessages, pendingQueueDepth, totalRendered, totalPresented, totalDrops } =
+            data;
           record.stats.push({
             atEpochMs: epochNow(),
             activeMessages,
             pendingQueueDepth,
             totalRendered,
+            totalPresented,
             totalDrops,
           });
         }
@@ -1509,8 +1606,16 @@ export function canvasProbePrelude({
   tokens = TOKENS,
   forceFallback = false,
   workerPrelude = workerProbePrelude(tokens),
-}: { tokens?: readonly string[]; forceFallback?: boolean; workerPrelude?: string } = {}) {
+  observeCardPlans = false,
+}: {
+  tokens?: readonly string[];
+  forceFallback?: boolean;
+  workerPrelude?: string;
+  observeCardPlans?: boolean;
+} = {}) {
   return (
+    `const observePaidPlan = ${observePaidPlan.toString()};\n` +
+    `const instrumentCardPlanCalls = ${instrumentCardPlanCalls.toString()};\n` +
     `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
     `;(${installProbeRuntime.toString()})(${JSON.stringify({
       worker: false,
@@ -1518,6 +1623,7 @@ export function canvasProbePrelude({
       forceFallback,
       workerPrelude,
       attachProbeSource: attachWorkerRendererProbe.toString(),
+      observeCardPlans,
     })});`
   );
 }
@@ -1526,14 +1632,88 @@ export function canvasProbePrelude({
 // scope, after the original onmessage assignment. Fail closed on bundle drift.
 export function workerProbeSuffix(
   source: string,
-  attachProbeSource = attachWorkerRendererProbe.toString()
+  attachProbeSource = attachWorkerRendererProbe.toString(),
+  observeCardPlans = false
 ) {
   const handler =
     /self\.onmessage=([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.handleMessage\(\1\)\};?\s*$/.exec(
       source
     );
   if (!handler) return null;
-  return `\n;(${attachProbeSource})(${handler[2]});\n`;
+  if (observeCardPlans && !source.includes('__ytObservePaidPlan(')) return null;
+  return (
+    `\n;(${attachProbeSource})(${handler[2]});\n` +
+    (observeCardPlans ? `\nvar __ytObservePaidPlan = ${observePaidPlan.toString()};\n` : '')
+  );
+}
+
+/** Observe the production shared plan after its own measurement and before drawing. */
+function observePaidPlan<
+  T extends {
+    height: number;
+    body?: { lines: unknown[]; height: number };
+    translation?: { lines: unknown[]; height: number };
+    bodyY?: number;
+    translationY?: number;
+  },
+>(
+  prepare: (input: unknown) => T,
+  input: {
+    kind?: string;
+    content?: Array<{ content?: string }>;
+    context?: CanvasContext;
+    maxBodyLines?: number;
+  }
+): T {
+  const plan = prepare(input);
+  const state = (globalThis as typeof globalThis & { __ytPlacementProbe?: ProbeState })
+    .__ytPlacementProbe;
+  const frame = state?.currentRenderFrame;
+  const id = /WINDOWS380_[A-Z0-9_]+/u.exec(
+    input.content?.map((part) => part.content ?? '').join(' ') ?? ''
+  )?.[0];
+  if (
+    state &&
+    id &&
+    (Object.hasOwn(state.measuredPlans, id) || Object.keys(state.measuredPlans).length < 128)
+  )
+    state.measuredPlans[id] = {
+      width: (plan as T & { width?: number }).width ?? 0,
+      height: plan.height,
+      maxBodyLines: input.maxBodyLines ?? 0,
+    };
+  if (frame && id && frame.cardPlans.length < 24) {
+    const border = frame.lastStroke?.context === input.context ? frame.lastStroke : null;
+    if (border) delete frame.lastStroke;
+    frame.cardPlans.push({
+      id,
+      kind: input.kind ?? 'unknown',
+      height: plan.height,
+      maxBodyLines: input.maxBodyLines ?? 0,
+      bodyRows: plan.body?.lines.length ?? 0,
+      bodyY: plan.bodyY ?? null,
+      bodyHeight: plan.body?.height ?? 0,
+      translationRows: plan.translation?.lines.length ?? 0,
+      translationY: plan.translationY ?? null,
+      translationHeight: plan.translation?.height ?? 0,
+      borderAlpha: border?.alpha ?? null,
+      borderStyle: border?.style ?? null,
+    });
+  }
+  return plan;
+}
+
+export function instrumentCardPlanCalls(source: string): string | null {
+  const minified =
+    /function ([A-Za-z_$][\w$]*)\(e\)\{let t=Math\.max\(1,e\.width-e\.paddingH\*2\),n=e\.showAuthor/u.exec(
+      source
+    );
+  const name = source.includes('preparePaidCardPlan({') ? 'preparePaidCardPlan' : minified?.[1];
+  if (!name) return null;
+  const call = `${name}({`;
+  const count = source.split(call).length - 1;
+  if (count < 1 || count > 6 || source.includes('__ytObservePaidPlan')) return null;
+  return source.replaceAll(call, `__ytObservePaidPlan(${name}, {`);
 }
 
 function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
@@ -1551,6 +1731,9 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     placementMisses: 0,
     drops: {},
     overflow: 0,
+    fixtureText: {},
+    // Worker has confirmed first-draw accounting but no attribution-unknown counter.
+    totalPresentationUnknown: null,
   };
   state.exact = exact;
   const queuedAt = new Map<string, number>();
@@ -1560,7 +1743,7 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     else exact.overflow++;
   };
   const isFixture = (id: unknown): id is string =>
-    typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
+    typeof id === 'string' && /^WINDOWS(193|195|196|204|380)_/.test(id);
   let inEnqueue = false;
   let inDrain = false;
   const nativeEnqueue = renderer.enqueueMessage;
@@ -1569,12 +1752,27 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
     try {
       const admitted = nativeEnqueue.call(this, message);
       if (
+        /^WINDOWS380_(COMBINING|MODIFIER|ZWJ)$/.test(message.id) &&
+        typeof message.text === 'string'
+      ) {
+        exact.fixtureText ??= {};
+        exact.fixtureText[message.id] = message.text.slice(0, 512);
+      }
+      if (
         admitted &&
         isFixture(message.id) &&
         this.pendingQueue.some((entry) => entry.id === message.id)
       ) {
         queuedAt.set(message.id, epochNow());
       }
+      exact.pendingNow = this.pendingQueue.slice(0, 128).map((entry) => entry.id);
+      exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+      exact.retained = {
+        pending: this.pendingQueue.length,
+        active: this.activeMessages.length,
+        indexed: this.messageById?.size ?? null,
+        imageFetchTasks: this.imageFetchTasks?.size ?? null,
+      };
       return admitted;
     } finally {
       inEnqueue = false;
@@ -1733,6 +1931,7 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
   const nativeFrame = renderer.renderFrame;
   renderer.renderFrame = function (...args) {
     const startedAt = performance.now();
+    const beforeActive = this.activeMessages.filter((message) => isFixture(message.id));
     const frame = state.beginRenderFrame({
       ctx: this.ctx,
       logicalWidth: this.logicalWidth,
@@ -1752,6 +1951,7 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
       bounded(exact.frames, { atEpochMs: epochNow(), workMs: performance.now() - startedAt });
       exact.config = {
         mode: this.config?.danmakuMode ?? null,
+        superChatLayout: this.config?.superChatLayout ?? null,
         reducedMotion: this.config?.reducedMotion ?? null,
         ignoreReducedMotion: this.config?.ignoreReducedMotion ?? null,
         translationGeneration: this.config?.translationGeneration ?? null,
@@ -1771,6 +1971,21 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
         laneHeight: this.laneHeight,
         laneCount: this.numLanes,
       };
+      exact.presentationCount =
+        typeof this.totalPresented === 'number' ? this.totalPresented : null;
+      const activeSet = new Set(this.activeMessages);
+      for (const message of beforeActive) {
+        if (
+          !activeSet.has(message) &&
+          performance.now() >= message.startTime + message.pausedDuration + message.duration
+        )
+          bounded(exact.dispositions, {
+            id: message.id,
+            kind: 'completed',
+            reason: 'expired-duration',
+            atEpochMs: epochNow(),
+          });
+      }
       const active = this.activeMessages.filter((message) => isFixture(message.id));
       exact.activeNow = active.slice(0, 100).map((message) => ({
         id: message.id,
@@ -1791,6 +2006,14 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
           performance.now() >= message.startTime + message.pausedDuration &&
           performance.now() < message.startTime + message.pausedDuration + message.duration,
       }));
+      exact.pendingNow = this.pendingQueue.slice(0, 128).map((message) => message.id);
+      exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+      exact.retained = {
+        pending: this.pendingQueue.length,
+        active: this.activeMessages.length,
+        indexed: this.messageById?.size ?? null,
+        imageFetchTasks: this.imageFetchTasks?.size ?? null,
+      };
       frame.failed = !successful;
       frame.config = { ...frame.config, ...exact.config };
       state.endRenderFrame(
@@ -1818,7 +2041,8 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
 // A changed bundle shape is an acceptance failure, never a silent fallback.
 export function instrumentCanvasPageScript(
   source: string,
-  probeSource = attachCanvasRendererProbe.toString()
+  probeSource = attachCanvasRendererProbe.toString(),
+  observeCardPlans = false
 ) {
   const marker = '\n\tmain();\n';
   if (
@@ -1827,9 +2051,13 @@ export function instrumentCanvasPageScript(
     source.split(marker).length !== 2
   )
     return null;
-  return source.replace(
+  const cardSource = observeCardPlans ? instrumentCardPlanCalls(source) : source;
+  if (!cardSource) return null;
+  return cardSource.replace(
     marker,
-    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);${marker}`
+    `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);` +
+      (observeCardPlans ? `\n\tvar __ytObservePaidPlan = ${observePaidPlan.toString()};` : '') +
+      marker
   );
 }
 
@@ -1855,11 +2083,14 @@ function attachCanvasRendererProbe(
     getRegularCardInsets(fontSize, outlineWidthPx, false, backgroundVisible);
   const exact: CanvasExact = {
     dispositions: [],
+    drains: [],
     activeNow: [],
     config: null,
     peaks: { pending: 0, active: 0 },
     drops: {},
     overflow: 0,
+    fixtureText: {},
+    totalPresentationUnknown: null,
   };
   state.exact = exact;
   const queuedAt = new Map<string, number>();
@@ -1868,16 +2099,75 @@ function attachCanvasRendererProbe(
     else exact.overflow++;
   };
   const isFixture = (id: unknown): id is string =>
-    typeof id === 'string' && /^WINDOWS(193|195|196|204)_/.test(id);
+    typeof id === 'string' && /^WINDOWS(193|195|196|204|380)_/.test(id);
   const nativeEnqueue = Renderer.prototype.enqueueMessage;
   Renderer.prototype.enqueueMessage = function (message, ...args) {
-    const result = nativeEnqueue.call(this, message, ...args);
+    const before = this.pendingQueue.toArray();
+    const priorDrop = this.observability?.onMessageDropped;
+    let dropReason: string | null = null;
+    if (priorDrop && this.observability)
+      this.observability.onMessageDropped = (...dropArgs) => {
+        dropReason = typeof dropArgs[0] === 'string' ? dropArgs[0] : null;
+        return priorDrop.apply(this.observability, dropArgs);
+      };
+    if (isFixture(message.id)) {
+      state.ingress ??= {};
+      state.ingress[message.id] ??= performance.timeOrigin + performance.now();
+    }
+    let result: unknown;
+    try {
+      result = nativeEnqueue.call(this, message, ...args);
+    } finally {
+      if (priorDrop && this.observability) this.observability.onMessageDropped = priorDrop;
+    }
+    const after = this.pendingQueue.toArray();
+    const afterIds = new Set(after.map((entry) => entry.id));
+    for (const prior of before) {
+      if (isFixture(prior.id) && !afterIds.has(prior.id)) {
+        bounded({
+          id: prior.id,
+          kind: 'dropped',
+          reason: dropReason ?? 'queue_replaced',
+          atEpochMs: performance.timeOrigin + performance.now(),
+          queueResidenceMs: queuedAt.has(prior.id)
+            ? performance.timeOrigin + performance.now() - (queuedAt.get(prior.id) ?? 0)
+            : null,
+        });
+        queuedAt.delete(prior.id);
+      }
+    }
+    if (isFixture(message.id) && !afterIds.has(message.id))
+      bounded({
+        id: message.id,
+        kind: 'dropped',
+        reason: dropReason ?? 'unattributed',
+        atEpochMs: performance.timeOrigin + performance.now(),
+        queueResidenceMs: null,
+      });
+    if (
+      /^WINDOWS380_(COMBINING|MODIFIER|ZWJ)$/.test(message.id) &&
+      typeof message.text === 'string'
+    ) {
+      exact.fixtureText ??= {};
+      exact.fixtureText[message.id] = message.text.slice(0, 512);
+    }
     if (
       isFixture(message.id) &&
       this.pendingQueue.toArray().some((entry) => entry.id === message.id)
     ) {
       queuedAt.set(message.id, performance.timeOrigin + performance.now());
     }
+    exact.pendingNow = this.pendingQueue
+      .toArray()
+      .slice(0, 128)
+      .map((entry) => entry.id);
+    exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+    exact.retained = {
+      pending: this.pendingQueue.size,
+      active: this.activeMessages.length,
+      indexed: null,
+      imageFetchTasks: null,
+    };
     exact.peaks.pending = Math.max(exact.peaks.pending, this.pendingQueue.size);
     return result;
   };
@@ -1917,13 +2207,50 @@ function attachCanvasRendererProbe(
     }
     return result;
   };
+  const drainMethods = Renderer.prototype as unknown as Record<
+    string,
+    (...args: unknown[]) => unknown
+  >;
+  for (const method of ['drainQueue', 'drainQueueAsync'] as const) {
+    const native = drainMethods[method];
+    if (typeof native !== 'function') continue;
+    drainMethods[method] = function (this: CanvasRendererProbe, ...args: unknown[]) {
+      const startedAt = performance.now();
+      const before = this.pendingQueue.size;
+      const activeBefore = this.activeMessages.length;
+      const record = () => {
+        if (!exact.drains) return;
+        if (exact.drains.length < 240)
+          exact.drains.push({
+            atEpochMs: performance.timeOrigin + performance.now(),
+            workMs: performance.now() - startedAt,
+            pendingBefore: before,
+            activeBefore,
+            activeAfter: this.activeMessages.length,
+          });
+        else exact.overflow++;
+      };
+      let result: unknown;
+      try {
+        result = Reflect.apply(native, this, args);
+      } catch (error) {
+        record();
+        throw error;
+      }
+      if (result && typeof (result as Promise<unknown>).finally === 'function')
+        return (result as Promise<unknown>).finally(record);
+      record();
+      return result;
+    };
+  }
   const nativeFrame = Renderer.prototype.renderFrame;
   const observed = new WeakSet();
   Renderer.prototype.renderFrame = function (...args) {
+    const beforeActive = this.activeMessages.filter((entry) => isFixture(entry.message?.id));
     if (this.observability && !observed.has(this.observability)) {
       const observability = this.observability;
       observed.add(observability);
-      const dropMethods: [keyof CanvasObservability, 0 | 1][] = [
+      const dropMethods: ['onMessageDropped' | 'onMessagesDropped', 0 | 1][] = [
         ['onMessageDropped', 1],
         ['onMessagesDropped', 0],
       ];
@@ -1960,6 +2287,9 @@ function attachCanvasRendererProbe(
       const dims = this.overlay.getDimensions();
       exact.config = {
         mode: this.settings.danmakuMode,
+        superChatLayout: this.settings.superChatLayout ?? null,
+        reducedMotion: this.reducedMotion ?? null,
+        ignoreReducedMotion: this.settings.ignoreReducedMotion ?? null,
         fontSize: this.settings.fontSize,
         laneSpacing: this.settings.laneSpacing,
         laneDensityFactor: this.currentLaneDensityFactor,
@@ -1974,6 +2304,26 @@ function attachCanvasRendererProbe(
         laneHeight: this.laneAllocator.getLaneHeight(),
         laneCount: this.laneAllocator.getLaneCount(),
       };
+      const presentationMetrics = this.observability?.getMetrics?.();
+      const presented = presentationMetrics?.totalPresented ?? this.totalPresented;
+      exact.presentationCount = typeof presented === 'number' ? presented : null;
+      exact.totalPresentationUnknown =
+        typeof presentationMetrics?.totalPresentationUnknown === 'number'
+          ? presentationMetrics.totalPresentationUnknown
+          : null;
+      const activeSet = new Set(this.activeMessages);
+      for (const entry of beforeActive) {
+        if (
+          !activeSet.has(entry) &&
+          performance.now() >= entry.startTime + entry.pausedDuration + entry.duration
+        )
+          bounded({
+            id: entry.message.id,
+            kind: 'completed',
+            reason: 'expired-duration',
+            atEpochMs: performance.timeOrigin + performance.now(),
+          });
+      }
       const active = this.activeMessages.filter((entry) => isFixture(entry.message?.id));
       exact.activeNow = active.slice(0, 100).map((entry) => ({
         id: entry.message.id,
@@ -1989,6 +2339,17 @@ function attachCanvasRendererProbe(
         endAtEpochMs:
           performance.timeOrigin + entry.startTime + entry.pausedDuration + entry.duration,
       }));
+      exact.pendingNow = this.pendingQueue
+        .toArray()
+        .slice(0, 128)
+        .map((entry) => entry.id);
+      exact.queuedNow = [...queuedAt].slice(0, 128).map(([id, atEpochMs]) => ({ id, atEpochMs }));
+      exact.retained = {
+        pending: this.pendingQueue.size,
+        active: this.activeMessages.length,
+        indexed: null,
+        imageFetchTasks: null,
+      };
       frame.failed = !successful;
       frame.config = { ...frame.config, ...exact.config };
       state.endRenderFrame(
@@ -3620,9 +3981,28 @@ export async function runPlacementTimingFixture({
       });
     }
   }
+  const commentDisplayMatrix =
+    selectedScenarios === undefined && !spacingOnly
+      ? await (
+          await import('./comment-display-matrix.ts')
+        ).runCommentDisplayMatrix({
+          context,
+          root,
+          output,
+          extensionId,
+          mode: comparisonOnly ? 'baseline' : 'candidate',
+        })
+      : null;
   return {
-    status: scenarios.every((scenario) => scenario.status === 'passed') ? 'passed' : 'failed',
+    status:
+      scenarios.every((scenario) => scenario.status === 'passed') &&
+      (commentDisplayMatrix === null ||
+        commentDisplayMatrix.status === 'passed' ||
+        (comparisonOnly && commentDisplayMatrix.status === 'observed'))
+        ? 'passed'
+        : 'failed',
     scenarios,
+    commentDisplayMatrix,
     comparisonOnly,
     selectedScenarios: selected.map((scenario) => scenario.name),
     spacingOnly,

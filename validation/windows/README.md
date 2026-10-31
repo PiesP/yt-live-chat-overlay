@@ -1,5 +1,102 @@
 # Windows acceptance profile
 
+## Comment display matrix (#380, #382–#387)
+
+The ordinary full installed Edge extension profile runs
+`comment-display-matrix.ts` after the maintained placement scenarios. It uses
+the installed packaged Worker and a separate forced Canvas fallback page on an
+owned YouTube-shaped fixture. Do not select a focused installation scenario:
+the controller does not support combining `--scenario` and `--installation`.
+The artifact Main profile remains a separate route.
+
+The matrix uses fixed Unicode boundary, paid, RTL, narrow fixed/reduced-motion,
+motion, and zero-capacity/restoration inputs. It waits for all three canonical
+accessible tails before the content capture and requires the deferred zero-capacity
+ID itself to draw after restoration. It then navigates to fresh owned pages for
+matched stacked/wide presentation captures over the existing bright, dark, and
+detailed videos at 400px and 960px viewport widths; recorded player bounds are
+the actual overlay size. The presentation workload includes a
+localized long amount, mixed RTL/CJK author, sticker, membership event, and
+ordinary comment. The videos must decode and advance before capture. Each backend
+is limited to 16 PNG captures, 48 records per snapshot, and 60 seconds; the total
+PNG ceiling is 32. On the detailed scene, a page-owned Translator stub records
+the accepted canonical tail and supplies a distinct selected translation; the
+probe requires its positive-alpha draw in the same complete frame. The fixture
+also opens the actual settings dialog and reads three drawn production Canvas
+preview samples under wide and stacked selections. `comment-display-matrix.json` binds the controller's exact
+source, core, build-log, bundle, profile, packaged page-script, fixture sources,
+preview, and video digests; review it with `result.json` and collected original PNGs.
+Candidate collection fails when the installed backend, complete coherent frame,
+positive-alpha viewport draw, bounded accessible source, display projection,
+placement continuity, first-presentation count, or restoration assertion fails.
+The resized motion row must still have a positive-alpha draw in its current
+complete frame and overlap the viewport with its committed rectangle. Every
+presentation scene and layout also checks source-bound sticker, membership,
+and ordinary ink against the committed card bounds. When those items are due
+in different frames, the fixture saves a separate JSON-only frame observation
+without increasing the PNG ceiling. The controlled 8-by-4 sticker image is
+attributed only after the matching scene's sticker ID entered the renderer;
+a visible text fallback remains a valid sticker observation.
+Activation and reservation alone do not count as presentation. A result with
+`visualReview: pending` still requires inspection of the original PNGs, including
+ink against actual text/image bounds. Presentation records include active width,
+height, actual velocity where available, geometric full-card exposure, visible
+fraction, queue residence, and ordinary-row presence. These are diagnostics,
+not a reading-time or blanket contrast verdict. The trace keeps first-visible,
+allocation, and unknown-presentation counts separate. The numeric unknown count
+comes from Main observability; the Worker-local probe reports `null` because it
+cannot infer unknown attribution across fallback and recovery. Exact original-plus-
+translation line counts and total-height budget, effect alpha, and overload-policy
+acceptance are recorded separately from the PNG review. The detailed paid card
+records the production `preparePaidCardPlan` output for four total body rows and
+for a one-row canonical fallback. The same completed frame must contain the
+selected translation when rows are available, keep body and translation ink
+inside the committed card, and omit translated ink for the deliberate one-row
+fallback. The bright membership card records its actual border stroke alpha and
+body draw alpha in two completed frames at least 250 logical milliseconds apart
+under effective reduced motion; the border alpha must remain stable. A zero-row
+membership reservation and a prefetched future replay membership must publish
+neither a positive-alpha draw nor an observed border stroke before eligibility.
+
+A separate JSON-only overload envelope uses the same installed extension and
+source-hashed probes after the 60-second/16-PNG display matrix. Its limit is
+120 seconds and 128 records per backend, with no extra PNGs. It exercises paid
+arrivals around an ordinary waiter and recurring one-second vacancies,
+source-measured unplaceable paid height beside fitting ordinary content,
+equal-priority overflow, controlled pause/hidden/resume, and future replay
+reservation, plus a separate zero-row membership reservation. Active/queue caps
+cover 30/50, 300/200 (the default caps), and 300/1000 settings.
+Records separate fixture delivery, renderer ingress, pending queue, reservation,
+first positive-alpha draw, completion, and attributed discard reasons. Per-kind
+delay/residence summaries, active/pending occupancy, frame/drain work, and
+bounded retained counts carry probe-overhead and attribution limits. The hidden
+case uses a controlled Document visibility getter and event, not an OS tab
+switch. Worker Manager backpressure before worker ingress may be unattributed
+per ID; compare delivered and renderer-ingress counts rather than assigning a
+reason. These timing samples do not isolate probe overhead or establish GPU or
+FPS behavior.
+
+The original `f7ff6f0d` correctness baseline supports stacked cards only.
+When the current fixture is transplanted into a comparison checkout, the bundle
+source SHA identifies that checkout, not the original product commit. The
+runtime classifies legacy support only when both completed backends report
+stacked-only behavior; mixed or unavailable capability fails, and candidates
+require actual wide transport/rendering. The legacy envelope skips overload
+comparison and records wide as unsupported without a five-second wait. A
+wide-capable baseline may be compared with the final candidate only after the
+corrected pre-#387 product tree is bound separately. Do not pool that policy
+comparison with the older correctness baseline. All runtime observations still
+require source-bound execution and visual review before acceptance.
+
+The caller selects `candidate` by default. An explicitly prepared private
+comparison branch may select `baseline` through the existing `comparisonOnly`
+argument; it records observations and `baselineFindings` without changing product
+source or silently downgrading a candidate failure. Compare only records with
+the same fixture bytes, backend, workload, viewport, DPR, font, settings, and
+build/source/core identity. The fixture does not establish physical GPU,
+screen-reader, live-site, or native Translator acceptance. Existing replay,
+translation, pause, and recovery fixture records retain their separate scope.
+
 ## Native Translator cancellation prerequisite (#338)
 
 Create the ignored `validation/windows/inputs/translator-native-cancellation.json`
