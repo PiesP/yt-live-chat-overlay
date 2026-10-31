@@ -261,7 +261,7 @@ test.describe('Danmaku Rendering', () => {
     });
 
     const receivedAndRendered = page.locator('#yt-chat-overlay-debug > div').first();
-    await expect(receivedAndRendered).toHaveText('Rcvd: 1 | Rndr: 1');
+    await expect(receivedAndRendered).toHaveText('Rcvd: 1 | Alloc: 1 | Shown≥1 | Uncertain: 0');
   });
 
   test('renders the full height of cached Latin glyphs', async ({ page }) => {
@@ -293,7 +293,7 @@ test.describe('Danmaku Rendering', () => {
     });
 
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
 
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
@@ -490,7 +490,7 @@ test.describe('Danmaku Rendering', () => {
     );
 
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
 
     const readLayout = () =>
@@ -620,7 +620,7 @@ test.describe('Danmaku Rendering', () => {
     await emitRichBidiMessage(page, 'main');
 
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
     const readSequence = () =>
       page
@@ -754,7 +754,7 @@ test.describe('Danmaku Rendering', () => {
 
     await emitRichBidiMessage(page, 'worker');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
     const readSequence = () =>
       rendererWorker
@@ -890,7 +890,7 @@ test.describe('Danmaku Rendering', () => {
       fetch('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=e2e-cjk')
     );
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
 
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
@@ -1093,7 +1093,7 @@ test.describe('Danmaku Rendering', () => {
     );
 
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
 
     const readContainment = () =>
@@ -1177,7 +1177,7 @@ test.describe('Danmaku Rendering', () => {
     });
 
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
 
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
@@ -1332,7 +1332,7 @@ test.describe('Danmaku Rendering', () => {
 
     await appendComment('e2e-fixed-top', 'TOP SAFE ZONE');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
     await expect.poll(readInkBounds, { timeout: 5000 }).not.toBeNull();
     const topBounds = await readInkBounds();
@@ -1358,7 +1358,7 @@ test.describe('Danmaku Rendering', () => {
     await expect(canvas).toBeAttached();
     await appendComment('e2e-fixed-bottom', 'BOTTOM SAFE ZONE');
     await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
-      'Rcvd: 1 | Rndr: 1'
+      /^Rcvd: 1 \| Alloc: 1 \| Shown≥\d+ \| Uncertain: \d+$/u
     );
     await expect.poll(readInkBounds, { timeout: 5000 }).not.toBeNull();
     const bottomBounds = await readInkBounds();
