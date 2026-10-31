@@ -897,6 +897,16 @@ export function assertCommittedVisibleItem(snapshot: MatrixSnapshot, id: string)
   return { draw, row, frameId: snapshot.frame.frameId };
 }
 
+/** Source-owned content ink must be present in the current committed frame. */
+export function assertOwnedContentInk(snapshot: MatrixSnapshot, id: string): MatrixDraw {
+  const { draw } = assertCommittedVisibleItem(snapshot, id);
+  assert(
+    draw.rect && draw.rect.right > draw.rect.left && draw.rect.bottom > draw.rect.top,
+    `${id} lacks nonempty source ink in its committed frame`
+  );
+  return draw;
+}
+
 /** Keep an already painted moving row inside the viewport after a narrower reflow. */
 export function assertResizeSafeMotion(
   snapshot: MatrixSnapshot,
@@ -2034,14 +2044,7 @@ async function runBackend(options: {
     check(() =>
       assert(content.accessibility[IDS[4]]?.includes('مرحبا'), 'RTL accessible body was lost')
     );
-    check(() =>
-      assert(
-        content.ink.some(
-          (entry) => entry.id === IDS[3] && entry.right > entry.left && entry.bottom > entry.top
-        ),
-        'Multiline image-emoji source ink was not observed'
-      )
-    );
+    check(() => assertOwnedContentInk(content, IDS[3]));
     await contentStyle.evaluate((element) => element.parentNode?.removeChild(element));
 
     // The six content rows become future reservations when reflowed into a
@@ -2286,6 +2289,32 @@ async function runBackend(options: {
     await observeVisible(IDS[8]);
     const restored = await capture('restored');
     check(() => assertRestoredVisibility(restored, IDS[7], IDS[8]));
+    // Retain this document and backlog owner; give its existing fixed rows
+    // enough real lanes before the zero-rate source batch is admitted.
+    await page.setViewportSize({ width: 720, height: 1000 });
+    await page.addStyleTag({
+      content: '#movie_player { height: 800px !important; aspect-ratio: auto !important; }',
+    });
+    await waitForProbeConfig(page, backend, {
+      viewportWidth: 720,
+      playerHeight: 800,
+      safeTop: 0,
+      safeBottom: 0,
+      mode: 'top',
+    });
+    assert(
+      await page.evaluate(() => {
+        const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+        return Boolean(
+          player &&
+          player.left >= 0 &&
+          player.top >= 0 &&
+          player.right <= innerWidth &&
+          player.bottom <= innerHeight
+        );
+      }),
+      'Rate-control player exceeded the physical viewport'
+    );
     await page.evaluate(() =>
       window.__ytChatOverlay?.applySettings({
         backlogMode: 'playback',
@@ -2346,6 +2375,7 @@ async function runBackend(options: {
     // A fresh owned document keeps the positive cohort independent of the 51
     // held zero-rate rows, so old eventual service cannot satisfy its proof.
     await openFresh();
+    await page.setViewportSize({ width: 720, height: 540 });
     await page.evaluate(() =>
       window.__ytChatOverlay?.applySettings({
         danmakuMode: 'top',

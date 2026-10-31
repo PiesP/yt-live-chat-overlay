@@ -17,6 +17,10 @@ and requires the deferred zero-capacity ID itself to draw after restoration.
 The 51-row zero-rate backlog must stay outside renderer ingress, then its first
 row must enter and paint after a same-page positive-rate update. A separate
 fresh page checks the positive cohort with its own distinct first-visible ID.
+Before the zero-rate batch, the same page expands to a measured 800px player
+inside a 720-by-1000 viewport so earlier fixed rows leave real lanes for the
+resumed backlog row. Its player bounds must fit the physical viewport. The
+fresh positive cohort returns to the 720-by-540 viewport before source input.
 It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
 detailed videos at 400px and 960px viewport widths; recorded player bounds are
@@ -45,6 +49,8 @@ Ordinary ink is bound at the actual regular painter call to its current active
 message, covering wrapped fixed rows and inline scrolling rows. Ambiguous shared
 content arrays are rejected. A snapshot that omits required active rows, plan
 rows, or frame draws is marked truncated and cannot establish complete-frame ink.
+The multiline emoji owner is checked in that same complete current frame and
+against its committed row; the capped historical ink ledger is diagnostic only.
 The fixture also opens the actual settings dialog and reads three drawn production Canvas
 preview samples under wide and stacked selections. `comment-display-matrix.json` binds the controller's exact
 source, core, build-log, bundle, profile, packaged page-script, fixture sources,

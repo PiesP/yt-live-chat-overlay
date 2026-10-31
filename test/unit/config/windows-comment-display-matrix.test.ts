@@ -13,6 +13,7 @@ import {
   assertCoherentVisibleFrame,
   assertCommittedVisibleItem,
   assertNoVisibleCardInk,
+  assertOwnedContentInk,
   assertPreviewComparison,
   assertResizeSafeMotion,
   assertRestoredVisibility,
@@ -1060,6 +1061,43 @@ describe('Windows comment display matrix contract', () => {
       ...snapshot,
       activeNow: [{ id, x: 10, y: 10, width: 80, height: 30 }],
     };
+    const fullHistory = {
+      ...committed,
+      backend: 'main' as const,
+      ink: Array.from({ length: 48 }, () => ({
+        id: 'WINDOWS380_OTHER',
+        left: 0,
+        top: 0,
+        right: 1,
+        bottom: 1,
+        kind: 'text',
+      })),
+    };
+    expect(assertOwnedContentInk(fullHistory, id).id).toBe(id);
+    for (const draw of [
+      { ...snapshot.frame.draws[0]!, id: 'WINDOWS380_OTHER' },
+      { ...snapshot.frame.draws[0]!, alpha: 0 },
+      { ...snapshot.frame.draws[0]!, rect: { left: 970, top: 10, right: 990, bottom: 40 } },
+      { ...snapshot.frame.draws[0]!, rect: { left: 10, top: 10, right: 10, bottom: 40 } },
+    ])
+      expect(() =>
+        assertOwnedContentInk(
+          {
+            ...fullHistory,
+            frame: { ...snapshot.frame, draws: [draw] },
+          },
+          id
+        )
+      ).toThrow();
+    expect(() =>
+      assertOwnedContentInk(
+        {
+          ...fullHistory,
+          frame: { ...snapshot.frame, truncated: true },
+        },
+        id
+      )
+    ).toThrow();
     expect(assertCommittedVisibleItem(committed, id).row.width).toBe(80);
     expect(() => assertCommittedVisibleItem({ ...committed, activeNow: [] }, id)).toThrow();
     expect(() =>
