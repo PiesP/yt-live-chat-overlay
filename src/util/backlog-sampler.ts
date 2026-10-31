@@ -9,7 +9,7 @@
  * 1. Mode-based filtering (none / recent / full)
  * 2. Priority message extraction (SuperChat, Membership)
  * 3. Statistical sampling with tier-based selection
- * 4. Time-distributed picking to avoid temporal clustering
+ * 4. Even message-rank picking across the admitted candidate range
  *
  * Extracted from backlog-controller.ts for single-responsibility separation.
  */
@@ -43,8 +43,8 @@ export class BacklogSampler {
 
   /**
    * Split messages into priority (SuperChat/Membership) and regular groups.
-   * Priority messages are emitted immediately during backlog injection;
-   * regular messages go through the throttled queue.
+   * Priority messages precede ordinary messages in the same throttled
+   * injection queue; both remain subject to the configured rate.
    */
   extractPriorityMessages(messages: ChatMessage[]): {
     priority: ChatMessage[];
@@ -63,7 +63,7 @@ export class BacklogSampler {
   }
 
   /**
-   * Apply smart sampling based on message importance and time distribution.
+   * Apply smart sampling based on message importance and message-rank coverage.
    * Returns sampled messages sorted by priority then timestamp.
    */
   sampleMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -73,20 +73,31 @@ export class BacklogSampler {
     const isSubstantialText = (m: ChatMessage): boolean => {
       if (isPriorityMessage(m)) return false;
       const text = m.text.trim();
-      return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
+      if (/^[\sㅋㅎㅇㄱ]+$/.test(text)) return false;
+      // Bounded display-text heuristic: short CJK and emoji can carry meaning,
+      // but this does not infer the message's actual semantics.
+      return (
+        text.length >= 3 ||
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Extended_Pictographic}]/u.test(
+          text
+        )
+      );
     };
 
     // Partition into priority / substantial / other tiers in a single pass.
     const tier1: ChatMessage[] = [];
     const tier2: ChatMessage[] = [];
     const tier3: ChatMessage[] = [];
+    let oldestOrdinary: ChatMessage | undefined;
+    let latestOrdinary: ChatMessage | undefined;
     for (const m of messages) {
       if (isPriorityMessage(m)) {
         tier1.push(m);
-      } else if (isSubstantialText(m)) {
-        tier2.push(m);
       } else {
-        tier3.push(m);
+        if (!oldestOrdinary || m.timestamp < oldestOrdinary.timestamp) oldestOrdinary = m;
+        if (!latestOrdinary || m.timestamp >= latestOrdinary.timestamp) latestOrdinary = m;
+        if (isSubstantialText(m)) tier2.push(m);
+        else tier3.push(m);
       }
     }
 
@@ -97,16 +108,32 @@ export class BacklogSampler {
 
     const selected: ChatMessage[] = [...tier1];
     let remaining = normalBudget;
+    const reserved = new Set<ChatMessage>();
 
-    if (tier2.length > 0 && remaining > 0) {
-      const pick = Math.min(remaining, tier2.length);
-      selected.push(...this.timeDistributedPick(tier2, pick));
+    // Cover the entire admitted ordinary range before applying text-tier bias.
+    // Priority messages remain fully protected outside the ordinary budget.
+    if (remaining > 1 && oldestOrdinary) {
+      selected.push(oldestOrdinary);
+      reserved.add(oldestOrdinary);
+      remaining--;
+    }
+    if (remaining > 0 && latestOrdinary && !reserved.has(latestOrdinary)) {
+      selected.push(latestOrdinary);
+      reserved.add(latestOrdinary);
+      remaining--;
+    }
+
+    const availableTier2 = tier2.filter((message) => !reserved.has(message));
+    if (availableTier2.length > 0 && remaining > 0) {
+      const pick = Math.min(remaining, availableTier2.length);
+      selected.push(...this.rankDistributedPick(availableTier2, pick));
       remaining -= pick;
     }
 
-    if (tier3.length > 0 && remaining > 0) {
-      const pick = Math.min(remaining, tier3.length);
-      selected.push(...this.timeDistributedPick(tier3, pick));
+    const availableTier3 = tier3.filter((message) => !reserved.has(message));
+    if (availableTier3.length > 0 && remaining > 0) {
+      const pick = Math.min(remaining, availableTier3.length);
+      selected.push(...this.rankDistributedPick(availableTier3, pick));
     }
 
     return selected.sort((a, b) => {
@@ -118,19 +145,20 @@ export class BacklogSampler {
   }
 
   /**
-   * Pick messages with even time distribution to avoid clustering.
-   * Divides the time range into buckets and picks one message per bucket.
+   * Cover the admitted messages by rank after timestamp ordering. Equal-time
+   * buckets would overrepresent sparse periods and lose dense recent chat.
+   * Both endpoints are selected when count > 1; one slot favors the latest.
    */
-  timeDistributedPick(messages: ChatMessage[], count: number): ChatMessage[] {
+  rankDistributedPick(messages: ChatMessage[], count: number): ChatMessage[] {
     if (count >= messages.length) return [...messages];
     if (count <= 0) return [];
 
     const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
-    const step = Math.max(1, Math.floor(sorted.length / count));
     const picked: ChatMessage[] = [];
 
     for (let i = 0; i < count; i++) {
-      const idx = Math.min(i * step, sorted.length - 1);
+      const idx =
+        count === 1 ? sorted.length - 1 : Math.floor((i * (sorted.length - 1)) / (count - 1));
       const msg = sorted[idx];
       if (msg) picked.push(msg);
     }

@@ -38,6 +38,18 @@ describe('backlog scheduler pure calculations', () => {
     expect(computeAdaptiveMeanInterval(10, 5, 5, 0.1, 0.25)).toBe(200);
   });
 
+  it('keeps zero as no injection and caps a conflicting minimum by the maximum', () => {
+    const stopped = new BacklogScheduler({ ...config, backlogMaxRate: 0 }, 24);
+    expect(
+      stopped.computeMeanIntervalWithUtilization(0, 0, 0, null, 2_000).meanInterval
+    ).toBeNull();
+    expect(computeAdaptiveMeanInterval(0, 4, 0, 1, 1)).toBeNull();
+
+    const capped = new BacklogScheduler({ ...config, backlogMaxRate: 2 }, 24);
+    expect(capped.computeMeanIntervalWithUtilization(0, 0, 0, null, 2_000).meanInterval).toBe(500);
+    expect(computeAdaptiveMeanInterval(0.000_000_001, 0, 0, 1, 1)).toBe(2_147_483_647);
+  });
+
   it('uses one injected timestamp for decay and ramp calculations', () => {
     const scheduler = new BacklogScheduler(config, 4);
 

@@ -1786,6 +1786,103 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('keeps uncertain Worker presentation attribution through timeout fallback and replacement', async () => {
+    let clock = 10_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({
+        danmakuMode: 'top',
+        fadeDurationMs: 0,
+        staggerMaxDelayMs: 0,
+        staggerMediumDelayMs: 0,
+      })
+    );
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      ctx: CanvasRenderingContext2D;
+      activeMessages: CanvasMessage[];
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      replaceCanvas(): boolean;
+      startRenderLoop(): void;
+      estimateDimensions(message: ChatMessage): { width: number; height: number };
+      renderFrame(): void;
+      fallbackInProgress: boolean;
+    };
+    internals.canvas = canvas;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+    internals.ctx = ctx;
+    internals.estimateDimensions = () => ({ width: 100, height: 20 });
+    vi.spyOn(internals, 'replaceCanvas').mockReturnValue(true);
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    internals.workerManager.setActive(true);
+
+    const previous = makeMessage('same-id', 'original');
+    const replacement = { ...makeMessage('same-id', 'edited'), actionType: 'replace' as const };
+    const uncertain = makeMessage('uncertain', 'could be future');
+    const fresh = makeMessage('fresh', 'new ingress');
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
+      { message: previous, trackDrops: false, presentationAccounting: 'unknown' },
+      { message: uncertain, trackDrops: false, presentationAccounting: 'unknown' },
+    ]);
+    renderer.observability.onMessagesPresented(1); // Worker already reported the first ID.
+    renderer.fallbackToMainThread('snapshot-timeout');
+    renderer.addMessage(replacement);
+    renderer.addMessage(fresh);
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+    renderer.addMessage({
+      ...makeMessage('uncertain', 'edited after fallback'),
+      actionType: 'replace',
+    });
+    expect(
+      internals.pendingQueue
+        .toArray()
+        .map((message) => message.id)
+        .sort()
+    ).toEqual(['fresh', 'same-id', 'uncertain']);
+    expect(
+      internals.pendingQueue.toArray().find((message) => message.id === 'uncertain')?.text
+    ).toBe('edited after fallback');
+    renderer.isPaused = false;
+    internals.renderFrame();
+    const recovered = internals.activeMessages.find((entry) => entry.message.id === 'same-id');
+    expect(recovered?.message.text).toBe('edited');
+    expect(recovered?.wasPresented).toBe(true);
+    let sawFresh = internals.activeMessages.some(
+      (entry) => entry.message.id === 'fresh' && entry.wasPresented
+    );
+    let sawUncertain = internals.activeMessages.some(
+      (entry) => entry.message.id === 'uncertain' && entry.wasPresented
+    );
+    expect(renderer.observability.getMetrics().totalPresented).toBe(1 + Number(sawFresh));
+    for (let frame = 0; frame < 10 && (!sawFresh || !sawUncertain); frame++) {
+      clock += 6_000;
+      internals.renderFrame();
+      sawFresh ||= internals.activeMessages.some(
+        (entry) => entry.message.id === 'fresh' && entry.wasPresented
+      );
+      sawUncertain ||= internals.activeMessages.some(
+        (entry) => entry.message.id === 'uncertain' && entry.wasPresented
+      );
+    }
+    expect(sawFresh).toBe(true);
+    expect(sawUncertain).toBe(true);
+    expect(renderer.observability.getMetrics().totalPresented).toBe(2);
+    expect(renderer.observability.getMetrics().totalPresentationUnknown).toBe(2);
+    renderer.destroy();
+    canvas.remove();
+  });
+
   it('counts only tracked pending messages when a drain batch is unplaceable', () => {
     const renderer = new CanvasRenderer(overlay, makeSettings());
     const tracked = Array.from({ length: 3 }, (_, index) =>
@@ -1933,6 +2030,7 @@ describe('CanvasRenderer', () => {
       vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
       vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
       const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
+      const presented = vi.spyOn(renderer.observability, 'onMessagesPresented');
       const origin = performance.timeOrigin;
       vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
         ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
@@ -1951,6 +2049,7 @@ describe('CanvasRenderer', () => {
             startEpochMs: origin + start,
             fadeStartEpochMs: origin + start,
             speedTier: backlog ? 3 : 1,
+            wasPresented: laneIndex === 0,
             epoch: 0,
             capturedAtEpochMs: origin + 1000,
             effectiveNowEpochMs: origin + 1000,
@@ -1967,6 +2066,8 @@ describe('CanvasRenderer', () => {
       expect(internals.activeMessages).toHaveLength(2);
       expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
       const [visible, future] = internals.activeMessages;
+      expect(visible?.wasPresented).toBe(true);
+      expect(future?.wasPresented).toBe(false);
       expect(visible?.startTime).toBe(0);
       expect(future?.startTime).toBe(2000);
       const effectiveNow = paused ? 1000 : 1500;
@@ -1985,6 +2086,7 @@ describe('CanvasRenderer', () => {
         expect(reflowed[1]?.startTime).toBe(2000);
       }
       expect(rendered).not.toHaveBeenCalled();
+      expect(presented).not.toHaveBeenCalled();
       if (paused) {
         clock = 5000;
         renderer.resume();
