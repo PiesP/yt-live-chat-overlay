@@ -534,6 +534,22 @@ describe('compactRemovedMessages', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('mirrorVisibleMessages', () => {
+  it('uses the accepted body for the accessible alternative', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    const updateLiveRegion = vi.fn();
+    const ctx = makeCompactCtx({
+      activeMessages: [
+        { message: { id: 'one', text: 'short…', canonicalText: 'short and long' } },
+      ] as never[],
+      lastLiveRegionUpdate: { value: 0 },
+      updateLiveRegion,
+    });
+    mirrorVisibleMessages(ctx);
+    expect(updateLiveRegion.mock.calls[0]?.[0]).toMatchObject([
+      { id: 'one', text: 'short and long' },
+    ]);
+    nowSpy.mockRestore();
+  });
   it('skips when within throttle window', () => {
     const updateLiveRegion = vi.fn();
     const ctx = makeCompactCtx({

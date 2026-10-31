@@ -1,5 +1,29 @@
 # Rendering timing contract
 
+## Regular-message content
+
+The parser keeps ordinary comments compact: `text` and `content` are the visible
+projection, limited to 80 code points including an ellipsis. Truncation stops
+before a whole grapheme that would exceed the budget. When the accepted body is
+longer, `canonicalText` and `canonicalContent` retain its normalized, bounded
+source; short messages omit these fields. Rich emoji fallback text contributes
+to `canonicalText`, while translation reads only text segments from
+`canonicalContent` and never sends emoji descriptions. Main and Worker draw and
+measure only `text`/`content`; both supply `canonicalText ?? text` to accessible
+alternatives. Only bounded `canonicalText` crosses to the Worker. Replacement
+uses the existing message ID, and display assets come only from visible content.
+The existing 4096-code-point field and aggregate limits, 512-segment limit, and
+translation request budgets still apply to accepted input. Paid and membership
+bodies retain their existing full source and line-limited display behavior.
+
+The aggregate budget counts the longest body representation once, alongside the
+existing author and metadata fields. It does not grant an additional body budget
+for canonical fields. If grapheme segmentation is unavailable, truncation treats
+each text segment as indivisible and uses an ellipsis when it cannot fit. This
+can retain less text, while preserving the compact limit and whole characters.
+
+## Motion and geometry
+
 Canvas and OffscreenCanvas Worker rendering use the shared motion planner in
 `src/renderer/layout/message-schedule.ts`. Each candidate's effective mode,
 start, geometry, actual velocity, viewport entry, and visible interval are

@@ -834,6 +834,36 @@ describe('Worker message protocol', () => {
     });
   });
 
+  it('drops a previous canonical body when an active message is replaced by compact text', () => {
+    const renderer = initializeRenderer({ outlineWidthPx: 0 });
+    const internals = renderer as unknown as {
+      activeMessages: Array<{ id: string; text: string; canonicalText?: string }>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'edited',
+            text: 'A'.repeat(79) + '…',
+            canonicalText: 'A'.repeat(90),
+          }),
+        ],
+      })
+    );
+    internals.drainQueue(10_000, 640, 360);
+    expect(internals.activeMessages[0]?.canonicalText).toBe('A'.repeat(90));
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'edited', text: 'B', actionType: 'replace' })],
+      })
+    );
+    expect(internals.activeMessages[0]).toMatchObject({ text: 'B' });
+    expect(internals.activeMessages[0]).not.toHaveProperty('canonicalText');
+  });
+
   it('rebuilds lane reservations when an active replacement uses fewer slots', () => {
     const renderer = initializeRenderer({ outlineWidthPx: 0 });
     const internals = renderer as unknown as {

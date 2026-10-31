@@ -67,6 +67,9 @@ describe('message-helpers', () => {
   });
 
   describe('truncateForKind', () => {
+    it('keeps a combining sequence whole at the display boundary', () => {
+      expect(truncateForKind(`${'A'.repeat(78)}e\u0301ZZ`, 'text')).toBe(`${'A'.repeat(78)}…`);
+    });
     it('truncates long text to MAX_MESSAGE_TEXT_LENGTH', () => {
       const longText = 'a'.repeat(100);
       const result = truncateForKind(longText, 'text');
