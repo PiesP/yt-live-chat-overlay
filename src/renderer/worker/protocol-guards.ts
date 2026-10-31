@@ -364,6 +364,7 @@ function validateAddMessages(data: Record<string, unknown>): boolean {
     if (!isRecord(msg)) return false;
     if (typeof msg.id !== 'string' || msg.id.length === 0) return false;
     if (typeof msg.text !== 'string') return false;
+    if (hasOwn(msg, 'canonicalText') && typeof msg.canonicalText !== 'string') return false;
     if (!isFiniteNonNegative(msg.width)) return false;
     if (!isFiniteNonNegative(msg.height)) return false;
     if (!isFiniteNumber(msg.priority)) return false;

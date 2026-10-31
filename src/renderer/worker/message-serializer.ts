@@ -50,6 +50,7 @@ export function serializeWorkerMessage({
     id,
     ...(message.actionType !== undefined ? { actionType: message.actionType } : {}),
     text: message.text,
+    ...(message.canonicalText !== undefined ? { canonicalText: message.canonicalText } : {}),
     width: dimensions.width,
     height: dimensions.height,
     priority,

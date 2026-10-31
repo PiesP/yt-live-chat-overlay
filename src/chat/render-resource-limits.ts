@@ -123,6 +123,8 @@ export function getRenderMessageResourceViolation(value: unknown): RenderResourc
 
   const text = inspectField(readOptionalString(value, 'text'), 'body');
   if (text.violation) return text.violation;
+  const canonicalText = inspectField(readOptionalString(value, 'canonicalText'), 'body');
+  if (canonicalText.violation) return canonicalText.violation;
 
   let bodyCodePoints = text.codePoints;
   if (Array.isArray(value.content)) {
@@ -130,6 +132,12 @@ export function getRenderMessageResourceViolation(value: unknown): RenderResourc
     if (content.violation) return content.violation;
     if (value.content.length > 0) bodyCodePoints = content.codePoints;
   }
+  if (Array.isArray(value.canonicalContent)) {
+    const canonicalContent = inspectContent(value.canonicalContent);
+    if (canonicalContent.violation) return canonicalContent.violation;
+    bodyCodePoints = Math.max(bodyCodePoints, canonicalContent.codePoints);
+  }
+  bodyCodePoints = Math.max(bodyCodePoints, canonicalText.codePoints);
 
   const author = inspectField(readOptionalString(value, 'author'), 'author');
   if (author.violation) return author.violation;

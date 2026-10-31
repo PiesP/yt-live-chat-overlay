@@ -62,6 +62,10 @@ export interface ChatMessage {
   id?: string;
   text: string;
   content: ContentSegment[];
+  /** Accepted regular-message body before the compact display projection. */
+  canonicalText?: string;
+  /** Accepted rich body; present only when regular-message display was shortened. */
+  canonicalContent?: ContentSegment[];
   kind: ChatMessageKind;
   timestamp: number;
   author?: string;

@@ -10,7 +10,7 @@ import {
   stripControlCharacters,
   truncateForKind,
 } from '@chat/message-helpers';
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 // ── stripControlCharacters ────────────────────────────────────────────
 
@@ -76,6 +76,17 @@ describe('normalizeInlineText', () => {
 // ── truncateForKind ───────────────────────────────────────────────────
 
 describe('truncateForKind', () => {
+  it('uses an ellipsis without splitting text when Intl.Segmenter is unavailable', () => {
+    vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      expect(truncateForKind(`${'A'.repeat(78)}👍🏽Z`, 'text')).toBe('…');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it.each(['e\u0301', '👍🏽', '👨‍👩‍👧‍👦'])('does not split %s at the code-point limit', (cluster) => {
+    expect(truncateForKind(`${'A'.repeat(78)}${cluster}ZZ`, 'text')).toBe(`${'A'.repeat(78)}…`);
+  });
   it('truncates text kind messages longer than 80 chars', () => {
     const longText = 'a'.repeat(100);
     const result = truncateForKind(longText, 'text');

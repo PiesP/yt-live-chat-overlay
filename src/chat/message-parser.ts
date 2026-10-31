@@ -35,6 +35,7 @@ import {
   type RenderResourceViolation,
 } from '@chat/render-resource-limits';
 import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@chat/youtube/request';
+import { splitGraphemesForTruncation } from '@renderer/text-segmentation';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('ChatMessageParser');
@@ -48,6 +49,8 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
 export interface ParsedMessageBody {
   text: string;
   content: ContentSegment[];
+  canonicalText?: string;
+  canonicalContent?: ContentSegment[];
   visibleLength: number;
 }
 
@@ -423,6 +426,10 @@ function parseRendererMessage(
   const message: ChatMessage = {
     text: parsedBody.text,
     content: parsedBody.content,
+    ...(parsedBody.canonicalText !== undefined ? { canonicalText: parsedBody.canonicalText } : {}),
+    ...(parsedBody.canonicalContent !== undefined
+      ? { canonicalContent: parsedBody.canonicalContent }
+      : {}),
     kind,
     timestamp: timestampOverride ?? Date.now(),
     author,
@@ -704,18 +711,24 @@ function finalizeMessageBody(
     };
   }
 
-  const content = normalizeAndTruncateRegularContent(segments);
+  const canonicalContent = normalizeRegularContentSegments(segments);
+  const canonicalText = projectContentText(canonicalContent);
+  const content = truncateRegularContent(canonicalContent, canonicalText);
+  const text = projectContentText(content);
   return {
-    text: projectContentText(content),
+    text,
     content,
+    ...(text !== canonicalText ? { canonicalText, canonicalContent } : {}),
     visibleLength: getVisibleContentLength(content),
   };
 }
 
 /** Normalize a rich regular-message body while preserving retained emoji assets. */
-function normalizeAndTruncateRegularContent(segments: readonly ContentSegment[]): ContentSegment[] {
-  const normalized = normalizeRegularContentSegments(segments);
-  if (countCodePoints(projectContentText(normalized)) <= MAX_REGULAR_MESSAGE_TEXT_LENGTH) {
+function truncateRegularContent(
+  normalized: ContentSegment[],
+  canonicalText: string
+): ContentSegment[] {
+  if (countCodePoints(canonicalText) <= MAX_REGULAR_MESSAGE_TEXT_LENGTH) {
     return normalized;
   }
 
@@ -728,11 +741,18 @@ function normalizeAndTruncateRegularContent(segments: readonly ContentSegment[])
     if (remaining <= 0) break;
 
     if (segment.type === 'text') {
-      const codePoints = Array.from(segment.content);
-      const retained = codePoints.slice(0, remaining).join('');
+      const clusters = splitGraphemesForTruncation(segment.content) ?? [segment.content];
+      let retained = '';
+      let retainedLength = 0;
+      for (const cluster of clusters) {
+        const length = countCodePoints(cluster);
+        if (retainedLength + length > remaining) break;
+        retained += cluster;
+        retainedLength += length;
+      }
       appendTextSegment(truncated, retained);
-      projectedLength += Math.min(codePoints.length, remaining);
-      if (codePoints.length > remaining) break;
+      projectedLength += retainedLength;
+      if (retainedLength < countCodePoints(segment.content)) break;
       continue;
     }
 

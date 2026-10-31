@@ -612,7 +612,7 @@ export function mirrorVisibleMessages(ctx: CanvasRenderContext): void {
       id:
         message.id ??
         `${message.timestamp}:${message.author ?? ''}:${message.kind}:${message.text}`,
-      text: message.text,
+      text: message.canonicalText ?? message.text,
       kind: message.kind,
       ...(message.author !== undefined ? { author: message.author } : {}),
       ...(message.superChat?.amount !== undefined
