@@ -74,6 +74,7 @@ type Backend = 'worker' | 'main';
 type MatrixDraw = {
   id: string;
   kind?: string;
+  section?: 'body' | 'translation';
   alpha: number;
   rect: Rect | null;
   textSnippet?: string | null;
@@ -763,7 +764,7 @@ export function presentationItem(
   const proof = assertCommittedVisibleItem(snapshot, id);
   if (role === 'sticker')
     assert(
-      proof.draw.kind === 'sticker-image' || proof.draw.textSnippet?.includes(id),
+      proof.draw.kind === 'sticker-image' || proof.draw.section === 'body',
       'Sticker lacks source-bound image ink or its visible fallback'
     );
   return {
@@ -808,20 +809,26 @@ export function paidRowBudget(snapshot: MatrixSnapshot, id: string, expectedLine
   const row = snapshot.activeNow.find((entry) => entry.id === id);
   assert(row, `${id} lacks committed card geometry`);
   assert(plan.height <= row.height + 2, 'Measured plan exceeds committed card height');
-  const original = frame.draws.find(
-    (entry) =>
-      entry.id === id &&
-      entry.alpha > 0 &&
-      entry.textSnippet?.includes(id) &&
-      !entry.textSnippet.includes('MATRIX_TRANSLATED')
-  );
+  const visibleSection = (entry: MatrixDraw, section: 'body' | 'translation') =>
+    entry.id === id &&
+    entry.section === section &&
+    entry.alpha > 0 &&
+    entry.rect &&
+    entry.rect.left < Number(frame.logicalWidth) &&
+    entry.rect.right > 0 &&
+    entry.rect.top < Number(frame.logicalHeight) &&
+    entry.rect.bottom > 0;
+  const original = frame.draws.find((entry) => visibleSection(entry, 'body'));
   assert(original?.rect, 'Canonical body lacks positive-alpha ink in the completed frame');
-  const translated = frame.draws.find(
-    (entry) =>
-      entry.id === id && entry.alpha > 0 && entry.textSnippet?.includes('MATRIX_TRANSLATED')
-  );
+  const translated = frame.draws.find((entry) => visibleSection(entry, 'translation'));
   if (expectedLines > 1) assert(translated?.rect, 'Translated body lacks positive-alpha ink');
-  else assert(!translated, 'One-line fallback unexpectedly drew translated ink');
+  else
+    assert(
+      !frame.draws.some(
+        (entry) => entry.id === id && entry.section === 'translation' && entry.alpha > 0
+      ),
+      'One-line fallback unexpectedly drew translated ink'
+    );
   for (const draw of [original, translated]) {
     if (!draw?.rect) continue;
     assert(
@@ -854,7 +861,7 @@ export function membershipEffect(snapshot: MatrixSnapshot, id: string) {
   assert(plan.borderStyle?.startsWith('rgba('), 'Membership border stroke was not observed');
   assert(plan.borderAlpha !== null && plan.borderAlpha > 0 && plan.borderAlpha <= 1);
   const body = frame.draws.find(
-    (entry) => entry.id === id && entry.alpha > 0 && entry.textSnippet?.includes(id)
+    (entry) => entry.id === id && entry.alpha > 0 && entry.section === 'body'
   );
   assert(body?.rect, 'Membership body ink was not observed');
   assert(
@@ -1102,10 +1109,12 @@ async function waitForTranslationDraw(page: Page, backend: Backend, id: string) 
           (draw) =>
             draw.id === messageId &&
             draw.alpha > 0 &&
-            draw.textSnippet?.includes('MATRIX_TRANSLATED') &&
+            draw.section === 'translation' &&
             draw.rect &&
             draw.rect.left < Number(frame.logicalWidth) &&
-            draw.rect.right > 0
+            draw.rect.right > 0 &&
+            draw.rect.top < Number(frame.logicalHeight) &&
+            draw.rect.bottom > 0
         )
       );
     },
@@ -1928,7 +1937,10 @@ async function runBackend(options: {
         const paid = check(() => presentationGeometry(observed, paidId));
         const translatedDraw = observed.frame?.draws.some(
           (draw) =>
-            draw.id === paidId && draw.alpha > 0 && draw.textSnippet?.includes('MATRIX_TRANSLATED')
+            draw.id === paidId &&
+            draw.alpha > 0 &&
+            draw.section === 'translation' &&
+            Boolean(draw.rect)
         );
         if (scene === 'detailed')
           check(() => {

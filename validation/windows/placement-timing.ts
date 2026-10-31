@@ -171,6 +171,7 @@ type ActiveRow = {
 };
 type Draw = {
   id: string;
+  section?: 'body' | 'translation' | undefined;
   frameId: number;
   kind?: string;
   alpha: number;
@@ -340,6 +341,8 @@ type ProbeState = ProbeSample & {
   currentRenderFrame: RenderFrame | null;
   currentFrame: { startedAt: number; preClearMs: number | null } | null;
   measuredPlans: Record<string, { width: number; height: number; maxBodyLines: number }>;
+  registerPlanSections: (plan: object, id: string, context: CanvasContext) => void;
+  wrapWrappedContent: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
   requestAtEpochMs?: number;
   flushSequence?: number;
   canvasSourceHooked?: boolean;
@@ -436,6 +439,12 @@ function installProbeRuntime(options: ProbeOptions) {
   const ids = new Set(options.tokens);
   const bitmapIds = new WeakMap<object, string>();
   const bitmapInk = new WeakMap<object, BitmapInk>();
+  const planSections = new WeakMap<
+    object,
+    { id: string; section: 'body' | 'translation'; context: CanvasContext }
+  >();
+  let textOwner: { id: string; section: 'body' | 'translation'; context: CanvasContext } | null =
+    null;
   const frameContexts = new WeakMap<RenderFrame, CanvasContext>();
   const state = {
     frames: [],
@@ -461,6 +470,26 @@ function installProbeRuntime(options: ProbeOptions) {
     measuredPlans: {},
   } as unknown as ProbeState;
   scope.__ytPlacementProbe = state;
+  state.registerPlanSections = (plan, id, context) => {
+    if (!ids.has(id)) return;
+    const rows = plan as { body?: object; translation?: object };
+    if (rows.body) planSections.set(rows.body, { id, section: 'body', context });
+    if (rows.translation)
+      planSections.set(rows.translation, { id, section: 'translation', context });
+  };
+  state.wrapWrappedContent = (render) =>
+    function (this: unknown, ...args: unknown[]) {
+      const context = args[0] as CanvasContext;
+      const prepared = args.at(-1);
+      const owner = prepared && typeof prepared === 'object' ? planSections.get(prepared) : null;
+      const previous = textOwner;
+      textOwner = owner?.context === context && state.currentRenderFrame ? owner : null;
+      try {
+        return Reflect.apply(render, this, args);
+      } finally {
+        textOwner = previous;
+      }
+    };
   const epochNow = () => performance.timeOrigin + performance.now();
   const tokenIn = (text: unknown) => options.tokens.find((token) => String(text).includes(token));
   const overlayContext = (ctx: CanvasContext) =>
@@ -635,6 +664,8 @@ function installProbeRuntime(options: ProbeOptions) {
       const japanese = ink?.japanese ?? null;
       frame.draws.push({
         id,
+        section:
+          ink?.section === 'body' || ink?.section === 'translation' ? ink.section : undefined,
         frameId: frame.frameId,
         kind,
         alpha: ctx.globalAlpha,
@@ -697,15 +728,16 @@ function installProbeRuntime(options: ProbeOptions) {
     } as CanvasRenderingContext2D['stroke'];
     const nativeFillText = prototype.fillText;
     prototype.fillText = function (text, x, y, ...rest) {
-      const id = tokenIn(text);
+      const id = textOwner?.id ?? tokenIn(text);
       const result = nativeFillText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
-        bitmapIds.set(this.canvas, id);
+        if (!textOwner) bitmapIds.set(this.canvas, id);
         const metrics = this.measureText(text);
         bitmapInk.set(this.canvas, {
           ...bitmapInk.get(this.canvas),
           fill: {
             textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
             font: this.font,
             left: x - (metrics.actualBoundingBoxLeft ?? 0),
             top: y - metrics.actualBoundingBoxAscent,
@@ -746,6 +778,7 @@ function installProbeRuntime(options: ProbeOptions) {
             font: this.font,
             lineWidth: this.lineWidth,
             textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
             japanese: japaneseRun(text, this, x, y),
           }
         );
@@ -754,15 +787,17 @@ function installProbeRuntime(options: ProbeOptions) {
     };
     const nativeStrokeText = prototype.strokeText;
     prototype.strokeText = function (text, x, y, ...rest) {
-      const id = tokenIn(text);
+      const id = textOwner?.id ?? tokenIn(text);
       const result = nativeStrokeText.call(this, text, x, y, ...rest);
       if (id && !overlayContext(this)) {
+        if (!textOwner) bitmapIds.set(this.canvas, id);
         const metrics = this.measureText(text);
         const padding = this.lineWidth / 2;
         bitmapInk.set(this.canvas, {
           ...bitmapInk.get(this.canvas),
           stroke: {
             textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
             font: this.font,
             lineWidth: this.lineWidth,
             left: x - (metrics.actualBoundingBoxLeft ?? 0) - padding,
@@ -807,6 +842,7 @@ function installProbeRuntime(options: ProbeOptions) {
             font: this.font,
             lineWidth: this.lineWidth,
             textSnippet: String(text).slice(0, 128),
+            section: textOwner?.section,
             japanese: japaneseRun(text, this, x, y),
           }
         );
@@ -830,7 +866,7 @@ function installProbeRuntime(options: ProbeOptions) {
                 ids.has(entry) && /^WINDOWS380_(BRIGHT|DARK|DETAILED)_STICKER$/u.test(entry)
             )
           : undefined;
-      const id = bitmapIds.get(image) ?? stickerId;
+      const id = textOwner?.context === this ? textOwner.id : (bitmapIds.get(image) ?? stickerId);
       const result = Reflect.apply(nativeDrawImage, this, [image, ...args]);
       if (
         id &&
@@ -872,6 +908,7 @@ function installProbeRuntime(options: ProbeOptions) {
               : null;
           recordRect(this, id, ...destination, id === stickerId ? 'sticker-image' : 'bitmap', {
             sourceInk,
+            section: textOwner?.context === this ? textOwner.section : undefined,
             japanese,
           });
         }
@@ -1702,6 +1739,8 @@ export function canvasProbePrelude({
 } = {}) {
   return (
     `const observePaidPlan = ${observePaidPlan.toString()};\n` +
+    `const cardPlanFunctionName = ${cardPlanFunctionName.toString()};\n` +
+    `const wrappedContentFunctionName = ${wrappedContentFunctionName.toString()};\n` +
     `const instrumentCardPlanCalls = ${instrumentCardPlanCalls.toString()};\n` +
     `const workerProbeSuffix = ${workerProbeSuffix.toString()};\n` +
     `;(${installProbeRuntime.toString()})(${JSON.stringify({
@@ -1728,9 +1767,14 @@ export function workerProbeSuffix(
     );
   if (!handler) return null;
   if (observeCardPlans && !source.includes('__ytObservePaidPlan(')) return null;
+  const wrappedName = observeCardPlans ? wrappedContentFunctionName(source) : null;
+  if (observeCardPlans && !wrappedName) return null;
   return (
     `\n;(${attachProbeSource})(${handler[2]});\n` +
-    (observeCardPlans ? `\nvar __ytObservePaidPlan = ${observePaidPlan.toString()};\n` : '')
+    (observeCardPlans
+      ? `\nvar __ytObservePaidPlan = ${observePaidPlan.toString()};\n` +
+        `${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});\n`
+      : '')
   );
 }
 
@@ -1759,6 +1803,7 @@ function observePaidPlan<
   const id = /WINDOWS380_[A-Z0-9_]+/u.exec(
     input.content?.map((part) => part.content ?? '').join(' ') ?? ''
   )?.[0];
+  if (frame && id && input.context) state.registerPlanSections(plan, id, input.context);
   if (
     state &&
     id &&
@@ -1807,6 +1852,30 @@ function cardPlanFunctionName(source: string): string | null {
   )
     return null;
   return name;
+}
+
+/** Bind the actual shared row painter, including minified Worker output, by its plan-row calls. */
+function wrappedContentFunctionName(source: string): string | null {
+  const body = new Set<string>();
+  const translation = new Set<string>();
+  for (const row of source.matchAll(/\.(body|translation)\)/gu)) {
+    const close = (row.index ?? 0) + row[0].length - 1;
+    let depth = 0;
+    for (let index = close; index >= Math.max(0, close - 1200); index--) {
+      if (source[index] === ')') depth++;
+      if (source[index] !== '(') continue;
+      depth--;
+      if (depth !== 0) continue;
+      const name = /[A-Za-z_$][\w$]*$/u.exec(source.slice(Math.max(0, index - 80), index))?.[0];
+      if (name && source.includes(`function ${name}(`))
+        (row[1] === 'body' ? body : translation).add(name);
+      break;
+    }
+  }
+  const matches = [...body].filter((name): name is string =>
+    Boolean(name && translation.has(name) && source.includes(`function ${name}(`))
+  );
+  return matches.length === 1 ? (matches[0] ?? null) : null;
 }
 
 export function instrumentCardPlanCalls(source: string): string | null {
@@ -2154,13 +2223,16 @@ export function instrumentCanvasPageScript(
     return null;
   const cardPlanName = observeCardPlans ? cardPlanFunctionName(source) : null;
   if (observeCardPlans && !cardPlanName) return null;
+  const wrappedName = observeCardPlans ? wrappedContentFunctionName(source) : null;
+  if (observeCardPlans && !wrappedName) return null;
   return source.replace(
     marker,
     `\n\t;(${probeSource})(CanvasRenderer, getRegularCardInsets);` +
       (observeCardPlans
         ? `\n\tvar __ytOriginalPaidPlan = ${cardPlanName};` +
           `\n\tvar __ytObservePaidPlan = ${observePaidPlan.toString()};` +
-          `\n\t${cardPlanName} = function(input) { return __ytObservePaidPlan(__ytOriginalPaidPlan, input); };`
+          `\n\t${cardPlanName} = function(input) { return __ytObservePaidPlan(__ytOriginalPaidPlan, input); };` +
+          `\n\t${wrappedName} = globalThis.__ytPlacementProbe.wrapWrappedContent(${wrappedName});`
         : '') +
       marker
   );

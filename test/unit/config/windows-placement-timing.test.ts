@@ -729,7 +729,9 @@ describe('Windows placement timing probe', () => {
   it('observes shared paid plans in readable and minified emitted shapes and rejects drift', () => {
     const readable =
       'function preparePaidCardPlan(input) { return { height: 1 }; }\n' +
-      'function paint() { return preparePaidCardPlan({ width: 1 }); }\n' +
+      'function renderWrappedContentSegments() {}\n' +
+      'function paint() { const plan = preparePaidCardPlan({ width: 1 }); ' +
+      'renderWrappedContentSegments(ctx, plan.body); renderWrappedContentSegments(ctx, plan.translation); }\n' +
       'function getRegularCardInsets() {}\n' +
       'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n\tmain();\n})();';
     const canvas = instrumentCanvasPageScript(readable, 'function probe() {}', true);
@@ -739,36 +741,211 @@ describe('Windows placement timing probe', () => {
     expect(canvas).toContain('var __ytObservePaidPlan = function observePaidPlan');
     const minified =
       'function Mn(e){let t=Math.max(1,e.width-e.paddingH*2),n=e.showAuthor&&!!e.author;' +
-      'return {height:t}};function paint(){return Mn({width:1,paddingH:0})}' +
+      'return {height:t}};function Zt(e,t){};function paint(){let p=Mn({width:1,paddingH:0});' +
+      'Zt(ctx,p.body);Zt(ctx,p.translation)}' +
       'self.onmessage=e=>{xr.handleMessage(e)};';
     const worker = instrumentCardPlanCalls(minified);
     expect(worker).toContain('__ytObservePaidPlan(Mn, {width:1,paddingH:0})');
     expect(worker && workerProbeSuffix(worker, undefined, true)).toContain('__ytObservePaidPlan');
+    expect(worker && workerProbeSuffix(worker, undefined, true)).toContain(
+      'wrapWrappedContent(Zt)'
+    );
     expect(() =>
       runInNewContext(worker + workerProbeSuffix(worker!, undefined, true)!, {
         self: {},
         xr: { handleMessage() {} },
+        __ytPlacementProbe: { wrapWrappedContent: (render: unknown) => render },
       })
     ).not.toThrow();
     expect(instrumentCardPlanCalls(minified.replace('e.showAuthor', 'e.showName'))).toBeNull();
     expect(workerProbeSuffix(minified, undefined, true)).toBeNull();
+    let blobParts: unknown[] = [];
+    class FakeBlob {
+      constructor(parts: unknown[]) {
+        blobParts = parts;
+      }
+    }
+    const pageSandbox = {
+      performance: { timeOrigin: 1000, now: () => 1 },
+      requestAnimationFrame: () => 1,
+      addEventListener: () => {},
+      postMessage: () => {},
+      MutationObserver: class {
+        observe() {}
+      },
+      document: { querySelectorAll: () => [] },
+      Blob: FakeBlob,
+      Worker: class {},
+      HTMLCanvasElement: class {},
+    };
+    runInNewContext(
+      `${canvasProbePrelude({ observeCardPlans: true })}\n` +
+        `new Blob([${JSON.stringify(minified.replace('self.onmessage', '/* OffscreenCanvas */self.onmessage'))}], { type: 'text/javascript' });`,
+      pageSandbox
+    );
+    expect(blobParts).toHaveLength(3);
+    expect(String(blobParts[1])).toContain('__ytObservePaidPlan(Mn,');
+    expect(String(blobParts[2])).toContain('wrapWrappedContent(Zt)');
   });
 
   it('keeps the original paid-plan result and call count through an additive Canvas wrapper', () => {
     const source =
       '(() => { function preparePaidCardPlan(input) {' +
       'globalThis.planCalls++; return input; }\n' +
-      'function paint(input) { return preparePaidCardPlan({ width: input }); }\n' +
+      'function renderWrappedContentSegments() {}\n' +
+      'function paint(input) { const plan = preparePaidCardPlan({ width: input }); ' +
+      'renderWrappedContentSegments(ctx, plan.body); renderWrappedContentSegments(ctx, plan.translation); return plan; }\n' +
       'function getRegularCardInsets() {}\n' +
       'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n' +
       'function main() { globalThis.planResult = paint(123); }\n\tmain();\n})();';
     const instrumented = instrumentCanvasPageScript(source, 'function probe() {}', true)!;
     expect(() => assertInstrumentedPageScript(source, instrumented)).not.toThrow();
-    const sandbox = { RendererBase: class {}, planCalls: 0, planResult: null };
+    const sandbox = {
+      RendererBase: class {},
+      ctx: {},
+      planCalls: 0,
+      planResult: null,
+      __ytPlacementProbe: { wrapWrappedContent: (render: unknown) => render },
+    };
     runInNewContext(instrumented, sandbox);
     expect(sandbox.planCalls).toBe(1);
     expect(sandbox.planResult).toEqual({ width: 123 });
     expect(instrumentCanvasPageScript(instrumented, undefined, true)).toBeNull();
+  });
+
+  it('attributes fragmented paid rows and reused bitmap ink to the actual plan section', () => {
+    const first = 'WINDOWS380_DETAILED_PAID';
+    const second = 'WINDOWS380_DARK_PAID';
+    const overlay = { width: 400, height: 200, closest: () => ({}) };
+    const glyph = { width: 40, height: 25, closest: () => null };
+    let nativeDraws = 0;
+    class FakeContext {
+      canvas: typeof overlay;
+      globalAlpha = 1;
+      font = '20px sans-serif';
+      lineWidth = 1;
+      constructor(canvas: typeof overlay) {
+        this.canvas = canvas;
+      }
+      fillText() {
+        nativeDraws++;
+      }
+      strokeText() {
+        nativeDraws++;
+      }
+      drawImage() {
+        nativeDraws++;
+      }
+      stroke() {}
+      clearRect() {}
+      measureText(text: string) {
+        return {
+          width: text.length * 8,
+          actualBoundingBoxLeft: 0,
+          actualBoundingBoxRight: text.length * 8,
+          actualBoundingBoxAscent: 18,
+          actualBoundingBoxDescent: 4,
+        };
+      }
+      getTransform() {
+        return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+      }
+    }
+    const source = `(() => {
+      function preparePaidCardPlan(input) {
+        globalThis.planCalls++;
+        return { height: 70, body: { lines: [1], height: 22 }, bodyY: 10,
+          translation: input.translatedText ? { lines: [1], height: 22 } : undefined,
+          translationY: input.translatedText ? 35 : undefined };
+      }
+      function renderWrappedContentSegments(ctx, segments, x, y, maxWidth, maxLines,
+        color, fontSize, outlineWidth, outlineOpacity, textCache, emojiCache,
+        getFont, measure, prepared) {
+        if (prepared === globalThis.lastPlan.body) {
+          if (globalThis.ownerId === '${first}') new FakeContext(glyph).fillText('WIND', 0, 20);
+          ctx.drawImage(glyph, 20, y, 40, 25);
+        } else {
+          ctx.fillText('한국어', 20, y);
+        }
+      }
+      function paint(id, y) {
+        globalThis.ownerId = id;
+        const plan = preparePaidCardPlan({ content: [{ content: id + ' original' }],
+          context: ctx, maxBodyLines: 4, translatedText: id === '${first}' ? '한국어' : null });
+        globalThis.lastPlan = plan;
+        renderWrappedContentSegments(ctx, [], 20, y + plan.bodyY, 200, 1,
+          '', 20, 0, 0, null, null, null, null, plan.body);
+        if (plan.translation) renderWrappedContentSegments(ctx, [], 20,
+          y + plan.translationY, 200, 1, '', 20, 0, 0, null, null, null, null,
+          plan.translation);
+        return plan;
+      }
+      function getRegularCardInsets() {}
+      var CanvasRenderer = class CanvasRenderer extends RendererBase {};
+      function main() {
+        const probe = globalThis.__ytPlacementProbe;
+        const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
+          config: { logicalWidth: 400, logicalHeight: 200, superChatLayout: 'stacked' } });
+        ctx.clearRect(0, 0, 400, 200);
+        globalThis.firstPlan = paint('${first}', 10);
+        globalThis.secondPlan = paint('${second}', 100);
+        ctx.drawImage(glyph, 300, 170, 40, 25);
+        probe.endRenderFrame(frame, [
+          { id: '${first}', x: 10, y: 10, width: 200, height: 70 },
+          { id: '${second}', x: 10, y: 100, width: 200, height: 70 }
+        ]);
+      }
+\tmain();
+    })();`;
+    const instrumented = instrumentCanvasPageScript(source, undefined, true);
+    expect(instrumented).not.toBeNull();
+    expect(() => assertInstrumentedPageScript(source, instrumented!)).not.toThrow();
+    const sandbox = {
+      FakeContext,
+      RendererBase: class {},
+      overlay,
+      glyph,
+      ctx: new FakeContext(overlay),
+      planCalls: 0,
+      ownerId: '',
+      lastPlan: null,
+      firstPlan: null,
+      secondPlan: null,
+      CanvasRenderingContext2D: FakeContext,
+      performance: { timeOrigin: 1000, now: () => 1 },
+      requestAnimationFrame: () => 1,
+      addEventListener: () => {},
+      postMessage: () => {},
+      MutationObserver: class {
+        observe() {}
+      },
+      document: { querySelectorAll: () => [] },
+      Blob: class {},
+      Worker: class {},
+      HTMLCanvasElement: class {},
+    };
+    runInNewContext(
+      `${canvasProbePrelude({ tokens: [first, second], observeCardPlans: true })}\n${instrumented}`,
+      sandbox
+    );
+    const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
+    expect(sandbox.planCalls).toBe(2);
+    expect(frame).toMatchObject({ complete: true, cleared: true, truncated: false });
+    expect(
+      frame.draws.map((draw: { id: string; section?: string }) => [draw.id, draw.section])
+    ).toEqual([
+      [first, 'body'],
+      [first, 'translation'],
+      [second, 'body'],
+    ]);
+    expect(
+      frame.draws.every(
+        (draw: { alpha: number; textSnippet: string | null }) =>
+          draw.alpha > 0 && !draw.textSnippet?.includes('WINDOWS380_')
+      )
+    ).toBe(true);
+    expect(nativeDraws).toBeGreaterThan(frame.draws.length);
+    expect(sandbox.firstPlan).not.toBe(sandbox.secondPlan);
   });
 
   it('retains only a bounded first complete visible draw with its committed row', () => {

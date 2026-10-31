@@ -28,7 +28,10 @@ artifacts under the controller's unchanged 64-file collection limit.
 On the detailed scene, a page-owned Translator stub records
 the accepted canonical tail and supplies a distinct selected translation; the
 probe requires its positive-alpha draw in the same complete frame. The fixture
-also opens the actual settings dialog and reads three drawn production Canvas
+binds paid body and translation draws to the actual prepared plan row passed to
+the shared text painter, so fragmented text and reused glyph bitmaps retain the
+source card ID and section. A plan allocation alone never counts as a draw.
+The fixture also opens the actual settings dialog and reads three drawn production Canvas
 preview samples under wide and stacked selections. `comment-display-matrix.json` binds the controller's exact
 source, core, build-log, bundle, profile, packaged page-script, fixture sources,
 preview, and video digests; review it with `result.json` and collected original PNGs.

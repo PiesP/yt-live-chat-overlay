@@ -200,18 +200,20 @@ describe('Windows comment display matrix contract', () => {
         backingRatioY: 1,
         active: [{ id, x: 10, y: 10, width: 160, height: 100 }],
         draws: [
-          { id, alpha: 1, rect, textSnippet: `${id} canonical body` },
+          { id, alpha: 1, rect, section: 'body', textSnippet: 'canonical body' },
           {
             id,
             alpha: 1,
             rect: { ...rect, top: 65, bottom: 77 },
-            textSnippet: `${id} MATRIX_TRANSLATED body`,
+            section: 'translation',
+            textSnippet: '한국어',
           },
           {
             id: member,
             alpha: 0.8,
             rect: { left: 10, top: 100, right: 80, bottom: 120 },
-            textSnippet: `${member} membership body`,
+            section: 'body',
+            textSnippet: 'membership body',
           },
         ],
         cardPlans: [
@@ -255,6 +257,21 @@ describe('Windows comment display matrix contract', () => {
     } satisfies Parameters<typeof paidRowBudget>[0];
     expect(paidRowBudget(sample, id, 4).plan.translationRows).toBe(2);
     expect(membershipEffect(sample, member).borderAlpha).toBe(0.75);
+    const bodyDraw = sample.frame.draws[0]!;
+    const translationDraw = sample.frame.draws[1]!;
+    for (const rejected of [
+      [bodyDraw],
+      [bodyDraw, { ...translationDraw, id: member }],
+      [bodyDraw, { ...translationDraw, alpha: 0 }],
+      [bodyDraw, { ...translationDraw, rect: { left: 970, right: 990, top: 65, bottom: 77 } }],
+    ]) {
+      expect(() =>
+        paidRowBudget({ ...sample, frame: { ...sample.frame, draws: rejected } }, id, 4)
+      ).toThrow();
+    }
+    expect(() =>
+      paidRowBudget({ ...sample, frame: { ...sample.frame, complete: false } }, id, 4)
+    ).toThrow();
     expect(() =>
       paidRowBudget(
         {
