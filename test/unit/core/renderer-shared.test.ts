@@ -55,6 +55,28 @@ function computeMessageOpacity(
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('computeMessageOpacity', () => {
+  it.each([true, false])(
+    'uses current motion remaining time for fade-out after a shorter reflow (scrolling=%s)',
+    (isScrolling) => {
+      const cfg = makeConfig({ depthLayersEnabled: false, ageFadeRate: 0 });
+      expect(
+        computeMessageOpacityPrimitive(false, 6000, 4000, isScrolling, SPEED_TIER.NEAR, cfg, 2264)
+      ).toBe(1);
+      expect(
+        computeMessageOpacityPrimitive(false, 6000, 4000, isScrolling, SPEED_TIER.NEAR, cfg, 3900)
+      ).toBeCloseTo(100 / 300);
+    }
+  );
+
+  it('retains initial fade-in and age fading when translation or resize lengthens motion', () => {
+    const cfg = makeConfig({ depthLayersEnabled: false });
+    expect(
+      computeMessageOpacityPrimitive(false, 150, 10_600, false, SPEED_TIER.NEAR, cfg, 1000)
+    ).toBeCloseTo(0.5);
+    expect(
+      computeMessageOpacityPrimitive(false, 6000, 10_600, true, SPEED_TIER.NEAR, cfg, 1000)
+    ).toBeCloseTo(0.4);
+  });
   // ── Basic / base-only ─────────────────────────────────────────────────
 
   describe('base opacity only (no fades, no dims, no age)', () => {

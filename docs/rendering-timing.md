@@ -42,10 +42,16 @@ Backlog velocity is `max(1, baseSpeed * max(1, backlogMultiplier))` in both
 renderers, without additional burst acceleration. This retains the existing
 Canvas readability policy while correcting faster Worker Backlog messages.
 The Worker may serialize a burst multiplier for ordinary messages, but Backlog
-ignores it, including while pending. Speed settings become authoritative at
-placement and at deliberate resize, translation, or settings reflow. A committed
-motion plan keeps its velocity and reservation until collision-aware reflow;
+ignores it, including while pending. Speed settings establish the nominal plan
+at placement and on deliberate motion-policy changes. Geometry reflow can adjust
+actual velocity to preserve the existing position and expiry, as described
+below. A committed plan keeps its velocity and reservation between reflows;
 pause and recovery preserve its elapsed progress and future entry.
+
+Fade-in and age dimming retain the first-appearance clock across reflow.
+Fade-out uses the current committed motion's remaining time, so a shorter plan
+does not accidentally become transparent while it is still alive. Pause offsets
+apply to both clocks; geometry changes do not restart fade-in.
 
 Vertical geometry uses the saved `fontSize` in logical pixels for measurement,
 regular drawing, prewarming, lane creation and reflow in both renderers.
@@ -125,12 +131,27 @@ policy, and forced retry deadline.
 Reflow gives messages currently crossing the viewport priority over future or
 offscreen entries. It first retains legal placements, then searches legal blocks
 for displaced messages within each group before admitting the next group.
-Existing order is preserved within each group. It preserves future entry
-deadlines and normalized elapsed progress.
-All accepted reservations rebuild the indexes and conservative lane summaries.
-Messages too tall for the viewport receive `oversized`; messages without a
-collision-free block receive `reflow_capacity`. Capacity loss is a permanent
-disposition rather than an overlapping draw or an additional retention queue.
+Existing order is preserved within each group. Density changes prefer the legal
+new-grid position nearest the previous physical Y, rather than retaining a lane
+index whose meaning changed. Grid rounding and collision constraints can still
+require movement.
+
+Translation and resize preserve the current X coordinate and committed expiry
+of already visible scrolling messages. One affine velocity covers the revised
+distance by that deadline, so it can differ from the configured nominal speed.
+This anchors X rather than both edges when width changes. Fixed messages remain
+centered; viewport, collision and capacity changes can require repositioning.
+Future reservations retain their geometric entry deadline. A deliberate mode or
+speed-policy change can establish one new deadline; unchanged geometry does not
+restart or extend the plan.
+
+Accepted reservations rebuild the indexes and conservative lane summaries.
+An active message that cannot be reconciled stays hidden in the existing bounded
+active array without a lane reservation. Its committed clock and resource owners
+remain intact until normal expiry or a later successful reflow. Geometry changes
+can restore it while it is alive; expired content is not revived. This adds no
+separate retention queue. New pending candidates retain the existing admission
+and drop policy.
 
 Worker recovery snapshots use validated epoch timestamps at the cross-thread
 boundary, then return to the Canvas monotonic clock. A valid snapshot preserves

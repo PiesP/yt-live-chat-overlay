@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **Burst and Backlog settings** — Interpret burst thresholds as messages per elapsed second, cover both ends of the admitted Backlog range when sampling, and pause Backlog injection at a zero maximum. Existing saved numbers remain compatible; labels explain sampling limits and randomized target rates.
+- **Motion and reflow** — Fade out against the current remaining lifetime, retain nearby physical rows through density changes, and preserve scrolling position and expiry across translation or resize. Temporarily unplaceable active comments stay hidden within existing bounds until they fit or expire. Existing settings remain compatible.
 - **Comment content** — Keep combining marks and emoji sequences whole when shortening ordinary comments. Translation and accessible alternatives receive the bounded accepted body while the visible comment keeps its existing compact limit. Existing settings and message IDs remain compatible.
 - **Pending comment storage** — Release consumed Main Canvas queue references during overflow, draining and trimming, with bounded bucket storage across repeated reuse. Priority, FIFO order and drop accounting remain intact.
 - **Opacity controls** — Preserve outline opacity across its full 0–100% range through preview, import, save and reload. Text opacity keeps its 50–100% range; each slider and number input now shares its range and adjustment feedback.

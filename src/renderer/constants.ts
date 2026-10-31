@@ -150,6 +150,8 @@ export interface CanvasMessage {
   trackDrops?: boolean;
   /** Last committed geometry, retained for resize and mode transitions. */
   motion?: MessageMotionPlan;
+  /** No legal safe-zone lane currently fits; retain the clock until expiry. */
+  reflowHidden?: boolean;
   message: ChatMessage;
   /** Position/animation start time (includes stagger delay). */
   startTime: number;

@@ -456,8 +456,10 @@ describe('Placement through source, runtime and renderer', () => {
       for (const message of changed) {
         const old = previous.find((entry) => entry.id === message.id);
         if (!old) throw new Error('lost prior placement');
-        const beforeProgress = (11_000 - old.motion.startTime) / old.duration;
-        expect((11_000 - message.motion.startTime) / message.duration).toBeCloseTo(beforeProgress);
+        // Geometry changes preserve the current position and expiry, rather
+        // than the old normalized fraction of a differently sized trajectory.
+        expect(message.x).toBeCloseTo(old.x);
+        expect(message.motion.endTime).toBeCloseTo(old.motion.endTime);
       }
       if (mode === 'worker') {
         if (!harness.worker) throw new Error('Worker missing');
