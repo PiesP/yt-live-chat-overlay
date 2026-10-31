@@ -1164,14 +1164,12 @@ async function waitForProbeConfig(
   await page.waitForFunction(
     ({ selectedBackend, config }) => {
       const probe = window.__ytPlacementProbe;
-      const selected =
-        selectedBackend === 'worker'
-          ? probe?.workers.find((record) => record.ready)?.sample
-          : probe;
+      const worker = probe?.workers.find((record) => record.ready);
+      const selected = selectedBackend === 'worker' ? worker?.sample : probe;
       const frame = selected?.latestRenderFrame;
       const exact = selected?.exact?.config;
       const player = document.querySelector('#movie_player')?.getBoundingClientRect();
-      return Boolean(
+      const matches = Boolean(
         frame?.complete &&
         player &&
         innerWidth === config.viewportWidth &&
@@ -1181,9 +1179,19 @@ async function waitForProbeConfig(
         (config.fontSize === undefined || exact?.fontSize === config.fontSize) &&
         (config.safeTop === undefined || exact?.safeTop === config.safeTop)
       );
+      if (!matches && selectedBackend === 'worker' && worker && probe) {
+        const now = performance.now();
+        if (now - (worker.dueFlushAt ?? -Infinity) >= 100) {
+          const requestId = (probe.flushSequence ?? 0) + 1;
+          probe.flushSequence = requestId;
+          worker.dueFlushAt = now;
+          worker.worker.postMessage({ type: 'ytPlacementFlush', requestId });
+        }
+      }
+      return matches;
     },
     { selectedBackend: backend, config: expected },
-    { timeout: 5000 }
+    { polling: 100, timeout: 5000 }
   );
 }
 
@@ -2746,9 +2754,13 @@ async function runOverloadBackend(options: {
             const selected = selectedBackend === 'worker' ? worker?.sample : probe;
             const frame = selected?.latestRenderFrame;
             const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+            const video = document.querySelector('video')?.getBoundingClientRect();
             return {
               viewportWidth: innerWidth,
               playerHeight: player?.height ?? null,
+              videoRect: video
+                ? { width: video.width, height: video.height, top: video.top, bottom: video.bottom }
+                : null,
               workerReady: Boolean(worker),
               sourceHooked: probe?.sourceHooked ?? false,
               canvasSourceHooked: probe?.canvasSourceHooked ?? false,
