@@ -550,19 +550,20 @@ describe('Worker reservation safety', () => {
   it('preserves future starts and resolves fixed capacity when reflow shrinks the lane range', () => {
     const { internals } = setup('top');
     internals.drainQueue(0, 640, 40);
+    vi.spyOn(performance, 'now').mockReturnValue(100);
     const futureStarts = new Map(internals.activeMessages.map((m) => [m.id, m.startTime]));
     expect([...futureStarts.values()].some((time) => time > 0)).toBe(true);
     internals.numLanes = 1;
     internals.logicalHeight = 20;
     internals.reflowActiveMessages();
-    expect(internals.totalDrops).toBe(1);
-    expect(internals.dropReasons.reflow_capacity).toBe(1);
-    expect(internals.activeMessages).toHaveLength(2);
+    expect(internals.totalDrops).toBe(0);
+    expect(internals.activeMessages).toHaveLength(3);
+    expect(internals.activeMessages.filter((m) => m.reflowHidden)).toHaveLength(1);
     expect(internals.activeMessages.every((m) => m.startTime === futureStarts.get(m.id))).toBe(
       true
     );
-    for (const a of internals.activeMessages) {
-      for (const b of internals.activeMessages) {
+    for (const a of internals.activeMessages.filter((m) => !m.reflowHidden)) {
+      for (const b of internals.activeMessages.filter((m) => !m.reflowHidden)) {
         if (a === b) continue;
         expect(
           motionPlansCollide(
@@ -576,28 +577,61 @@ describe('Worker reservation safety', () => {
     }
   });
 
-  it('labels an active message that becomes taller than the viewport on reflow', () => {
+  it('hides an active message that becomes taller than the viewport on reflow', () => {
     const { internals } = setup('top');
     internals.drainQueue(0, 640, 40);
+    vi.spyOn(performance, 'now').mockReturnValue(100);
     const first = internals.activeMessages[0];
     expect(first).toBeDefined();
     if (!first) return;
     first.height = 10_000;
     internals.reflowActiveMessages();
-    expect(internals.dropReasons.oversized).toBe(1);
+    expect(internals.dropReasons.oversized).toBe(0);
+    expect(first.reflowHidden).toBe(true);
+  });
+
+  it('restores a hidden active only within its original lifetime', () => {
+    const { internals } = setup('top');
+    internals.drainQueue(0, 640, 40);
+    const first = internals.activeMessages[0];
+    expect(first).toBeDefined();
+    if (!first) return;
+    internals.activeMessages.splice(1);
+    const deadline = first.motion?.endTime ?? first.startTime + first.duration;
+    vi.spyOn(performance, 'now').mockReturnValue(100);
+    const priorLaneCount = internals.numLanes;
+    internals.numLanes = 0;
+    internals.reflowActiveMessages();
+    expect(first.reflowHidden).toBe(true);
+    expect(internals.activeMessages).toContain(first);
+    internals.numLanes = priorLaneCount;
+    first.height = 10_000;
+    internals.reflowActiveMessages();
+    expect(first.reflowHidden).toBe(true);
+    expect(internals.activeMessages).toContain(first);
+    first.height = 20;
+    internals.reflowActiveMessages();
+    expect(first.reflowHidden).toBeUndefined();
+    expect(first.motion?.endTime).toBeCloseTo(deadline);
+    vi.spyOn(performance, 'now').mockReturnValue(deadline + 1);
+    internals.reflowActiveMessages();
+    expect(first.reflowHidden).toBe(true);
+    (internals as typeof internals & { renderFrame(): void }).renderFrame();
+    expect(internals.activeMessages).not.toContain(first);
   });
 
   it('reconciles a live reduced-motion preference change before drawing', () => {
     const { renderer, internals } = setup();
     internals.drainQueue(0, 640, 40);
+    vi.spyOn(performance, 'now').mockReturnValue(100);
     renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { reducedMotion: true } }));
     expect(
-      internals.activeMessages.every(
-        (m) => m.motion?.mode === 'top' && m.x === Math.floor((640 - m.width) / 2)
-      )
+      internals.activeMessages
+        .filter((m) => !m.reflowHidden)
+        .every((m) => m.motion?.mode === 'top' && m.x === Math.floor((640 - m.width) / 2))
     ).toBe(true);
-    for (const a of internals.activeMessages) {
-      for (const b of internals.activeMessages) {
+    for (const a of internals.activeMessages.filter((m) => !m.reflowHidden)) {
+      for (const b of internals.activeMessages.filter((m) => !m.reflowHidden)) {
         if (a === b || a.y + a.height <= b.y || b.y + b.height <= a.y) continue;
         expect(a.motion && b.motion && motionPlansCollide(a.motion, b.motion, 0.08, 0)).toBe(false);
       }
@@ -605,7 +639,11 @@ describe('Worker reservation safety', () => {
     renderer.handleMessage(
       makeEvent({ type: 'updateConfig', config: { ignoreReducedMotion: true } })
     );
-    expect(internals.activeMessages.every((m) => m.motion?.mode === 'scroll')).toBe(true);
+    expect(
+      internals.activeMessages
+        .filter((m) => !m.reflowHidden)
+        .every((m) => m.motion?.mode === 'scroll')
+    ).toBe(true);
   });
 });
 
@@ -614,6 +652,143 @@ beforeEach(() => {
   // Spy on performance.now again (clearAllMocks removes it)
   vi.spyOn(performance, 'now').mockReturnValue(10000);
   resetWorkerForTests();
+});
+
+describe('Worker committed-motion fade', () => {
+  it.each([
+    ['scroll', false, 0],
+    ['top', false, 0],
+    ['scroll', true, 300],
+  ] as const)(
+    'keeps a reflowed %s message visible with reduced motion=%s and pause=%s',
+    (mode, reducedMotion, pausedDuration) => {
+      const renderer = initializeRenderer({ danmakuMode: mode, reducedMotion });
+      const internals = renderer as unknown as {
+        activeMessages: ActiveMessage[];
+        midOpacityBuckets: ActiveMessage[][];
+        renderFrame(): void;
+      };
+      const message: ActiveMessage = {
+        id: 'reflow-fade',
+        x: 640,
+        y: 20,
+        startX: 640,
+        width: 100,
+        height: 20,
+        startTime: 7736 - pausedDuration,
+        fadeStartTime: 4000 - pausedDuration,
+        duration: 4000,
+        invDuration: 1 / 4000,
+        pausedDuration,
+        laneIndex: 0,
+        laneSlotCount: 1,
+        laneArrayIndices: [],
+        speedTier: 1,
+        text: '',
+        color: '#fff',
+        content: [],
+        ghostText: '',
+      };
+      internals.activeMessages.push(message);
+      internals.renderFrame();
+      expect(internals.midOpacityBuckets.slice(1).some((bucket) => bucket.includes(message))).toBe(
+        true
+      );
+    }
+  );
+});
+
+describe('Worker physical reflow anchors', () => {
+  it('keeps an uncontested row near physical Y across density changes', () => {
+    const renderer = initializeRenderer({ danmakuMode: 'top', safeTop: 0, safeBottom: 0 });
+    renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height: 400, dpr: 1 }));
+    const internals = renderer as unknown as {
+      activeMessages: ActiveMessage[];
+      laneHeight: number;
+    };
+    const grid = internals.laneHeight;
+    const height = Math.floor(grid);
+    const message: ActiveMessage = {
+      id: 'density-y',
+      x: 270,
+      y: 8 * grid + Math.floor((grid - height) / 2),
+      startX: 270,
+      width: 100,
+      height,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 30_000,
+      invDuration: 1 / 30_000,
+      pausedDuration: 0,
+      laneIndex: 8,
+      laneSlotCount: 1,
+      laneArrayIndices: [],
+      speedTier: 1,
+      text: '',
+      color: '#fff',
+      content: [],
+      ghostText: '',
+      kind: 'superchat',
+    };
+    internals.activeMessages.push(message);
+    let previousY = message.y;
+    for (const factor of [0.75, 0.5]) {
+      renderer.handleMessage(makeEvent({ type: 'laneDensity', factor }));
+      expect(message.reflowHidden).toBeUndefined();
+      expect(Math.abs(message.y - previousY)).toBeLessThanOrEqual(internals.laneHeight / 2 + 1);
+      previousY = message.y;
+    }
+  });
+
+  it('keeps current X and expiry when translated geometry widens from 300 to 600px', () => {
+    const renderer = initializeRenderer({
+      danmakuMode: 'scroll',
+      speedPxPerSec: 250,
+      scrollDurationMinMs: 1000,
+      safeTop: 0,
+      safeBottom: 0,
+    });
+    renderer.handleMessage(makeEvent({ type: 'resize', width: 1280, height: 400, dpr: 1 }));
+    const internals = renderer as unknown as {
+      activeMessages: ActiveMessage[];
+      messageById: Map<string, ActiveMessage>;
+    };
+    const message: ActiveMessage = {
+      id: 'widened',
+      x: 530,
+      y: 0,
+      startX: 1280,
+      width: 300,
+      height: 20,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 6720,
+      invDuration: 1 / 6720,
+      pausedDuration: 0,
+      laneIndex: 0,
+      laneSlotCount: 1,
+      laneArrayIndices: [],
+      speedTier: 1,
+      text: '',
+      color: '#fff',
+      content: [],
+      ghostText: '',
+      kind: 'superchat',
+    };
+    message.motion = motionPlanFromMessage(message, 'scroll', 1280, 100);
+    internals.activeMessages.push(message);
+    internals.messageById.set(message.id, message);
+    vi.spyOn(performance, 'now').mockReturnValue(3000);
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateMessageGeometries',
+        geometries: [{ id: message.id, width: 600, height: 20 }],
+      })
+    );
+    expect(message.reflowHidden).toBeUndefined();
+    expect(message.x).toBeCloseTo(530);
+    expect(message.motion?.endTime).toBeCloseTo(6720);
+  });
 });
 
 afterEach(() => {

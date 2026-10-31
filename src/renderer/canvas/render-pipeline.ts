@@ -195,9 +195,8 @@ export function cleanupAndBucketStage(
   ctx: CanvasRenderContext,
   now: number,
   dims: OverlayDimensions,
-  mode: string
+  _mode: string
 ): CleanupResult {
-  const isScrolling = mode === 'scroll' || mode === 'reverse';
   const farBuckets = ctx.farOpacityBuckets;
   const midBuckets = ctx.midOpacityBuckets;
   const nearBuckets = ctx.nearOpacityBuckets;
@@ -228,7 +227,7 @@ export function cleanupAndBucketStage(
     writeIdx++;
 
     // Still in stagger delay — keep in array but skip rendering
-    if (elapsed < 0) continue;
+    if (elapsed < 0 || msg.reflowHidden) continue;
 
     // ── Render pre-compute ──
     // Save previous position for temporal frame blending (FAR-tier motion blur)
@@ -241,6 +240,7 @@ export function cleanupAndBucketStage(
       ctx.isReducedMotionActive,
       false
     );
+    const isScrolling = effectiveMode === 'scroll' || effectiveMode === 'reverse';
     msg.x = messageXAtElapsed(
       effectiveMode,
       msg.startX,
@@ -259,7 +259,8 @@ export function cleanupAndBucketStage(
       msg.duration,
       isScrolling,
       msg.speedTier,
-      ctx.cachedOpacityConfig
+      ctx.cachedOpacityConfig,
+      elapsed
     );
 
     const bucketIndex = Math.min(

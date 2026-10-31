@@ -358,6 +358,118 @@ describe('Canvas reservation safety', () => {
     renderer.destroy();
   });
 
+  it('keeps an uncontested Main row near its physical Y across density changes', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const dimensions = { width: 640, height: 400 };
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ danmakuMode: 'top', fontSize: 16, laneSpacing: 0 })
+    );
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      reflowActiveMessages(viewport: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.reset(dimensions, 1000);
+    const grid = internals.laneAllocator.getLaneHeight();
+    const height = Math.floor(grid);
+    const source = makeMessage('density-y', 'density');
+    const laneIndex = 8;
+    const message = {
+      message: source,
+      renderMessage: source,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 10_000,
+      invDuration: 1 / 10_000,
+      width: 100,
+      height,
+      startX: 270,
+      x: 270,
+      y: laneIndex * grid + Math.floor((grid - height) / 2),
+      pausedDuration: 0,
+      laneIndex,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'density',
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    internals.activeMessages.push(message);
+    const initialY = message.y;
+    internals.laneAllocator.restore({
+      heap: [],
+      indexMap: {},
+      laneHeight: grid,
+      laneCount: 0,
+      speedTierLanes: {},
+    });
+    internals.reflowActiveMessages(dimensions);
+    expect(message.reflowHidden).toBe(true);
+    internals.laneAllocator.reset(dimensions, 1000);
+    internals.reflowActiveMessages(dimensions);
+    expect(message.reflowHidden).toBeUndefined();
+    for (const factor of [0.75, 0.5]) {
+      internals.laneAllocator.updateLaneDensityFactor(factor);
+      internals.laneAllocator.reset(dimensions, 1000);
+      const nextGrid = internals.laneAllocator.getLaneHeight();
+      internals.reflowActiveMessages(dimensions);
+      expect(message.reflowHidden).toBeUndefined();
+      expect(Math.abs(message.y - initialY)).toBeLessThanOrEqual(nextGrid / 2 + 1);
+    }
+    renderer.destroy();
+  });
+
+  it('anchors Main translation width at current X and preserves expiry', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(3000);
+    const dimensions = { width: 1280, height: 400 };
+    const overlay = new Overlay();
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({
+        danmakuMode: 'scroll',
+        speedPxPerSec: 250,
+        scrollDurationMinMs: 1000,
+        exitPaddingPx: 100,
+      })
+    );
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      activeMessages: CanvasMessage[];
+      reflowActiveMessages(viewport: { width: number; height: number }): void;
+    };
+    internals.laneAllocator.reset(dimensions, 3000);
+    const source = makeMessage('width-x', 'source');
+    const message = {
+      message: source,
+      renderMessage: source,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 6720,
+      invDuration: 1 / 6720,
+      width: 300,
+      height: 20,
+      startX: 1280,
+      x: 530,
+      y: 0,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'source',
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    message.motion = motionPlanFromMessage(message, 'scroll', 1280, 100);
+    internals.activeMessages.push(message);
+    message.width = 600;
+    internals.reflowActiveMessages(dimensions);
+    expect(message.x).toBeCloseTo(530);
+    expect(message.motion?.endTime).toBeCloseTo(6720);
+    renderer.destroy();
+  });
+
   it.each([
     {
       name: 'mixed heights with only 1px clearance',

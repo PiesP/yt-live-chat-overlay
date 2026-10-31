@@ -17,6 +17,79 @@ import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 describe('scrolling motion on the main Canvas path', () => {
+  it('keeps a hidden active clock until expiry without sending it to a draw bucket', () => {
+    const message = {
+      message: { id: 'hidden', text: 'hidden', kind: 'text', content: [] },
+      reflowHidden: true,
+      startTime: 0,
+      fadeStartTime: 0,
+      pausedDuration: 0,
+      duration: 1000,
+      x: 100,
+      y: 100,
+      width: 100,
+      height: 20,
+      speedTier: 1,
+    };
+    const releaseMessage = vi.fn();
+    const ctx = makeDrainCtx({
+      settings: DEFAULT_SETTINGS,
+      activeMessages: [message] as never[],
+      messageActivator: { releaseMessage } as never,
+      farOpacityBuckets: Array.from({ length: 32 }, () => []),
+      midOpacityBuckets: Array.from({ length: 32 }, () => []),
+      nearOpacityBuckets: Array.from({ length: 32 }, () => []),
+    });
+    cleanupAndBucketStage(ctx, 500, { width: 640, height: 360 }, 'scroll');
+    expect(ctx.midOpacityBuckets.every((bucket) => bucket.length === 0)).toBe(true);
+    expect(releaseMessage).not.toHaveBeenCalled();
+    cleanupAndBucketStage(ctx, 1000, { width: 640, height: 360 }, 'scroll');
+    expect(releaseMessage).toHaveBeenCalledWith(message);
+  });
+  it.each([
+    ['scroll', false, 0],
+    ['top', false, 0],
+    ['scroll', true, 300],
+  ] as const)(
+    'keeps a reflowed %s message visible with reduced motion=%s and pause=%s',
+    (mode, reduced, pausedDuration) => {
+      const message = {
+        message: { id: 'fade', text: 'fade', kind: 'text', content: [] },
+        startTime: 7736 - pausedDuration,
+        fadeStartTime: 4000 - pausedDuration,
+        pausedDuration,
+        duration: 4000,
+        invDuration: 1 / 4000,
+        startX: 640,
+        x: 640,
+        y: 0,
+        width: 100,
+        height: 20,
+        speedTier: 1,
+      };
+      const ctx = makeDrainCtx({
+        settings: { ...DEFAULT_SETTINGS, danmakuMode: mode },
+        activeMessages: [message] as never[],
+        isReducedMotionActive: reduced,
+        farOpacityBuckets: Array.from({ length: 32 }, () => []),
+        midOpacityBuckets: Array.from({ length: 32 }, () => []),
+        nearOpacityBuckets: Array.from({ length: 32 }, () => []),
+        cachedOpacityConfig: {
+          baseOpacity: 1,
+          fadeDurationMs: 300,
+          invFadeDuration: 1 / 300,
+          backlogOpacityMultiplier: 1,
+          depthLayersEnabled: false,
+          depthFarOpacityMul: 1,
+          ageFadeRate: 0,
+        },
+      });
+      cleanupAndBucketStage(ctx, 10_000, { width: 640, height: 360 }, mode);
+      expect(
+        ctx.midOpacityBuckets.slice(1).some((bucket) => bucket.includes(message as never))
+      ).toBe(true);
+    }
+  );
   it.each([false, true])(
     'uses fixed position only when effective reduced motion is %s',
     (reducedMotion) => {
