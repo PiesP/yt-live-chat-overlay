@@ -29,6 +29,7 @@ import type { ChromeProcessIdentity } from './chrome-process.ts';
 import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.ts';
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
+import { readManagerIngressFifoSelector, runManagerIngressFifo } from './comment-display-matrix.ts';
 import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   readInstalledViewingTaskSelector,
@@ -290,6 +291,7 @@ type ChromeResult<Live = LiveObservation> = {
   installedTranslationWorker?: Awaited<
     ReturnType<typeof runInstalledTranslationWorkerFixture>
   > | null;
+  managerIngressFifo?: Awaited<ReturnType<typeof runManagerIngressFifo>> | null;
   cleanup: Record<string, unknown>;
   browserVersion?: string;
   installationMethod?: string;
@@ -2477,12 +2479,14 @@ export async function runChromeInstallation({
   const installedViewingSelected = await readInstalledViewingTaskSelector(root);
   const translatorNativeSelected = await readTranslatorNativeSelector(root);
   const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
+  const managerFifoSelected = await readManagerIngressFifoSelector(root);
   assert(
     Number(opacitySelected) +
       Number(requestDeadlineSelected) +
       Number(installedViewingSelected) +
       Number(Boolean(translatorNativeSelected)) +
-      Number(translationWorkerSelected) <=
+      Number(translationWorkerSelected) +
+      Number(managerFifoSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
@@ -2519,6 +2523,13 @@ export async function runChromeInstallation({
     assert.equal(headless, false, 'Installed translation Worker requires headed Chrome');
     assert.equal(installation, 'extension', 'Installed translation Worker requires the extension');
     assert.deepEqual(liveUrls, [], 'Installed translation Worker cannot use public live URLs');
+  }
+  if (managerFifoSelected) {
+    assert.equal(await readFocusedScenario(root), null, 'Manager FIFO cannot combine selectors');
+    assert.equal(liveObservation, null, 'Manager FIFO cannot use duration observation');
+    assert.equal(browserName, 'msedge', 'Manager FIFO requires installed Edge');
+    assert.equal(installation, 'extension', 'Manager FIFO requires the extension');
+    assert.deepEqual(liveUrls, [], 'Manager FIFO cannot use public live URLs');
   }
   if (translatorNativeSelected) {
     assert.equal(
@@ -2594,7 +2605,7 @@ export async function runChromeInstallation({
       installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
     if (opacitySelected)
       assert.equal(extensionUpgradeInput, null, 'Opacity fixture cannot run an upgrade');
-    if (translatorNativeSelected || translationWorkerSelected) {
+    if (translatorNativeSelected || translationWorkerSelected || managerFifoSelected) {
       assert.equal(
         extensionUpgradeInput,
         null,
@@ -2750,6 +2761,17 @@ export async function runChromeInstallation({
         installWorkerProbe: installFixtureWorkerProbe,
       });
       assert.equal(result.installedTranslationWorker.status, 'observed');
+      return result;
+    }
+    if (managerFifoSelected) {
+      assert(extensionId, 'Manager FIFO requires an installed extension ID');
+      result.managerIngressFifo = await runManagerIngressFifo({
+        context,
+        root,
+        output,
+        extensionId,
+      });
+      assert.equal(result.managerIngressFifo.status, 'passed');
       return result;
     }
     if (requestDeadlineSelected) {

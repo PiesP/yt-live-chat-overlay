@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runInNewContext, Script } from 'node:vm';
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -33,6 +36,8 @@ import {
   overloadTrace,
   overflowSeedAdmissionFinding,
   paidRowBudget,
+  prepareManagerFifoBackground,
+  readManagerIngressFifoSelector,
   planPaidCaptureWait,
   planRoleVisibilityWait,
   planVisibleItemWait,
@@ -53,6 +58,150 @@ const source = MATRIX_BATCHES.content.map(
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('selects only the exact source-owned Manager FIFO input', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'yt-manager-fifo-'));
+    const inputs = join(root, 'validation/windows/inputs');
+    try {
+      expect(await readManagerIngressFifoSelector(root)).toBe(false);
+      await mkdir(inputs, { recursive: true });
+      const path = join(inputs, 'manager-ingress-fifo.json');
+      await writeFile(path, '{"scenario":"manager-ingress-fifo"}');
+      expect(await readManagerIngressFifoSelector(root)).toBe(true);
+      await writeFile(path, '{"scenario":"overflow"}');
+      await expect(readManagerIngressFifoSelector(root)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('warms only the exact installed background worker and retains the owned page until probe setup', async () => {
+    const extensionId = 'a'.repeat(32);
+    const exactUrl = `chrome-extension://${extensionId}/background.js`;
+    const matching = { url: () => exactUrl, evaluate: vi.fn(async () => extensionId) };
+    const foreign = { url: () => 'chrome-extension://foreign/background.js' };
+    const workers: Array<typeof matching | typeof foreign> = [foreign];
+    const page = {
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+    const context = {
+      serviceWorkers: () => workers,
+      newPage: vi.fn(async () => page),
+      waitForEvent: vi.fn(
+        async (_name: string, options: { predicate: (worker: unknown) => boolean }) => {
+          expect(options.predicate(foreign)).toBe(false);
+          expect(options.predicate(matching)).toBe(true);
+          workers.push(matching);
+          return matching;
+        }
+      ),
+    } as unknown as Parameters<typeof prepareManagerFifoBackground>[0];
+    const ready = await prepareManagerFifoBackground(context, extensionId, '<html></html>');
+    expect(ready.activation).toBe('owned-fixture');
+    expect(ready.warmupPage).toBe(page);
+    expect(page.close).not.toHaveBeenCalled();
+    expect(matching.evaluate).toHaveBeenCalledWith('chrome.runtime.id');
+    await ready.warmupPage?.close();
+    expect(page.close).toHaveBeenCalledTimes(1);
+    const reused = await prepareManagerFifoBackground(context, extensionId, '<html></html>');
+    expect(reused).toEqual({ warmupPage: null, activation: 'already-running' });
+    expect(
+      (context as unknown as { newPage: ReturnType<typeof vi.fn> }).newPage
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a failed Manager FIFO warmup when the exact worker never appears', async () => {
+    const page = {
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+    const context = {
+      serviceWorkers: () => [],
+      newPage: async () => page,
+      waitForEvent: async () => {
+        throw new Error('Exact worker activation timed out');
+      },
+    } as unknown as Parameters<typeof prepareManagerFifoBackground>[0];
+    await expect(
+      prepareManagerFifoBackground(context, 'a'.repeat(32), '<html></html>')
+    ).rejects.toThrow('Exact worker activation timed out');
+    expect(page.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains both Manager FIFO activation and warmup cleanup failures', async () => {
+    const activationError = new Error('Exact worker activation timed out');
+    const cleanupError = new Error('Owned warmup page did not close');
+    const page = {
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => {}),
+      close: vi.fn(async () => {
+        throw cleanupError;
+      }),
+    };
+    const context = {
+      serviceWorkers: () => [],
+      newPage: async () => page,
+      waitForEvent: async () => {
+        throw activationError;
+      },
+    } as unknown as Parameters<typeof prepareManagerFifoBackground>[0];
+    let failure: unknown;
+    try {
+      await prepareManagerFifoBackground(context, 'a'.repeat(32), '<html></html>');
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) throw new Error('Expected both failures');
+    expect(failure.errors).toEqual([activationError, cleanupError]);
+    expect(page.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the exact ordered ordinary IDs from returned native Worker posts', () => {
+    const posts: Array<Record<string, unknown>> = [];
+    class TestManager {
+      worker = { postMessage: (message: Record<string, unknown>) => posts.push(message) };
+      latestWorkerPendingDepth = 0;
+      currentEpoch = 0;
+      deps = { observability: { getMetrics: () => ({ totalDropped: 4 }) } };
+      sendToWorker(message: { id: string }, id = message.id) {
+        this.worker.postMessage({ type: 'addMessages', messages: [{ id }] });
+        return true;
+      }
+      applyBatchReceipt() {}
+      setPaused() {}
+    }
+    const target: Record<string, unknown> = {};
+    attachWorkerManagerProbe(
+      TestManager,
+      target,
+      ['WINDOWS387_FIFO_PAID_BOOTSTRAP', 'WINDOWS387_FIFO_OLD_4', 'WINDOWS387_FIFO_NEW_0'],
+      false
+    );
+    const manager = new TestManager();
+    manager.sendToWorker({ id: 'WINDOWS387_FIFO_PAID_BOOTSTRAP' });
+    const probe = target.__ytMatrixManagerProbe as {
+      read: () => {
+        nativePostedOrdinaryIds: string[];
+        omittedNativePostedOrdinaryIds: number;
+      };
+      sendFixture: (id: string, kind: 'text') => boolean;
+      droppedCount: () => number;
+    };
+    expect(probe.sendFixture('WINDOWS387_FIFO_OLD_4', 'text')).toBe(true);
+    expect(probe.sendFixture('WINDOWS387_FIFO_NEW_0', 'text')).toBe(true);
+    expect(probe.read().nativePostedOrdinaryIds).toEqual([
+      'WINDOWS387_FIFO_OLD_4',
+      'WINDOWS387_FIFO_NEW_0',
+    ]);
+    expect(probe.read().omittedNativePostedOrdinaryIds).toBe(0);
+    expect(probe.droppedCount()).toBe(4);
+    expect(posts).toHaveLength(3);
+    expect(() => probe.sendFixture('not-fixture-owned', 'text')).toThrow();
+  });
+
   it('binds presentation capture to full or source-limited near-full paid ink', async () => {
     const id = 'WINDOWS380_DETAILED_PAID';
     const makeSample = (
