@@ -171,7 +171,7 @@ type ActiveRow = {
 };
 type Draw = {
   id: string;
-  section?: 'body' | 'translation' | undefined;
+  section?: 'body' | 'translation' | 'regular' | undefined;
   frameId: number;
   kind?: string;
   alpha: number;
@@ -342,6 +342,7 @@ type ProbeState = ProbeSample & {
   currentFrame: { startedAt: number; preClearMs: number | null } | null;
   measuredPlans: Record<string, { width: number; height: number; maxBodyLines: number }>;
   registerPlanSections: (plan: object, id: string, context: CanvasContext) => void;
+  registerActiveContent: (rows: unknown[], context: CanvasContext) => void;
   wrapWrappedContent: (render: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown;
   requestAtEpochMs?: number;
   flushSequence?: number;
@@ -443,8 +444,15 @@ function installProbeRuntime(options: ProbeOptions) {
     object,
     { id: string; section: 'body' | 'translation'; context: CanvasContext }
   >();
-  let textOwner: { id: string; section: 'body' | 'translation'; context: CanvasContext } | null =
-    null;
+  let activeContent = new WeakMap<
+    object,
+    { id: string; section: 'regular'; context: CanvasContext } | null
+  >();
+  let textOwner: {
+    id: string;
+    section: 'body' | 'translation' | 'regular';
+    context: CanvasContext;
+  } | null = null;
   const frameContexts = new WeakMap<RenderFrame, CanvasContext>();
   const state = {
     frames: [],
@@ -477,11 +485,39 @@ function installProbeRuntime(options: ProbeOptions) {
     if (rows.translation)
       planSections.set(rows.translation, { id, section: 'translation', context });
   };
+  state.registerActiveContent = (rows, context) => {
+    activeContent = new WeakMap();
+    for (const candidate of rows) {
+      if (!candidate || typeof candidate !== 'object') continue;
+      const row = candidate as {
+        id?: string;
+        content?: object;
+        message?: { id?: string; content?: object };
+        renderMessage?: { content?: object };
+      };
+      const id = row.id ?? row.message?.id;
+      const content = row.renderMessage?.content ?? row.content ?? row.message?.content;
+      if (!id || !ids.has(id) || !Array.isArray(content) || !content.length) continue;
+      const previous = activeContent.get(content);
+      activeContent.set(
+        content,
+        activeContent.has(content) && (!previous || previous.id !== id)
+          ? null
+          : { id, section: 'regular', context }
+      );
+    }
+  };
   state.wrapWrappedContent = (render) =>
     function (this: unknown, ...args: unknown[]) {
       const context = args[0] as CanvasContext;
       const prepared = args.at(-1);
-      const owner = prepared && typeof prepared === 'object' ? planSections.get(prepared) : null;
+      const segments = args[1];
+      const owner =
+        prepared && typeof prepared === 'object'
+          ? planSections.get(prepared)
+          : segments && typeof segments === 'object'
+            ? activeContent.get(segments)
+            : null;
       const previous = textOwner;
       textOwner = owner?.context === context && state.currentRenderFrame ? owner : null;
       try {
@@ -665,7 +701,9 @@ function installProbeRuntime(options: ProbeOptions) {
       frame.draws.push({
         id,
         section:
-          ink?.section === 'body' || ink?.section === 'translation' ? ink.section : undefined,
+          ink?.section === 'body' || ink?.section === 'translation' || ink?.section === 'regular'
+            ? ink.section
+            : undefined,
         frameId: frame.frameId,
         kind,
         alpha: ctx.globalAlpha,
@@ -2112,6 +2150,7 @@ function attachWorkerRendererProbe(renderer: WorkerRendererProbe) {
         laneSpacing: this.config?.laneSpacing ?? null,
       },
     });
+    state.registerActiveContent(this.activeMessages, this.ctx);
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);
@@ -2454,6 +2493,7 @@ function attachCanvasRendererProbe(
         laneSpacing: this.settings.laneSpacing,
       },
     });
+    state.registerActiveContent(this.activeMessages, this.ctx);
     let successful = false;
     try {
       const result = nativeFrame.apply(this, args);

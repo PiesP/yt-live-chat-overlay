@@ -555,6 +555,20 @@ describe('Windows comment display matrix contract', () => {
       )
     ).toThrow(/viewport overlap/);
     expect(() => presentationItem(committed, id, 'sticker')).toThrow(/Sticker lacks/);
+    expect(() => presentationItem(committed, id, 'ordinary')).toThrow(/active source row/);
+    expect(
+      presentationItem(
+        {
+          ...committed,
+          frame: {
+            ...committed.frame!,
+            draws: [{ ...committed.frame!.draws[0]!, section: 'regular' }],
+          },
+        },
+        id,
+        'ordinary'
+      ).id
+    ).toBe(id);
     expect(
       presentationItem(
         {

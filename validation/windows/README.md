@@ -31,6 +31,8 @@ probe requires its positive-alpha draw in the same complete frame. The fixture
 binds paid body and translation draws to the actual prepared plan row passed to
 the shared text painter, so fragmented text and reused glyph bitmaps retain the
 source card ID and section. A plan allocation alone never counts as a draw.
+Ordinary wrapped ink uses the active row's content-array identity in the current
+frame; ambiguous shared arrays are rejected.
 The fixture also opens the actual settings dialog and reads three drawn production Canvas
 preview samples under wide and stacked selections. `comment-display-matrix.json` binds the controller's exact
 source, core, build-log, bundle, profile, packaged page-script, fixture sources,

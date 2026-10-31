@@ -816,6 +816,8 @@ describe('Windows placement timing probe', () => {
   it('attributes fragmented paid rows and reused bitmap ink to the actual plan section', () => {
     const first = 'WINDOWS380_DETAILED_PAID';
     const second = 'WINDOWS380_DARK_PAID';
+    const ordinary = 'WINDOWS380_DETAILED_ORDINARY';
+    const mainOrdinary = 'WINDOWS380_DARK_ORDINARY';
     const overlay = { width: 400, height: 200, closest: () => ({}) };
     const glyph = { width: 40, height: 25, closest: () => null };
     let nativeDraws = 0;
@@ -864,8 +866,10 @@ describe('Windows placement timing probe', () => {
         if (prepared === globalThis.lastPlan.body) {
           if (globalThis.ownerId === '${first}') new FakeContext(glyph).fillText('WIND', 0, 20);
           ctx.drawImage(glyph, 20, y, 40, 25);
-        } else {
+        } else if (prepared) {
           ctx.fillText('한국어', 20, y);
+        } else {
+          ctx.fillText('ORD', x, y);
         }
       }
       function paint(id, y) {
@@ -886,13 +890,23 @@ describe('Windows placement timing probe', () => {
         const probe = globalThis.__ytPlacementProbe;
         const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
           config: { logicalWidth: 400, logicalHeight: 200, superChatLayout: 'stacked' } });
+        probe.registerActiveContent([
+          { id: '${ordinary}', content: regularSegments },
+          { message: { id: '${mainOrdinary}' }, renderMessage: { content: mainSegments } }
+        ], ctx);
         ctx.clearRect(0, 0, 400, 200);
         globalThis.firstPlan = paint('${first}', 10);
         globalThis.secondPlan = paint('${second}', 100);
+        renderWrappedContentSegments(ctx, regularSegments, 20, 175, 200, 1,
+          '', 20, 0, 0, null, null, null, null);
+        renderWrappedContentSegments(ctx, mainSegments, 120, 175, 200, 1,
+          '', 20, 0, 0, null, null, null, null);
         ctx.drawImage(glyph, 300, 170, 40, 25);
         probe.endRenderFrame(frame, [
           { id: '${first}', x: 10, y: 10, width: 200, height: 70 },
-          { id: '${second}', x: 10, y: 100, width: 200, height: 70 }
+          { id: '${second}', x: 10, y: 100, width: 200, height: 70 },
+          { id: '${ordinary}', x: 10, y: 170, width: 200, height: 30 },
+          { id: '${mainOrdinary}', x: 110, y: 170, width: 200, height: 30 }
         ]);
       }
 \tmain();
@@ -905,6 +919,8 @@ describe('Windows placement timing probe', () => {
       RendererBase: class {},
       overlay,
       glyph,
+      regularSegments: [{ type: 'text', content: `${ordinary} original` }],
+      mainSegments: [{ type: 'text', content: `${mainOrdinary} original` }],
       ctx: new FakeContext(overlay),
       planCalls: 0,
       ownerId: '',
@@ -925,7 +941,7 @@ describe('Windows placement timing probe', () => {
       HTMLCanvasElement: class {},
     };
     runInNewContext(
-      `${canvasProbePrelude({ tokens: [first, second], observeCardPlans: true })}\n${instrumented}`,
+      `${canvasProbePrelude({ tokens: [first, second, ordinary, mainOrdinary], observeCardPlans: true })}\n${instrumented}`,
       sandbox
     );
     const frame = runInNewContext('__ytPlacementProbe.latestRenderFrame', sandbox);
@@ -937,6 +953,8 @@ describe('Windows placement timing probe', () => {
       [first, 'body'],
       [first, 'translation'],
       [second, 'body'],
+      [ordinary, 'regular'],
+      [mainOrdinary, 'regular'],
     ]);
     expect(
       frame.draws.every(
@@ -946,6 +964,23 @@ describe('Windows placement timing probe', () => {
     ).toBe(true);
     expect(nativeDraws).toBeGreaterThan(frame.draws.length);
     expect(sandbox.firstPlan).not.toBe(sandbox.secondPlan);
+    const ambiguous = runInNewContext(
+      `(() => { const probe = __ytPlacementProbe;
+        const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
+          config: { logicalWidth: 400, logicalHeight: 200 } });
+        probe.registerActiveContent([
+          { id: '${ordinary}', content: regularSegments },
+          { id: '${first}', content: regularSegments }
+        ], ctx);
+        ctx.clearRect(0, 0, 400, 200);
+        probe.wrapWrappedContent((surface) => surface.fillText('ORD', 20, 30))(
+          ctx, regularSegments);
+        probe.endRenderFrame(frame, []);
+        return frame.draws.length;
+      })()`,
+      sandbox
+    );
+    expect(ambiguous).toBe(0);
   });
 
   it('retains only a bounded first complete visible draw with its committed row', () => {
@@ -1025,6 +1060,7 @@ describe('Windows placement timing probe', () => {
     })();`;
       const state: Record<string, unknown> = {
         beginRenderFrame: () => ({ frameId: 1, cleared: true }),
+        registerActiveContent: () => {},
         endRenderFrame: () => {},
       };
       const script = instrumentCanvasPageScript(source.replace('      main();', '\tmain();'));

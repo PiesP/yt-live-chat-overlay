@@ -74,7 +74,7 @@ type Backend = 'worker' | 'main';
 type MatrixDraw = {
   id: string;
   kind?: string;
-  section?: 'body' | 'translation';
+  section?: 'body' | 'translation' | 'regular';
   alpha: number;
   rect: Rect | null;
   textSnippet?: string | null;
@@ -767,6 +767,8 @@ export function presentationItem(
       proof.draw.kind === 'sticker-image' || proof.draw.section === 'body',
       'Sticker lacks source-bound image ink or its visible fallback'
     );
+  if (role === 'ordinary')
+    assert(proof.draw.section === 'regular', 'Ordinary ink lacks its active source row');
   return {
     id,
     role,
