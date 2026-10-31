@@ -75,8 +75,12 @@ neither a positive-alpha draw nor an observed border stroke before eligibility.
 A separate JSON-only overload envelope uses the same installed extension and
 source-hashed probes after the 60-second/16-PNG display matrix. Its limit is
 120 seconds and 128 records per backend, with no extra PNGs. It exercises paid
-arrivals around an ordinary waiter and recurring one-second vacancies,
-source-measured unplaceable paid height beside fitting ordinary content,
+arrivals around an ordinary seed and recurring one-second vacancies. The seed is
+classified as waiting or already served. A distinct later ordinary arrival
+follows the first renewed paid batch; its ingress,
+reservation, and first visible draw are recorded beside subsequent paid service.
+The same envelope also exercises source-measured unplaceable paid height beside
+fitting ordinary content,
 equal-priority overflow, controlled pause/hidden/resume, and future replay
 reservation, plus a separate zero-row membership reservation. Active/queue caps
 cover 30/50, 300/200 (the default caps), and 300/1000 settings.

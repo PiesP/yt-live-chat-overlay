@@ -161,8 +161,20 @@ describe('Windows comment display matrix contract', () => {
     expect(ids.length).toBeLessThanOrEqual(128);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain('WINDOWS380_LOAD_VACANCY_ORDINARY');
+    expect(ids).toContain('WINDOWS380_LOAD_VACANCY_LATE_ORDINARY');
     expect(ids).toContain('WINDOWS380_LOAD_IMPOSSIBLE_PAID');
     expect(ids).toContain('WINDOWS380_LOAD_OVERFLOW_NEW_7');
+    const moreA = OVERLOAD_BATCHES.vacancyMoreA.map((action) => {
+      const renderer = Object.values(action.addChatItemAction.item)[0] as { id: string };
+      return renderer.id;
+    });
+    expect(moreA.slice(0, -1)).toEqual(
+      expect.arrayContaining([
+        'WINDOWS380_LOAD_VACANCY_MORE_A_PAID_0',
+        'WINDOWS380_LOAD_VACANCY_MORE_A_PAID_3',
+      ])
+    );
+    expect(moreA.at(-1)).toBe('WINDOWS380_LOAD_VACANCY_LATE_ORDINARY');
   });
 
   it('compares measured paid row budgets, border alpha, and actual draw without promoting reservations', () => {
@@ -372,6 +384,55 @@ describe('Windows comment display matrix contract', () => {
     );
     expect(trace.byKind.paid).toMatchObject({ reserved: 1, firstVisible: 1 });
     expect(trace.byKind.ordinary).toMatchObject({ reserved: 0, firstVisible: 0 });
+    const lateId = 'WINDOWS380_LOAD_VACANCY_LATE_ORDINARY';
+    const laterPaidId = 'WINDOWS380_LOAD_VACANCY_MORE_B_PAID_0';
+    const repeated = overloadTrace(
+      {
+        ...sample,
+        ingress: { [lateId]: 1100, [laterPaidId]: 1200 },
+        firstEntry: { [lateId]: 1320, [laterPaidId]: 1280 },
+        dispositions: [
+          {
+            id: lateId,
+            kind: 'activated',
+            reason: null,
+            atEpochMs: 1300,
+            queueResidenceMs: 200,
+            isBacklog: false,
+          },
+          {
+            id: laterPaidId,
+            kind: 'activated',
+            reason: null,
+            atEpochMs: 1250,
+            queueResidenceMs: 50,
+            isBacklog: false,
+          },
+        ],
+      },
+      [lateId, laterPaidId],
+      { active: 30, queue: 50 }
+    );
+    expect(repeated.records).toMatchObject([
+      {
+        id: lateId,
+        kind: 'ordinary',
+        rendererIngressAtEpochMs: 1100,
+        reservedAtEpochMs: 1300,
+        firstVisibleAtEpochMs: 1320,
+      },
+      {
+        id: laterPaidId,
+        kind: 'paid',
+        rendererIngressAtEpochMs: 1200,
+        reservedAtEpochMs: 1250,
+        firstVisibleAtEpochMs: 1280,
+      },
+    ]);
+    expect(repeated.byKind).toMatchObject({
+      paid: { firstVisible: 1 },
+      ordinary: { firstVisible: 1 },
+    });
   });
 
   it('retains late source-owned ink beyond 48 records and rejects omitted frame draws', async () => {

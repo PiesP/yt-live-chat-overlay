@@ -359,11 +359,14 @@ export const OVERLOAD_BATCHES = Object.freeze({
     ),
     textAction('WINDOWS380_LOAD_VACANCY_ORDINARY', 'Compatible waiting ordinary'),
   ],
-  vacancyMoreA: Array.from({ length: 4 }, (_, index) =>
-    overloadPaidAction(`WINDOWS380_LOAD_VACANCY_MORE_A_${index}`, 'Paid after a vacancy')
-  ),
+  vacancyMoreA: [
+    ...Array.from({ length: 4 }, (_, index) =>
+      overloadPaidAction(`WINDOWS380_LOAD_VACANCY_MORE_A_PAID_${index}`, 'Paid after a vacancy')
+    ),
+    textAction('WINDOWS380_LOAD_VACANCY_LATE_ORDINARY', 'Ordinary after renewed paid pressure'),
+  ],
   vacancyMoreB: Array.from({ length: 4 }, (_, index) =>
-    overloadPaidAction(`WINDOWS380_LOAD_VACANCY_MORE_B_${index}`, 'Paid after another vacancy')
+    overloadPaidAction(`WINDOWS380_LOAD_VACANCY_MORE_B_PAID_${index}`, 'Paid after another vacancy')
   ),
   impossible: [
     overloadPaidAction('WINDOWS380_LOAD_IMPOSSIBLE_PAID', 'Tall paid body '.repeat(45)),
@@ -2362,6 +2365,7 @@ async function runOverloadBackend(options: {
     trace: ReturnType<typeof overloadTrace>;
     outcome?: 'ordinary-waiting' | 'ordinary-already-served';
   }> = [];
+  let currentVacancyService: Record<string, unknown> | null = null;
   let failureStage = 'setup';
   let replayRequests = 0;
   const cases: Array<Record<string, unknown>> = [];
@@ -2576,6 +2580,7 @@ async function runOverloadBackend(options: {
     for (const name of OVERLOAD_CASES) {
       currentCase = name;
       currentSnapshots = [];
+      currentVacancyService = null;
       failureStage = `${name}:navigation`;
       replayRequests = 0;
       const caps = OVERLOAD_SETTINGS[name];
@@ -2656,14 +2661,15 @@ async function runOverloadBackend(options: {
         return measured;
       };
       if (name === 'vacancy') {
+        const seedId = 'WINDOWS380_LOAD_VACANCY_ORDINARY';
+        const lateId = 'WINDOWS380_LOAD_VACANCY_LATE_ORDINARY';
         await send('vacancySeed');
-        await waitForIngress(page, backend, 'WINDOWS380_LOAD_VACANCY_ORDINARY');
+        await waitForIngress(page, backend, seedId);
         await page.waitForTimeout(450);
         const seed = await observe('seed');
-        const ordinaryId = 'WINDOWS380_LOAD_VACANCY_ORDINARY';
-        const ordinary = snapshots.at(-1)?.trace.records.find((record) => record.id === ordinaryId);
+        const ordinary = snapshots.at(-1)?.trace.records.find((record) => record.id === seedId);
         const ordinaryWaiting =
-          seed.pendingNow.includes(ordinaryId) && !Number.isFinite(seed.firstEntry[ordinaryId]);
+          seed.pendingNow.includes(seedId) && !Number.isFinite(seed.firstEntry[seedId]);
         const ordinaryServed = Boolean(
           Number.isFinite(ordinary?.rendererIngressAtEpochMs) &&
           Number.isFinite(ordinary?.reservedAtEpochMs) &&
@@ -2677,14 +2683,61 @@ async function runOverloadBackend(options: {
         if (seedRecord)
           seedRecord.outcome = ordinaryWaiting ? 'ordinary-waiting' : 'ordinary-already-served';
         await send('vacancyMoreA');
+        await waitForIngress(page, backend, lateId);
         await page.waitForTimeout(550);
+        const afterA = await observe('late-ordinary-after-paid');
         await send('vacancyMoreB');
         await page.waitForTimeout(3000);
         const end = await observe('recurring-vacancy');
+        const afterATrace = snapshots.at(-2)?.trace;
+        const endTrace = snapshots.at(-1)?.trace;
+        const lateAfterA = afterATrace?.records.find((record) => record.id === lateId);
+        const lateEnd = endTrace?.records.find((record) => record.id === lateId);
+        const paidService = endTrace?.records
+          .filter(
+            (record) =>
+              record.id.includes('_VACANCY_MORE_') && Number.isFinite(record.firstVisibleAtEpochMs)
+          )
+          .map((record) => ({
+            id: record.id,
+            rendererIngressAtEpochMs: record.rendererIngressAtEpochMs,
+            reservedAtEpochMs: record.reservedAtEpochMs,
+            firstVisibleAtEpochMs: record.firstVisibleAtEpochMs,
+          }));
+        currentVacancyService = {
+          seedOutcome: seedRecord?.outcome ?? null,
+          seedOrdinary: ordinary ?? null,
+          lateAfterA: lateAfterA ?? null,
+          lateEnd: lateEnd ?? null,
+          paidService: paidService ?? [],
+          afterAFrameId: afterA.frame?.frameId ?? null,
+          endFrameId: end.frame?.frameId ?? null,
+        };
         check(() =>
           assert(
-            Number.isFinite(end.firstEntry.WINDOWS380_LOAD_VACANCY_ORDINARY),
-            'Compatible ordinary waiter received no successful visible service'
+            Number.isFinite(end.firstEntry[seedId]),
+            'Seed ordinary received no successful visible service'
+          )
+        );
+        check(() =>
+          assert(
+            Number.isFinite(lateEnd?.rendererIngressAtEpochMs) &&
+              Number.isFinite(lateEnd?.reservedAtEpochMs) &&
+              Number.isFinite(lateEnd?.firstVisibleAtEpochMs) &&
+              Number(lateEnd?.firstVisibleAtEpochMs) >= Number(lateEnd?.rendererIngressAtEpochMs),
+            'Later ordinary arrival received no successful visible service'
+          )
+        );
+        check(() =>
+          assert(
+            Number.isFinite(lateEnd?.rendererIngressAtEpochMs) &&
+              paidService?.some(
+                (record) =>
+                  Number.isFinite(record.rendererIngressAtEpochMs) &&
+                  Number.isFinite(record.reservedAtEpochMs) &&
+                  Number(record.firstVisibleAtEpochMs) >= Number(lateEnd?.rendererIngressAtEpochMs)
+              ),
+            'Renewed paid pressure produced no successful visible service'
           )
         );
       } else if (name === 'impossible') {
@@ -2789,6 +2842,7 @@ async function runOverloadBackend(options: {
         caps,
         ids,
         snapshots,
+        ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
         delivered: [...delivered],
         elapsedMs: Date.now() - startedAt,
       });
@@ -2800,6 +2854,7 @@ async function runOverloadBackend(options: {
         backend,
         caps: OVERLOAD_SETTINGS[currentCase],
         snapshots: currentSnapshots,
+        ...(currentVacancyService ? { vacancyService: currentVacancyService } : {}),
         delivered: [...delivered],
         partial: true,
         elapsedMs: Date.now() - startedAt,
