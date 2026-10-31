@@ -173,12 +173,12 @@ describe('BurstDetector', () => {
       detector.start();
 
       for (let tick = 0; tick < 6; tick++) {
-        for (let m = 0; m < 12; m++) {
+        for (let m = 0; m < 8; m++) {
           detector.onMessageReceived();
         }
         advanceTime(SAMPLE_INTERVAL);
       }
-      // Average: 12 msg/sample → exceeds high threshold (10)
+      // 8 per 500 ms = 16 msg/s: above high, below extreme.
       expect(detector.getLevel()).toBe('high');
     });
 
@@ -201,6 +201,67 @@ describe('BurstDetector', () => {
       // Average: 25 msg/sample → exceeds extreme threshold (20)
       expect(detector.getLevel()).toBe('extreme');
     });
+  });
+
+  it.each([
+    { perTick: 4, expected: 'elevated' },
+    { perTick: 10, expected: 'high' },
+    { perTick: 20, expected: 'extreme' },
+  ] as const)('classifies $perTick arrivals per 500 ms as msg/s', ({ perTick, expected }) => {
+    const detector = new BurstDetector();
+    for (let tick = 0; tick < 10; tick++) {
+      for (let i = 0; i < perTick; i++) detector.onMessageReceived();
+      advanceTime(SAMPLE_INTERVAL);
+    }
+    expect(detector.getLevel()).toBe(expected);
+  });
+
+  it('uses actual elapsed time when a sampling callback is delayed', () => {
+    const detector = new BurstDetector();
+    for (let i = 0; i < 4; i++) detector.onMessageReceived();
+    now += 1_000;
+    vi.advanceTimersByTime(SAMPLE_INTERVAL);
+    expect(detector.getLevel()).toBe('normal'); // 4 msg/s, not 8 msg/s
+    detector.pause();
+    detector.resume();
+    for (let i = 0; i < 4; i++) detector.onMessageReceived();
+    advanceTime(SAMPLE_INTERVAL);
+    expect(detector.getLevel()).toBe('elevated');
+  });
+
+  it('uses window throughput for uniform and batched arrivals without a batch EMA spike', () => {
+    const uniform = new BurstDetector();
+    for (let i = 0; i < 10; i++) {
+      now += 50;
+      uniform.onMessageReceived();
+    }
+    vi.advanceTimersByTime(SAMPLE_INTERVAL);
+    expect(uniform.getLevel()).toBe('high');
+    expect(uniform.getEmaRate()).toBeGreaterThan(0);
+    uniform.destroy();
+
+    const batch = new BurstDetector();
+    for (let i = 0; i < 10; i++) batch.onMessageReceived();
+    advanceTime(SAMPLE_INTERVAL);
+    expect(batch.getLevel()).toBe('high');
+    expect(batch.getEmaRate()).toBe(0);
+  });
+
+  it('clears the rate window after idle and measures a fresh resumed interval', () => {
+    const detector = new BurstDetector();
+    for (let i = 0; i < 30; i++) {
+      now += 10;
+      detector.onMessageReceived();
+    }
+    advanceTime(SAMPLE_INTERVAL);
+    expect(detector.getLevel()).toBe('extreme');
+    expect(detector.getEmaRate()).toBeGreaterThan(0);
+    advanceTime(16_000);
+    expect(detector.getLevel()).toBe('normal');
+    expect(detector.getEmaRate()).toBe(0);
+    for (let i = 0; i < 4; i++) detector.onMessageReceived();
+    advanceTime(SAMPLE_INTERVAL);
+    expect(detector.getLevel()).toBe('elevated');
   });
 
   // ── pause / resume ───────────────────────────────────────────────────

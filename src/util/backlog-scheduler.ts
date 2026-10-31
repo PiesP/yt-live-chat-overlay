@@ -28,6 +28,7 @@ const REAL_TIME_FACTOR_STEP = 0.2;
 const UTILIZATION_FACTOR_MIN = 0.1;
 const UTILIZATION_FACTOR_SLOPE = 0.9;
 const REAL_TIME_DECAY_MS = 2000;
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 export function computeDensityRampFactor(elapsedMs: number, densityRampMs: number): number {
   if (elapsedMs >= densityRampMs) return 1;
@@ -47,12 +48,14 @@ export function computeAdaptiveMeanInterval(
   activityCount: number,
   utilizationFactor: number,
   rampFactor: number
-): number {
+): number | null {
+  if (maxRate <= 0) return null;
   const realTimeFactor = Math.max(REAL_TIME_FACTOR_MIN, 1 - activityCount * REAL_TIME_FACTOR_STEP);
   const congestionFactor = Math.min(realTimeFactor, utilizationFactor);
-  const rawRate = Math.round(maxRate * congestionFactor * rampFactor);
-  const adaptiveRate = Math.min(maxRate, Math.max(minRate, rawRate));
-  return Math.round(1000 / adaptiveRate);
+  const scaledRate = maxRate * congestionFactor * rampFactor;
+  const rawRate = maxRate < 1 ? scaledRate : Math.round(scaledRate);
+  const adaptiveRate = Math.max(0, Math.min(maxRate, Math.max(minRate, rawRate)));
+  return Math.min(MAX_TIMEOUT_MS, Math.round(1000 / adaptiveRate));
 }
 
 export class BacklogScheduler {
@@ -141,17 +144,19 @@ export class BacklogScheduler {
     injectionStartTime: number,
     onUtilizationQuery: (() => number) | null,
     now: number = Date.now()
-  ): { meanInterval: number; updatedActivityCount: number } {
-    const maxRate = Math.max(
-      this.config.backlogInjectionRateMin,
-      Math.min(this.config.backlogInjectionMax, this.config.backlogMaxRate, this.lanes * 2)
+  ): { meanInterval: number | null; updatedActivityCount: number } {
+    // The visible maximum wins over a conflicting minimum. Zero pauses delivery.
+    const maxRate = Math.min(
+      this.config.backlogInjectionMax,
+      this.config.backlogMaxRate,
+      this.lanes * 2
     );
 
     const updatedCount = decayActivityCount(realTimeActivityCount, now - lastRealTimeActivityAt);
     const utilizationFactor = this.getUtilizationFactor(onUtilizationQuery);
     const rampFactor = this.getDensityRampFactor(injectionStartTime, now);
 
-    const minRate = Math.max(1, Math.min(this.config.backlogInjectionRateMin, maxRate));
+    const minRate = Math.max(0, Math.min(this.config.backlogInjectionRateMin, maxRate));
 
     return {
       meanInterval: computeAdaptiveMeanInterval(
@@ -178,7 +183,7 @@ export class BacklogScheduler {
     const floorMs = Math.max(32, Math.round(meanInterval * 0.6));
     const poissonDelay = Math.max(
       floorMs,
-      Math.min(meanInterval * 2, sampleExponential(meanInterval, random))
+      Math.min(MAX_TIMEOUT_MS, meanInterval * 2, sampleExponential(meanInterval, random))
     );
     return setTimeout(() => processTick(), poissonDelay);
   }

@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@app-types';
 import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
+import { BacklogSampler } from '@util/backlog-sampler';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -17,6 +18,100 @@ function makeMessage(
     ...overrides,
   };
 }
+
+describe('BacklogSampler candidate coverage', () => {
+  const sampler = new BacklogSampler();
+  const messages = (count: number): ChatMessage[] =>
+    Array.from({ length: count }, (_, index) =>
+      makeMessage('text', { id: String(index), timestamp: index, text: 'ordinary message' })
+    );
+
+  it.each([
+    { input: 199, selected: 199 },
+    { input: 200, selected: 120 },
+    { input: 499, selected: 299 },
+    { input: 500, selected: 175 },
+  ])('covers both endpoints for $input candidates', ({ input, selected }) => {
+    const picked = sampler.sampleMessages(messages(input));
+    expect(picked).toHaveLength(selected);
+    expect(picked[0]?.id).toBe('0');
+    expect(picked.at(-1)?.id).toBe(String(input - 1));
+    expect(new Set(picked.map((message) => message.id)).size).toBe(selected);
+  });
+
+  it('keeps the latest short reaction when substantial text fills all 120 slots', () => {
+    const input = messages(200).map((message, index) => ({
+      ...message,
+      text: index < 120 ? 'ordinary message' : 'gg',
+    }));
+    const picked = sampler.sampleMessages(input);
+    expect(picked).toHaveLength(120);
+    expect(picked[0]?.id).toBe('0');
+    expect(picked.at(-1)?.id).toBe('199');
+    expect(new Set(picked.map((message) => message.id)).size).toBe(120);
+  });
+
+  it.each([
+    { input: 200, ordinaryBudget: 120 },
+    { input: 499, ordinaryBudget: 299 },
+    { input: 500, ordinaryBudget: 175 },
+  ])(
+    'covers mixed-tier endpoints and protects paid messages at $input',
+    ({ input, ordinaryBudget }) => {
+      const candidates = messages(input).map((message, index) => ({
+        ...message,
+        kind: (index === 10
+          ? 'superchat'
+          : index === 11
+            ? 'membership'
+            : 'text') as ChatMessage['kind'],
+        text: index < ordinaryBudget + 2 ? 'ordinary message' : 'gg',
+      }));
+      const picked = sampler.sampleMessages(candidates);
+      const ids = picked.map((message) => message.id);
+      expect(picked).toHaveLength(ordinaryBudget + 2);
+      expect(ids).toContain('0');
+      expect(ids).toContain(String(input - 1));
+      expect(ids).toContain('10');
+      expect(ids).toContain('11');
+      expect(new Set(ids).size).toBe(picked.length);
+    }
+  );
+
+  it('uses message ranks across irregular timestamps and favors the latest for one slot', () => {
+    const input = messages(6).map((message, index) => ({
+      ...message,
+      timestamp: [0, 1, 2, 3, 10_000, 100_000][index] ?? 0,
+    }));
+    expect(sampler.rankDistributedPick(input, 3).map((message) => message.id)).toEqual([
+      '0',
+      '2',
+      '5',
+    ]);
+    expect(sampler.rankDistributedPick(input, 1)[0]?.id).toBe('5');
+    expect(sampler.rankDistributedPick(input, 0)).toEqual([]);
+    expect(sampler.rankDistributedPick([], 1)).toEqual([]);
+  });
+
+  it('retains priority, short CJK, and emoji reactions within a bounded sample', () => {
+    const input = [
+      makeMessage('superchat', { id: 'priority', timestamp: 0 }),
+      ...Array.from({ length: 117 }, (_, index) =>
+        makeMessage('text', { id: `long-${index}`, timestamp: index + 1, text: 'ordinary text' })
+      ),
+      makeMessage('text', { id: 'ko', timestamp: 118, text: '좋아' }),
+      makeMessage('text', { id: 'emoji', timestamp: 119, text: '👍' }),
+      ...Array.from({ length: 80 }, (_, index) =>
+        makeMessage('text', { id: `short-${index}`, timestamp: index + 120, text: 'a' })
+      ),
+    ];
+    const picked = sampler.sampleMessages(input);
+    expect(picked).toHaveLength(121); // 120 ordinary slots plus protected priority
+    expect(picked.map((message) => message.id)).toContain('priority');
+    expect(picked.map((message) => message.id)).toContain('ko');
+    expect(picked.map((message) => message.id)).toContain('emoji');
+  });
+});
 
 // ── isPriorityMessage ─────────────────────────────────────────────────────
 

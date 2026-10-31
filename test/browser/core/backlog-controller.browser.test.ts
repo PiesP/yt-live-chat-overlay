@@ -556,6 +556,34 @@ describe('BacklogInjectionController', () => {
   // ═══════════════════════════════════════════════════════
 
   describe('updateConfig', () => {
+    it('holds queued backlog at zero without timers and resumes on a positive maximum', () => {
+      const emitted: string[] = [];
+      controller.onBacklogMessage = (message) => emitted.push(message.id as string);
+      controller.updateConfig({ backlogMaxRate: 0 });
+      controller.startBacklogInjection([makeMsg({ id: 'a' }), makeMsg({ id: 'b' })]);
+      controller.startBacklogInjection([makeMsg({ id: 'c' })]);
+      expect(emitted).toEqual([]);
+      expect(controller.drainPending().map((message) => message.id)).toEqual(['a', 'b', 'c']);
+      vi.advanceTimersByTime(10_000);
+      expect(emitted).toEqual([]);
+
+      controller.updateConfig({ backlogMaxRate: 2 });
+      expect(emitted).toEqual(['a']);
+      vi.advanceTimersByTime(5_000);
+      expect(emitted).toEqual(['a', 'b', 'c']);
+    });
+
+    it('cancels a scheduled injection when maximum becomes zero', () => {
+      const emitted: string[] = [];
+      controller.onBacklogMessage = (message) => emitted.push(message.id as string);
+      controller.startBacklogInjection([makeMsg({ id: 'a' }), makeMsg({ id: 'b' })]);
+      expect(emitted).toEqual(['a']);
+      controller.updateConfig({ backlogMaxRate: 0 });
+      vi.advanceTimersByTime(10_000);
+      expect(emitted).toEqual(['a']);
+      expect(controller.drainPending().map((message) => message.id)).toEqual(['b']);
+    });
+
     it('updates speed multiplier', () => {
       controller.updateConfig({ backlogSpeedMultiplier: 3 });
       expect(controller.getSpeedMultiplier()).toBe(3);
