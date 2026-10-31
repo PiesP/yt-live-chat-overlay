@@ -1775,6 +1775,51 @@ export function overloadTrace(
   };
 }
 
+type VacancySeedEvidence = Pick<MatrixSnapshot, 'ingress' | 'firstEntry' | 'pendingNow'> & {
+  dispositions: Array<Pick<MatrixSnapshot['dispositions'][number], 'id' | 'kind' | 'atEpochMs'>>;
+  activeNow: Array<
+    Pick<MatrixSnapshot['activeNow'][number], 'id' | 'startAtEpochMs' | 'endAtEpochMs'>
+  >;
+  frame: Pick<MatrixFrame, 'startedAtEpochMs'> | null;
+};
+
+/** An activated future row is admitted, but has not yet received visible service. */
+export function classifyVacancySeedOrdinary(
+  seed: VacancySeedEvidence,
+  id: string,
+  delivered: boolean
+): 'ordinary-waiting' | 'ordinary-reserved-future' | 'ordinary-already-served' | null {
+  const finite = (value: number | null | undefined): value is number =>
+    typeof value === 'number' && Number.isFinite(value);
+  const ingress = seed.ingress[id];
+  if (!delivered || !finite(ingress)) return null;
+  const reservation = seed.dispositions.find(
+    (entry) => entry.id === id && entry.kind === 'activated'
+  );
+  const reservedAt = reservation?.atEpochMs;
+  const firstVisibleAt = seed.firstEntry[id];
+  const active = seed.activeNow.find((entry) => entry.id === id);
+  if (Object.hasOwn(seed.firstEntry, id) && !finite(firstVisibleAt)) return null;
+  if (seed.pendingNow.includes(id))
+    return !reservation && !finite(firstVisibleAt) && !active ? 'ordinary-waiting' : null;
+  if (finite(firstVisibleAt))
+    return finite(reservedAt) && firstVisibleAt >= ingress && firstVisibleAt >= reservedAt
+      ? 'ordinary-already-served'
+      : null;
+  const frameAt = seed.frame?.startedAtEpochMs;
+  const startAt = active?.startAtEpochMs;
+  const endAt = active?.endAtEpochMs;
+  return finite(reservedAt) &&
+    finite(frameAt) &&
+    finite(startAt) &&
+    finite(endAt) &&
+    reservedAt >= ingress &&
+    startAt > frameAt &&
+    endAt > startAt
+    ? 'ordinary-reserved-future'
+    : null;
+}
+
 async function waitForVisible(
   page: Page,
   backend: Backend,
@@ -3653,7 +3698,7 @@ async function runOverloadBackend(options: {
   let currentSnapshots: Array<{
     stage: string;
     trace: ReturnType<typeof overloadTrace>;
-    outcome?: 'ordinary-waiting' | 'ordinary-already-served';
+    outcome?: NonNullable<ReturnType<typeof classifyVacancySeedOrdinary>>;
     managerProbe?: ManagerProbeRead;
   }> = [];
   let currentVacancyService: Record<string, unknown> | null = null;
@@ -4007,20 +4052,13 @@ async function runOverloadBackend(options: {
         await page.waitForTimeout(450);
         const seed = await observe('seed');
         const ordinary = snapshots.at(-1)?.trace.records.find((record) => record.id === seedId);
-        const ordinaryWaiting =
-          seed.pendingNow.includes(seedId) && !Number.isFinite(seed.firstEntry[seedId]);
-        const ordinaryServed = Boolean(
-          Number.isFinite(ordinary?.rendererIngressAtEpochMs) &&
-          Number.isFinite(ordinary?.reservedAtEpochMs) &&
-          Number.isFinite(ordinary?.firstVisibleAtEpochMs)
-        );
+        const seedOutcome = classifyVacancySeedOrdinary(seed, seedId, ordinary?.delivered === true);
         assert(
-          ordinaryWaiting || ordinaryServed,
-          'Vacancy seed established neither an ordinary waiter nor completed visible service'
+          seedOutcome,
+          'Vacancy seed established neither an ordinary waiter, future reservation, nor completed visible service'
         );
         const seedRecord = snapshots.at(-1);
-        if (seedRecord)
-          seedRecord.outcome = ordinaryWaiting ? 'ordinary-waiting' : 'ordinary-already-served';
+        if (seedRecord) seedRecord.outcome = seedOutcome;
         await send('vacancyMoreA');
         await waitForIngress(page, backend, lateId);
         await page.waitForTimeout(550);

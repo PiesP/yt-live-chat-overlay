@@ -22,6 +22,7 @@ import {
   assertRestoredVisibility,
   attachWorkerManagerProbe,
   bindMatrixIdentity,
+  classifyVacancySeedOrdinary,
   classifyMatrixRuntime,
   classifyPlanProbeCapability,
   flowTrace,
@@ -831,6 +832,47 @@ describe('Windows comment display matrix contract', () => {
       ])
     );
     expect(moreA.at(-1)).toBe('WINDOWS380_LOAD_VACANCY_LATE_ORDINARY');
+  });
+
+  it('distinguishes a future ordinary reservation from waiting and visible service', () => {
+    const id = 'WINDOWS380_LOAD_VACANCY_ORDINARY';
+    const ingressAt = 1793465167479;
+    const reservedAt = 1793465167538.3;
+    const frameAt = 1793465168042.9;
+    const startAt = 1793465169007.9;
+    const evidence = {
+      ingress: { [id]: ingressAt },
+      firstEntry: {},
+      pendingNow: [],
+      dispositions: [{ id, kind: 'activated', atEpochMs: reservedAt }],
+      activeNow: [{ id, startAtEpochMs: startAt, endAtEpochMs: startAt + 1000 }],
+      frame: { startedAtEpochMs: frameAt },
+    };
+
+    expect(classifyVacancySeedOrdinary(evidence, id, true)).toBe('ordinary-reserved-future');
+    expect(classifyVacancySeedOrdinary(evidence, id, false)).toBeNull();
+    expect(
+      classifyVacancySeedOrdinary(
+        { ...evidence, pendingNow: [id], dispositions: [], activeNow: [] },
+        id,
+        true
+      )
+    ).toBe('ordinary-waiting');
+    expect(
+      classifyVacancySeedOrdinary({ ...evidence, firstEntry: { [id]: startAt + 20 } }, id, true)
+    ).toBe('ordinary-already-served');
+    expect(classifyVacancySeedOrdinary({ ...evidence, ingress: {} }, id, true)).toBeNull();
+    expect(
+      classifyVacancySeedOrdinary(
+        { ...evidence, activeNow: [{ id, startAtEpochMs: frameAt, endAtEpochMs: startAt }] },
+        id,
+        true
+      )
+    ).toBeNull();
+    expect(classifyVacancySeedOrdinary({ ...evidence, activeNow: [] }, id, true)).toBeNull();
+    expect(
+      classifyVacancySeedOrdinary({ ...evidence, firstEntry: { [id]: Number.NaN } }, id, true)
+    ).toBeNull();
   });
 
   it('compares measured paid row budgets, border alpha, and actual draw without promoting reservations', () => {
