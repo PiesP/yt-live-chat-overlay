@@ -331,6 +331,11 @@ export function drawStage(
   renderCtx: CanvasRenderingContext2D,
   buckets: CanvasMessage[][]
 ): void {
+  const effectiveMode = resolveEffectiveMotionMode(
+    ctx.settings.danmakuMode,
+    ctx.isReducedMotionActive,
+    false
+  );
   for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
     const entries = buckets[bucketIndex];
     if (!entries || entries.length === 0) continue;
@@ -404,6 +409,7 @@ export function drawStage(
           regularConfig.backgroundColor = ctx.settings.backgroundColors[renderMessage.authorType];
           regularConfig.messageWidth = msg.width;
           regularConfig.messageHeight = msg.height;
+          regularConfig.mode = effectiveMode;
           renderRegularMessage(
             renderCtx,
             renderMessage,
@@ -476,14 +482,15 @@ export function drawStage(
           );
           const paddingH = isPaidCard ? paidPadding.paddingH : regularInsets.horizontal;
           const paddingV = isPaidCard ? paidPadding.paddingV : regularInsets.vertical;
-          const translationAbove = isPaidCard
-            ? 0
-            : getRegularContentBounds(
-                { text: msg.translatedText, content: [] },
-                getFontString(fontSize, 'normal', ctx.settings.fontFamily),
-                fontSize,
-                renderCtx
-              ).above;
+          const translationAbove =
+            isPaidCard || effectiveMode === 'top' || effectiveMode === 'bottom'
+              ? 0
+              : getRegularContentBounds(
+                  { text: msg.translatedText, content: [] },
+                  getFontString(fontSize, 'normal', ctx.settings.fontFamily),
+                  fontSize,
+                  renderCtx
+                ).above;
           const transY = snappedY + msg.height - paddingV - translationHeight + translationAbove;
           const transColor =
             ctx.settings.preserveUserColor && renderMessage.userColor
@@ -494,16 +501,18 @@ export function drawStage(
           try {
             renderCtx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
             const transFont = getFontString(fontSize, 'normal', ctx.settings.fontFamily);
-            if (isPaidCard) {
+            if (isPaidCard || effectiveMode === 'top' || effectiveMode === 'bottom') {
               renderWrappedContentSegments(
                 renderCtx,
                 [{ type: 'text', content: msg.translatedText }],
                 snappedX + paddingH,
                 transY,
-                Math.max(1, msg.width - paddingH * 2),
-                msg.message.kind === 'superchat'
-                  ? ctx.settings.superChatMaxBodyLines
-                  : ctx.settings.membershipMaxBodyLines,
+                Math.max(0, msg.width - paddingH * 2),
+                isPaidCard
+                  ? msg.message.kind === 'superchat'
+                    ? ctx.settings.superChatMaxBodyLines
+                    : ctx.settings.membershipMaxBodyLines
+                  : 3,
                 transColor,
                 fontSize,
                 ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,

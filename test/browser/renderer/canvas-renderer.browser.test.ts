@@ -247,6 +247,44 @@ describe('Canvas reservation safety', () => {
     return { renderer, internals };
   }
 
+  it('keeps an unfit queued comment until a safe-zone change and skips repeated placement attempts', () => {
+    const overlay = new Overlay();
+    const dimensions = { width: 320, height: 100 };
+    (overlay as unknown as { dimensions: typeof dimensions }).dimensions = dimensions;
+    const tight = makeSettings({
+      safeTop: 0.25,
+      safeBottom: 0.5,
+      fontSize: 32,
+      laneSpacing: 0,
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+    });
+    const renderer = new CanvasRenderer(overlay, tight);
+    const internals = renderer as unknown as {
+      laneAllocator: LaneAllocator;
+      pendingQueue: {
+        enqueue(message: ChatMessage, priority: number): void;
+        toArray(): ChatMessage[];
+      };
+      activeMessages: CanvasMessage[];
+      drainQueue(now: number): void;
+      checkPlacement(message: ChatMessage, now: number): unknown;
+    };
+    internals.laneAllocator.reset(dimensions, 0);
+    const check = vi.spyOn(internals, 'checkPlacement');
+    internals.pendingQueue.enqueue(makeMessage('deferred', 'A visible ordinary row'), 0);
+    internals.drainQueue(0);
+    expect(internals.pendingQueue.toArray()).toHaveLength(1);
+    expect(internals.activeMessages).toHaveLength(0);
+    expect(check).toHaveBeenCalledTimes(1);
+    internals.drainQueue(16);
+    expect(check).toHaveBeenCalledTimes(1);
+    renderer.updateSettings(makeSettings({ ...tight, safeTop: 0.1, safeBottom: 0.1 }));
+    internals.drainQueue(32);
+    expect(internals.pendingQueue.toArray()).toHaveLength(0);
+    expect(internals.activeMessages).toHaveLength(1);
+    renderer.destroy();
+  });
+
   it.each(['scroll', 'reverse'] as const)(
     'validates future reservations and chooses a safe alternative in %s',
     (mode) => {

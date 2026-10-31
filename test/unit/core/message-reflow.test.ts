@@ -39,6 +39,28 @@ const options = {
 };
 
 describe('collision-aware message reflow', () => {
+  it('rejects a normal row but places a shorter row inside a partial safe zone', () => {
+    const motion = computeMessageMotionPlan({ ...input, mode: 'top' });
+    const result = reconcileMessagePlacements(
+      [
+        { message: 'normal', laneIndex: 0, height: 47, motion },
+        { message: 'short', laneIndex: 0, height: 20, motion },
+      ],
+      {
+        ...options,
+        laneCount: 1,
+        laneHeight: 47,
+        viewportHeight: 100,
+        safeTop: 0.25,
+        safeBottom: 0.5,
+      }
+    );
+    expect(result.placements.map(({ message }) => message)).toEqual(['short']);
+    expect(result.dropped).toEqual([{ message: 'normal', reason: 'reflow_capacity' }]);
+    expect(result.placements[0]?.y).toBeGreaterThanOrEqual(25);
+    expect((result.placements[0]?.y ?? Infinity) + 20).toBeLessThanOrEqual(50);
+  });
+
   it.each([
     ['top', 1000],
     ['scroll', 200],

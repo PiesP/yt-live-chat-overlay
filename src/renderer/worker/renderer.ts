@@ -32,7 +32,7 @@
 
 /// <reference lib="webworker" />
 
-import type { FontWeight } from '@app-types';
+import type { AuthorType, ChatMessage, FontWeight } from '@app-types';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { MAX_WORKER_IMAGE_BYTES, readBoundedImageBlob } from '@media/bounded-image-response';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
@@ -116,8 +116,8 @@ import {
 import {
   getRegularContentBounds,
   getRegularRowHeight,
-  getRowContentOffset,
   getRowGridHeight,
+  getSafeRowContentOffset,
   getRowSlotCount,
   rowsNeedVerticalClearance,
 } from '@renderer/layout/row-geometry';
@@ -126,6 +126,8 @@ import {
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
+  type DimensionMeasurement,
+  estimateTranslatedMessageDimensions,
   type OpacityConfig,
 } from '@renderer/shared';
 import {
@@ -562,9 +564,11 @@ export class WorkerRenderer {
     backgroundColor: '#00000000',
     messageWidth: 0,
     messageHeight: 0,
+    mode: 'scroll',
   };
   private statsFrameCounter = 0;
   private idleSince: number | null = null;
+  private capacityDeferred = new WeakSet<WorkerMessage>();
 
   /** CSS-pixel dimensions (not DPR-multiplied). Set by init/resize handlers. */
   private logicalWidth = 0;
@@ -631,9 +635,12 @@ export class WorkerRenderer {
             this.ctx.setTransform(newDpr, 0, 0, newDpr, 0, 0);
             this.logicalWidth = cssW;
             this.logicalHeight = cssH;
+            this.capacityDeferred = new WeakSet();
             clearTextMeasurementCaches();
             this.initLanes(cssW, cssH);
+            this.refreshMessageGeometries();
             this.reflowActiveMessages();
+            this.startRenderLoop();
             break;
           }
           case 'updateMessageGeometries': {
@@ -642,46 +649,66 @@ export class WorkerRenderer {
             for (const geometry of geometries) {
               const existing = this.messageById.get(geometry.id);
               if (!existing) continue;
+              if (!('laneArrayIndices' in existing)) this.capacityDeferred.delete(existing);
               const pendingTranslation = this.pendingTranslations.get(geometry.id);
               const isActive = 'laneArrayIndices' in existing;
-              const hasActiveTranslation = isActive && !!existing.translatedText;
-              if (
-                geometry.translationHeight === undefined &&
-                pendingTranslation?.translatedText === null
-              ) {
-                pendingTranslation.width = geometry.width;
-                pendingTranslation.height = geometry.height;
-                continue;
-              }
-              const hasPendingTranslation = pendingTranslation !== undefined;
-              if (
-                geometry.translationHeight === undefined &&
-                (hasActiveTranslation || hasPendingTranslation)
-              ) {
-                continue;
-              }
-              if (pendingTranslation) {
-                pendingTranslation.width = geometry.width;
-                pendingTranslation.height = geometry.height;
-                if (geometry.translationHeight !== undefined) {
-                  pendingTranslation.translationHeight = geometry.translationHeight;
+              if (!(this.ctx?.canvas instanceof OffscreenCanvas)) {
+                const hasActiveTranslation = isActive && !!existing.translatedText;
+                if (
+                  geometry.translationHeight === undefined &&
+                  pendingTranslation?.translatedText === null
+                ) {
+                  pendingTranslation.width = geometry.width;
+                  pendingTranslation.height = geometry.height;
+                  continue;
                 }
+                if (
+                  geometry.translationHeight === undefined &&
+                  (hasActiveTranslation || pendingTranslation !== undefined)
+                )
+                  continue;
+                if (pendingTranslation) {
+                  pendingTranslation.width = geometry.width;
+                  pendingTranslation.height = geometry.height;
+                  if (geometry.translationHeight !== undefined)
+                    pendingTranslation.translationHeight = geometry.translationHeight;
+                }
+                if (isActive) {
+                  this.applyActiveMessageGeometry(existing, geometry.width, geometry.height);
+                  if (geometry.translationHeight !== undefined)
+                    existing.translationHeight = geometry.translationHeight;
+                  activeGeometryChanged = true;
+                } else {
+                  existing.width = geometry.width;
+                  existing.height = geometry.height;
+                  if (geometry.translationHeight !== undefined)
+                    existing.translationHeight = geometry.translationHeight;
+                }
+                continue;
+              }
+              // Main geometry is only a notification. Re-measure with local fonts
+              // so delayed size/settings receipts cannot overwrite newer rows.
+              const measured = this.measureMessageGeometry(
+                existing,
+                pendingTranslation?.translatedText
+              );
+              if (pendingTranslation) {
+                Object.assign(pendingTranslation, measured);
+                if (isActive) continue;
               }
               if (isActive) {
-                this.applyActiveMessageGeometry(existing, geometry.width, geometry.height);
-                if (geometry.translationHeight !== undefined) {
-                  existing.translationHeight = geometry.translationHeight;
-                }
-                activeGeometryChanged = true;
+                activeGeometryChanged ||=
+                  existing.width !== measured.width || existing.height !== measured.height;
+                this.applyActiveMessageGeometry(existing, measured.width, measured.height);
+                existing.translationHeight = measured.translationHeight;
               } else {
-                existing.width = geometry.width;
-                existing.height = geometry.height;
-                if (geometry.translationHeight !== undefined) {
-                  existing.translationHeight = geometry.translationHeight;
-                }
+                existing.width = measured.width;
+                existing.height = measured.height;
+                existing.translationHeight = measured.translationHeight;
               }
             }
             if (activeGeometryChanged) this.reflowActiveMessages();
+            this.startRenderLoop();
             break;
           }
           case 'addMessages': {
@@ -761,6 +788,18 @@ export class WorkerRenderer {
                   )) ||
                 (nextConfig.laneSpacing !== undefined &&
                   nextConfig.laneSpacing !== this.config.laneSpacing) ||
+                (nextConfig.superChatMaxBodyLines !== undefined &&
+                  nextConfig.superChatMaxBodyLines !== this.config.superChatMaxBodyLines) ||
+                (nextConfig.membershipMaxBodyLines !== undefined &&
+                  nextConfig.membershipMaxBodyLines !== this.config.membershipMaxBodyLines) ||
+                (nextConfig.showSuperChatAmount !== undefined &&
+                  nextConfig.showSuperChatAmount !== this.config.showSuperChatAmount) ||
+                (nextConfig.translationMode !== undefined &&
+                  nextConfig.translationMode !== this.config.translationMode) ||
+                (nextConfig.showAuthor !== undefined &&
+                  Object.keys(nextConfig.showAuthor).some(
+                    (key) => nextConfig.showAuthor?.[key] !== this.config?.showAuthor[key]
+                  )) ||
                 (nextConfig.safeTop !== undefined && nextConfig.safeTop !== this.config.safeTop) ||
                 (nextConfig.safeBottom !== undefined &&
                   nextConfig.safeBottom !== this.config.safeBottom);
@@ -827,10 +866,17 @@ export class WorkerRenderer {
               }
               this.superChatGradientCache.clear();
               if (geometryChanged && this.canvas) {
+                this.capacityDeferred = new WeakSet();
                 this.initLanes(this.logicalWidth, this.logicalHeight);
+                this.refreshMessageGeometries();
                 this.reflowActiveMessages();
               }
-              if (motionPolicyChanged && !geometryChanged) this.reflowActiveMessages();
+              if (motionPolicyChanged && !geometryChanged) {
+                this.capacityDeferred = new WeakSet();
+                this.refreshMessageGeometries();
+                this.reflowActiveMessages();
+              }
+              if (geometryChanged || motionPolicyChanged) this.startRenderLoop();
             }
             break;
           case 'setPaused': {
@@ -856,9 +902,6 @@ export class WorkerRenderer {
           case 'updateTranslation': {
             const msgId = data.id as string;
             const translatedText = data.translatedText as string | null;
-            const width = data.width as number;
-            const height = data.height as number;
-            const translationHeight = data.translationHeight as number;
             const translationGeneration = (data.translationGeneration as number | undefined) ?? 0;
             const msg = this.messageById.get(msgId);
             if (
@@ -869,10 +912,18 @@ export class WorkerRenderer {
             ) {
               this.pendingTranslations.set(msgId, {
                 translatedText,
-                width,
-                height,
-                translationHeight,
+                ...(this.ctx?.canvas instanceof OffscreenCanvas
+                  ? this.measureMessageGeometry(msg, translatedText)
+                  : {
+                      width: data.width as number,
+                      height: data.height as number,
+                      translationHeight: data.translationHeight as number,
+                    }),
               });
+              if (!('laneArrayIndices' in msg)) {
+                this.capacityDeferred.delete(msg);
+                this.startRenderLoop();
+              }
             }
             break;
           }
@@ -942,8 +993,10 @@ export class WorkerRenderer {
           case 'laneDensity':
             this.laneDensityFactor = (data as { factor: number }).factor;
             if (this.canvas && this.config) {
+              this.capacityDeferred = new WeakSet();
               this.initLanes(this.logicalWidth, this.logicalHeight);
               this.reflowActiveMessages();
+              this.startRenderLoop();
             }
             break;
           case 'ping':
@@ -1010,11 +1063,120 @@ export class WorkerRenderer {
     return getFontString(fontSize, this.config.fontWeight, this.config.fontFamily);
   }
 
+  /** The Worker's font metrics decide placement; transferred dimensions are provisional. */
+  private measureMessageGeometry(
+    message: WorkerMessage | ActiveMessage,
+    translatedText = message.translatedText ?? null
+  ): {
+    width: number;
+    height: number;
+    translationHeight: number;
+  } {
+    const config = this.config;
+    const ctx = this.ctx;
+    if (!config || !ctx || !(ctx.canvas instanceof OffscreenCanvas))
+      return {
+        width: message.width,
+        height: message.height,
+        translationHeight: message.translationHeight ?? 0,
+      };
+    const kind =
+      message.kind === 'superchat' || message.kind === 'membership' ? message.kind : 'text';
+    const authorType: AuthorType =
+      message.authorType === 'member' ||
+      message.authorType === 'moderator' ||
+      message.authorType === 'owner' ||
+      message.authorType === 'verified'
+        ? message.authorType
+        : 'normal';
+    const content: ChatMessage['content'] = (message.content ?? []).map((segment) =>
+      segment.type === 'text'
+        ? { type: 'text', content: segment.content }
+        : {
+            type: 'emoji',
+            emoji: {
+              url: segment.emojiUrl ?? '',
+              alt: segment.emojiAlt ?? '',
+              ...(segment.emojiFallbackText ? { fallbackText: segment.emojiFallbackText } : {}),
+            },
+          }
+    );
+    const source: ChatMessage = {
+      id: message.id,
+      kind,
+      text: message.text,
+      content,
+      timestamp: 0,
+      authorType,
+      ...(message.author ? { author: message.author } : {}),
+      ...(message.authorPhotoUrl ? { authorPhotoUrl: message.authorPhotoUrl } : {}),
+      ...(message.membershipHeader ? { membershipHeader: message.membershipHeader } : {}),
+      ...(kind === 'superchat'
+        ? {
+            superChat: {
+              amount: message.superChatAmount ?? '',
+              tier: 'blue' as const,
+              ...(message.superChatStickerUrl
+                ? { sticker: { url: message.superChatStickerUrl, alt: '' } }
+                : {}),
+            },
+          }
+        : {}),
+    };
+    const measurement: DimensionMeasurement = {
+      width: (text, font, direction) => {
+        const previousFont = ctx.font;
+        ctx.font = font;
+        try {
+          return this.measureTextCached(text, direction);
+        } finally {
+          ctx.font = previousFont;
+        }
+      },
+      height: (font, fontSize) => measureTextHeight(fontSize, font, ctx),
+      context: ctx,
+    };
+    return estimateTranslatedMessageDimensions(source, translatedText, config.translationMode, {
+      fontSize: config.fontSize,
+      showAuthor:
+        kind === 'superchat'
+          ? (config.showAuthor.superChat ?? true)
+          : (config.showAuthor[authorType] ?? true),
+      fontWeight: config.fontWeight,
+      fontFamily: config.fontFamily,
+      maxBodyLines: {
+        superchat: config.superChatMaxBodyLines,
+        membership: config.membershipMaxBodyLines,
+      },
+      showSuperChatAmount: config.showSuperChatAmount,
+      letterSpacing: getSpeedTier(message, config) === SPEED_TIER.FAR ? '1px' : '0px',
+      outlineWidthPx: config.outlineWidthPx,
+      availableWidth: this.logicalWidth,
+      backgroundColor: config.backgroundColors[authorType] ?? '#00000000',
+      mode: this.effectiveMotionMode,
+      measurement,
+    });
+  }
+
+  private refreshMessageGeometries(): void {
+    for (const message of this.messageById.values()) {
+      const pending = this.pendingTranslations.get(message.id);
+      const geometry = this.measureMessageGeometry(message);
+      message.width = geometry.width;
+      message.height = geometry.height;
+      message.translationHeight = geometry.translationHeight;
+      if (pending)
+        Object.assign(pending, this.measureMessageGeometry(message, pending.translatedText));
+    }
+  }
+
   private static estimateBitmapBytes(bitmap: ImageBitmap): number {
     return bitmap.width * bitmap.height * 4;
   }
 
   private enqueueMessage(msg: WorkerMessage): boolean {
+    Object.assign(msg, this.measureMessageGeometry(msg));
+    this.capacityDeferred.delete(msg);
     if (msg.actionType === 'replace' && this.replaceMessage(msg)) return true;
 
     const maxSize = this.config?.queueMaxSize ?? 200;
@@ -1138,7 +1300,10 @@ export class WorkerRenderer {
       this.animFrameId = null;
       if (this.isDestroyed || this.isPaused || this.isUserPaused) return;
       this.renderFrame();
-      if (this.activeMessages.length === 0 && this.pendingQueue.length === 0) {
+      if (
+        this.activeMessages.length === 0 &&
+        this.pendingQueue.every((message) => this.capacityDeferred.has(message))
+      ) {
         const now = performance.now();
         if (this.idleSince === null) {
           this.idleSince = now;
@@ -1376,6 +1541,7 @@ export class WorkerRenderer {
       laneSpacing: config.laneSpacing,
       viewportHeight: this.logicalHeight,
       safeTop: config.safeTop,
+      safeBottom: config.safeBottom,
       mode: config.danmakuMode,
       headwayGapRatio: config.headwayGapRatio,
       now,
@@ -1438,7 +1604,8 @@ export class WorkerRenderer {
     );
     this.laneHeight = getRowGridHeight(baseHeight, this.config.laneSpacing, this.laneDensityFactor);
     const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
-    this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+    const fullLanes = Math.floor(usableHeight / this.laneHeight);
+    this.numLanes = Math.max(0, fullLanes > 0 ? fullLanes : usableHeight > 0 ? 1 : 0);
     const now = performance.now();
     this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
     this.speedTierLanes.clear();
@@ -1462,32 +1629,42 @@ export class WorkerRenderer {
   } | null {
     if (this.laneHeap.length === 0) return null;
     const maxWaitMs = this.config?.scrollDurationMaxMs ?? DEFAULT_SETTINGS.scrollDurationMaxMs;
-    const result = findPlacementShared(
-      this.laneState,
-      now,
-      msgHeight,
-      this.laneHeight,
-      maxWaitMs,
-      speedTier,
-      Math.random,
-      strategy,
-      true,
-      this.config?.laneSpacing ?? 0
-    );
-    if (!result) return null;
     const slotCount = getRowSlotCount(msgHeight, this.laneHeight, this.config?.laneSpacing ?? 0);
-    const laneY = computeLaneY(
-      result.laneIndex,
-      this.logicalHeight,
-      this.config?.safeTop ?? 0,
-      this.laneHeight
-    );
-    const verticalOffset = getRowContentOffset(
-      msgHeight,
-      this.laneHeight,
-      this.config?.laneSpacing ?? 0
-    );
-    return { ...result, laneY, slotCount, verticalOffset };
+    const usableHeight =
+      this.logicalHeight * (1 - (this.config?.safeTop ?? 0) - (this.config?.safeBottom ?? 0));
+    for (let attempt = 0; attempt < this.numLanes; attempt++) {
+      const result = findPlacementShared(
+        this.laneState,
+        now,
+        msgHeight,
+        this.laneHeight,
+        maxWaitMs,
+        speedTier,
+        Math.random,
+        strategy,
+        true,
+        this.config?.laneSpacing ?? 0
+      );
+      if (!result) return null;
+      const verticalOffset = getSafeRowContentOffset(
+        msgHeight,
+        this.laneHeight,
+        this.config?.laneSpacing ?? 0,
+        result.laneIndex,
+        usableHeight
+      );
+      if (verticalOffset !== null) {
+        const laneY = computeLaneY(
+          result.laneIndex,
+          this.logicalHeight,
+          this.config?.safeTop ?? 0,
+          this.laneHeight
+        );
+        return { ...result, laneY, slotCount, verticalOffset };
+      }
+      this.collidedLanes.add(result.laneIndex);
+    }
+    return null;
   }
 
   private commitPlacement(
@@ -1709,8 +1886,8 @@ export class WorkerRenderer {
     const pendingDepthBeforeDrain = this.pendingQueue.length;
     this.sortPendingQueueIfNeeded();
     // Anti-block gate: check if drainQueue should run
-    let shouldDrain = true;
-    if (this.pendingQueue.length > 0) {
+    let shouldDrain = this.pendingQueue.some((message) => !this.capacityDeferred.has(message));
+    if (shouldDrain) {
       let occupiedCount = 0;
       for (let h = 0; h < this.laneHeap.length; h++) {
         const entry = this.laneHeap[h];
@@ -1725,7 +1902,7 @@ export class WorkerRenderer {
             if (this.antiBlockStartTime === 0) {
               this.antiBlockStartTime = now;
             }
-            const front = this.pendingQueue[0];
+            const front = this.pendingQueue.find((message) => !this.capacityDeferred.has(message));
             const forceDrain = now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS;
             if (forceDrain) {
               this.antiBlockStartTime = now;
@@ -1928,6 +2105,7 @@ export class WorkerRenderer {
                 cfg.backgroundColors[msg.authorType ?? 'normal'] ?? '#00000000';
               regularConfig.messageWidth = msg.width;
               regularConfig.messageHeight = msg.height;
+              regularConfig.mode = this.effectiveMotionMode;
               renderRegularMessage(
                 this.ctx,
                 msg,
@@ -1973,30 +2151,39 @@ export class WorkerRenderer {
                 ? paidPadding.paddingH
                 : regularInsets.horizontal;
               const paddingV = msg.cardConfigWorker ? paidPadding.paddingV : regularInsets.vertical;
-              const translationAbove = msg.cardConfigWorker
-                ? 0
-                : getRegularContentBounds(
-                    { text: msg.translatedText, content: [] },
-                    getFontString(translationFontSize, 'normal', cfg.fontFamily),
-                    translationFontSize,
-                    this.ctx
-                  ).above;
+              const translationAbove =
+                msg.cardConfigWorker ||
+                this.effectiveMotionMode === 'top' ||
+                this.effectiveMotionMode === 'bottom'
+                  ? 0
+                  : getRegularContentBounds(
+                      { text: msg.translatedText, content: [] },
+                      getFontString(translationFontSize, 'normal', cfg.fontFamily),
+                      translationFontSize,
+                      this.ctx
+                    ).above;
               const translationY =
                 sy + msg.height - paddingV - translationHeight + translationAbove;
               this.ctx.save();
               try {
                 this.ctx.globalAlpha =
                   (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-                if (msg.cardConfigWorker) {
+                if (
+                  msg.cardConfigWorker ||
+                  this.effectiveMotionMode === 'top' ||
+                  this.effectiveMotionMode === 'bottom'
+                ) {
                   renderWrappedContentSegments(
                     this.ctx,
                     [{ type: 'text', content: msg.translatedText }],
                     sx + paddingH,
                     Math.floor(translationY),
-                    Math.max(1, msg.width - paddingH * 2),
-                    msg.kind === 'superchat'
-                      ? cfg.superChatMaxBodyLines
-                      : cfg.membershipMaxBodyLines,
+                    Math.max(0, msg.width - paddingH * 2),
+                    msg.cardConfigWorker
+                      ? msg.kind === 'superchat'
+                        ? cfg.superChatMaxBodyLines
+                        : cfg.membershipMaxBodyLines
+                      : 3,
                     translationColor,
                     translationFontSize,
                     strokeWidth,
@@ -2083,6 +2270,11 @@ export class WorkerRenderer {
       applied++;
       const message = this.messageById.get(id);
       if (!message) continue;
+      if (this.ctx?.canvas instanceof OffscreenCanvas)
+        Object.assign(
+          translation,
+          this.measureMessageGeometry(message, translation.translatedText)
+        );
       const geometryChanged =
         message.width !== translation.width || message.height !== translation.height;
       message.translatedText = translation.translatedText;
@@ -2098,6 +2290,7 @@ export class WorkerRenderer {
       } else {
         message.width = translation.width;
         message.height = translation.height;
+        this.capacityDeferred.delete(message);
       }
     }
     if (activeGeometryChanged) this.reflowActiveMessages();
@@ -2220,7 +2413,7 @@ export class WorkerRenderer {
     this.sortPendingQueueIfNeeded();
     const t0 = performance.now();
     const candidates = selectDrainCandidates(
-      this.pendingQueue,
+      this.pendingQueue.filter((entry) => !this.capacityDeferred.has(entry)),
       (entry) => entry.priority,
       this.drainCursors,
       DRAIN_MAX_ATTEMPTS,
@@ -2247,13 +2440,22 @@ export class WorkerRenderer {
       attempts++;
       const speedTier = getSpeedTier(entry, this.config);
       const requiredSlots = getRowSlotCount(entry.height, this.laneHeight, this.config.laneSpacing);
-      if (requiredSlots > this.numLanes) {
-        // A message taller than the viewport can never obtain a contiguous
-        // block. Treat it as a permanent drop instead of retrying it every
-        // frame and keeping the Worker render loop alive indefinitely.
-        this.recordDrop(entry, 'oversized');
-        this.messageById.delete(entry.id);
-        committed.add(entry);
+      const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
+      if (this.numLanes <= 0 || entry.height > usableHeight || requiredSlots > this.numLanes) {
+        const baselineHeight = getRegularRowHeight(
+          this.config.fontSize,
+          this.config.fontWeight,
+          this.config.fontFamily,
+          this.config.outlineWidthPx,
+          this.ctx ?? undefined
+        );
+        if (usableHeight < baselineHeight) {
+          this.capacityDeferred.add(entry);
+        } else {
+          this.recordDrop(entry, 'oversized');
+          this.messageById.delete(entry.id);
+          committed.add(entry);
+        }
         continue;
       }
       const laneStrategy =

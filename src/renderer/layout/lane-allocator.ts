@@ -16,8 +16,8 @@ import {
 } from '@renderer/layout/lane-shared';
 import {
   getRegularRowHeight,
-  getRowContentOffset,
   getRowGridHeight,
+  getSafeRowContentOffset,
   getRowSlotCount,
 } from '@renderer/layout/row-geometry';
 import { createLogger } from '@util/logging';
@@ -162,7 +162,10 @@ export class LaneAllocator {
     );
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
-    this.state.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+    // A partial first slot may still hold a shorter candidate. Its physical
+    // bounds are checked before placement; zero usable pixels means zero lanes.
+    const fullLanes = Math.floor(usableHeight / this.laneHeight);
+    this.state.numLanes = Math.max(0, fullLanes > 0 ? fullLanes : usableHeight > 0 ? 1 : 0);
 
     log.debug('Reset', {
       lanes: this.state.numLanes,
@@ -256,27 +259,39 @@ export class LaneAllocator {
 
     const slotCount = getRowSlotCount(messageHeight, this.laneHeight, this.options.laneSpacing);
 
-    const result = findPlacementShared(
-      this.state,
-      now,
-      messageHeight,
-      this.laneHeight,
-      this.options.scrollDurationMaxMs,
-      speedTier,
-      random,
-      strategy,
-      exactMotionValidation,
-      this.options.laneSpacing
-    );
-    if (!result) return null;
-
-    return {
-      laneIndex: result.laneIndex,
-      waitMs: result.waitMs,
-      laneY: this.getLaneY(result.laneIndex, dimensions.height),
-      slotCount,
-      verticalOffset: getRowContentOffset(messageHeight, this.laneHeight, this.options.laneSpacing),
-    };
+    const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
+    for (let attempt = 0; attempt < totalLanes; attempt++) {
+      const result = findPlacementShared(
+        this.state,
+        now,
+        messageHeight,
+        this.laneHeight,
+        this.options.scrollDurationMaxMs,
+        speedTier,
+        random,
+        strategy,
+        exactMotionValidation,
+        this.options.laneSpacing
+      );
+      if (!result) return null;
+      const verticalOffset = getSafeRowContentOffset(
+        messageHeight,
+        this.laneHeight,
+        this.options.laneSpacing,
+        result.laneIndex,
+        usableHeight
+      );
+      if (verticalOffset !== null)
+        return {
+          laneIndex: result.laneIndex,
+          waitMs: result.waitMs,
+          laneY: this.getLaneY(result.laneIndex, dimensions.height),
+          slotCount,
+          verticalOffset,
+        };
+      this.state.collidedLanes.add(result.laneIndex);
+    }
+    return null;
   }
 
   /**

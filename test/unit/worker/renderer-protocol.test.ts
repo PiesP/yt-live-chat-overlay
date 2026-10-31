@@ -480,6 +480,8 @@ describe('Worker reservation safety', () => {
       scrollDurationMaxMs: 30000,
       outlineWidthPx: 0,
       outlineOpacity: 0,
+      safeTop: 0,
+      safeBottom: 0,
     });
     const internals = renderer as unknown as {
       laneHeap: [number, number][];
@@ -520,6 +522,35 @@ describe('Worker reservation safety', () => {
     }
     return { renderer, internals };
   }
+
+  it('uses local Worker canvas metrics before admitting transferred fixed geometry', () => {
+    (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> }).canvas =
+      new MockOffscreenCanvas();
+    try {
+      const renderer = initializeRenderer({ danmakuMode: 'top', safeTop: 0, safeBottom: 0 });
+      const internals = renderer as unknown as { pendingQueue: WorkerMessage[] };
+      const text = 'long content '.repeat(12);
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [
+            makeWorkerMessage({
+              id: 'local-geometry',
+              text,
+              content: [{ type: 'text', content: text }],
+              width: 2000,
+              height: 1,
+            }),
+          ],
+        })
+      );
+      expect(internals.pendingQueue[0]?.width).toBeLessThanOrEqual(640);
+      expect(internals.pendingQueue[0]?.height).toBeGreaterThan(1);
+    } finally {
+      delete (mockCtx as typeof mockCtx & { canvas?: InstanceType<typeof MockOffscreenCanvas> })
+        .canvas;
+    }
+  });
 
   it.each(['scroll', 'reverse'] as const)(
     'checks future reservations and uses an alternative lane in %s',
@@ -1275,21 +1306,43 @@ describe('Worker message protocol', () => {
       expect(internals.activeMessages[0]?.translatedContent).toBeUndefined();
     });
 
-    it('drops messages that require more lanes than the viewport has', () => {
-      const renderer = initializeRenderer();
+    it('defers an unfit message without repeated attempts, then admits it after viewport recovery', () => {
+      const renderer = initializeRenderer({ fontSize: 32, safeTop: 0.25, safeBottom: 0.5 });
       const internals = renderer as unknown as {
         drainQueue: (now: number, width: number, height: number) => void;
         pendingQueue: WorkerMessage[];
         totalDrops: number;
         dropReasons: { oversized: number };
       };
-      const oversized = makeWorkerMessage({ height: 10_000 });
+      const deferred = makeWorkerMessage({ height: 47 });
 
-      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [oversized] }));
-      internals.drainQueue(10_000, 640, 360);
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height: 60, dpr: 1 }));
 
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [deferred] }));
+      internals.drainQueue(10_000, 640, 60);
+
+      expect(internals.pendingQueue).toHaveLength(1);
+      expect(internals.totalDrops).toBe(0);
+      internals.drainQueue(10_016, 640, 60);
+      expect(internals.pendingQueue).toHaveLength(1);
+      renderer.handleMessage(makeEvent({ type: 'resize', width: 640, height: 400, dpr: 1 }));
+      internals.drainQueue(10_032, 640, 400);
       expect(internals.pendingQueue).toHaveLength(0);
-      expect(internals.totalDrops).toBe(1);
+      expect(internals.totalDrops).toBe(0);
+    });
+
+    it('drops a permanently oversized message in a normal viewport', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        drainQueue: (now: number, width: number, height: number) => void;
+        pendingQueue: WorkerMessage[];
+        dropReasons: { oversized: number };
+      };
+      renderer.handleMessage(
+        makeEvent({ type: 'addMessages', messages: [makeWorkerMessage({ height: 10_000 })] })
+      );
+      internals.drainQueue(10_000, 640, 360);
+      expect(internals.pendingQueue).toHaveLength(0);
       expect(internals.dropReasons.oversized).toBe(1);
     });
 

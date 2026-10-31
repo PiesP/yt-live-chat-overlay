@@ -132,6 +132,29 @@ describe('LaneAllocator', () => {
       tiny.reset({ width: 1, height: 1 });
       expect(tiny.getLaneCount()).toBeGreaterThanOrEqual(1);
     });
+
+    it('admits only physically fitting candidates in a partial safe-zone slot', () => {
+      const tiny = new LaneAllocator({
+        ...defaultOptions,
+        safeTop: 0.25,
+        safeBottom: 0.5,
+        fontSize: 32,
+      });
+      const viewport = { width: 320, height: 100 };
+      tiny.reset(viewport, now);
+      expect(tiny.getLaneCount()).toBe(1);
+      expect(tiny.findPlacement(47, viewport, SPEED_TIER.MID, now, 'top')).toBeNull();
+      tiny.clearCandidateExclusions();
+      const smaller = tiny.findPlacement(20, viewport, SPEED_TIER.MID, now, 'top');
+      expect(smaller).not.toBeNull();
+      if (!smaller) return;
+      expect(smaller.laneY + smaller.verticalOffset).toBeGreaterThanOrEqual(25);
+      expect(smaller.laneY + smaller.verticalOffset + 20).toBeLessThanOrEqual(50);
+      tiny.reset({ width: 320, height: 400 }, now);
+      expect(
+        tiny.findPlacement(47, { width: 320, height: 400 }, SPEED_TIER.MID, now, 'top')
+      ).not.toBeNull();
+    });
   });
 
   // ── getLaneY ──────────────────────────────────────────────────────────

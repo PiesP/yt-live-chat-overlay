@@ -7,6 +7,7 @@ import { renderRegularMessage, splitGraphemeClusters } from '@renderer/canvas/sh
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
+import { resolveEffectiveMotionMode } from '@renderer/layout/message-schedule';
 import {
   getRegularRowHeight,
   getRowContentOffset,
@@ -1471,12 +1472,20 @@ export class SettingsUiForm {
     const outlineWidth = settings.outline.enabled ? settings.outline.widthPx : 0;
     const availableWidth = element.parentElement?.getBoundingClientRect().width ?? 0;
     const width = Math.max(1, Math.floor(availableWidth || 320));
+    const mode = resolveEffectiveMotionMode(
+      settings.danmakuMode,
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+      settings.ignoreReducedMotion
+    );
     const font = getFontString(settings.fontSize, settings.fontWeight, settings.fontFamily);
     const textWidth = Math.max(
       0,
       width - 2 * getRegularCardInsets(settings.fontSize, outlineWidth).horizontal
     );
-    if (measureTextWidth(message.text, font) > textWidth) {
+    if (
+      (mode === 'scroll' || mode === 'reverse') &&
+      measureTextWidth(message.text, font) > textWidth
+    ) {
       const pieces = splitGraphemeClusters(message.text);
       while (pieces.length && measureTextWidth(`${pieces.join('')}…`, font) > textWidth)
         pieces.pop();
@@ -1493,9 +1502,10 @@ export class SettingsUiForm {
       undefined,
       '0px',
       outlineWidth,
+      width,
       undefined,
-      undefined,
-      settings.backgroundColors.normal
+      settings.backgroundColors.normal,
+      mode
     );
     const base = getRegularRowHeight(
       settings.fontSize,
@@ -1532,6 +1542,7 @@ export class SettingsUiForm {
       backgroundColor: settings.backgroundColors.normal,
       messageWidth: measured.width,
       messageHeight: measured.height,
+      mode,
     };
     const noBitmap = { maxBytes: 0, get: (): undefined => undefined, set: (): boolean => false };
     const noImages = { get: (): null => null };
@@ -1550,7 +1561,7 @@ export class SettingsUiForm {
         noImages,
         () => false,
         getFont,
-        (text) => measureTextWidth(text, getFont(settings.fontSize))
+        (text, direction) => measureTextWidth(text, getFont(settings.fontSize), direction)
       );
     }
   }
