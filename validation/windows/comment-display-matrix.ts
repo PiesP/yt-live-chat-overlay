@@ -563,7 +563,8 @@ const OVERFLOW_SEED_BATCHES = Object.fromEntries(
   ])
 ) as Record<`overflowSeed${number}`, ReturnType<typeof textAction>[]>;
 const MANAGER_FIFO_IDS = {
-  bootstrap: 'WINDOWS387_FIFO_PAID_BOOTSTRAP',
+  // The existing paid-plan draw observer binds WINDOWS380-prefixed card IDs.
+  bootstrap: 'WINDOWS380_FIFO_PAID_BOOTSTRAP',
   paid: Array.from({ length: 50 }, (_, index) => `WINDOWS387_FIFO_PAID_${index}`),
   old: Array.from({ length: 80 }, (_, index) => `WINDOWS387_FIFO_OLD_${index}`),
   fresh: Array.from({ length: 4 }, (_, index) => `WINDOWS387_FIFO_NEW_${index}`),
