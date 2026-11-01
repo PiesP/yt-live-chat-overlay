@@ -25,7 +25,7 @@ invalid metadata, API failure, or digest drift fails. Later checks continue
 after an earlier failure.
 
 The workflow pins consumer data at
-`5adbdf8592366862002d5e8c9a408845f889f099` and provider code at
+`e61b85b0c31bc0dc1d526f43eb5ee158a512c3be` and provider code at
 `4ab0442d8d2e3cf640767b499b6444c92f6479b5`, independently by full SHA.
 Both paths run after the selected Node setup, and no scanner code or pin data
 comes from a candidate PR checkout. The provider snapshots in

@@ -13,7 +13,7 @@ const centralWorkflowJobs = {
 const releaseJobs = ['quality', 'unit', 'e2e', 'build'];
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
-const reviewedScannerSource = '5adbdf8592366862002d5e8c9a408845f889f099';
+const reviewedScannerSource = 'e61b85b0c31bc0dc1d526f43eb5ee158a512c3be';
 
 function topLevelBlock(workflow: string, key: string): string {
   const marker = `${key}:\n`;
@@ -26,7 +26,7 @@ function topLevelBlock(workflow: string, key: string): string {
 }
 
 describe('project setup actions', () => {
-  it('passes the reviewed pre-.node-version scanner pin to shared setup', () => {
+  it('uses the reviewed scanner source runtime pin through shared setup', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
     for (const job of ['pin-metadata', 'pinned-tools']) {
       const jobSection = workflow.match(
@@ -34,7 +34,7 @@ describe('project setup actions', () => {
       )?.[0];
       expect(jobSection).toContain(`ref: ${reviewedScannerSource}`);
       expect(jobSection).toContain(`uses: ${centralAction}`);
-      expect(jobSection).toContain("node-version: '26.12.1'");
+      expect(jobSection).not.toContain('node-version:');
       expect(jobSection).toContain("install-dependencies: 'false'");
     }
   });
