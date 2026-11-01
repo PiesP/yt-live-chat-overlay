@@ -48,11 +48,11 @@ export function assertQualifiedRuntime(
   )
 ): void {
   if (
-    selectedVersion !== '26.12.1\n' ||
-    version !== '26.12.1' ||
+    selectedVersion !== '26.13.0\n' ||
+    version !== '26.13.0' ||
     typeof zipApi.ZipEntry?.read !== 'function'
   ) {
-    throw new Error('Userscript manager preparation requires the pinned Node 26.12.1 ZIP runtime.');
+    throw new Error('Userscript manager preparation requires the pinned Node 26.13.0 ZIP runtime.');
   }
 }
 
@@ -205,7 +205,7 @@ interface ExtractedFile {
   content: Buffer;
 }
 
-// Node 26.12.1 checks local method, flags and sizes against the central directory,
+// Node 26.13.0 checks local method, flags and sizes against the central directory,
 // but does not compare their filenames. Check that one field before extracting.
 function assertLocalNames(zip: Buffer, entries: ZipEntryView[]): void {
   let end = -1;
