@@ -53,15 +53,13 @@ jobs:
       - name: 📥 Checkout reviewed pin source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 5adbdf8592366862002d5e8c9a408845f889f099
+          ref: e61b85b0c31bc0dc1d526f43eb5ee158a512c3be
           persist-credentials: false
           submodules: false
 
       - name: 📦 Setup reviewed pin runtime
         uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
-          # The reviewed 5adbdf8 source predates .node-version and pins this in Volta.
-          node-version: '26.12.1'
           install-dependencies: 'false'
 
       - name: 🔐 Prepare reviewed scanner pin helper
@@ -156,7 +154,7 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 5adbdf8592366862002d5e8c9a408845f889f099
+          ref: e61b85b0c31bc0dc1d526f43eb5ee158a512c3be
           persist-credentials: false
           submodules: false
 
@@ -164,8 +162,6 @@ jobs:
         if: ${{ needs.changes.result != 'success' || needs.changes.outputs.pinned_tools == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@38cd1cb18c9c37e57e8b53a98e811450bb1a18fc
         with:
-          # The reviewed 5adbdf8 source predates .node-version and pins this in Volta.
-          node-version: '26.12.1'
           install-dependencies: 'false'
 
       - name: 🔐 Prepare reviewed scanner pin helper
