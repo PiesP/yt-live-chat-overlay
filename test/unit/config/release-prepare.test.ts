@@ -38,7 +38,7 @@ function createReleaseFixture(): string {
   );
   writeFileSync(
     join(fixtureRoot, 'package.json'),
-    '{"version":"1.2.3","packageManager":"pnpm@12.15.0"}\n'
+    '{"version":"1.2.3","packageManager":"pnpm@12.16.1"}\n'
   );
   writeFileSync(join(fixtureRoot, '.node-version'), '26.12.1\n');
   writeFileSync(join(fixtureRoot, '.gitignore'), 'test-results/\nrelease-bundle/\n');
