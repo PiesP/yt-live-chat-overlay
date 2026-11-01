@@ -30,6 +30,8 @@ catalog:
 overrides:
   # Only native Firefox BiDi is used; the patched barrel defers the unused CDP mapper.
   'puppeteer-core@25.16.0>chromium-bidi': '-'
+  # postcss-url only uses minimatch.filter; qualify this major on its real CSS path.
+  'postcss-url@10.1.4>minimatch': 11.0.1
   vite@*: 'catalog:'
   vitest@*: 'catalog:'
 patchedDependencies:
