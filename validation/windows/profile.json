@@ -43,6 +43,7 @@
       "validation/windows/native-tab-lifetime.ts",
       "validation/windows/native-worker-retirement.ts",
       "validation/windows/main-image-recovery.ts",
+      "validation/windows/backlog-reset.ts",
       "validation/windows/native-page-script-probe.ts",
       "validation/windows/chrome-process.ts",
       "validation/windows/live-duration.ts",
