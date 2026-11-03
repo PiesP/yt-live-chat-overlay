@@ -2,12 +2,14 @@
 
 import { Script, createContext } from 'node:vm';
 
-import { describe, expect, it } from 'vite-plus/test';
+import type { Page } from '@playwright/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 import {
   assertFarColorPixels,
   farColorPrelude,
   observeFarColorPage,
+  waitForFarColorPageReady,
 } from '../../../validation/windows/far-color';
 
 // This checks serialized observer code, not the production color policy.
@@ -80,5 +82,95 @@ describe('FAR imported-alpha pixel predicate', () => {
         136
       )
     ).toThrow(/Visible pixels disagree/);
+  });
+});
+
+describe('FAR native page readiness ordering', () => {
+  it('waits for asynchronous production readiness before asserting the exact native injection', async () => {
+    const order: string[] = ['domcontentloaded'];
+    let releaseCanvas = (): void => {};
+    let releaseApp = (): void => {};
+    const canvasReady = new Promise<void>((resolve) => {
+      releaseCanvas = resolve;
+    });
+    const appReady = new Promise<void>((resolve) => {
+      releaseApp = resolve;
+    });
+    const waitForCanvas = vi.fn(() => {
+      order.push('wait-canvas');
+      return canvasReady;
+    });
+    const waitForFunction = vi.fn(() => {
+      order.push('wait-app');
+      return appReady;
+    });
+    const page = {
+      locator: vi.fn(() => ({ waitFor: waitForCanvas })),
+      waitForFunction,
+    } as unknown as Pick<Page, 'locator' | 'waitForFunction'>;
+    let injected = false;
+    const probe = {
+      assertInjected: vi.fn(async () => {
+        expect(injected).toBe(true);
+        order.push('assert-exact-injection');
+      }),
+      restore: vi.fn(async () => {
+        order.push('restore');
+      }),
+    };
+    const pending = waitForFarColorPageReady(page, probe);
+    expect(probe.assertInjected).not.toHaveBeenCalled();
+    expect(probe.restore).not.toHaveBeenCalled();
+    releaseCanvas();
+    await Promise.resolve();
+    expect(waitForFunction).toHaveBeenCalledWith(expect.any(Function), undefined, {
+      timeout: 15_000,
+    });
+    expect(probe.assertInjected).not.toHaveBeenCalled();
+    injected = true;
+    releaseApp();
+    await pending;
+    expect(waitForCanvas).toHaveBeenCalledWith({ state: 'attached', timeout: 15_000 });
+    expect(order).toEqual([
+      'domcontentloaded',
+      'wait-canvas',
+      'wait-app',
+      'assert-exact-injection',
+      'restore',
+    ]);
+  });
+
+  it('propagates unavailable readiness and leaves probe cleanup with the fixture owner', async () => {
+    const page = {
+      locator: () => ({
+        waitFor: async () => {
+          throw new Error('Production canvas did not attach');
+        },
+      }),
+      waitForFunction: vi.fn(),
+    } as unknown as Pick<Page, 'locator' | 'waitForFunction'>;
+    const probe = { assertInjected: vi.fn(), restore: vi.fn() };
+    await expect(waitForFarColorPageReady(page, probe)).rejects.toThrow(
+      'Production canvas did not attach'
+    );
+    expect(probe.assertInjected).not.toHaveBeenCalled();
+    expect(probe.restore).not.toHaveBeenCalled();
+    expect(page.waitForFunction).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failing exact-injection assertion authoritative after readiness', async () => {
+    const page = {
+      locator: () => ({ waitFor: async () => {} }),
+      waitForFunction: async () => {},
+    } as unknown as Pick<Page, 'locator' | 'waitForFunction'>;
+    const probe = {
+      assertInjected: vi.fn(async () => {
+        throw new Error('Native injection count is not exactly one');
+      }),
+      restore: vi.fn(),
+    };
+    await expect(waitForFarColorPageReady(page, probe)).rejects.toThrow('not exactly one');
+    expect(probe.assertInjected).toHaveBeenCalledOnce();
+    expect(probe.restore).not.toHaveBeenCalled();
   });
 });

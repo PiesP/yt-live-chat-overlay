@@ -1181,6 +1181,9 @@ Place exactly `{"scenario":"far-color"}` in
 Run the maintained headed installed Edge extension profile without a controller
 `--scenario` flag or public URLs. The focused route requires a fresh extension
 installation and skips the unrelated native/PiP and full display campaigns.
+After navigation, it waits for the production canvas and application handle
+before asserting exactly one completed native page-script injection;
+DOMContentLoaded alone does not complete the asynchronous document-end bootstrap.
 
 The fixture imports `colors.normal="#f008"` through the actual JSON file chooser,
 stops and reloads the application to read back persisted settings, then admits

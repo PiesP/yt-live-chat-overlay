@@ -6,10 +6,13 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { BrowserContext } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 
 import { restoreFixtureSettings } from './fixture-settings.ts';
-import { installNativePageScriptProbe } from './native-page-script-probe.ts';
+import {
+  installNativePageScriptProbe,
+  type NativePageScriptProbe,
+} from './native-page-script-probe.ts';
 import { buildVisibleWatchHtml } from './visible-watch.ts';
 
 const URL = 'https://www.youtube.com/watch?v=windows410FarColor';
@@ -199,6 +202,22 @@ export function farColorPrelude(forceFallback: boolean): string {
   );
 }
 
+/** Native document_end delivery continues asynchronously after DOMContentLoaded. */
+export async function waitForFarColorPageReady(
+  page: Pick<Page, 'locator' | 'waitForFunction'>,
+  probe: Pick<NativePageScriptProbe, 'assertInjected' | 'restore'>
+): Promise<void> {
+  await page
+    .locator('#yt-live-chat-overlay canvas')
+    .waitFor({ state: 'attached', timeout: 15_000 });
+  await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings), undefined, {
+    timeout: 15_000,
+  });
+  // Keep the exact native-injection assertion after the production readiness barriers.
+  await probe.assertInjected();
+  await probe.restore();
+}
+
 export async function runFarColorFixture({
   context,
   root,
@@ -229,6 +248,10 @@ export async function runFarColorFixture({
       observations.push(observation);
       page.on('pageerror', (error) => {
         if (errors.length < 16) errors.push(error.message);
+      });
+      page.on('console', (entry) => {
+        if (entry.type() === 'error' && errors.length < 16)
+          errors.push(entry.text().slice(0, 2000));
       });
       try {
         await page.setViewportSize({ width: 1000, height: 900 });
@@ -281,6 +304,7 @@ export async function runFarColorFixture({
           content: farColorPrelude(backend === 'main'),
         });
         const navigate = async () => {
+          observation.navigationStage = 'install-native-probe';
           probe = await installNativePageScriptProbe({
             context,
             root,
@@ -288,12 +312,14 @@ export async function runFarColorFixture({
             fixtureUrl: URL,
             instrumentedSource: observeFarColorPage(source),
           });
+          observation.probeProvenance = probe.provenance;
           await probe.assertReady();
+          observation.navigationStage = 'native-probe-ready';
           await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          await probe.assertInjected();
-          await probe.restore();
+          observation.navigationStage = 'document-loaded-awaiting-production-readiness';
+          await waitForFarColorPageReady(page, probe);
+          observation.navigationStage = 'production-ready-exact-native-injection-verified';
           probe = undefined;
-          await page.waitForFunction(() => Boolean(window.__ytChatOverlay));
         };
         await navigate();
         previous = await page.evaluate(() => {
