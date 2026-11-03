@@ -71,7 +71,7 @@ const MAX_CAPTURES_PER_BACKEND = 12;
 const MAX_OVERLOAD_MS = 120_000;
 const MAX_OVERLOAD_RECORDS = 128;
 const PRESENTATION_VIEWPORT_HEIGHT = 1100;
-const PRESENTATION_PLAYER_HEIGHT = 900;
+const PRESENTATION_PLAYER_HEIGHT = 940;
 const MIN_PAID_BODY_LINES = resolveLimits('superChatMaxBodyLines').min;
 const MIN_FONT_SIZE = resolveLimits('fontSize').min;
 const MAX_FONT_SIZE = resolveLimits('fontSize').max;
@@ -3166,18 +3166,39 @@ async function runBackend(options: {
         activeCap: 40,
         queueCap: 80,
       });
+      const presentationBounds = await page.evaluate(() => {
+        const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+        const canvas = document
+          .querySelector('#yt-live-chat-overlay canvas')
+          ?.getBoundingClientRect();
+        const viewport = window.visualViewport;
+        return {
+          player: player
+            ? { left: player.left, top: player.top, right: player.right, bottom: player.bottom }
+            : null,
+          canvas: canvas
+            ? { left: canvas.left, top: canvas.top, right: canvas.right, bottom: canvas.bottom }
+            : null,
+          visible: {
+            left: viewport?.offsetLeft ?? 0,
+            top: viewport?.offsetTop ?? 0,
+            right: (viewport?.offsetLeft ?? 0) + (viewport?.width ?? innerWidth),
+            bottom: (viewport?.offsetTop ?? 0) + (viewport?.height ?? innerHeight),
+          },
+        };
+      });
+      const { player, canvas, visible } = presentationBounds;
+      assert(player && canvas, 'Presentation player or canvas is unavailable');
       assert(
-        await page.evaluate(() => {
-          const player = document.querySelector('#movie_player')?.getBoundingClientRect();
-          return Boolean(
-            player &&
-            player.left >= 0 &&
-            player.top >= 0 &&
-            player.right <= innerWidth &&
-            player.bottom <= innerHeight
-          );
-        }),
-        'Presentation player exceeded the physical viewport'
+        player.left >= visible.left &&
+          player.top >= visible.top &&
+          player.right <= visible.right &&
+          player.bottom <= visible.bottom &&
+          canvas.left >= player.left &&
+          canvas.top >= player.top &&
+          canvas.right <= player.right &&
+          canvas.bottom <= player.bottom,
+        'Presentation geometry exceeds the visible viewport: ' + JSON.stringify(presentationBounds)
       );
       const paidId = PRESENTATION_IDS[scene].paid;
       const key = `presentation${scene[0]?.toUpperCase()}${scene.slice(1)}` as
@@ -3316,6 +3337,25 @@ async function runBackend(options: {
         ] as const) {
           failureStage = `presentation:${scene}:${width}:${layout}:${role}`;
           const planning = await snapshot(page, backend);
+          const roleIds = Object.values(PRESENTATION_IDS[scene]);
+          const hiddenRoles = planning.activeNow
+            .filter((entry) => roleIds.includes(entry.id) && entry.slotCount === 0)
+            .map(({ id: hiddenId, height, y, slotCount }) => ({
+              id: hiddenId,
+              height,
+              y,
+              slotCount,
+            }));
+          assert.equal(
+            hiddenRoles.length,
+            0,
+            name +
+              ' cannot prove all roles with hidden active cards: ' +
+              JSON.stringify({
+                logicalHeight: planning.frame?.logicalHeight ?? null,
+                hiddenRoles,
+              })
+          );
           const waitBudget = planVisibleItemWait(planning, id, Date.now() - startedAt);
           currentRoleWait = {
             ...waitBudget,
