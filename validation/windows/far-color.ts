@@ -37,6 +37,28 @@ export async function readFarColorSelector(root: string): Promise<boolean> {
   }
 }
 
+/** Validate only positive-alpha pixels matching the independently specified text RGB. */
+export function assertFarColorPixels(
+  pixels: readonly number[][],
+  rgb: readonly number[],
+  alphaUpperBound?: number
+): { matchedPixels: number; maxAlpha: number; alphaUpperBound: number | null } {
+  const matched = pixels.filter(
+    (pixel) =>
+      (pixel[3] ?? 0) > 0 &&
+      rgb.every((channel, index) => Math.abs(channel - (pixel[index] ?? -100)) <= 4)
+  );
+  assert(matched.length > 0, `Visible pixels disagree with RGB ${rgb.join(',')}`);
+  const maxAlpha = Math.max(...matched.map((pixel) => pixel[3] ?? 0));
+  if (alphaUpperBound !== undefined) {
+    assert(
+      maxAlpha <= alphaUpperBound,
+      `Matched text pixel alpha ${maxAlpha} exceeds ${alphaUpperBound}; the transparent, outline-free fixture requires an unlayered text draw`
+    );
+  }
+  return { matchedPixels: matched.length, maxAlpha, alphaUpperBound: alphaUpperBound ?? null };
+}
+
 /** Source-bound observation: retain successful real text draws and nontransparent row pixels. */
 function installColorRuntime(worker: boolean): void {
   type Context = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -293,6 +315,7 @@ export async function runFarColorFixture({
           opacity: 1,
           depthFarOpacityMul: 1,
           motionBlurEnabled: false,
+          translationEnabled: false,
           showAuthor: { ...previous.showAuthor, normal: false },
           outline: { ...previous.outline, enabled: false },
           colors: { ...previous.colors, normal: '#f008' },
@@ -326,7 +349,12 @@ export async function runFarColorFixture({
           const response = await fetch('/youtubei/v1/live_chat/get_live_chat?far410=1');
           await response.json();
         });
-        const waitColor = async (color: string, rgb: number[], capture?: string) => {
+        const waitColor = async (
+          color: string,
+          rgb: number[],
+          capture?: string,
+          alphaUpperBound?: number
+        ) => {
           await page.waitForFunction(
             (expected) =>
               window.__ytFarColor?.draws.some(
@@ -344,20 +372,21 @@ export async function runFarColorFixture({
           );
           assert(record);
           assert(record.fills.length > 0);
-          assert(
-            record.pixels.some((pixel) =>
-              rgb.every((channel, index) => Math.abs(channel - (pixel[index] ?? -100)) <= 4)
-            ),
-            `Visible pixels disagree with ${color}`
-          );
+          const pixelProof = assertFarColorPixels(record.pixels, rgb, alphaUpperBound);
           if (capture) {
             const name = `far-color-${backend}-${capture}.png`;
             await page.screenshot({ path: join(output, name) });
             captures.push(name);
           }
-          return record;
+          return { ...record, pixelProof };
         };
-        const alpha = await waitColor('rgba(201,23,23,0.5333333333333333)', [201, 23, 23], 'alpha');
+        // #f008 expands to #ff000088: the independent encoded alpha ceiling is 0x88 = 136.
+        const alpha = await waitColor(
+          'rgba(201,23,23,0.5333333333333333)',
+          [201, 23, 23],
+          'alpha',
+          136
+        );
         await page.evaluate(() => {
           const app = window.__ytChatOverlay;
           if (!app) throw new Error('Fixture app unavailable');

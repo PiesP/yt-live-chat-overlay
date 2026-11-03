@@ -4,7 +4,11 @@ import { Script, createContext } from 'node:vm';
 
 import { describe, expect, it } from 'vite-plus/test';
 
-import { farColorPrelude, observeFarColorPage } from '../../../validation/windows/far-color';
+import {
+  assertFarColorPixels,
+  farColorPrelude,
+  observeFarColorPage,
+} from '../../../validation/windows/far-color';
 
 // This checks serialized observer code, not the production color policy.
 describe('source-bound FAR observer', () => {
@@ -33,5 +37,48 @@ describe('source-bound FAR observer', () => {
     const source = 'function renderRegularMessage(){}\n\tmain();\n';
     expect(observeFarColorPage(source)).toMatch(/^function renderRegularMessage\(\)\{\}/);
     expect(observeFarColorPage(source).endsWith('\n\tmain();\n')).toBe(true);
+  });
+});
+
+describe('FAR imported-alpha pixel predicate', () => {
+  it('accepts alpha 136 and ignores opaque pixels of a different color', () => {
+    expect(
+      assertFarColorPixels(
+        [
+          [201, 23, 23, 136],
+          [201, 23, 23, 50],
+          [255, 255, 255, 255],
+        ],
+        [201, 23, 23],
+        136
+      )
+    ).toEqual({ matchedPixels: 2, maxAlpha: 136, alphaUpperBound: 136 });
+  });
+
+  it('rejects matching text pixels exceeding the independent #f008 alpha ceiling', () => {
+    expect(() => assertFarColorPixels([[201, 23, 23, 137]], [201, 23, 23], 136)).toThrow(
+      /exceeds 136/
+    );
+    expect(() => assertFarColorPixels([[201, 23, 23, 255]], [201, 23, 23], 136)).toThrow(
+      /unlayered text draw/
+    );
+  });
+
+  it('retains the opaque case and rejects absent positive-alpha matched text', () => {
+    expect(assertFarColorPixels([[201, 23, 23, 255]], [201, 23, 23])).toEqual({
+      matchedPixels: 1,
+      maxAlpha: 255,
+      alphaUpperBound: null,
+    });
+    expect(() =>
+      assertFarColorPixels(
+        [
+          [201, 23, 23, 0],
+          [255, 255, 255, 255],
+        ],
+        [201, 23, 23],
+        136
+      )
+    ).toThrow(/Visible pixels disagree/);
   });
 });

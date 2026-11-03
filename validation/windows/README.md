@@ -1190,6 +1190,12 @@ real packaged Worker and a separate forced Main fallback page must draw the
 independently specified alpha red, configured red, and preserved user blue
 colors. The observer wraps the original regular painter, retains actual positive
 alpha text fills and backing-canvas pixels, and writes two captures per backend.
+For imported `#f008`, matched red text pixels must have alpha at most 136
+(`0x88`), with their observed maximum retained in the receipt. This bound applies
+to the controlled transparent-background, outline-free, motion-blur-free fixture
+with translation disabled; it does not assert a general alpha limit for layered
+product rendering. A larger matching alpha fails with that fixture prerequisite
+stated explicitly.
 Settings changes exercise the same already active message. DPR is read from the
 actual Canvas transform when sampling pixels. All fixture settings are restored
 and durably checked before its owned page closes. `far-color.json` retains the
