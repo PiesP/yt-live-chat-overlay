@@ -1173,3 +1173,27 @@ delivery after the real queue drains, and final session teardown. Review the
 bundle, collection and cleanup receipts. A failure also writes
 `backlog-reset-failure.json`. These state and ingress observations do not
 establish pixel presentation, public YouTube compatibility or Worker behavior.
+
+## FAR color contract (#410)
+
+Place exactly `{"scenario":"far-color"}` in
+`validation/windows/inputs/far-color.json` before bundling the committed checkout.
+Run the maintained headed installed Edge extension profile without a controller
+`--scenario` flag or public URLs. The focused route requires a fresh extension
+installation and skips the unrelated native/PiP and full display campaigns.
+
+The fixture imports `colors.normal="#f008"` through the actual JSON file chooser,
+stops and reloads the application to read back persisted settings, then admits
+`WINDOWS410_FAR_A` through the production chat response parser. Its production
+hash is 0.52563691069372, selecting FAR without replacing the classifier. The
+real packaged Worker and a separate forced Main fallback page must draw the
+independently specified alpha red, configured red, and preserved user blue
+colors. The observer wraps the original regular painter, retains actual positive
+alpha text fills and backing-canvas pixels, and writes two captures per backend.
+Settings changes exercise the same already active message. DPR is read from the
+actual Canvas transform when sampling pixels. All fixture settings are restored
+and durably checked before its owned page closes. `far-color.json` retains the
+source digest, observations and cleanup; the controller binds source/core,
+package hashes, browser version, and browser/profile cleanup. Inspect all four
+PNGs before changing `visualReview: pending`. This is controlled fixture evidence,
+not live YouTube or a release-wide qualification.

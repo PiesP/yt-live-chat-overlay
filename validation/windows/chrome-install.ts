@@ -31,6 +31,7 @@ import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome
 import { runChromiumBootstrapBoundaries } from './chromium-bootstrap-boundaries.ts';
 import { beginChromiumNetworkDiagnostics } from './chromium-network-diagnostics.ts';
 import { readManagerIngressFifoSelector, runManagerIngressFifo } from './comment-display-matrix.ts';
+import { readFarColorSelector, runFarColorFixture } from './far-color.ts';
 import { restoreFixtureSettings } from './fixture-settings.ts';
 import {
   readInstalledViewingTaskSelector,
@@ -294,6 +295,7 @@ type ChromeResult<Live = LiveObservation> = {
   > | null;
   managerIngressFifo?: Awaited<ReturnType<typeof runManagerIngressFifo>> | null;
   backlogReset?: Awaited<ReturnType<typeof runBacklogResetFixture>> | null;
+  farColor?: Awaited<ReturnType<typeof runFarColorFixture>> | null;
   cleanup: Record<string, unknown>;
   browserVersion?: string;
   installationMethod?: string;
@@ -2483,6 +2485,7 @@ export async function runChromeInstallation({
   const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
   const managerFifoSelected = await readManagerIngressFifoSelector(root);
   const backlogResetSelected = await readBacklogResetSelector(root);
+  const farColorSelected = await readFarColorSelector(root);
   assert(
     Number(opacitySelected) +
       Number(requestDeadlineSelected) +
@@ -2490,7 +2493,8 @@ export async function runChromeInstallation({
       Number(Boolean(translatorNativeSelected)) +
       Number(translationWorkerSelected) +
       Number(managerFifoSelected) +
-      Number(backlogResetSelected) <=
+      Number(backlogResetSelected) +
+      Number(farColorSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
@@ -2534,6 +2538,14 @@ export async function runChromeInstallation({
     assert.equal(browserName, 'msedge', 'Manager FIFO requires installed Edge');
     assert.equal(installation, 'extension', 'Manager FIFO requires the extension');
     assert.deepEqual(liveUrls, [], 'Manager FIFO cannot use public live URLs');
+  }
+  if (farColorSelected) {
+    assert.equal(await readFocusedScenario(root), null, 'FAR color cannot combine selectors');
+    assert.equal(liveObservation, null, 'FAR color cannot use duration observation');
+    assert.equal(browserName, 'msedge', 'FAR color requires installed Edge');
+    assert.equal(installation, 'extension', 'FAR color requires the extension');
+    assert.equal(headless, false, 'FAR color requires headed Edge');
+    assert.deepEqual(liveUrls, [], 'FAR color cannot use public live URLs');
   }
   if (backlogResetSelected) {
     assert.equal(await readFocusedScenario(root), null, 'Backlog reset cannot combine selectors');
@@ -2616,7 +2628,12 @@ export async function runChromeInstallation({
       installation === 'extension' ? await readExtensionUpgradeInput(root) : null;
     if (opacitySelected)
       assert.equal(extensionUpgradeInput, null, 'Opacity fixture cannot run an upgrade');
-    if (translatorNativeSelected || translationWorkerSelected || managerFifoSelected) {
+    if (
+      translatorNativeSelected ||
+      translationWorkerSelected ||
+      managerFifoSelected ||
+      farColorSelected
+    ) {
       assert.equal(
         extensionUpgradeInput,
         null,
@@ -2772,6 +2789,12 @@ export async function runChromeInstallation({
         installWorkerProbe: installFixtureWorkerProbe,
       });
       assert.equal(result.installedTranslationWorker.status, 'observed');
+      return result;
+    }
+    if (farColorSelected) {
+      assert(extensionId, 'FAR color requires an installed extension ID');
+      result.farColor = await runFarColorFixture({ context, root, output, extensionId });
+      assert.equal(result.farColor.status, 'passed');
       return result;
     }
     if (managerFifoSelected) {
