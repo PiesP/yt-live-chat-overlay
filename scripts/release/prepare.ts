@@ -12,6 +12,7 @@ import {
 import { arch, platform } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
+import { assertFirefoxDataConsent } from '../check/firefox-manifest.ts';
 import { sha256, verifiedFootprint } from './footprint.ts';
 
 const root = resolve(import.meta.dirname, '..', '..');
@@ -56,6 +57,9 @@ function validateExtensionVersion(directory: string, artifactName: string, versi
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown };
   assertArtifactVersion(artifactName, manifest.version, version);
+  if (directory === 'dist-extension-firefox') {
+    assertFirefoxDataConsent(manifest, `${directory}/manifest.json`);
+  }
 }
 
 function changelogEntry(markdown: string, releaseVersion: string): string {

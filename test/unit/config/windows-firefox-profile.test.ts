@@ -25,15 +25,18 @@ const {
   FirefoxBidiCommandTimeout,
   FirefoxBidiSession,
   buildFirefoxLaunchArguments,
+  buildFirefoxLaunchEnvironment,
   cleanupFirefoxResources,
   combineFirefoxCloseFailures,
   extensionInstallParameters,
   extensionUninstallParameters,
+  launchFirefoxBidi,
   parseFirefoxProfileEndpoint,
   readOwnedFirefoxEndpoint,
   removeOwnedProfile,
   selectOwnedFirefoxListener,
   selectOwnedFirefoxProcesses,
+  selectWindowsEndpointOwnerPids,
   terminateOwnedProcessTree,
   waitForWindowsEndpoint,
 } = firefoxBidiModule;
@@ -367,6 +370,70 @@ afterEach(async () => {
 });
 
 describe('Windows Firefox installation profile', () => {
+  it('binds a state-less Windows endpoint to the exact address family, port and owner', () => {
+    const ipv4 = {
+      localAddress: '127.0.0.1',
+      localPort: 50947,
+      remoteAddress: '0.0.0.0',
+      remotePort: 0,
+      pid: 21,
+      state: 0,
+    };
+    const ipv6 = { ...ipv4, localAddress: '::1', remoteAddress: '::', pid: 22 };
+    const connected = { ...ipv4, remoteAddress: '127.0.0.1', remotePort: 50000 };
+    const otherPort = { ...ipv4, localPort: 50948 };
+    const wildcard = { ...ipv4, localAddress: '0.0.0.0' };
+    const nonLoopback = { ...ipv4, localAddress: '192.0.2.1' };
+    const records = [ipv4, ipv6, connected, otherPort, wildcard, nonLoopback];
+    expect(selectWindowsEndpointOwnerPids(records, '127.0.0.1', 50947)).toEqual([21]);
+    expect(selectWindowsEndpointOwnerPids(records, '::1', 50947)).toEqual([22]);
+    expect(selectWindowsEndpointOwnerPids([ipv6], '127.0.0.1', 50947)).toEqual([]);
+    expect(
+      selectWindowsEndpointOwnerPids(
+        [{ ...ipv4, remotePort: 0, remoteAddress: '::' }],
+        '127.0.0.1',
+        50947
+      )
+    ).toEqual([]);
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { pid: 21 },
+    {
+      localAddress: '127.0.0.1',
+      localPort: 50947,
+      remoteAddress: '0.0.0.0',
+      remotePort: 0,
+      pid: 0,
+    },
+    {
+      localAddress: '127.0.0.1',
+      localPort: 50947,
+      remoteAddress: '0.0.0.0',
+      remotePort: null,
+      pid: 21,
+    },
+  ])('rejects incomplete endpoint ownership records: %j', (record) => {
+    expect(() => selectWindowsEndpointOwnerPids([record], '127.0.0.1', 50947)).toThrow(
+      'Invalid Windows TCP endpoint record'
+    );
+  });
+
+  it('rejects unsupported endpoint targets and non-array OS results', () => {
+    expect(() => selectWindowsEndpointOwnerPids([], 'localhost', 50947)).toThrow(
+      'Invalid Windows Firefox endpoint inspection'
+    );
+    expect(() => selectWindowsEndpointOwnerPids([], '127.0.0.1', 0)).toThrow(
+      'Invalid Windows Firefox endpoint inspection'
+    );
+    expect(() => selectWindowsEndpointOwnerPids({}, '127.0.0.1', 50947)).toThrow(
+      'Invalid Windows Firefox endpoint inspection'
+    );
+  });
+
   it('preserves typed command timeout identity without command parameters', async () => {
     const { session } = createBidiSession(() => {});
     const failure = await session
@@ -585,6 +652,34 @@ describe('Windows Firefox installation profile', () => {
     expect(ownership).toMatchObject({ browserPid: 21, expectedProcesses: [browser] });
   });
 
+  it.each([false, true])(
+    'distinguishes missing metadata from an empty listener observation: metadata=%s',
+    async (hasMetadata) => {
+      vi.useFakeTimers();
+      try {
+        const child = Object.assign(new EventEmitter(), { pid: 10, exitCode: 0, signalCode: null });
+        const ownership = {
+          executablePath: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+          profileDir: 'C:\\task\\.firefox-install-profile-test',
+          spawnedAt: Date.now(),
+        };
+        const pending = waitForWindowsEndpoint(child, ownership, {
+          readEndpoint: async () => (hasMetadata ? { host: '127.0.0.1', port: 50947 } : null),
+          inspect: async () => ({ processes: [], listenerPids: [] }),
+        });
+        const rejected = expect(pending).rejects.toThrow(
+          `"metadataObserved":${String(hasMetadata)}`
+        );
+        await vi.advanceTimersByTimeAsync(30_100);
+        await rejected;
+        expect(child.listenerCount('error')).toBe(0);
+        expect(ownership).not.toHaveProperty('browserPid');
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('terminates the verified browser after its launcher exits and rejects reused identities', async () => {
     const spawnedAt = Date.now();
     const createdUtc = new Date(spawnedAt + 10).toISOString();
@@ -731,7 +826,6 @@ describe('Windows Firefox installation profile', () => {
       'C:\\task\\.firefox-install-profile-a',
       '--remote-debugging-port',
       '0',
-      '--remote-allow-system-access',
       'about:blank',
     ]);
     expect(
@@ -749,7 +843,6 @@ describe('Windows Firefox installation profile', () => {
       'C:\\task\\.firefox-install-profile-b',
       '--remote-debugging-port',
       '0',
-      '--remote-allow-system-access',
       'about:blank',
     ]);
     expect(
@@ -766,7 +859,6 @@ describe('Windows Firefox installation profile', () => {
       '/tmp/.firefox-install-profile-c',
       '--remote-debugging-port',
       '0',
-      '--remote-allow-system-access',
       'about:blank',
     ]);
     expect(extensionInstallParameters('C:\\task\\dist-extension-firefox')).toEqual({
@@ -781,6 +873,36 @@ describe('Windows Firefox installation profile', () => {
       })
     ).toBe('C:\\Program Files\\Mozilla Firefox\\firefox.exe');
   });
+
+  it('scopes Firefox system access to the spawned child across supported versions', () => {
+    const environment = { MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '0', FIREFOX_FIXTURE: 'preserved' };
+    const before = { ...process.env };
+    expect(buildFirefoxLaunchEnvironment(environment)).toEqual({
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '1',
+      FIREFOX_FIXTURE: 'preserved',
+    });
+    expect(environment.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS).toBe('0');
+    expect(buildFirefoxLaunchEnvironment().MOZ_REMOTE_ALLOW_SYSTEM_ACCESS).toBe('1');
+    expect(process.env).toEqual(before);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'retains startup output and removes the owned profile when Firefox exits before its endpoint',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'yt-firefox-startup-'));
+      temporaryDirectories.push(root);
+      const executablePath = join(root, 'firefox-startup-fixture');
+      await writeFile(
+        executablePath,
+        "#!/bin/sh\nprintf '%s\\n' 'known Firefox startup failure' >&2\nexit 17\n",
+        { mode: 0o700 }
+      );
+      await expect(launchFirefoxBidi({ root, executablePath, headless: true })).rejects.toThrow(
+        'known Firefox startup failure'
+      );
+      expect(await readdir(root)).toEqual(['firefox-startup-fixture']);
+    }
+  );
 
   it('rejects non-public live URLs and returns only categorized error counts', () => {
     expect(normalizeLiveUrls(['https://www.youtube.com/watch?v=public'])).toEqual([

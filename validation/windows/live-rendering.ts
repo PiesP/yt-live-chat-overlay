@@ -437,9 +437,21 @@ export function countUnexpectedLiveErrors(
   ).length;
 }
 
-/** These native YouTube media, ad, and site-module requests are outside the overlay. */
+export function isYouTubeReportOnlyImagePolicy(entry: LiveDiagnosticEntry): boolean {
+  return (
+    entry.level === 'error' &&
+    entry.type === 'javascript' &&
+    /^Content-Security-Policy: \(Report-Only policy\) The page[’']s settings would block the loading of a resource \(img-src\) at data:image\/(?:svg\+xml|gif)(?:;|,)/u.test(
+      entry.text
+    ) &&
+    /because it violates the following directive: [“"]img-src(?:[ ”"]|$)/u.test(entry.text)
+  );
+}
+
+/** These native YouTube policy reports, media, ad, and site-module requests are outside the overlay. */
 export function isYouTubeHostError(entry: LiveDiagnosticEntry): boolean {
   if ((entry.level ?? entry.type) !== 'error') return false;
+  if (isYouTubeReportOnlyImagePolicy(entry)) return true;
   const text = entry.text;
   if (
     /^Failed to load .https:\/\/www\.youtube\.com\/s\/_\/ytmainappweb\/_\/js\//.test(text) &&

@@ -143,7 +143,52 @@ function windowsPowerShellPath() {
   return win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-async function inspectWindowsFirefox(port = 0): Promise<FirefoxInspection> {
+export function selectWindowsEndpointOwnerPids(records: unknown, host: string, port: number) {
+  if (
+    (host !== '127.0.0.1' && host !== '::1') ||
+    !Number.isSafeInteger(port) ||
+    port < 1 ||
+    port > 65_535 ||
+    !Array.isArray(records)
+  ) {
+    throw new Error('Invalid Windows Firefox endpoint inspection');
+  }
+  const owners: number[] = [];
+  for (const value of records) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('Invalid Windows TCP endpoint record');
+    }
+    const row = value as Record<string, unknown>;
+    if (
+      typeof row.localAddress !== 'string' ||
+      typeof row.remoteAddress !== 'string' ||
+      typeof row.localPort !== 'number' ||
+      !Number.isSafeInteger(row.localPort) ||
+      row.localPort < 1 ||
+      row.localPort > 65_535 ||
+      typeof row.remotePort !== 'number' ||
+      !Number.isSafeInteger(row.remotePort) ||
+      row.remotePort < 0 ||
+      row.remotePort > 65_535 ||
+      typeof row.pid !== 'number' ||
+      !Number.isSafeInteger(row.pid) ||
+      row.pid <= 0
+    ) {
+      throw new Error('Invalid Windows TCP endpoint record');
+    }
+    if (
+      row.localAddress === host &&
+      row.localPort === port &&
+      row.remotePort === 0 &&
+      row.remoteAddress === (host === '127.0.0.1' ? '0.0.0.0' : '::')
+    ) {
+      owners.push(row.pid);
+    }
+  }
+  return owners;
+}
+
+async function inspectWindowsFirefox(port = 0, host = '127.0.0.1'): Promise<FirefoxInspection> {
   const script = `$ErrorActionPreference = 'Stop'
 $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'firefox.exe'" | ForEach-Object {
   $handle = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
@@ -164,13 +209,19 @@ $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'firefox.exe'" | Fo
     return
   }
 })
-$listeners = @()
+$connections = @()
 if (${port} -gt 0) {
-  $listeners = @(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Where-Object {
-    $_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '::1'
-  } | ForEach-Object { [int]$_.OwningProcess })
+  $connections = @(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | ForEach-Object {
+    [pscustomobject]@{
+      localAddress = $_.LocalAddress
+      localPort = $_.LocalPort
+      remoteAddress = $_.RemoteAddress
+      remotePort = $_.RemotePort
+      pid = $_.OwningProcess
+    }
+  })
 }
-ConvertTo-Json -Compress -Depth 3 -InputObject ([pscustomobject]@{ processes = $processes; listenerPids = $listeners })`;
+ConvertTo-Json -Compress -Depth 3 -InputObject ([pscustomobject]@{ processes = $processes; connections = $connections })`;
   const { stdout } = await execFileAsync(
     windowsPowerShellPath(),
     ['-NoProfile', '-NonInteractive', '-Command', script],
@@ -180,11 +231,17 @@ ConvertTo-Json -Compress -Depth 3 -InputObject ([pscustomobject]@{ processes = $
   if (!result || typeof result !== 'object') {
     throw new Error('Firefox process inspection returned invalid data');
   }
-  const inspection = result as Partial<FirefoxInspection>;
-  if (!Array.isArray(inspection.processes) || !Array.isArray(inspection.listenerPids)) {
+  const inspection = result as { processes?: FirefoxProcess[]; connections?: unknown };
+  if (!Array.isArray(inspection.processes) || !Array.isArray(inspection.connections)) {
     throw new Error('Firefox process inspection returned invalid data');
   }
-  return inspection as FirefoxInspection;
+  // Some Windows providers report a live listener's state as zero. Keep endpoint/PID
+  // ownership checks; the WebSocket and BiDi handshakes establish service readiness.
+  return {
+    processes: inspection.processes,
+    listenerPids:
+      port > 0 ? selectWindowsEndpointOwnerPids(inspection.connections, host, port) : [],
+  };
 }
 
 function ownsProfileCommand(commandLine: unknown, profileDir: string) {
@@ -604,9 +661,13 @@ export function buildFirefoxLaunchArguments({
     profileDir,
     '--remote-debugging-port',
     '0',
-    '--remote-allow-system-access',
     'about:blank',
   ];
+}
+
+export function buildFirefoxLaunchEnvironment(environment: NodeJS.ProcessEnv = process.env) {
+  // Firefox 159 removed the CLI switch; the child-scoped environment also supports ESR 140.
+  return { ...environment, MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '1' };
 }
 
 export function extensionInstallParameters(extensionPath: string) {
@@ -681,6 +742,15 @@ export async function waitForWindowsEndpoint(
   } = {}
 ) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  const startupState = {
+    metadataReads: 0,
+    metadataObserved: false,
+    metadataPort: null as number | null,
+    listenerChecks: 0,
+    emptyListeners: 0,
+    firefoxProcesses: 0,
+    listenerPids: [] as number[],
+  };
   let spawnError = null;
   let lastMetadataError = null;
   const onError = (error: unknown) => {
@@ -692,13 +762,19 @@ export async function waitForWindowsEndpoint(
       if (spawnError) throw spawnError;
       let metadata: Awaited<ReturnType<typeof readEndpoint>> | undefined;
       try {
+        startupState.metadataReads++;
         metadata = await readEndpoint(ownership.profileDir, ownership.spawnedAt);
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
         lastMetadataError = error;
       }
       if (metadata) {
-        const inspected = await inspect(metadata.port);
+        startupState.metadataObserved = true;
+        startupState.metadataPort = metadata.port;
+        startupState.listenerChecks++;
+        const inspected = await inspect(metadata.port, metadata.host);
+        startupState.firefoxProcesses = inspected.processes.length;
+        startupState.listenerPids = inspected.listenerPids.slice(0, 8);
         let owner: FirefoxProcess;
         try {
           owner = selectOwnedFirefoxListener(
@@ -708,6 +784,7 @@ export async function waitForWindowsEndpoint(
           );
         } catch (error) {
           if (inspected.listenerPids.length > 0) throw error;
+          startupState.emptyListeners++;
           await delay(POLL_INTERVAL_MS);
           continue;
         }
@@ -720,10 +797,15 @@ export async function waitForWindowsEndpoint(
       }
       await delay(POLL_INTERVAL_MS);
     }
+    const reason = lastMetadataError
+      ? 'Timed out waiting for complete Firefox BiDi endpoint metadata'
+      : 'Timed out waiting for a verified task-owned Firefox BiDi endpoint';
     throw new Error(
-      lastMetadataError
-        ? 'Timed out waiting for complete Firefox BiDi endpoint metadata'
-        : 'Timed out waiting for a verified task-owned Firefox BiDi endpoint'
+      `${reason}; startup state: ${JSON.stringify({
+        ...startupState,
+        launcherExitCode: child.exitCode ?? null,
+        launcherSignal: child.signalCode ?? null,
+      })}`
     );
   } finally {
     child.removeListener?.('error', onError);
@@ -1246,6 +1328,7 @@ export async function launchFirefoxBidi({
   assertOwnedProfile(taskRoot, profileDir);
   const ownership: FirefoxOwnership = { executablePath, profileDir, spawnedAt: Date.now() };
   const child = spawn(executablePath, buildFirefoxLaunchArguments({ profileDir, headless }), {
+    env: buildFirefoxLaunchEnvironment(),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: headless,
   });
@@ -1293,6 +1376,14 @@ export async function launchFirefoxBidi({
       await session.close();
     } else {
       await cleanupFirefoxResources({ child, ownership, profileDir, root: taskRoot, socket: null });
+    }
+    if (output.trim()) {
+      throw new Error(
+        `${errorMessage(error)}\nFirefox startup output:\n${output.trim().slice(-8192)}`,
+        {
+          cause: error,
+        }
+      );
     }
     throw error;
   }

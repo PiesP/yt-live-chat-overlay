@@ -1,6 +1,6 @@
 # Privacy
 
-Last updated: 2026-08-25
+Last updated: 2026-11-03
 
 YouTube Live Chat Overlay is distributed as a userscript and as Chrome and
 Firefox extension builds. It does not use a developer-operated backend,
@@ -37,9 +37,37 @@ or chat continuations are not already available. It also loads YouTube-hosted
 author images, emoji, and stickers from allowlisted Google media domains such as
 `ggpht.com`, `googleusercontent.com`, `gstatic.com`, and `ytimg.com`.
 
+Chat request bodies include only the YouTube protocol client name/version, page
+language, continuation and page-provided click-tracking context, plus replay
+position when needed. The application does not copy arbitrary page client fields
+or add device details, region, time zone or UTC offset to that client context.
+YouTube session cookies and visitor identifiers still accompany functional
+requests. Chat API requests limit the referrer to the page origin. Normal browser
+network headers remain under the browser's control.
+
 The userscript manager may separately check GitHub release URLs embedded in the
 userscript header for updates. YouTube, Google, GitHub, browser vendors, and
 installed userscript managers have their own privacy policies.
+
+## Firefox data consent
+
+The Firefox extension requires Firefox 140 or later so installation can use
+[Firefox's built-in data consent](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/).
+The manifest also sets the Android consent API floor to Firefox for Android 142.
+The project's browser acceptance checks cover desktop installations.
+Its [manifest](./extension/manifest.firefox.json) declares the data used in functional
+requests to YouTube and Google media hosts:
+
+- `authenticationInfo`: YouTube session cookies and visitor/session context.
+- `browsingActivity`: watch-page, chat and media addresses used by requests.
+- `websiteContent`: page-derived client context and chat continuation/request data.
+- `websiteActivity`: replay playback position and page-provided click-tracking context.
+
+These categories describe requests to the original service, including authenticated
+requests. They do not represent a project-operated collection endpoint. Chat message
+bodies stay in the browser; there is no optional telemetry collection. Firefox
+shows the required data permissions when installing the extension. The userscript
+and Chromium builds use their existing browser or manager permissions.
 
 ## Translation
 
