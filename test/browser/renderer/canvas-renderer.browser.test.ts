@@ -164,7 +164,43 @@ describe('Backlog control across visual resets', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('retains the session callback and resumes queued delivery after font, opacity and layout changes', () => {
+  it('keeps empty frames alive until a paused queue passes its toggle cooldown', async () => {
+    const settings = makeSettings({
+      queueMaxSize: 10,
+      backlogPauseThreshold: 0.2,
+      backlogResumeThreshold: 0.1,
+      backlogToggleCooldownMs: 1000,
+    });
+    const overlay = new Overlay();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const transitions: boolean[] = [];
+    renderer.onBacklogPauseChange = (paused) => transitions.push(paused);
+    renderer.setReplayMode(true);
+    renderer.setConnectionStatus('connected');
+    try {
+      for (let index = 0; index < 3; index++) {
+        renderer.addMessage(makeMessage(`cooldown-${index}`, 'filler'));
+      }
+      expect(transitions).toEqual([true]);
+      renderer.clearPendingQueue();
+      const clearedAt = performance.now();
+      await vi.waitFor(() => expect(transitions).toEqual([true, false]), {
+        timeout: 3000,
+        interval: 20,
+      });
+      expect(performance.now() - clearedAt).toBeGreaterThanOrEqual(900);
+      expect(renderer.getQueueLength()).toBe(0);
+    } finally {
+      renderer.destroy();
+      container.remove();
+    }
+  });
+
+  it('retains the session callback and resumes queued delivery after font, opacity and layout changes', async () => {
     let settings = makeSettings({
       backlogMode: 'full',
       backlogToggleCooldownMs: 0,
@@ -197,7 +233,7 @@ describe('Backlog control across visual resets', () => {
     };
     const queue = renderer as unknown as {
       backlogPaused: boolean;
-      updateBacklogPause(): void;
+      canvas: HTMLCanvasElement;
     };
     state.state = 'active';
     state.settings = settings;
@@ -245,10 +281,15 @@ describe('Backlog control across visual resets', () => {
       renderer.addMessage(makeMessage('final-congestion-b', 'filler'));
       expect(controller.paused).toBe(true);
       const pendingBeforeResume = controller.drainPending().length;
-      renderer.clearPendingQueue();
-      queue.updateBacklogPause();
-      expect(controller.paused).toBe(false);
-      expect(controller.drainPending()).toHaveLength(pendingBeforeResume - 1);
+      document.body.appendChild(queue.canvas);
+      renderer.resumeRenderLoop();
+      await vi.waitFor(
+        () => {
+          expect(controller.paused).toBe(false);
+        },
+        { timeout: 3000, interval: 20 }
+      );
+      expect(controller.drainPending().length).toBeLessThan(pendingBeforeResume);
       expect(new Set(delivered.filter((id) => id.startsWith('backlog-'))).size).toBe(
         delivered.filter((id) => id.startsWith('backlog-')).length
       );

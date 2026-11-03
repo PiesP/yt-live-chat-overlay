@@ -135,6 +135,31 @@ describe('BacklogInjectionController', () => {
   // ═══════════════════════════════════════════════════════
 
   describe('startBacklogInjection', () => {
+    it('completes when the final delivery synchronously pauses for congestion', () => {
+      const delivered: string[] = [];
+      controller.onBacklogMessage = (message) => {
+        if (!message.id) throw new Error('Expected backlog ID');
+        delivered.push(message.id);
+        controller.setPaused(true);
+      };
+
+      controller.startBacklogInjection([makeMsg({ id: 'last' })]);
+      expect(controller.isBacklogActive).toBe(false);
+      expect(controller.drainPending()).toEqual([]);
+      controller.setPaused(false);
+      vi.advanceTimersByTime(30_000);
+      expect(delivered).toEqual(['last']);
+      expect(document.getElementById('yt-chat-overlay-backlog-indicator')).toBeNull();
+    });
+
+    it('does not schedule a new tick when delivery destroys the controller', () => {
+      controller.onBacklogMessage = () => controller.destroy();
+      controller.startBacklogInjection([makeMsg({ id: 'first' }), makeMsg({ id: 'retired' })]);
+      expect(controller.isBacklogActive).toBe(false);
+      expect(controller.drainPending()).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('does not schedule another delivery after the renderer pauses during a delivery', () => {
       const delivered: string[] = [];
       controller.onBacklogMessage = (message) => {

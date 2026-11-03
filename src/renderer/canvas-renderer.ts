@@ -1288,6 +1288,7 @@ export class CanvasRenderer extends RendererBase {
       // before stopping the loop. When the status changes, the loop is
       // restarted via setConnectionStatus.
       if (
+        !this.backlogPaused &&
         this.activeMessages.length === 0 &&
         this.pendingQueue.toArray().every((message) => this.capacityDeferred.has(message))
       ) {
@@ -1421,6 +1422,10 @@ export class CanvasRenderer extends RendererBase {
 
     // ── Drain stage: anti-block gate + lane allocation ──
     drainStage(rctx, now, dims);
+
+    // Reconcile only after the batch commits: resuming Backlog may enqueue
+    // synchronously. Keep checking empty frames until the toggle cooldown ends.
+    this.updateBacklogPause();
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
