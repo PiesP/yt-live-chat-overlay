@@ -19,6 +19,7 @@ const ENTRY_MARKER = '\n\tmain();\n';
 const PREFIX = 'WINDOWS405_BACKLOG_';
 const BATCH_SIZE = 51;
 const MAX_EVENTS = 128;
+// Three 51-action batches fit, with room to record a few duplicate deliveries before failing.
 const MAX_DELIVERIES = 160;
 const MAX_RUN_MS = 150_000;
 
@@ -305,6 +306,12 @@ export async function runBacklogResetFixture({
   let originalSettings:
     | ReturnType<NonNullable<Window['__ytChatOverlay']>['getSettings']>
     | undefined;
+  let settingsRestoration:
+    | 'not-required'
+    | 'pending'
+    | 'restored'
+    | 'failed'
+    | 'skipped-page-closed' = 'not-required';
   let primaryError: unknown;
   let stage = 'setup';
   let deadlineExceeded = false;
@@ -420,6 +427,7 @@ export async function runBacklogResetFixture({
       });
       return settings;
     });
+    settingsRestoration = 'pending';
     await page.waitForFunction(
       () =>
         window.__ytBacklogReset?.renderer?.settings.queueMaxSize === 50 &&
@@ -619,6 +627,7 @@ export async function runBacklogResetFixture({
 
   let result: Awaited<ReturnType<typeof execute>> | undefined;
   let postStop: Awaited<ReturnType<typeof snapshot>> | null = null;
+  let postStopVerified = false;
   try {
     result = await execute();
   } catch (error) {
@@ -658,8 +667,20 @@ export async function runBacklogResetFixture({
   for (const cleanup of [
     async () => nativePageProbe?.restore(),
     async () => {
-      if (originalSettings && !page.isClosed()) {
-        await restoreFixtureSettings(context, page, extensionId, originalSettings);
+      if (originalSettings) {
+        if (page.isClosed()) {
+          settingsRestoration = 'skipped-page-closed';
+          throw new Error(
+            'Fixture page closed before settings restoration and post-stop verification; outer installed-profile cleanup remains responsible'
+          );
+        }
+        try {
+          await restoreFixtureSettings(context, page, extensionId, originalSettings);
+          settingsRestoration = 'restored';
+        } catch (error) {
+          settingsRestoration = 'failed';
+          throw error;
+        }
         postStop = await snapshot(page);
         assert.equal(
           postStop.callbackPresent,
@@ -684,6 +705,7 @@ export async function runBacklogResetFixture({
           'Backlog delivery continued after stop'
         );
         postStop = settled;
+        postStopVerified = true;
       }
     },
     async () => {
@@ -700,18 +722,27 @@ export async function runBacklogResetFixture({
     }
   }
   if (cleanupErrors.length > 0) {
-    await writeFile(
-      join(output, 'backlog-reset-cleanup-failure.json'),
-      JSON.stringify(
-        {
-          status: 'failed',
-          scenarioError: primaryError ? describeError(primaryError) : null,
-          cleanupErrors: cleanupErrors.map(describeError),
-        },
-        null,
-        2
-      )
-    );
+    try {
+      await writeFile(
+        join(output, 'backlog-reset-cleanup-failure.json'),
+        JSON.stringify(
+          {
+            status: 'failed',
+            scenarioError: primaryError ? describeError(primaryError) : null,
+            deadlineExceeded,
+            settingsRestoration,
+            postStopVerified,
+            outerProfileCleanup:
+              'owned by chrome-install.ts; completion not observed by this fixture',
+            cleanupErrors: cleanupErrors.map(describeError),
+          },
+          null,
+          2
+        )
+      );
+    } catch (receiptError) {
+      cleanupErrors.push(receiptError);
+    }
     throw new AggregateError(
       primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
       'Backlog reset fixture cleanup failed'
@@ -719,5 +750,5 @@ export async function runBacklogResetFixture({
   }
   if (primaryError) throw primaryError;
   assert(result);
-  return { ...result, postStop };
+  return { ...result, settingsRestoration, postStopVerified, postStop };
 }
