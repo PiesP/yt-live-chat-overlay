@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { Page } from '@playwright/test';
@@ -82,8 +82,10 @@ export async function exportSettingsThroughUi(page: Page): Promise<ExportedSetti
   assert.equal(download.suggestedFilename(), 'yt-chat-overlay-settings.json');
   const path = await download.path();
   assert(path, 'Settings export has no downloaded file');
+  const size = (await stat(path)).size;
+  assert(size > 0 && size <= MAX_EXPORT_BYTES, 'Settings export size is invalid');
   const bytes = await readFile(path);
-  assert(bytes.length > 0 && bytes.length <= MAX_EXPORT_BYTES, 'Settings export size is invalid');
+  assert.equal(bytes.length, size, 'Settings export changed while reading');
   let value: unknown;
   try {
     value = JSON.parse(bytes.toString('utf8'));
