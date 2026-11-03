@@ -71,8 +71,10 @@ command is excluded from the hold measurement. The horizontal resize holds the
 measured player height constant so its physical-row Y comparison has the same
 vertical geometry on both sides.
 On the detailed scene, a page-owned Translator stub records
-the accepted canonical tail and supplies a distinct selected translation; the
-probe requires its positive-alpha draw in the same complete frame. The fixture
+the accepted canonical tail and supplies a distinct selected paid-card translation.
+It returns source text for the other presentation roles so their dual-mode cards
+do not gain incidental translation rows. The probe requires the paid translation's
+positive-alpha draw in the same complete frame. The fixture
 binds paid body and translation draws to the actual prepared plan row passed to
 the shared text painter, so fragmented text and reused glyph bitmaps retain the
 source card ID and section. A plan allocation alone never counts as a draw.

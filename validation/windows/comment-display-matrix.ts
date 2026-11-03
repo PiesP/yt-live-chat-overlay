@@ -537,6 +537,31 @@ export const MATRIX_BATCHES = Object.freeze({
   presentationDetailed: presentationActions('detailed'),
 });
 
+/** Inject only the paid-card translation into the controlled detailed scene. */
+export function matrixTranslatorInitScript(paidId: string): string {
+  const translatedPaid = `${paidId} MATRIX_TRANSLATED ${'한국어 日本語 مرحبا long translated body '.repeat(4)}`;
+  return `(() => {
+    const paidId = ${JSON.stringify(paidId)};
+    const translatedPaid = ${JSON.stringify(translatedPaid)};
+    const record = { calls: [], overflow: 0 };
+    window.__ytMatrixTranslator = record;
+    Object.defineProperty(window, 'Translator', {
+      configurable: true,
+      value: {
+        availability: async () => 'available',
+        create: async () => ({
+          translate: async (input) => {
+            if (record.calls.length < 16) record.calls.push(input.slice(0, 512));
+            else record.overflow++;
+            return input.includes(paidId) ? translatedPaid : input;
+          },
+          destroy: () => {},
+        }),
+      },
+    });
+  })();`;
+}
+
 function overloadPaidAction(id: string, body: string) {
   return {
     addChatItemAction: {
@@ -2581,29 +2606,9 @@ async function runBackend(options: {
         },
       };
     });
-    await page.addInitScript((paidId) => {
-      const scope = window as typeof window & {
-        __ytMatrixTranslator?: { calls: string[]; overflow: number };
-      };
-      const record = { calls: [] as string[], overflow: 0 };
-      scope.__ytMatrixTranslator = record;
-      Object.defineProperty(window, 'Translator', {
-        configurable: true,
-        value: {
-          availability: async () => 'available',
-          create: async () => ({
-            translate: async (input: string) => {
-              if (record.calls.length < 16) record.calls.push(input.slice(0, 512));
-              else record.overflow++;
-              return input.includes(paidId)
-                ? `${paidId} MATRIX_TRANSLATED ${'한국어 日本語 مرحبا long translated body '.repeat(4)}`
-                : `MATRIX_TRANSLATED ${input.slice(0, 96)}`;
-            },
-            destroy: () => {},
-          }),
-        },
-      });
-    }, PRESENTATION_IDS.detailed.paid);
+    await page.addInitScript({
+      content: matrixTranslatorInitScript(PRESENTATION_IDS.detailed.paid),
+    });
     await openFresh();
     previousSettings = await page.evaluate(() => {
       const app = window.__ytChatOverlay;

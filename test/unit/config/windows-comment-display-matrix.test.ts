@@ -7,7 +7,11 @@ import { join } from 'node:path';
 import { runInNewContext, Script } from 'node:vm';
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { getTranslatableText } from '@chat/message-helpers';
+import { extractChatEvents } from '@chat/message-parser';
+import { estimateTranslatedMessageDimensions } from '@renderer/shared';
 import { RenderWorkerManager } from '@renderer/worker/manager';
+import { DEFAULT_SETTINGS } from '@settings/schema';
 import type { ObservabilityReporter } from '@util/observability';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
@@ -31,6 +35,7 @@ import {
   flowTrace,
   instrumentWorkerManagerPageScript,
   MATRIX_BATCHES,
+  matrixTranslatorInitScript,
   membershipEffect,
   OVERLOAD_BATCHES,
   overloadTrace,
@@ -58,6 +63,55 @@ const source = MATRIX_BATCHES.content.map(
 );
 
 describe('Windows comment display matrix contract', () => {
+  it('translates only the detailed paid fixture and leaves other role dimensions unchanged', async () => {
+    const paidId = 'WINDOWS380_DETAILED_PAID';
+    const messages = extractChatEvents(
+      MATRIX_BATCHES.presentationDetailed,
+      () => DEFAULT_SETTINGS
+    ).map((event) => event.message);
+    expect(messages.map((message) => message.id)).toEqual([
+      paidId,
+      'WINDOWS380_DETAILED_STICKER',
+      'WINDOWS380_DETAILED_MEMBERSHIP',
+      'WINDOWS380_DETAILED_ORDINARY',
+    ]);
+    const controlledWindow: Record<string, unknown> = {};
+    runInNewContext(matrixTranslatorInitScript(paidId), { window: controlledWindow });
+    const translatorFactory = controlledWindow.Translator as {
+      create: () => Promise<{ translate: (input: string) => Promise<string> }>;
+    };
+    const translator = await translatorFactory.create();
+    const paidMessage = messages[0];
+    if (!paidMessage) throw new Error('Detailed paid fixture was not parsed');
+    const paidText = getTranslatableText(paidMessage);
+    expect(paidText).toContain('CANONICAL_END');
+    const translatedPaid = await translator.translate(paidText);
+    expect(translatedPaid).toContain(`${paidId} MATRIX_TRANSLATED`);
+    expect(translatedPaid).not.toBe(paidText);
+
+    const measurement = {
+      width: (text: string) => text.length * 10,
+      height: () => 32,
+    };
+    for (const message of messages.slice(1)) {
+      const input = getTranslatableText(message);
+      expect(input).toBe(message.text);
+      const translated = await translator.translate(input);
+      expect(translated).toBe(input);
+      const options = {
+        fontSize: 32,
+        showAuthor: true,
+        availableWidth: 858,
+        mode: 'scroll' as const,
+        superChatLayout: 'wide' as const,
+        measurement,
+      };
+      expect(estimateTranslatedMessageDimensions(message, translated, 'dual', options)).toEqual(
+        estimateTranslatedMessageDimensions(message, null, 'dual', options)
+      );
+    }
+  });
+
   it('selects only the exact source-owned Manager FIFO input', async () => {
     const root = await mkdtemp(join(tmpdir(), 'yt-manager-fifo-'));
     const inputs = join(root, 'validation/windows/inputs');
