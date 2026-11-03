@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { open, type FileHandle } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { Page } from '@playwright/test';
@@ -74,7 +74,10 @@ async function closeSettings(page: Page): Promise<void> {
 }
 
 /** Read the actual settings export. The returned bytes stay in memory for UI import. */
-export async function exportSettingsThroughUi(page: Page): Promise<ExportedSettings> {
+export async function exportSettingsThroughUi(
+  page: Page,
+  openDownload: (path: string) => Promise<FileHandle> = (path) => open(path, 'r')
+): Promise<ExportedSettings> {
   await openSettings(page);
   const downloadPromise = page.waitForEvent('download');
   await page.locator(`${MODAL} button[data-action="export"]`).click();
@@ -82,10 +85,27 @@ export async function exportSettingsThroughUi(page: Page): Promise<ExportedSetti
   assert.equal(download.suggestedFilename(), 'yt-chat-overlay-settings.json');
   const path = await download.path();
   assert(path, 'Settings export has no downloaded file');
-  const size = (await stat(path)).size;
-  assert(size > 0 && size <= MAX_EXPORT_BYTES, 'Settings export size is invalid');
-  const bytes = await readFile(path);
-  assert.equal(bytes.length, size, 'Settings export changed while reading');
+  const handle = await openDownload(path);
+  let bytes: Buffer;
+  try {
+    const info = await handle.stat();
+    assert(
+      info.isFile() && info.size > 0 && info.size <= MAX_EXPORT_BYTES,
+      'Settings export size is invalid'
+    );
+    const buffer = Buffer.alloc(MAX_EXPORT_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    assert(length <= MAX_EXPORT_BYTES, 'Settings export size is invalid');
+    assert.equal(length, info.size, 'Settings export changed while reading');
+    bytes = buffer.subarray(0, length);
+  } finally {
+    await handle.close();
+  }
   let value: unknown;
   try {
     value = JSON.parse(bytes.toString('utf8'));
