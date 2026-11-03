@@ -1023,6 +1023,15 @@ describe('isColorValue', () => {
     expect(isColorValue('#FF')).toBe(false);
   });
 
+  it('rejects an unsupported seven-digit color and restores the author default', () => {
+    expect(isColorValue('#1234567')).toBe(false);
+    const stored = {
+      ...DEFAULT_SETTINGS,
+      colors: { ...DEFAULT_SETTINGS.colors, normal: '#1234567' },
+    };
+    expect(normalizeStoredSettings(stored).colors.normal).toBe(DEFAULT_SETTINGS.colors.normal);
+  });
+
   it("'rgb(255,0,0)' returns false (not hex)", () => {
     expect(isColorValue('rgb(255,0,0)')).toBe(false);
   });
@@ -1124,4 +1133,24 @@ describe('migrateSettings', () => {
       backgroundColors: DEFAULT_SETTINGS.backgroundColors,
     });
   });
+});
+
+describe('saved author color round trip', () => {
+  it.each(['#abc', '#abcd', '#aabbcc', '#aabbccdd'])(
+    'preserves supported author color %s through import, patch, and persisted reload',
+    (color) => {
+      const imported = normalizeStoredSettings(
+        JSON.parse(
+          JSON.stringify({
+            ...DEFAULT_SETTINGS,
+            colors: { ...DEFAULT_SETTINGS.colors, normal: color },
+          })
+        )
+      );
+      const patched = applySettingsPatch(imported, { preserveUserColor: false });
+      const reloaded = normalizeStoredSettings(JSON.parse(JSON.stringify(patched)));
+      expect(reloaded.colors.normal).toBe(color);
+      expect(reloaded.preserveUserColor).toBe(false);
+    }
+  );
 });

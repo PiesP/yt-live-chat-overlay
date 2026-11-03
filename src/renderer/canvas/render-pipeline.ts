@@ -24,6 +24,7 @@ import {
   renderWrappedContentSegments,
 } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { resolveRegularMessageColor } from '@renderer/color-utils';
 import {
   ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
@@ -385,12 +386,15 @@ export function drawStage(
               renderCtx.textBaseline = 'top';
               renderCtx.textRendering = 'optimizeSpeed';
               renderCtx.fontKerning = 'none';
-              const ghostColor =
-                msg.renderMessage.userColor && ctx.settings.preserveUserColor
-                  ? msg.renderMessage.userColor
-                  : (msg.renderMessage.authorType &&
-                      ctx.settings.colors[msg.renderMessage.authorType]) ||
-                    ctx.settings.colors.normal;
+              const ghostColor = resolveRegularMessageColor(
+                msg.renderMessage.userColor,
+                ctx.settings.preserveUserColor,
+                ctx.settings.colors[msg.renderMessage.authorType],
+                ctx.settings.colors.normal,
+                msg.message.kind === 'text' &&
+                  ctx.settings.depthLayersEnabled &&
+                  msg.speedTier === SPEED_TIER.FAR
+              );
               renderCtx.fillStyle = ghostColor;
               if (msg.ghostText) {
                 renderCtx.fillText(
@@ -420,10 +424,13 @@ export function drawStage(
             ? ctx.settings.outline.opacity
             : 0;
           regularConfig.showAuthor = ctx.settings.showAuthor[renderMessage.authorType];
-          regularConfig.color =
-            ctx.settings.preserveUserColor && renderMessage.userColor
-              ? renderMessage.userColor
-              : ctx.settings.colors[renderMessage.authorType];
+          regularConfig.color = resolveRegularMessageColor(
+            renderMessage.userColor,
+            ctx.settings.preserveUserColor,
+            ctx.settings.colors[renderMessage.authorType],
+            ctx.settings.colors.normal,
+            ctx.settings.depthLayersEnabled && msg.speedTier === SPEED_TIER.FAR
+          );
           regularConfig.backgroundColor = ctx.settings.backgroundColors[renderMessage.authorType];
           regularConfig.messageWidth = msg.width;
           regularConfig.messageHeight = msg.height;
@@ -514,11 +521,7 @@ export function drawStage(
                   renderCtx
                 ).above;
           const transY = snappedY + msg.height - paddingV - translationHeight + translationAbove;
-          const transColor =
-            ctx.settings.preserveUserColor && renderMessage.userColor
-              ? renderMessage.userColor
-              : (msg.message.authorType && ctx.settings.colors[msg.message.authorType]) ||
-                ctx.settings.colors.normal;
+          const transColor = ctx.regularRenderConfig.color;
           renderCtx.save();
           try {
             renderCtx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;

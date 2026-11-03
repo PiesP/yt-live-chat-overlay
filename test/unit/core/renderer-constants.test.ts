@@ -79,9 +79,9 @@ describe('desaturateColor', () => {
       expect(result).toBe('rgb(76,76,76)');
     });
 
-    it('desaturates rgba() format (ignores alpha)', () => {
+    it('desaturates rgba() format while preserving alpha', () => {
       const result = desaturateColor('rgba(255, 0, 0, 0.5)', 1.0);
-      expect(result).toBe('rgb(76,76,76)');
+      expect(result).toBe('rgba(76,76,76,0.5)');
     });
 
     it('returns original for factor 0 with rgb()', () => {

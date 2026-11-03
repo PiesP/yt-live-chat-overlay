@@ -73,13 +73,12 @@ import {
 } from '@renderer/canvas/shared';
 import { getSpeedTier } from '@renderer/canvas/speed-tier';
 import { type CardConfigWorker, resolveCardBorderAlpha } from '@renderer/card-config';
-import { computeOutlineColor, desaturateColor } from '@renderer/color-utils';
+import { computeOutlineColor, resolveRegularMessageColor } from '@renderer/color-utils';
 import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   EMOJI_FETCH_TIMEOUT_DEFAULT_MS,
-  FAR_LAYER_DESATURATION_FACTOR,
   GRADIENT_CACHE_MAX,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
@@ -903,6 +902,13 @@ export class WorkerRenderer {
                   nextConfig.outlineOpacity !== this.config.outlineOpacity) ||
                 (nextConfig.preserveUserColor !== undefined &&
                   nextConfig.preserveUserColor !== this.config.preserveUserColor);
+              const activeColorsChanged =
+                authorColorsChanged ||
+                (nextConfig.color !== undefined && nextConfig.color !== this.config.color) ||
+                (nextConfig.preserveUserColor !== undefined &&
+                  nextConfig.preserveUserColor !== this.config.preserveUserColor) ||
+                (nextConfig.depthLayersEnabled !== undefined &&
+                  nextConfig.depthLayersEnabled !== this.config.depthLayersEnabled);
               const imageCacheCapacityChanged =
                 (nextConfig.emojiCacheMb !== undefined &&
                   nextConfig.emojiCacheMb !== this.config.emojiCacheMb) ||
@@ -911,6 +917,18 @@ export class WorkerRenderer {
                 (nextConfig.stickerCacheMb !== undefined &&
                   nextConfig.stickerCacheMb !== this.config.stickerCacheMb);
               Object.assign(this.config, nextConfig);
+              if (activeColorsChanged) {
+                for (const active of this.activeMessages) {
+                  active.color = resolveRegularMessageColor(
+                    active.userColor,
+                    this.config.preserveUserColor,
+                    active.authorType ? this.config.authorColors[active.authorType] : undefined,
+                    this.config.color || DEFAULT_TEXT_COLOR,
+                    false
+                  );
+                  delete active.colorOverride;
+                }
+              }
               if (this.config.translationGeneration !== previousTranslationGeneration) {
                 this.pendingTranslations.clear();
               }
@@ -1372,12 +1390,16 @@ export class WorkerRenderer {
     else delete existing.cardConfigWorker;
 
     if (this.config) {
-      existing.color =
-        this.config.preserveUserColor && msg.userColor
-          ? msg.userColor
-          : (msg.authorType && this.config.authorColors[msg.authorType]) ||
-            this.config.color ||
-            DEFAULT_TEXT_COLOR;
+      existing.color = resolveRegularMessageColor(
+        msg.userColor,
+        this.config.preserveUserColor,
+        msg.authorType ? this.config.authorColors[msg.authorType] : undefined,
+        this.config.color || DEFAULT_TEXT_COLOR,
+        false
+      );
+      if (msg.userColor !== undefined) existing.userColor = msg.userColor;
+      else delete existing.userColor;
+      delete existing.colorOverride;
     }
     this.applyActiveMessageGeometry(existing, msg.width, msg.height);
     this.messageById.set(msg.id, existing);
@@ -1888,12 +1910,13 @@ export class WorkerRenderer {
       });
     const slotCount = placement.slotCount;
     const laneY = placement.laneY + placement.verticalOffset;
-    const authorColor =
-      this.config.preserveUserColor && msg.userColor
-        ? msg.userColor
-        : (msg.authorType && this.config.authorColors[msg.authorType]) ||
-          this.config.color ||
-          DEFAULT_TEXT_COLOR;
+    const authorColor = resolveRegularMessageColor(
+      msg.userColor,
+      this.config.preserveUserColor,
+      msg.authorType ? this.config.authorColors[msg.authorType] : undefined,
+      this.config.color || DEFAULT_TEXT_COLOR,
+      false
+    );
     const am: ActiveMessage = {
       id: msg.id,
       motion,
@@ -1923,6 +1946,7 @@ export class WorkerRenderer {
     if (msg.trackDrops !== undefined) am.trackDrops = msg.trackDrops;
     if (msg.authorType !== undefined) am.authorType = msg.authorType;
     if (msg.kind !== undefined) am.kind = msg.kind;
+    if (msg.userColor !== undefined) am.userColor = msg.userColor;
     if (msg.translatedText !== undefined) {
       am.translatedText = msg.translatedText;
       if (msg.translatedText) {
@@ -2149,8 +2173,14 @@ export class WorkerRenderer {
         try {
           for (const msg of entries) {
             let renderColor = msg.colorOverride || msg.color;
-            if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
-              renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
+            if (cfg.depthLayersEnabled && msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
+              renderColor = resolveRegularMessageColor(
+                undefined,
+                false,
+                msg.color,
+                msg.color,
+                true
+              );
               msg.colorOverride = renderColor;
             }
             const sx = Math.floor(msg.x);
@@ -2286,9 +2316,7 @@ export class WorkerRenderer {
             ) {
               const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
               this.translationFontSize = translationFontSize;
-              const translationColor = msg.authorType
-                ? cfg.authorColors[msg.authorType] || renderColor
-                : renderColor;
+              const translationColor = renderColor;
               const translationHeight = msg.translationHeight ?? translationFontSize;
               const regularInsets = getRegularCardInsets(
                 cfg.fontSize,
@@ -2692,12 +2720,13 @@ export class WorkerRenderer {
       }
       // Pre-warm text bitmap cache — see canvas-renderer.ts drainQueue for rationale.
       if (entry.content && this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0) {
-        const warmColor =
-          this.config.preserveUserColor && entry.userColor
-            ? entry.userColor
-            : (entry.authorType && this.config.authorColors[entry.authorType]) ||
-              this.config.color ||
-              DEFAULT_TEXT_COLOR;
+        const warmColor = resolveRegularMessageColor(
+          entry.userColor,
+          this.config.preserveUserColor,
+          entry.authorType ? this.config.authorColors[entry.authorType] : undefined,
+          this.config.color || DEFAULT_TEXT_COLOR,
+          entry.kind === 'text' && this.config.depthLayersEnabled && speedTier === SPEED_TIER.FAR
+        );
         const farSpacing = speedTier === SPEED_TIER.FAR ? '1px' : undefined;
         const renderCtx = this.ctx;
         if (renderCtx) {

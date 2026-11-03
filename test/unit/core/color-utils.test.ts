@@ -3,6 +3,7 @@ import {
   computeOutlineColor,
   computeReadableTextColor,
   parseAnyColor,
+  resolveRegularMessageColor,
   resolveSuperChatRgb,
   toRgba,
 } from '@renderer/color-utils';
@@ -39,6 +40,13 @@ describe('parseAnyColor', () => {
       expect(parseAnyColor('#FF')).toBeNull();
       expect(parseAnyColor('#0')).toBeNull();
     });
+
+    it.each(['#12345', '#1234567', '#12', '#abcdz', '#12345678a'])(
+      'rejects malformed hex %s instead of accepting a partial prefix',
+      (value) => {
+        expect(parseAnyColor(value)).toBeNull();
+      }
+    );
 
     it('returns null for invalid hex', () => {
       expect(parseAnyColor('#GGGGGG')).toBeNull();
@@ -289,7 +297,14 @@ describe('desaturateColor', () => {
   });
 
   it('handles rgba() format', () => {
-    expect(desaturateColor('rgba(0, 255, 0, 0.5)', 0)).toBe('rgb(0,255,0)');
+    expect(desaturateColor('rgba(0, 255, 0, 0.5)', 0)).toBe('rgba(0,255,0,0.5)');
+  });
+
+  it('preserves identical short and long hex alpha while desaturating', () => {
+    expect(desaturateColor('#abcd', 0.3)).toBe('rgba(174,186,198,0.8666666666666667)');
+    expect(desaturateColor('#aabbccdd', 0.3)).toBe('rgba(174,186,198,0.8666666666666667)');
+    expect(desaturateColor('#0000', 0.3)).toBe('rgba(0,0,0,0)');
+    expect(desaturateColor('#1234567', 0.3)).toBe('#1234567');
   });
 
   it('returns original for unparseable colors', () => {
@@ -298,5 +313,42 @@ describe('desaturateColor', () => {
 
   it('full desaturation of pure white is still white', () => {
     expect(desaturateColor('#FFFFFF', 1)).toBe('rgb(255,255,255)');
+  });
+});
+
+describe('regular message color policy', () => {
+  it.each([
+    [undefined, true, '#ff0000', true, 'rgb(201,23,23)'],
+    ['#0000ff', false, '#ff0000', true, 'rgb(201,23,23)'],
+    ['#0000ff', true, '#ff0000', true, 'rgb(9,9,187)'],
+    [undefined, true, '#ff0000', false, '#ff0000'],
+    ['#0000ff', true, '#ff0000', false, '#0000ff'],
+  ] as const)('resolves user=%s preserve=%s far=%s', (user, preserve, author, far, expected) => {
+    expect(resolveRegularMessageColor(user, preserve, author, '#ffffff', far)).toBe(expected);
+  });
+});
+
+describe('accepted color channels', () => {
+  it.each(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#0000', '#ffffff00'])(
+    'decodes and desaturates every supported hex length: %s',
+    (value) => {
+      expect(parseAnyColor(value)).not.toBeNull();
+      expect(desaturateColor(value, 0.3)).not.toMatch(/NaN|Infinity/);
+    }
+  );
+  it.each(['#1g0000', '#abcz', '#aabbcczz', 'rgb(256,0,0)', 'rgba(1,2,3,2)', 'rgb(1,2,3)junk'])(
+    'rejects malformed channels: %s',
+    (value) => {
+      expect(parseAnyColor(value)).toBeNull();
+      expect(desaturateColor(value, 0.3)).toBe(value);
+    }
+  );
+  it('uses the fallback and retains alpha with the same FAR policy', () => {
+    expect(resolveRegularMessageColor(undefined, false, undefined, '#ff0000', true)).toBe(
+      'rgb(201,23,23)'
+    );
+    expect(resolveRegularMessageColor('#f008', true, '#00f', '#fff', true)).toBe(
+      'rgba(201,23,23,0.5333333333333333)'
+    );
   });
 });

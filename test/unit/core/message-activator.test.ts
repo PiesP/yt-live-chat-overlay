@@ -183,7 +183,7 @@ describe('MessageActivator', () => {
       expect(cmArg.invDuration).toBe(1);
     });
 
-    it('desaturates userColor when depthLayersEnabled and speedTier is FAR', () => {
+    it('retains regular userColor for the shared Main render policy', () => {
       const farActivator = new MessageActivator(
         translationService,
         makeConfig({ depthLayersEnabled: true })
@@ -206,9 +206,8 @@ describe('MessageActivator', () => {
       ); // speedTier = FAR(0)
 
       const cmArg = (callbacks.onActivated as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-      expect(cmArg.desaturatedUserColor).toBeDefined();
-      expect(typeof cmArg.desaturatedUserColor).toBe('string');
-      expect(cmArg.renderMessage.userColor).toBe(cmArg.desaturatedUserColor);
+      expect(cmArg.desaturatedUserColor).toBeUndefined();
+      expect(cmArg.renderMessage).toBe(msg);
     });
 
     it('does not desaturate when speedTier is not FAR', () => {

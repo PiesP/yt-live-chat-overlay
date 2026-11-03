@@ -4,13 +4,7 @@
 import type { ChatMessage } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
 import { getDisplayText } from '@renderer/canvas/shared';
-import { desaturateColor } from '@renderer/color-utils';
-import {
-  type CanvasMessage,
-  EMPTY_CHAT_MESSAGE,
-  FAR_LAYER_DESATURATION_FACTOR,
-  SPEED_TIER,
-} from '@renderer/constants';
+import { type CanvasMessage, EMPTY_CHAT_MESSAGE, SPEED_TIER } from '@renderer/constants';
 import type { TranslationService } from '@translation/service';
 
 export interface MessageActivatorConfig {
@@ -136,14 +130,6 @@ export class MessageActivator {
       presentationAccountingUnknown: undefined,
       _lastDrawnFrame: undefined,
     });
-
-    if (this.config.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {
-      cm.desaturatedUserColor = desaturateColor(message.userColor, FAR_LAYER_DESATURATION_FACTOR);
-      cm.renderMessage = { ...message, userColor: cm.desaturatedUserColor };
-    } else {
-      // Avoid per-frame nullish coalescing in renderFrame — ensure renderMessage is always set
-      cm.renderMessage = message;
-    }
 
     callbacks.onActivated(cm);
     callbacks.onMessageRendered();
