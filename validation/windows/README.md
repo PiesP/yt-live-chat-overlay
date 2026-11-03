@@ -1004,6 +1004,16 @@ opacity and safe-top through the installed script's settings UI; observes the
 manager's update confirmation, dismisses it once to verify that the prior
 version and settings remain active, then approves a second import. It checks one
 displayed installation, version, editor source bytes and retained settings.
+For the v0.46.0 candidate, the separate `candidateSettings` receipt then checks
+that the upgraded layout defaults to `stacked` and that text and outline opacity
+controls expose their respective 50–100% and 0–100% domains. It selects `wide`
+and both domain boundaries through the settings UI, waits for the full settings
+record in a fresh manager-backed page, and checks the selection and all other
+settings after reload. It exports the real settings JSON, imports the original
+and selected exports through the file picker, and checks each saved result after
+reload. The original full settings export is imported again and verified in
+storage and after reload before the upgrade fixture continues. The receipt keeps
+only bounded digests and control results, never the settings JSON.
 The original settings are restored through the UI after retention is proven so
 the ordinary seven-phase installed fixture can run on the candidate from its
 normal initial state, including actual page fetch ingress. The candidate digest
@@ -1049,6 +1059,10 @@ checks real extension storage. It replaces the same unpacked directory with the
 candidate and calls the installed extension's runtime reload. The check requires
 the same extension ID, the candidate runtime version, retained storage and a
 fresh page showing the saved preference, then restores the original setting.
+For v0.46.0, the same `candidateSettings` check runs after candidate runtime
+identity and font retention are verified. It reads the full stored record from
+the installed extension's `chrome.storage.local` and restores the selected
+baseline settings before the existing font-size fixture cleanup.
 The receipt records this separately as `extensionUpgrade`. Without the input it
 records `not-requested` and installs the candidate directly; an invalid supplied
 input retains a failed preflight receipt before browser launch.

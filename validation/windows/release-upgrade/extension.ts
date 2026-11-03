@@ -12,6 +12,7 @@ import { inflateRawSync } from 'node:zlib';
 import type { BrowserContext, CDPSession, Page } from '@playwright/test';
 
 import { buildVisibleWatchHtml } from '../visible-watch.ts';
+import { checkCandidateSettings, type CandidateSettingsReceipt } from './candidate-settings.ts';
 
 const INPUT = 'validation/windows/release-upgrade/extension-input.json';
 const CANDIDATE = 'dist-extension';
@@ -467,6 +468,7 @@ type UpgradeReceipt = {
   baselineStorageFontSize: number | null;
   candidateStorageFontSize: number | null;
   candidateUiFontSize: number | null;
+  candidateSettings?: CandidateSettingsReceipt;
   restoredFontSize: number | null;
   baselineRuntimeScripts: RuntimeScriptEvidence | null;
   candidateRuntimeScripts: RuntimeScriptEvidence | null;
@@ -664,6 +666,27 @@ export async function readExtensionStoredFontSize(page: Page): Promise<number | 
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const fontSize = (parsed as Record<string, unknown>).fontSize;
     return typeof fontSize === 'number' && Number.isFinite(fontSize) ? fontSize : null;
+  }, STORAGE_KEY);
+}
+
+async function readExtensionStoredSettings(page: Page): Promise<unknown> {
+  return page.evaluate(async (key) => {
+    const storage = (
+      globalThis as typeof globalThis & {
+        chrome?: {
+          storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } };
+        };
+      }
+    ).chrome?.storage?.local;
+    if (!storage) throw new Error('Extension storage unavailable');
+    const value = (await storage.get(key))[key];
+    if (typeof value !== 'string' || value.length === 0 || value.length > 256 * 1024)
+      throw new Error('Extension stored settings are missing or oversized');
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      throw new Error('Extension stored settings are not valid JSON');
+    }
   }, STORAGE_KEY);
 }
 
@@ -961,6 +984,16 @@ export async function runExtensionUpgrade({
       selected,
       'Fresh candidate page did not show retained preference'
     );
+    if (verified.input.candidateVersion === '0.46.0') {
+      receipt.activeStage = 'verify-candidate-settings-controls';
+      receipt.candidateSettings = { status: 'incomplete', stage: 'start' };
+      const settingsStoragePage = candidateExtensionPage;
+      await checkCandidateSettings(
+        candidatePage,
+        () => readExtensionStoredSettings(settingsStoragePage),
+        receipt.candidateSettings
+      );
+    }
     receipt.activeStage = 'restore-fixture-settings-through-ui';
     await setFontSizeThroughUi(candidatePage, original);
     await waitForStoredFont(candidateExtensionPage, original);

@@ -11,6 +11,11 @@ import { join } from 'node:path';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 
 import { buildVisibleWatchHtml } from '../visible-watch.ts';
+import {
+  checkCandidateSettings,
+  exportSettingsThroughUi,
+  type CandidateSettingsReceipt,
+} from './candidate-settings.ts';
 import { INSTALLED_SCRIPT_ROW_SELECTOR } from './manager-row.ts';
 
 export { INSTALLED_SCRIPT_ROW_SELECTOR } from './manager-row.ts';
@@ -82,6 +87,7 @@ type UpgradeObservation = {
   settingsBefore?: Settings;
   settingsAfterDeferral?: Settings;
   settingsAfter?: Settings;
+  candidateSettings?: CandidateSettingsReceipt;
   settingsRestoredForFixture?: Settings;
   activeStage?: string;
   cleanupErrors?: string[];
@@ -925,6 +931,23 @@ export async function runManagerUpgrade(
     await fixture.reload({ waitUntil: 'domcontentloaded' });
     result.settingsAfter = await observeSettings(fixture);
     requireRetainedSettings(result.settingsBefore, result.settingsAfter);
+    if (inputs.candidate.version === '0.46.0') {
+      result.activeStage = 'verify-candidate-settings-controls';
+      result.candidateSettings = { status: 'incomplete', stage: 'start' };
+      await checkCandidateSettings(
+        fixture,
+        async () => {
+          const readback = await openOwnedWatchFixture(context, managerId, root);
+          try {
+            return await exportSettingsThroughUi(readback);
+          } finally {
+            // Closing the readback tab avoids saving its stale form over the fixture.
+            await readback.close();
+          }
+        },
+        result.candidateSettings
+      );
+    }
     result.settingsRestoredForFixture = await setSettingsThroughUi(
       fixture,
       result.settingsOriginal,
