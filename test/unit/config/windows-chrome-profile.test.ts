@@ -1127,6 +1127,33 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(redactDiagnosticText(host.text)).not.toContain('sig=');
   });
 
+  it('separates only browser-generated report-only YouTube inline-image policy messages', () => {
+    const { isYouTubeHostError, countUnexpectedLiveErrors } = liveRenderingModule;
+    const text =
+      'Content-Security-Policy: (Report-Only policy) The page’s settings would block the loading of a resource (img-src) at data:image/svg+xml;base64,PHN2ZyB4bWxucz… because it violates the following directive: “img-src https://youtube.com/”';
+    const browserReport = { level: 'error', type: 'javascript', text };
+    expect(isYouTubeHostError(browserReport)).toBe(true);
+    expect(isYouTubeHostError({ ...browserReport, text: text.replace('svg+xml', 'gif') })).toBe(
+      true
+    );
+    const unexpected = [
+      { ...browserReport, type: 'console' },
+      { level: 'error', text },
+      { ...browserReport, text: text.replace('(Report-Only policy) ', '') },
+      { ...browserReport, text: text.replace('(img-src)', '(script-src)') },
+      {
+        ...browserReport,
+        text: text.replace('data:image/svg+xml', 'https://www.youtube.com/app.js'),
+      },
+      { ...browserReport, text: `[RenderWorkerManager] ${text}` },
+      { ...browserReport, text: '[Youtubei] request failed' },
+    ];
+    for (const entry of unexpected) expect(isYouTubeHostError(entry)).toBe(false);
+    expect(countUnexpectedLiveErrors([browserReport, ...unexpected], false)).toBe(
+      unexpected.length
+    );
+  });
+
   it('accepts one exact browser process identity from the browser CDP session', () => {
     expect(
       readOwnedBrowserProcessId({

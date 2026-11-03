@@ -10,6 +10,7 @@ import type { FirefoxBidiTimeoutProbe } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
+  isYouTubeReportOnlyImagePolicy,
   readPublicPageBrowserState,
   redactDiagnosticText,
   selectPublicSeekTarget,
@@ -1156,6 +1157,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
             }
           : {}),
         hostErrorCount: session.pageLogs.filter(isYouTubeHostError).length,
+        hostPolicyImageReportCount: session.pageLogs.filter(isYouTubeReportOnlyImagePolicy).length,
         unexpectedErrorCount: 0,
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
@@ -1246,7 +1248,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         diagnostics: session.pageLogs
           .filter(({ level, text }) => level === 'error' || /worker/i.test(text))
           .slice(0, 20)
-          .map(({ level, text }) => ({ level, text: redactDiagnosticText(text) })),
+          .map(({ level, type, text }) => ({ level, type, text: redactDiagnosticText(text) })),
       });
       if (unresponsive) {
         for (let skipped = index + 1; skipped < liveEntries.length; skipped++) {
