@@ -685,6 +685,15 @@ export async function waitForWindowsEndpoint(
   } = {}
 ) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  const startupState = {
+    metadataReads: 0,
+    metadataObserved: false,
+    metadataPort: null as number | null,
+    listenerChecks: 0,
+    emptyListeners: 0,
+    firefoxProcesses: 0,
+    listenerPids: [] as number[],
+  };
   let spawnError = null;
   let lastMetadataError = null;
   const onError = (error: unknown) => {
@@ -696,13 +705,19 @@ export async function waitForWindowsEndpoint(
       if (spawnError) throw spawnError;
       let metadata: Awaited<ReturnType<typeof readEndpoint>> | undefined;
       try {
+        startupState.metadataReads++;
         metadata = await readEndpoint(ownership.profileDir, ownership.spawnedAt);
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
         lastMetadataError = error;
       }
       if (metadata) {
+        startupState.metadataObserved = true;
+        startupState.metadataPort = metadata.port;
+        startupState.listenerChecks++;
         const inspected = await inspect(metadata.port);
+        startupState.firefoxProcesses = inspected.processes.length;
+        startupState.listenerPids = inspected.listenerPids.slice(0, 8);
         let owner: FirefoxProcess;
         try {
           owner = selectOwnedFirefoxListener(
@@ -712,6 +727,7 @@ export async function waitForWindowsEndpoint(
           );
         } catch (error) {
           if (inspected.listenerPids.length > 0) throw error;
+          startupState.emptyListeners++;
           await delay(POLL_INTERVAL_MS);
           continue;
         }
@@ -724,10 +740,15 @@ export async function waitForWindowsEndpoint(
       }
       await delay(POLL_INTERVAL_MS);
     }
+    const reason = lastMetadataError
+      ? 'Timed out waiting for complete Firefox BiDi endpoint metadata'
+      : 'Timed out waiting for a verified task-owned Firefox BiDi endpoint';
     throw new Error(
-      lastMetadataError
-        ? 'Timed out waiting for complete Firefox BiDi endpoint metadata'
-        : 'Timed out waiting for a verified task-owned Firefox BiDi endpoint'
+      `${reason}; startup state: ${JSON.stringify({
+        ...startupState,
+        launcherExitCode: child.exitCode ?? null,
+        launcherSignal: child.signalCode ?? null,
+      })}`
     );
   } finally {
     child.removeListener?.('error', onError);

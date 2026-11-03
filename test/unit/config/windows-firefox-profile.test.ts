@@ -587,6 +587,34 @@ describe('Windows Firefox installation profile', () => {
     expect(ownership).toMatchObject({ browserPid: 21, expectedProcesses: [browser] });
   });
 
+  it.each([false, true])(
+    'distinguishes missing metadata from an empty listener observation: metadata=%s',
+    async (hasMetadata) => {
+      vi.useFakeTimers();
+      try {
+        const child = Object.assign(new EventEmitter(), { pid: 10, exitCode: 0, signalCode: null });
+        const ownership = {
+          executablePath: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+          profileDir: 'C:\\task\\.firefox-install-profile-test',
+          spawnedAt: Date.now(),
+        };
+        const pending = waitForWindowsEndpoint(child, ownership, {
+          readEndpoint: async () => (hasMetadata ? { host: '127.0.0.1', port: 50947 } : null),
+          inspect: async () => ({ processes: [], listenerPids: [] }),
+        });
+        const rejected = expect(pending).rejects.toThrow(
+          `"metadataObserved":${String(hasMetadata)}`
+        );
+        await vi.advanceTimersByTimeAsync(30_100);
+        await rejected;
+        expect(child.listenerCount('error')).toBe(0);
+        expect(ownership).not.toHaveProperty('browserPid');
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('terminates the verified browser after its launcher exits and rejects reused identities', async () => {
     const spawnedAt = Date.now();
     const createdUtc = new Date(spawnedAt + 10).toISOString();
