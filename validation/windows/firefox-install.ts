@@ -109,6 +109,161 @@ const SETTINGS_KEY = 'yt-live-chat-overlay-settings';
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsFirefoxExtension';
 const MAX_LIVE_URLS = 3;
 
+export function publicTranslationProbeExpression(): string {
+  return `(async () => {
+        const rows = () => Array.from(document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p'));
+        const originals = new Map(rows().map((row) => [row.getAttribute('data-message-id'), row.textContent]));
+        const button = document.querySelector('#yt-chat-overlay-settings-button');
+        if (!(button instanceof HTMLButtonElement) || !Array.from(originals).some(([id, text]) => id && text)) {
+          throw new Error('Public original chat is unavailable before translation settings');
+        }
+        const apiExposed = typeof Translator !== 'undefined';
+        const settingsBefore = window.__ytChatOverlay?.getSettings();
+        button.click();
+        const modal = document.querySelector('#yt-chat-overlay-settings-backdrop');
+        const tab = modal?.querySelector('#tab-translation');
+        const enabled = modal?.querySelector('input[name="translationEnabled"]');
+        const service = modal?.querySelector('select[name="translationService"]');
+        const close = modal?.querySelector('button[data-action="close"]');
+        if (!(modal instanceof HTMLDialogElement) || !(tab instanceof HTMLButtonElement) ||
+            !(enabled instanceof HTMLInputElement) || !(service instanceof HTMLSelectElement) ||
+            !(close instanceof HTMLButtonElement) || !modal.open) {
+          throw new Error('Public translation settings are unavailable');
+        }
+        tab.click();
+        if (!apiExposed) {
+          enabled.checked = true;
+          enabled.dispatchEvent(new Event('change', { bubbles: true }));
+          service.value = 'auto';
+          service.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        close.click();
+        for (let attempt = 0; !apiExposed && attempt < 20 &&
+          (window.__ytChatOverlay?.getSettings()?.translationEnabled !== true ||
+            window.__ytChatOverlay?.getSettings()?.translationService !== 'auto'); attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        button.click();
+        const capability = modal.querySelector('.yt-chat-overlay-settings-capability');
+        const runtime = modal.querySelector('.yt-chat-overlay-settings-runtime-status');
+        const current = rows();
+        const originalOverlap = current.filter((row) => originals.has(row.getAttribute('data-message-id'))).length;
+        const originalMismatch = current.filter((row) => {
+          const id = row.getAttribute('data-message-id');
+          return originals.has(id) && originals.get(id) !== row.textContent;
+        }).length;
+        const replacementRows = current.filter((row) => !originals.has(row.getAttribute('data-message-id'))).length;
+        const currentIds = new Set(current.map((row) => row.getAttribute('data-message-id')));
+        const result = {
+          apiExposed,
+          capabilitySupported: capability?.getAttribute('data-supported') ?? null,
+          capabilityText: capability?.textContent ?? null,
+          runtimePhase: runtime?.getAttribute('data-phase') ?? null,
+          runtimeText: runtime?.textContent ?? null,
+          preferenceEnabled: window.__ytChatOverlay?.getSettings()?.translationEnabled === true,
+          preferenceUnchanged:
+            window.__ytChatOverlay?.getSettings()?.translationEnabled === settingsBefore?.translationEnabled &&
+            window.__ytChatOverlay?.getSettings()?.translationService === settingsBefore?.translationService,
+          service: window.__ytChatOverlay?.getSettings()?.translationService ?? null,
+          originalOverlap,
+          originalMismatch,
+          replacementRows,
+          nextRowObserved: false,
+          nextRowHasText: false,
+          canvasPresent: Boolean(document.querySelector('#${OVERLAY_ID} canvas')),
+          modalClosed: false,
+          nextRowEvidence: {
+            snapshots: [],
+            omittedSnapshots: 0,
+            nativeChangeCount: 0,
+            appChangeCount: 0,
+            playerChangeCount: 0,
+            pollCounters: 'unavailable'
+          }
+        };
+        close.click();
+        result.modalClosed = !modal.open;
+        // A new accessible row is emitted only after another chat message is rendered.
+        // The region retains at most 30 rows, so do not require the old IDs to remain later.
+        const evidence = result.nextRowEvidence;
+        const scheduled = [];
+        const changes = [];
+        const started = performance.now();
+        const digest = (items) => {
+          let hash = 2166136261;
+          for (const item of items) {
+            for (let index = 0; index < item.length; index++) {
+              hash = Math.imul(hash ^ item.charCodeAt(index), 16777619) >>> 0;
+            }
+            hash = Math.imul(hash ^ 0, 16777619) >>> 0;
+          }
+          return hash.toString(16).padStart(8, '0');
+        };
+        const observe = (attempt) => {
+          const appRows = rows();
+          const appIds = appRows.map((row) => row.getAttribute('data-message-id')).filter(Boolean);
+          let native = { status: 'unknown', reason: 'frame-unavailable', count: null, digest: null, scanned: null, truncated: null };
+          try {
+            const frame = document.querySelector('iframe#chatframe');
+            const nativeDocument = frame?.contentDocument;
+            if (nativeDocument) {
+              const items = nativeDocument.querySelector('#items');
+              if (items) {
+                const nativeRows = items.querySelectorAll(':scope > [id]');
+                const nativeIds = Array.from(nativeRows).slice(0, 256)
+                  .map((row) => row.id).filter(Boolean);
+                native = {
+                  status: 'available', reason: null, count: nativeRows.length, digest: digest(nativeIds),
+                  scanned: nativeIds.length, truncated: nativeRows.length > 256
+                };
+              } else native.reason = 'items-unavailable';
+            }
+          } catch { native.reason = 'frame-inaccessible'; }
+          const video = document.querySelector('#movie_player video.html5-main-video');
+          return {
+            attempt, elapsedMs: Math.round(performance.now() - started),
+            native,
+            app: { count: appRows.length, idCount: appIds.length, digest: digest(appIds) },
+            player: {
+              adShowing: document.querySelector('#movie_player')?.classList.contains('ad-showing') ?? null,
+              paused: video?.paused ?? null, readyState: video?.readyState ?? null
+            }
+          };
+        };
+        let previous = null;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const snapshot = observe(attempt);
+          const nativeChanged = previous?.native.status === 'available' &&
+            snapshot.native.status === 'available' &&
+            (previous.native.count !== snapshot.native.count || previous.native.digest !== snapshot.native.digest);
+          const appChanged = previous &&
+            (previous.app.count !== snapshot.app.count || previous.app.digest !== snapshot.app.digest);
+          const playerChanged = previous &&
+            (previous.player.adShowing !== snapshot.player.adShowing ||
+              previous.player.paused !== snapshot.player.paused ||
+              previous.player.readyState !== snapshot.player.readyState);
+          if (nativeChanged) evidence.nativeChangeCount++;
+          if (appChanged) evidence.appChangeCount++;
+          if (playerChanged) evidence.playerChangeCount++;
+          if (attempt % 10 === 0 || attempt === 99) scheduled.push(snapshot);
+          else if (nativeChanged || appChanged || playerChanged) {
+            if (changes.length < 5) changes.push(snapshot);
+            else evidence.omittedSnapshots++;
+          }
+          previous = snapshot;
+          const next = rows().find((row) => !currentIds.has(row.getAttribute('data-message-id')));
+          if (next) {
+            result.nextRowObserved = true;
+            result.nextRowHasText = Boolean(next.getAttribute('data-message-id') && next.textContent);
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        evidence.snapshots = [...scheduled, ...changes].sort((a, b) => a.attempt - b.attempt);
+        return result;
+      })()`;
+}
+
 const CONTINUATION = {
   timedContinuationData: {
     continuation: 'windows-firefox-extension-next',
@@ -1008,89 +1163,17 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         replacementRows: number;
         nextRowObserved: boolean;
         nextRowHasText: boolean;
+        nextRowEvidence: {
+          snapshots: Array<Record<string, unknown>>;
+          omittedSnapshots: number;
+          nativeChangeCount: number;
+          appChangeCount: number;
+          playerChangeCount: number;
+          pollCounters: 'unavailable';
+        };
         canvasPresent: boolean;
         modalClosed: boolean;
-      }>(
-        session,
-        `(async () => {
-        const rows = () => Array.from(document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p'));
-        const originals = new Map(rows().map((row) => [row.getAttribute('data-message-id'), row.textContent]));
-        const button = document.querySelector('#yt-chat-overlay-settings-button');
-        if (!(button instanceof HTMLButtonElement) || !Array.from(originals).some(([id, text]) => id && text)) {
-          throw new Error('Public original chat is unavailable before translation settings');
-        }
-        const apiExposed = typeof Translator !== 'undefined';
-        const settingsBefore = window.__ytChatOverlay?.getSettings();
-        button.click();
-        const modal = document.querySelector('#yt-chat-overlay-settings-backdrop');
-        const tab = modal?.querySelector('#tab-translation');
-        const enabled = modal?.querySelector('input[name="translationEnabled"]');
-        const service = modal?.querySelector('select[name="translationService"]');
-        const close = modal?.querySelector('button[data-action="close"]');
-        if (!(modal instanceof HTMLDialogElement) || !(tab instanceof HTMLButtonElement) ||
-            !(enabled instanceof HTMLInputElement) || !(service instanceof HTMLSelectElement) ||
-            !(close instanceof HTMLButtonElement) || !modal.open) {
-          throw new Error('Public translation settings are unavailable');
-        }
-        tab.click();
-        if (!apiExposed) {
-          enabled.checked = true;
-          enabled.dispatchEvent(new Event('change', { bubbles: true }));
-          service.value = 'auto';
-          service.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        close.click();
-        for (let attempt = 0; !apiExposed && attempt < 20 &&
-          (window.__ytChatOverlay?.getSettings()?.translationEnabled !== true ||
-            window.__ytChatOverlay?.getSettings()?.translationService !== 'auto'); attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        button.click();
-        const capability = modal.querySelector('.yt-chat-overlay-settings-capability');
-        const runtime = modal.querySelector('.yt-chat-overlay-settings-runtime-status');
-        const current = rows();
-        const originalOverlap = current.filter((row) => originals.has(row.getAttribute('data-message-id'))).length;
-        const originalMismatch = current.filter((row) => {
-          const id = row.getAttribute('data-message-id');
-          return originals.has(id) && originals.get(id) !== row.textContent;
-        }).length;
-        const replacementRows = current.filter((row) => !originals.has(row.getAttribute('data-message-id'))).length;
-        const currentIds = new Set(current.map((row) => row.getAttribute('data-message-id')));
-        const result = {
-          apiExposed,
-          capabilitySupported: capability?.getAttribute('data-supported') ?? null,
-          capabilityText: capability?.textContent ?? null,
-          runtimePhase: runtime?.getAttribute('data-phase') ?? null,
-          runtimeText: runtime?.textContent ?? null,
-          preferenceEnabled: window.__ytChatOverlay?.getSettings()?.translationEnabled === true,
-          preferenceUnchanged:
-            window.__ytChatOverlay?.getSettings()?.translationEnabled === settingsBefore?.translationEnabled &&
-            window.__ytChatOverlay?.getSettings()?.translationService === settingsBefore?.translationService,
-          service: window.__ytChatOverlay?.getSettings()?.translationService ?? null,
-          originalOverlap,
-          originalMismatch,
-          replacementRows,
-          nextRowObserved: false,
-          nextRowHasText: false,
-          canvasPresent: Boolean(document.querySelector('#${OVERLAY_ID} canvas')),
-          modalClosed: false
-        };
-        close.click();
-        result.modalClosed = !modal.open;
-        // A new accessible row is emitted only after another chat message is rendered.
-        // The region retains at most 30 rows, so do not require the old IDs to remain later.
-        for (let attempt = 0; attempt < 100; attempt++) {
-          const next = rows().find((row) => !currentIds.has(row.getAttribute('data-message-id')));
-          if (next) {
-            result.nextRowObserved = true;
-            result.nextRowHasText = Boolean(next.getAttribute('data-message-id') && next.textContent);
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-        return result;
-      })()`
-      );
+      }>(session, publicTranslationProbeExpression());
       const capabilityPassed = translation.apiExposed
         ? translation.capabilitySupported === 'true' &&
           translation.capabilityText?.includes('exposes the built-in Translator API') &&

@@ -831,6 +831,17 @@ prior-document Canvas marker does not establish same-document SPA teardown;
 the receipt marks that property unverified. The deterministic fixture checks
 its separate simulated SPA lifecycle. A missing required public observation
 keeps that public-page run unverified.
+The post-translation next-row wait records up to 16 passive, time-correlated
+snapshots of native chat and overlay accessible row counts and ID digests,
+alongside the current ad, pause and video-ready states. Scheduled snapshots
+cover the bounded 100-by-100-ms wait; additional row or player-state change
+snapshots have an explicit omitted count after the cap. Native chat remains
+`unknown` when its iframe is unavailable or inaccessible, or its expected
+`#items` container is missing. Poll/source counters remain
+`unavailable` because the installed application exposes none. The digests are
+diagnostic fingerprints, not raw chat IDs or proof of network delivery. These
+observations do not change the original next-row acceptance condition; a
+missing new overlay row keeps the public page unverified.
 
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
