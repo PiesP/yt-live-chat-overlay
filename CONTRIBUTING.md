@@ -140,6 +140,12 @@ does not guarantee rollback. A full staging transaction is unnecessary for
 these predictable input errors; validating the existing entry earlier covers
 them without changing archive, metadata or publication contracts.
 
+Before publishing release-specific verification claims, follow the
+[release verification note procedure](./docs/release-verification.md). Each
+version needs its own dated evidence and source/artifact scope. The generated
+`RELEASE_NOTES.md` contains installation, changelog and build details; a later
+coverage clarification is a separate, dated addendum to the public release body.
+
 When reviewing repeated code, check existing module responsibilities and prefer
 small changes that preserve lifecycle and security boundaries; avoid an abstraction
 that hides distinct behavior. Automated clone detection is retired.
