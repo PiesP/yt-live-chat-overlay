@@ -18,9 +18,15 @@ const FIXTURE_URL = 'https://www.youtube.com/watch?v=windows405BacklogReset';
 const ENTRY_MARKER = '\n\tmain();\n';
 const PREFIX = 'WINDOWS405_BACKLOG_';
 const BATCH_SIZE = 51;
+// Parser retains all 51; after the first high at 31, the remaining 20 plus
+// the second batch still fit in the production controller's pending capacity.
+const QUEUE_MAX_SIZE = 100;
+const CONGESTION_QUEUE_LENGTH = 30;
 const MAX_EVENTS = 128;
-// Three 51-action batches fit, with room to record a few duplicate deliveries before failing.
+// Two 51-action batches fit, with room to record duplicate deliveries before failing.
 const MAX_DELIVERIES = 160;
+const MAX_REPLAYS = 128;
+const MAX_LIFECYCLE = 16;
 const MAX_RUN_MS = 150_000;
 
 type PauseEvent = {
@@ -34,6 +40,7 @@ type PauseEvent = {
   rendererPaused: boolean;
   callbackMatches: boolean;
 };
+type PresentationRecord = { id: string; phase: string; accepted: boolean };
 type BacklogState = {
   sourceBound: boolean;
   manager: {
@@ -65,8 +72,22 @@ type BacklogState = {
   resetPhase: string;
   events: PauseEvent[];
   eventOverflow: number;
-  deliveries: string[];
+  deliveries: PresentationRecord[];
   deliveryOverflow: number;
+  replays: PresentationRecord[];
+  replayOverflow: number;
+  lifecycle: Array<{
+    kind: string;
+    atMs: number;
+    phase: string;
+    reason: string | null;
+    managerSame: boolean;
+    rendererSame: boolean;
+    controllerSame: boolean;
+    userPaused: boolean | null;
+    queueLength: number | null;
+  }>;
+  lifecycleOverflow: number;
 };
 
 declare global {
@@ -109,6 +130,10 @@ function pagePrelude(): void {
     eventOverflow: 0,
     deliveries: [],
     deliveryOverflow: 0,
+    replays: [],
+    replayOverflow: 0,
+    lifecycle: [],
+    lifecycleOverflow: 0,
   };
   window.__ytBacklogReset = state;
   Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
@@ -167,33 +192,61 @@ function instrument(source: string): string {
     'updateBacklogPause()',
     'setPaused(paused)',
     'ensureBacklogController(renderer)',
+    'replayMessage(message)',
+    'performOverlayRefresh(reason)',
+    'requestManagedRestart(reason)',
   ])
     assert(source.includes(method), `Packaged ${method} changed`);
   const insertion = `
 \tconst backlogState = window.__ytBacklogReset;
 \tif (!backlogState) throw new Error('Backlog prelude is unavailable');
+\tconst recordLifecycle = (kind, manager, reason) => {
+\t\tconst renderer = manager.renderer;
+\t\tconst event = {
+\t\t\tkind, atMs: performance.now(), phase: backlogState.phase,
+\t\t\treason: typeof reason === 'string' ? reason : null,
+\t\t\tmanagerSame: manager === backlogState.manager,
+\t\t\trendererSame: renderer === backlogState.renderer,
+\t\t\tcontrollerSame: manager.backlogController === backlogState.controller,
+\t\t\tuserPaused: renderer?.overlay.getUserPauseState() ?? null,
+\t\t\tqueueLength: renderer?.getQueueLength() ?? null,
+\t\t};
+\t\tif (backlogState.lifecycle.length < ${MAX_LIFECYCLE}) backlogState.lifecycle.push(event);
+\t\telse backlogState.lifecycleOverflow++;
+\t};
+\tconst acceptedForMain = (renderer, message) =>
+\t\trenderer.pendingQueue.toArray().includes(message) ||
+\t\trenderer.activeMessages.some((entry) => entry.message === message);
 \tconst nativeEnsureBacklog = RuntimeManager.prototype.ensureBacklogController;
 \tRuntimeManager.prototype.ensureBacklogController = function(...args) {
 \t\tconst result = Reflect.apply(nativeEnsureBacklog, this, args);
-\t\tbacklogState.manager = this;
-\t\tbacklogState.renderer = this.renderer;
-\t\tbacklogState.controller = this.backlogController;
-\t\tbacklogState.callback ??= this.renderer?.onBacklogPauseChange ?? null;
+\t\tif (!backlogState.controller && this.backlogController) {
+\t\t\tbacklogState.manager = this;
+\t\t\tbacklogState.renderer = this.renderer;
+\t\t\tbacklogState.controller = this.backlogController;
+\t\t\tbacklogState.callback = this.renderer?.onBacklogPauseChange ?? null;
+\t\t\trecordLifecycle('controller-created', this, null);
+\t\t} else if (this.backlogController !== backlogState.controller ||
+\t\t\tthis.renderer !== backlogState.renderer || this !== backlogState.manager) {
+\t\t\trecordLifecycle('identity-changed', this, null);
+\t\t}
 \t\treturn result;
 \t};
 \tconst nativeUpdateSettings = RuntimeManager.prototype.updateSessionSettings;
 \tRuntimeManager.prototype.updateSessionSettings = function(...args) {
-\t\tbacklogState.manager = this;
-\t\tbacklogState.renderer = this.renderer;
 \t\tbacklogState.resetPhase = 'updating';
 \t\ttry { return Reflect.apply(nativeUpdateSettings, this, args); }
 \t\tfinally { backlogState.resetPhase = 'complete'; }
 \t};
-\tconst nativeBacklogPause = CanvasRenderer.prototype.updateBacklogPause;
-\tCanvasRenderer.prototype.updateBacklogPause = function(...args) {
-\t\tconst result = Reflect.apply(nativeBacklogPause, this, args);
-\t\tif (this === backlogState.renderer) backlogState.renderer = this;
-\t\treturn result;
+\tconst nativeOverlayRefresh = RuntimeManager.prototype.performOverlayRefresh;
+\tRuntimeManager.prototype.performOverlayRefresh = function(reason, ...args) {
+\t\trecordLifecycle('overlay-refresh', this, reason);
+\t\treturn Reflect.apply(nativeOverlayRefresh, this, [reason, ...args]);
+\t};
+\tconst nativeManagedRestart = RuntimeManager.prototype.requestManagedRestart;
+\tRuntimeManager.prototype.requestManagedRestart = function(reason, ...args) {
+\t\trecordLifecycle('managed-restart', this, reason);
+\t\treturn Reflect.apply(nativeManagedRestart, this, [reason, ...args]);
 \t};
 \tconst nativeSetPaused = BacklogInjectionController.prototype.setPaused;
 \tBacklogInjectionController.prototype.setPaused = function(paused, ...args) {
@@ -216,13 +269,31 @@ function instrument(source: string): string {
 \t};
 \tconst nativeBacklogDelivery = CanvasRenderer.prototype.addMessage;
 \tCanvasRenderer.prototype.addMessage = function(message, ...args) {
-\t\tif (this === backlogState.renderer && message?.isBacklog === true &&
-\t\t\tmessage?.id?.startsWith(${JSON.stringify(PREFIX)})) {
+\t\tconst relevant = this === backlogState.renderer && message?.isBacklog === true &&
+\t\t\tmessage?.id?.startsWith(${JSON.stringify(PREFIX)});
+\t\tconst result = Reflect.apply(nativeBacklogDelivery, this, [message, ...args]);
+\t\tif (relevant) {
 \t\t\tif (backlogState.deliveries.length < ${MAX_DELIVERIES})
-\t\t\t\tbacklogState.deliveries.push(message.id);
+\t\t\t\tbacklogState.deliveries.push({
+\t\t\t\t\tid: message.id, phase: backlogState.phase, accepted: acceptedForMain(this, message),
+\t\t\t\t});
 \t\t\telse backlogState.deliveryOverflow++;
 \t\t}
-\t\treturn Reflect.apply(nativeBacklogDelivery, this, [message, ...args]);
+\t\treturn result;
+\t};
+\tconst nativeReplay = CanvasRenderer.prototype.replayMessage;
+\tCanvasRenderer.prototype.replayMessage = function(message, ...args) {
+\t\tconst relevant = this === backlogState.renderer &&
+\t\t\tmessage?.id?.startsWith(${JSON.stringify(PREFIX)});
+\t\tconst result = Reflect.apply(nativeReplay, this, [message, ...args]);
+\t\tif (relevant) {
+\t\t\tif (backlogState.replays.length < ${MAX_REPLAYS})
+\t\t\t\tbacklogState.replays.push({
+\t\t\t\t\tid: message.id, phase: backlogState.phase, accepted: acceptedForMain(this, message),
+\t\t\t\t});
+\t\t\telse backlogState.replayOverflow++;
+\t\t}
+\t\treturn result;
 \t};
 \tbacklogState.sourceBound = true;`;
   return source.replace(ENTRY_MARKER, `${insertion}${ENTRY_MARKER}`);
@@ -260,6 +331,10 @@ function snapshot(page: Page) {
       eventOverflow: state.eventOverflow,
       deliveries: state.deliveries,
       deliveryOverflow: state.deliveryOverflow,
+      replays: state.replays,
+      replayOverflow: state.replayOverflow,
+      lifecycle: state.lifecycle,
+      lifecycleOverflow: state.lifecycleOverflow,
       managerRetained: state.manager?.backlogController === controller,
       rendererRetained: state.manager?.renderer === renderer,
       callbackMatches: renderer?.onBacklogPauseChange === state.callback,
@@ -288,6 +363,8 @@ export async function runBacklogResetFixture({
   extensionId: string;
 }) {
   assert.match(extensionId, /^[a-p]{32}$/u);
+  assert(BATCH_SIZE > 50, 'Live seed must enter the production backlog batch path');
+  assert(QUEUE_MAX_SIZE > BATCH_SIZE, 'Parser capacity must retain the full live seed');
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
   const instrumented = instrument(source);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
@@ -295,7 +372,7 @@ export async function runBacklogResetFixture({
   const page = await context.newPage();
   const deliveredBatches = new Set<number>();
   const requests: Array<{ batch: number; atMs: number }> = [];
-  const routeHits = { first: 0, second: 0, third: 0 };
+  const routeHits = { first: 0, second: 0 };
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   let pageErrorOverflow = 0;
@@ -342,10 +419,9 @@ export async function runBacklogResetFixture({
       url.pathname === '/youtubei/v1/live_chat/get_live_chat'
     ) {
       const selected = url.searchParams.get('windows405');
-      const batch = selected && /^[123]$/u.test(selected) ? Number(selected) : null;
+      const batch = selected && /^[12]$/u.test(selected) ? Number(selected) : null;
       if (batch === 1) routeHits.first++;
       if (batch === 2) routeHits.second++;
-      if (batch === 3) routeHits.third++;
       const firstDelivery = batch !== null && !deliveredBatches.has(batch);
       if (firstDelivery && batch !== null) {
         deliveredBatches.add(batch);
@@ -404,7 +480,7 @@ export async function runBacklogResetFixture({
     assert.equal(initial.controllerPaused, null);
 
     stage = 'configure';
-    originalSettings = await page.evaluate(() => {
+    originalSettings = await page.evaluate((queueMaxSize) => {
       const app = window.__ytChatOverlay;
       if (!app) throw new Error('Installed app is unavailable');
       const settings = structuredClone(app.getSettings());
@@ -416,7 +492,7 @@ export async function runBacklogResetFixture({
         backlogInjectionMax: 100,
         backlogInjectionRateMin: 50,
         backlogDensityRampMs: 500,
-        queueMaxSize: 50,
+        queueMaxSize,
         backlogPauseThreshold: 0.3,
         backlogResumeThreshold: 0.1,
         backlogToggleCooldownMs: 500,
@@ -426,16 +502,16 @@ export async function runBacklogResetFixture({
         superChatLayout: 'stacked',
       });
       return settings;
-    });
+    }, QUEUE_MAX_SIZE);
     settingsRestoration = 'pending';
     await page.waitForFunction(
-      () =>
-        window.__ytBacklogReset?.renderer?.settings.queueMaxSize === 50 &&
+      (queueMaxSize) =>
+        window.__ytBacklogReset?.renderer?.settings.queueMaxSize === queueMaxSize &&
         window.__ytBacklogReset.renderer.settings.backlogPauseThreshold === 0.3 &&
         window.__ytBacklogReset.renderer.settings.fontSize === 32 &&
         window.__ytBacklogReset.renderer.settings.opacity === 0.7 &&
         window.__ytBacklogReset.renderer.settings.superChatLayout === 'stacked',
-      undefined,
+      QUEUE_MAX_SIZE,
       { timeout: 5_000 }
     );
     await page.keyboard.press('Control+Space');
@@ -452,14 +528,25 @@ export async function runBacklogResetFixture({
       });
     });
     await page.waitForFunction(
-      () => window.__ytBacklogReset?.events.some((event) => event.paused && event.queueLength > 15),
-      undefined,
+      (threshold) =>
+        window.__ytBacklogReset?.events.some(
+          (event) => event.paused && event.queueLength > threshold
+        ),
+      CONGESTION_QUEUE_LENGTH,
       { timeout: 20_000 }
     );
     const initialCongestion = await snapshot(page);
     assert(initialCongestion.controllerPending.length > 0);
     assert(initialCongestion.callbackMatches && initialCongestion.managerRetained);
     assert.equal(initialCongestion.userPaused, true);
+    assert.deepEqual(initialCongestion.workerAttempts, [
+      { type: 'module', error: 'SecurityError' },
+    ]);
+    assert.deepEqual(
+      initialCongestion.lifecycle.map((event) => [event.kind, event.phase]),
+      [['controller-created', 'initial']],
+      'Initial congestion must come from the routed >50 live seed before recovery'
+    );
 
     stage = 'retained-backlog';
     await page.evaluate(() =>
@@ -481,16 +568,6 @@ export async function runBacklogResetFixture({
     const phaseResults = [];
     for (const { name, settings } of phases) {
       stage = `reset-${name}`;
-      if (name === 'stacked') {
-        await page.evaluate(() =>
-          fetch('/youtubei/v1/live_chat/get_live_chat?windows405=3').then((response) => {
-            if (!response.ok) throw new Error('Third routed batch failed');
-          })
-        );
-        await page.waitForFunction(
-          () => (window.__ytBacklogReset?.controller?.drainPending().length ?? 0) > 20
-        );
-      }
       // Allow the previous natural high transition to clear the production cooldown.
       await page.waitForFunction(
         () => {
@@ -524,6 +601,11 @@ export async function runBacklogResetFixture({
       );
       const after = await snapshot(page);
       assert(after.callbackMatches && after.managerRetained && after.rendererRetained);
+      assert.equal(after.userPaused, true, `${name}: fixture user pause was lost`);
+      assert(
+        after.replays.length > before.replays.length,
+        `${name}: recent message replay was not observed`
+      );
       assert.equal(
         name === 'font'
           ? after.settings?.fontSize
@@ -534,19 +616,36 @@ export async function runBacklogResetFixture({
       );
       assert(after.controllerPending.length < before.controllerPending.length);
       phaseResults.push({ name, before, after });
+      // replayLatestMessages runs after the renderer reset but before
+      // updateSessionSettings returns, so a genuine high can still be
+      // recorded in the 'updating' phase.
       await page.waitForFunction(
-        ({ count, phase }) =>
-          window.__ytBacklogReset?.events
-            .slice(count)
-            .some(
-              (event) =>
-                event.paused &&
-                event.phase === phase &&
-                event.resetPhase === 'complete' &&
-                event.rendererPaused &&
-                event.queueLength > 15
-            ),
-        { count: eventCount, phase: name },
+        ({ count, phase, threshold }) => {
+          const events = window.__ytBacklogReset?.events.slice(count) ?? [];
+          const lowIndex = events.findIndex(
+            (event) =>
+              event.before &&
+              !event.paused &&
+              event.phase === phase &&
+              event.resetPhase === 'updating' &&
+              event.callbackMatches
+          );
+          return (
+            lowIndex >= 0 &&
+            events
+              .slice(lowIndex + 1)
+              .some(
+                (event) =>
+                  !event.before &&
+                  event.paused &&
+                  event.phase === phase &&
+                  event.rendererPaused &&
+                  event.callbackMatches &&
+                  event.queueLength > threshold
+              )
+          );
+        },
+        { count: eventCount, phase: name, threshold: CONGESTION_QUEUE_LENGTH },
         { timeout: 20_000 }
       );
     }
@@ -575,30 +674,60 @@ export async function runBacklogResetFixture({
       { timeout: 25_000 }
     );
     const drained = await snapshot(page);
+    assert.deepEqual(drained.workerAttempts, [{ type: 'module', error: 'SecurityError' }]);
+    assert(drained.callbackMatches && drained.managerRetained && drained.rendererRetained);
     assert(drained.deliveries.length > initialCongestion.deliveries.length);
-    assert.equal(new Set(drained.deliveries).size, drained.deliveries.length);
-    const retainedIds = new Set([
-      ...initialCongestion.controllerPending,
-      ...retainedBacklog.controllerPending,
-      ...phaseResults.flatMap(({ before, after }) => [
-        ...before.controllerPending,
-        ...after.controllerPending,
-      ]),
-    ]);
-    for (const id of retainedIds) {
-      assert(id !== null, 'Retained backlog message lacked an ID');
-      assert(drained.deliveries.includes(id), `Lost retained backlog ${id}`);
+    // A visual reset clears the renderer, then replayMessage may legitimately
+    // present a previously delivered row again. Only an accepted duplicate
+    // within the same reset phase is a duplicate presentation.
+    const presentations = [...drained.deliveries, ...drained.replays].filter(
+      (record) => record.accepted
+    );
+    assert(drained.deliveries.every((record) => record.accepted));
+    assert.equal(
+      new Set(presentations.map((record) => `${record.phase}:${record.id}`)).size,
+      presentations.length,
+      'Duplicate accepted presentation within one renderer generation'
+    );
+    const phaseOrder = ['initial', 'font', 'opacity', 'wide', 'stacked'];
+    const checkpoints = [
+      initialCongestion,
+      retainedBacklog,
+      ...phaseResults.flatMap(({ before, after }) => [before, after]),
+    ];
+    for (const checkpoint of checkpoints) {
+      const minimumPhase = phaseOrder.indexOf(checkpoint.phase);
+      assert(minimumPhase >= 0, `Unknown backlog phase ${checkpoint.phase}`);
+      for (const id of checkpoint.controllerPending) {
+        assert(id !== null, 'Retained backlog message lacked an ID');
+        assert(
+          presentations.some(
+            (record) => record.id === id && phaseOrder.indexOf(record.phase) >= minimumPhase
+          ),
+          `Lost retained backlog ${id} after ${checkpoint.phase}`
+        );
+      }
     }
     assert.equal(drained.eventOverflow, 0);
     assert.equal(drained.deliveryOverflow, 0);
+    assert.equal(drained.replayOverflow, 0);
+    assert.equal(drained.lifecycleOverflow, 0);
+    assert.equal(drained.lifecycle.filter((event) => event.kind === 'identity-changed').length, 0);
+    assert.equal(
+      drained.lifecycle.filter(
+        (event) => event.kind === 'overlay-refresh' || event.kind === 'managed-restart'
+      ).length,
+      0,
+      'Runtime recovery interrupted the retained backlog session'
+    );
     assert.equal(pageErrors.length, 0);
     assert.equal(pageErrorOverflow, 0);
     assert.equal(consoleErrors.length, 0);
     assert.equal(consoleErrorOverflow, 0);
-    assert.deepEqual(routeHits, { first: 1, second: 1, third: 1 });
+    assert.deepEqual(routeHits, { first: 1, second: 1 });
     assert.deepEqual(
       requests.map((entry) => entry.batch),
-      [1, 2, 3]
+      [1, 2]
     );
     return {
       status: 'passed' as const,
@@ -606,7 +735,9 @@ export async function runBacklogResetFixture({
       pageScriptProbeProvenance: provenance,
       bounded: {
         batchSize: BATCH_SIZE,
-        batches: 3,
+        batches: 2,
+        queueMaxSize: QUEUE_MAX_SIZE,
+        congestionQueueLength: CONGESTION_QUEUE_LENGTH,
         maxRunMs: MAX_RUN_MS,
         maxEvents: MAX_EVENTS,
         maxDeliveries: MAX_DELIVERIES,
