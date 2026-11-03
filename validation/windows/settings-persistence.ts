@@ -1524,3 +1524,259 @@ export async function runSettingsPersistenceFixture({
     await context.close();
   }
 }
+
+/** Narrow #411 product check: native selectors, durable settings, and scoped Arabic direction. */
+export async function runLocaleDomainsFixture({
+  browser,
+  root,
+  output,
+  userscript,
+  watchHtml,
+}: {
+  browser: Browser;
+  root: string;
+  output: string;
+  userscript: string;
+  watchHtml: string;
+}) {
+  const context = await createFixtureContext(browser, userscript, {
+    locale: 'ar-EG',
+    language: 'auto',
+    width: 1280,
+  });
+  const errors: string[] = [];
+  const observations: Record<string, unknown> = {};
+  const cleanup: Record<string, unknown> = {};
+  const screenshots: string[] = [];
+  let stage = 'navigate';
+  let failure: unknown;
+  try {
+    await routeFixture(context, watchHtml);
+    const page = await context.newPage();
+    page.setDefaultTimeout(15_000);
+    page.on('pageerror', (error) => {
+      if (errors.length < 16) errors.push(error.message);
+    });
+    page.on('console', (entry) => {
+      if (entry.type() === 'error' && errors.length < 16) errors.push(entry.text().slice(0, 2000));
+    });
+    const ready = async () => {
+      await page.locator('#yt-live-chat-overlay').waitFor({ state: 'attached', timeout: 15_000 });
+      await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings));
+    };
+    const open = async () => {
+      await openSettings(page);
+      await page.locator('#tab-translation').click();
+      return page.locator('#yt-chat-overlay-settings-backdrop');
+    };
+    const read = async () =>
+      page.evaluate(() => {
+        const dialog = document.querySelector<HTMLDialogElement>(
+          '#yt-chat-overlay-settings-backdrop'
+        );
+        if (!dialog) throw new Error('Locale settings dialog is unavailable');
+        const selectors = Object.fromEntries(
+          ['language', 'translationSource', 'translationTarget'].map((key) => {
+            const select = dialog.querySelector<HTMLSelectElement>(`select[name="${key}"]`);
+            if (!select) throw new Error(`Locale selector is unavailable: ${key}`);
+            return [
+              key,
+              {
+                value: select.value,
+                options: Array.from(select.options, (option) => ({
+                  value: option.value,
+                  label: option.textContent,
+                })),
+              },
+            ];
+          })
+        );
+        return {
+          selectors,
+          modal: { lang: dialog.lang, dir: dialog.dir },
+          root: { lang: document.documentElement.lang, dir: document.documentElement.dir },
+        };
+      });
+    const assertOptions = (snapshot: Awaited<ReturnType<typeof read>>, arabic: boolean) => {
+      for (const key of ['language', 'translationSource', 'translationTarget']) {
+        const selector = snapshot.selectors[key];
+        assert(selector);
+        const codes =
+          key === 'translationTarget'
+            ? ['auto', 'ko', 'en', 'ja', 'es', 'zh-CN', 'ar']
+            : ['auto', 'en', 'ko', 'ja', 'es', 'zh-CN', 'ar'];
+        assert.deepEqual(
+          selector.options.map((option) => option.value),
+          codes
+        );
+        assert.equal(new Set(selector.options.map((option) => option.value)).size, 7);
+        const concreteLabels = arabic
+          ? key === 'translationTarget'
+            ? ['الكورية', 'الإنجليزية', 'اليابانية', 'الإسبانية', 'الصينية', 'العربية']
+            : ['الإنجليزية', 'الكورية', 'اليابانية', 'الإسبانية', 'الصينية', 'العربية']
+          : key === 'translationTarget'
+            ? ['한국어', 'English', '日本語', 'Español', '中文', 'العربية']
+            : ['English', '한국어', '日本語', 'Español', '中文', 'العربية'];
+        const autoLabel =
+          key === 'translationSource'
+            ? arabic
+              ? 'كشف تلقائي'
+              : 'Auto-detect'
+            : arabic
+              ? 'تلقائي (المتصفح)'
+              : 'Auto (Browser)';
+        assert.deepEqual(
+          selector.options.map((option) => option.label),
+          [autoLabel, ...concreteLabels]
+        );
+      }
+    };
+    await page.goto(WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await ready();
+    const rootBefore = await page.evaluate(() => ({
+      lang: document.documentElement.lang,
+      dir: document.documentElement.dir,
+    }));
+    let modal = await open();
+    stage = 'browser-auto-arabic';
+    await page.waitForFunction(
+      () =>
+        document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop')?.lang ===
+        'ar'
+    );
+    const automatic = await read();
+    assert.deepEqual(automatic.modal, { lang: 'ar', dir: 'rtl' });
+    assert.deepEqual(automatic.root, rootBefore);
+    assertOptions(automatic, true);
+    observations.automaticArabic = automatic;
+
+    stage = 'explicit-selectors';
+    await modal.locator('select[name="translationSource"]').selectOption('ja');
+    await modal.locator('select[name="translationTarget"]').selectOption('ko');
+    await modal.locator('select[name="language"]').selectOption('en');
+    await page.waitForFunction(() => {
+      const settings = window.__ytChatOverlay?.getSettings();
+      return (
+        settings?.language === 'en' &&
+        settings.translationSource === 'ja' &&
+        settings.translationTarget === 'ko' &&
+        document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop')?.lang ===
+          'en'
+      );
+    });
+    await modal.locator('button.yt-chat-overlay-settings-close').click();
+    await page.evaluate(async () => {
+      await window.__ytChatOverlay?.stop();
+    });
+    observations.explicitStored = await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) ?? '{}'),
+      SETTINGS_KEY
+    );
+    const explicitStored = observations.explicitStored as Record<string, unknown>;
+    assert.equal(explicitStored.language, 'en');
+    assert.equal(explicitStored.translationSource, 'ja');
+    assert.equal(explicitStored.translationTarget, 'ko');
+
+    stage = 'explicit-reload';
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await ready();
+    modal = await open();
+    const reloaded = await read();
+    assertOptions(reloaded, false);
+    assert.deepEqual(reloaded.modal, { lang: 'en', dir: 'ltr' });
+    assert.deepEqual(reloaded.root, rootBefore);
+    assert.equal(reloaded.selectors.language?.value, 'en');
+    assert.equal(reloaded.selectors.translationSource?.value, 'ja');
+    assert.equal(reloaded.selectors.translationTarget?.value, 'ko');
+    observations.explicitReloaded = reloaded;
+    await page.screenshot({ path: join(output, 'locale-domains-explicit.png') });
+    screenshots.push('locale-domains-explicit.png');
+
+    stage = 'auto-selectors';
+    await modal.locator('select[name="translationSource"]').selectOption('auto');
+    await modal.locator('select[name="translationTarget"]').selectOption('auto');
+    await modal.locator('select[name="language"]').selectOption('auto');
+    await page.waitForFunction(
+      () =>
+        document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop')?.lang ===
+        'ar'
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => !document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop')?.open
+    );
+    await page.waitForFunction((key) => {
+      const saved = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
+      return (
+        saved.language === 'auto' &&
+        saved.translationSource === 'auto' &&
+        saved.translationTarget === 'auto'
+      );
+    }, SETTINGS_KEY);
+    await page.evaluate(async () => {
+      await window.__ytChatOverlay?.stop();
+    });
+    const autoStored = await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>,
+      SETTINGS_KEY
+    );
+    assert.equal(autoStored.language, 'auto');
+    assert.equal(autoStored.translationSource, 'auto');
+    assert.equal(autoStored.translationTarget, 'auto');
+    observations.autoStored = autoStored;
+    stage = 'auto-reload';
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await ready();
+    await open();
+    const autoReloaded = await read();
+    assertOptions(autoReloaded, true);
+    assert.deepEqual(autoReloaded.modal, { lang: 'ar', dir: 'rtl' });
+    assert.deepEqual(autoReloaded.root, rootBefore);
+    assert.equal(autoReloaded.selectors.language?.value, 'auto');
+    assert.equal(autoReloaded.selectors.translationSource?.value, 'auto');
+    assert.equal(autoReloaded.selectors.translationTarget?.value, 'auto');
+    observations.autoReloaded = autoReloaded;
+    await page.screenshot({ path: join(output, 'locale-domains-auto-arabic.png') });
+    screenshots.push('locale-domains-auto-arabic.png');
+    assert.deepEqual(errors, []);
+    stage = 'complete';
+  } catch (error) {
+    failure = error;
+  } finally {
+    await context.close();
+    cleanup.contextClosed = true;
+    const receipt = {
+      status: failure ? 'failed' : 'passed',
+      stage,
+      observations,
+      errors,
+      cleanup,
+      screenshots,
+      visualReview: 'pending',
+      userscriptSha256: createHash('sha256').update(userscript).digest('hex'),
+      fixtureSha256: createHash('sha256')
+        .update(await readFile(join(root, 'validation/windows/settings-persistence.ts')))
+        .digest('hex'),
+      error: failure ? String(failure) : null,
+    };
+    await writeFile(join(output, 'locale-domains.json'), JSON.stringify(receipt, null, 2));
+  }
+  if (failure) throw failure;
+  return {
+    checks: {
+      builtUserscriptFixture: true,
+      installedApplicationDelivery: false,
+      sustainedViewingLifecycle: false,
+      allLanguageSelectors: true,
+      explicitAndAutoPersisted: true,
+      arabicScopedDirection: true,
+    },
+    observations: {
+      profile: 'locale-domains',
+      browserVersion: browser.version(),
+      screenshots,
+      cleanup,
+      ...observations,
+    },
+  };
+}

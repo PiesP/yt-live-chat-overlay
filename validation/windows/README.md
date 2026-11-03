@@ -1206,3 +1206,26 @@ source digest, observations and cleanup; the controller binds source/core,
 package hashes, browser version, and browser/profile cleanup. Inspect all four
 PNGs before changing `visualReview: pending`. This is controlled fixture evidence,
 not live YouTube or a release-wide qualification.
+
+## Language domains (#411)
+
+For a bounded language-only check, prepare exactly `{"scenario":"locale-domains"}`
+in `validation/windows/inputs/locale-domains.json` before source-bound packaging.
+Use the maintained prepared Windows VM headed Edge artifact profile with
+`--browser msedge --mode desktop`, without installation, public URLs, or a
+controller `--scenario` option. The source-owned input is bundled with its hash;
+keep it local and remove only the task-owned input after the frozen bundle.
+Do not combine it with other focused selectors.
+
+This entry reuses the maintained settings-persistence fixture's userscript,
+GM-storage boundary, controlled watch page and context cleanup. It checks the
+actual interface, source and target selectors, their unique values, existing localized labels,
+target's Korean-first order and distinct automatic-detection wording. An Arabic
+browser locale resolves UI `auto` to a scoped RTL dialog while preserving the
+page root's language and direction. Explicit English UI/Japanese source/Korean
+target survive close, durable storage and a real reload; all three `auto` values
+then survive native Escape close and reload with Arabic UI. Two original PNGs
+and `locale-domains.json` retain the observations and cleanup. Review the PNGs
+with the controller's source/core, build/bundle hashes and installed browser
+version. This artifact fixture does not qualify extension installation,
+Translator model availability, live YouTube, or the unrelated native/PiP flows.

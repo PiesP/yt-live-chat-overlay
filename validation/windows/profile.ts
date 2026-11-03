@@ -17,7 +17,7 @@ import type {
 
 import { runOpacityDomains } from './opacity-domains.ts';
 import { runReloadFeedbackFixture } from './reload-feedback.ts';
-import { runSettingsPersistenceFixture } from './settings-persistence.ts';
+import { runLocaleDomainsFixture, runSettingsPersistenceFixture } from './settings-persistence.ts';
 import { runTranslationRuntimeFixture } from './translation-runtime.ts';
 import { runViewingExperienceFixture } from './viewing-experience.ts';
 
@@ -1658,6 +1658,7 @@ async function verifySustainedViewingLifecycle(
 }
 
 type FocusedScenario =
+  | 'locale-domains'
   | 'settings-opacity'
   | 'settings-persistence'
   | 'reload-feedback'
@@ -1683,6 +1684,7 @@ async function hasScenarioSelector(root: string, scenario: FocusedScenario): Pro
 }
 
 export async function readFocusedScenario(root: string): Promise<FocusedScenario | null> {
+  const localeDomains = await hasScenarioSelector(root, 'locale-domains');
   const opacity = await hasScenarioSelector(root, 'settings-opacity');
   const settings = await hasScenarioSelector(root, 'settings-persistence');
   const reload = await hasScenarioSelector(root, 'reload-feedback');
@@ -1690,7 +1692,8 @@ export async function readFocusedScenario(root: string): Promise<FocusedScenario
   const viewing = await hasScenarioSelector(root, 'viewing-experience');
   const japaneseIme = await hasScenarioSelector(root, 'japanese-ime');
   assert(
-    Number(opacity) +
+    Number(localeDomains) +
+      Number(opacity) +
       Number(settings) +
       Number(reload) +
       Number(translation) +
@@ -1699,6 +1702,7 @@ export async function readFocusedScenario(root: string): Promise<FocusedScenario
       1,
     'Focused Windows scenario selectors are mutually exclusive'
   );
+  if (localeDomains) return 'locale-domains';
   if (opacity) return 'settings-opacity';
   if (settings) return 'settings-persistence';
   if (reload) return 'reload-feedback';
@@ -1752,6 +1756,15 @@ export async function run({
   if (selectedScenario !== null) {
     assert(!installedContext, 'Focused fixtures use the production userscript');
     await mkdir(output, { recursive: true });
+    if (selectedScenario === 'locale-domains') {
+      return runLocaleDomainsFixture({
+        browser,
+        root,
+        output,
+        userscript,
+        watchHtml: createMockWatchHtml(previewHtml),
+      });
+    }
     if (selectedScenario === 'reload-feedback') {
       return runReloadFeedbackFixture({
         browser,
