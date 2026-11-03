@@ -48,8 +48,9 @@ fresh positive cohort returns to the 720-by-540 viewport before source input.
 It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
 detailed videos at 400px and 960px viewport widths. Each page uses a measured
-940px player inside a 1100px high browser viewport, with an actual config and
-measured player/canvas fit barrier before source input. Active presentation roles
+900px player at 400px width and a 940px player at 960px width, inside a 1100px high
+browser viewport with an actual config and measured player/canvas fit barrier
+before source input. Active presentation roles
 must retain allocated slots before their positive-ink waits. This provides measured lanes for paid,
 sticker, membership, and ordinary rows at 32px without changing source or
 scheduling policy; a row can still have a future planned start. Recorded viewport
