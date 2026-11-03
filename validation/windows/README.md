@@ -1143,7 +1143,7 @@ its receipts.
 The fixture restricts the exact extension renderer Worker constructor so the
 installed production application uses its Main fallback. A source-bound observer
 forwards the real runtime/controller methods and records bounded delivery and
-congestion transitions. Three controlled live-chat batches exercise user pause,
+congestion transitions. Two controlled live-chat batches exercise user pause,
 font/opacity/card-layout resets with the same controller, remaining Backlog
 delivery after the real queue drains, and final session teardown. Review
 `backlog-reset.json` with its screenshot and the central source, bundle,

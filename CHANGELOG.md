@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **Backlog control** — Keep Main-renderer congestion callbacks connected across font, opacity and card-layout changes, and resume pending Backlog delivery after the reset completes. Stop scheduling injection while congestion has paused it.
+- **Backlog control** — Keep Main-renderer congestion callbacks connected across font, opacity and card-layout changes, and resume pending Backlog delivery after resets and overlay refreshes. Stop scheduling injection while congestion has paused it, and allow natural queue draining to resume delivery. User pause no longer triggers recovery for an intentionally inactive queue; Worker and chat health checks remain active.
 - **Burst sampling window** — Apply a smaller sample window immediately, trimming message counts and elapsed durations together so the configured window controls the current rate.
 - **Worker ingress freshness** — Preserve fresh ordinary messages and FIFO order when the full Manager buffer evicts older messages under paid Worker backpressure.
 - **Main placement settings** — Apply changed maximum wait, headway and exit padding to new lane placements while retaining existing reservations.
