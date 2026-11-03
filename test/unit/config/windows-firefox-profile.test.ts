@@ -19,6 +19,7 @@ const {
   requireFirefoxPublicCoverage,
   resolveSystemFirefoxExecutable,
   runFirefoxInstallation,
+  publicTranslationProbeExpression,
   selectPublicSeekTarget,
 } = firefoxInstallModule;
 const {
@@ -42,6 +43,228 @@ const {
 } = firefoxBidiModule;
 
 const temporaryDirectories: string[] = [];
+
+async function executePublicTranslationProbe(
+  options: {
+    nativeUnavailable?: boolean;
+    nativeItemsMissing?: boolean;
+    nativeIds?: string[];
+    playerStateAtTick?: (tick: number) => {
+      adShowing: boolean;
+      paused: boolean;
+      readyState: number;
+    };
+    onTick?: (
+      tick: number,
+      appRows: Array<{ id: string; textContent: string }>,
+      nativeIds: string[]
+    ) => void;
+  } = {}
+) {
+  const appRows = [{ id: 'app-initial', textContent: 'Original' }];
+  const nativeIds = options.nativeIds ?? ['native-initial'];
+  let tick = 0;
+  let now = 0;
+  const settings = { translationEnabled: false, translationService: 'off' };
+  class Button {
+    click() {
+      /* supplied below */
+    }
+  }
+  class Input {
+    checked = false;
+    dispatchEvent() {
+      settings.translationEnabled = this.checked;
+    }
+  }
+  class Select {
+    value = 'off';
+    dispatchEvent() {
+      settings.translationService = this.value;
+    }
+  }
+  class Dialog {
+    open = false;
+    querySelector(selector: string): unknown {
+      if (selector === '#tab-translation') return tab;
+      if (selector === 'input[name="translationEnabled"]') return enabled;
+      if (selector === 'select[name="translationService"]') return service;
+      if (selector === 'button[data-action="close"]') return close;
+      if (selector === '.yt-chat-overlay-settings-capability')
+        return {
+          getAttribute: () => 'false',
+          textContent: 'This browser does not expose the built-in Translator API.',
+        };
+      if (selector === '.yt-chat-overlay-settings-runtime-status')
+        return {
+          getAttribute: () => 'unavailable',
+          textContent: 'Translation is inactive: this browser has no Translator API.',
+        };
+      return null;
+    }
+  }
+  const modal = new Dialog();
+  const button = new Button();
+  button.click = () => {
+    modal.open = true;
+  };
+  const tab = new Button();
+  const close = new Button();
+  close.click = () => {
+    modal.open = false;
+  };
+  const enabled = new Input();
+  const service = new Select();
+  const frame = {
+    get contentDocument() {
+      if (options.nativeUnavailable) throw new Error('Cross-origin frame');
+      return {
+        querySelector: () =>
+          options.nativeItemsMissing
+            ? null
+            : { querySelectorAll: () => nativeIds.map((id) => ({ id })) },
+      };
+    },
+  };
+  const document = {
+    querySelectorAll: () =>
+      appRows.map((row) => ({
+        getAttribute: (name: string) => (name === 'data-message-id' ? row.id : null),
+        textContent: row.textContent,
+      })),
+    querySelector: (selector: string) => {
+      if (selector === '#yt-chat-overlay-settings-button') return button;
+      if (selector === '#yt-chat-overlay-settings-backdrop') return modal;
+      if (selector === 'iframe#chatframe') return frame;
+      if (selector === '#yt-live-chat-overlay canvas') return {};
+      const player = options.playerStateAtTick?.(tick) ?? {
+        adShowing: tick >= 4,
+        paused: false,
+        readyState: 4,
+      };
+      if (selector === '#movie_player') return { classList: { contains: () => player.adShowing } };
+      if (selector === '#movie_player video.html5-main-video')
+        return { paused: player.paused, readyState: player.readyState };
+      return null;
+    },
+  };
+  const context = {
+    document,
+    window: { __ytChatOverlay: { getSettings: () => ({ ...settings }) } },
+    HTMLButtonElement: Button,
+    HTMLDialogElement: Dialog,
+    HTMLInputElement: Input,
+    HTMLSelectElement: Select,
+    Event: class Event {},
+    performance: { now: () => now },
+    setTimeout: (resolve: () => void, delay: number) => {
+      if (delay === 100) {
+        tick++;
+        now += 100;
+        options.onTick?.(tick, appRows, nativeIds);
+      }
+      resolve();
+    },
+  };
+  return await new Script(publicTranslationProbeExpression()).runInNewContext(context);
+}
+
+describe('public Firefox translation observation', () => {
+  it('time-binds native, app, and ad changes to the existing next-row wait', async () => {
+    const result = await executePublicTranslationProbe({
+      onTick(tick, appRows, nativeIds) {
+        if (tick === 3) nativeIds.push('native-new');
+        if (tick === 5) appRows.push({ id: 'app-new', textContent: 'Another original' });
+      },
+    });
+    expect(result.nextRowObserved).toBe(true);
+    expect(result.nextRowHasText).toBe(true);
+    expect(result.nextRowEvidence.nativeChangeCount).toBe(1);
+    expect(result.nextRowEvidence.appChangeCount).toBe(1);
+    expect(
+      result.nextRowEvidence.snapshots.map((entry: { attempt: number }) => entry.attempt)
+    ).toEqual([0, 3, 4, 5]);
+    expect(result.nextRowEvidence.snapshots[2].player.adShowing).toBe(true);
+    expect(JSON.stringify(result.nextRowEvidence)).not.toMatch(
+      /native-new|app-new|Another original/u
+    );
+  });
+
+  it('keeps a missing app row unverified while bounding advancing native evidence', async () => {
+    const result = await executePublicTranslationProbe({
+      nativeIds: Array.from({ length: 260 }, (_, index) => `native-${index}`),
+      onTick(tick, _appRows, nativeIds) {
+        nativeIds.push(`native-later-${tick}`);
+      },
+    });
+    expect(result.nextRowObserved).toBe(false);
+    expect(result.nextRowEvidence.nativeChangeCount).toBe(99);
+    expect(result.nextRowEvidence.snapshots).toHaveLength(16);
+    expect(result.nextRowEvidence.omittedSnapshots).toBe(84);
+    expect(result.nextRowEvidence.snapshots.at(-1).attempt).toBe(99);
+    expect(result.nextRowEvidence.snapshots[0].native).toMatchObject({
+      status: 'available',
+      scanned: 256,
+      truncated: true,
+    });
+    expect(JSON.stringify(result.nextRowEvidence).length).toBeLessThan(6000);
+  });
+
+  it('captures transient ad, pause, and readiness changes between scheduled samples', async () => {
+    const result = await executePublicTranslationProbe({
+      playerStateAtTick: (tick) => ({
+        adShowing: tick === 3,
+        paused: tick === 5,
+        readyState: tick === 7 ? 2 : 4,
+      }),
+    });
+    expect(result.nextRowObserved).toBe(false);
+    expect(result.nextRowEvidence.nativeChangeCount).toBe(0);
+    expect(result.nextRowEvidence.appChangeCount).toBe(0);
+    expect(result.nextRowEvidence.playerChangeCount).toBe(6);
+    expect(result.nextRowEvidence.omittedSnapshots).toBe(1);
+    expect(result.nextRowEvidence.snapshots).toHaveLength(16);
+    expect(
+      result.nextRowEvidence.snapshots.find((entry: { attempt: number }) => entry.attempt === 3)
+        .player.adShowing
+    ).toBe(true);
+    expect(
+      result.nextRowEvidence.snapshots.find((entry: { attempt: number }) => entry.attempt === 5)
+        .player.paused
+    ).toBe(true);
+    expect(
+      result.nextRowEvidence.snapshots.find((entry: { attempt: number }) => entry.attempt === 7)
+        .player.readyState
+    ).toBe(2);
+    expect(
+      result.nextRowEvidence.snapshots.find((entry: { attempt: number }) => entry.attempt === 10)
+        .player
+    ).toMatchObject({ adShowing: false, paused: false, readyState: 4 });
+  });
+
+  it('records inaccessible native chat as unknown without inventing poll counts', async () => {
+    const result = await executePublicTranslationProbe({ nativeUnavailable: true });
+    expect(result.nextRowObserved).toBe(false);
+    expect(result.nextRowEvidence.nativeChangeCount).toBe(0);
+    expect(result.nextRowEvidence.snapshots[0].native).toMatchObject({
+      status: 'unknown',
+      count: null,
+      digest: null,
+    });
+    expect(result.nextRowEvidence.pollCounters).toBe('unavailable');
+  });
+
+  it('does not label an accessible frame with no chat list as quiet traffic', async () => {
+    const result = await executePublicTranslationProbe({ nativeItemsMissing: true });
+    expect(result.nextRowObserved).toBe(false);
+    expect(result.nextRowEvidence.snapshots[0].native).toMatchObject({
+      status: 'unknown',
+      reason: 'items-unavailable',
+      count: null,
+      digest: null,
+    });
+  });
+});
 
 it('forwards a bounded page-evaluation timeout to the BiDi command', async () => {
   const { session } = createBidiSession(() => undefined);

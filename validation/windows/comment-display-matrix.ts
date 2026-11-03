@@ -71,7 +71,8 @@ const MAX_CAPTURES_PER_BACKEND = 12;
 const MAX_OVERLOAD_MS = 120_000;
 const MAX_OVERLOAD_RECORDS = 128;
 const PRESENTATION_VIEWPORT_HEIGHT = 1100;
-const PRESENTATION_PLAYER_HEIGHT = 900;
+const PRESENTATION_NARROW_PLAYER_HEIGHT = 900;
+const PRESENTATION_WIDE_PLAYER_HEIGHT = 940;
 const MIN_PAID_BODY_LINES = resolveLimits('superChatMaxBodyLines').min;
 const MIN_FONT_SIZE = resolveLimits('fontSize').min;
 const MAX_FONT_SIZE = resolveLimits('fontSize').max;
@@ -535,6 +536,31 @@ export const MATRIX_BATCHES = Object.freeze({
   presentationDark: presentationActions('dark'),
   presentationDetailed: presentationActions('detailed'),
 });
+
+/** Inject only the paid-card translation into the controlled detailed scene. */
+export function matrixTranslatorInitScript(paidId: string): string {
+  const translatedPaid = `${paidId} MATRIX_TRANSLATED ${'한국어 日本語 مرحبا long translated body '.repeat(4)}`;
+  return `(() => {
+    const paidId = ${JSON.stringify(paidId)};
+    const translatedPaid = ${JSON.stringify(translatedPaid)};
+    const record = { calls: [], overflow: 0 };
+    window.__ytMatrixTranslator = record;
+    Object.defineProperty(window, 'Translator', {
+      configurable: true,
+      value: {
+        availability: async () => 'available',
+        create: async () => ({
+          translate: async (input) => {
+            if (record.calls.length < 16) record.calls.push(input.slice(0, 512));
+            else record.overflow++;
+            return input.includes(paidId) ? translatedPaid : input;
+          },
+          destroy: () => {},
+        }),
+      },
+    });
+  })();`;
+}
 
 function overloadPaidAction(id: string, body: string) {
   return {
@@ -2580,29 +2606,9 @@ async function runBackend(options: {
         },
       };
     });
-    await page.addInitScript((paidId) => {
-      const scope = window as typeof window & {
-        __ytMatrixTranslator?: { calls: string[]; overflow: number };
-      };
-      const record = { calls: [] as string[], overflow: 0 };
-      scope.__ytMatrixTranslator = record;
-      Object.defineProperty(window, 'Translator', {
-        configurable: true,
-        value: {
-          availability: async () => 'available',
-          create: async () => ({
-            translate: async (input: string) => {
-              if (record.calls.length < 16) record.calls.push(input.slice(0, 512));
-              else record.overflow++;
-              return input.includes(paidId)
-                ? `${paidId} MATRIX_TRANSLATED ${'한국어 日本語 مرحبا long translated body '.repeat(4)}`
-                : `MATRIX_TRANSLATED ${input.slice(0, 96)}`;
-            },
-            destroy: () => {},
-          }),
-        },
-      });
-    }, PRESENTATION_IDS.detailed.paid);
+    await page.addInitScript({
+      content: matrixTranslatorInitScript(PRESENTATION_IDS.detailed.paid),
+    });
     await openFresh();
     previousSettings = await page.evaluate(() => {
       const app = window.__ytChatOverlay;
@@ -3101,6 +3107,8 @@ async function runBackend(options: {
       ['dark', 400],
       ['detailed', 960],
     ] as const) {
+      const playerHeight =
+        width === 400 ? PRESENTATION_NARROW_PLAYER_HEIGHT : PRESENTATION_WIDE_PLAYER_HEIGHT;
       if (backend === 'main') {
         const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
         const instrumentedSource = instrumentCanvasPageScript(source, undefined, true);
@@ -3126,7 +3134,7 @@ async function runBackend(options: {
       }
       await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings));
       await page.addStyleTag({
-        content: `#movie_player { height: ${PRESENTATION_PLAYER_HEIGHT}px !important; aspect-ratio: auto !important; }`,
+        content: `#movie_player { height: ${playerHeight}px !important; aspect-ratio: auto !important; }`,
       });
       await page.evaluate(
         (selectedScene) =>
@@ -3154,7 +3162,7 @@ async function runBackend(options: {
       failureStage = `presentation:${scene}:${width}:geometry`;
       await waitForProbeConfig(page, backend, {
         viewportWidth: width,
-        playerHeight: PRESENTATION_PLAYER_HEIGHT,
+        playerHeight,
         fontSize: 32,
         laneSpacing: 0,
         safeTop: 0,
@@ -3166,18 +3174,39 @@ async function runBackend(options: {
         activeCap: 40,
         queueCap: 80,
       });
+      const presentationBounds = await page.evaluate(() => {
+        const player = document.querySelector('#movie_player')?.getBoundingClientRect();
+        const canvas = document
+          .querySelector('#yt-live-chat-overlay canvas')
+          ?.getBoundingClientRect();
+        const viewport = window.visualViewport;
+        return {
+          player: player
+            ? { left: player.left, top: player.top, right: player.right, bottom: player.bottom }
+            : null,
+          canvas: canvas
+            ? { left: canvas.left, top: canvas.top, right: canvas.right, bottom: canvas.bottom }
+            : null,
+          visible: {
+            left: viewport?.offsetLeft ?? 0,
+            top: viewport?.offsetTop ?? 0,
+            right: (viewport?.offsetLeft ?? 0) + (viewport?.width ?? innerWidth),
+            bottom: (viewport?.offsetTop ?? 0) + (viewport?.height ?? innerHeight),
+          },
+        };
+      });
+      const { player, canvas, visible } = presentationBounds;
+      assert(player && canvas, 'Presentation player or canvas is unavailable');
       assert(
-        await page.evaluate(() => {
-          const player = document.querySelector('#movie_player')?.getBoundingClientRect();
-          return Boolean(
-            player &&
-            player.left >= 0 &&
-            player.top >= 0 &&
-            player.right <= innerWidth &&
-            player.bottom <= innerHeight
-          );
-        }),
-        'Presentation player exceeded the physical viewport'
+        player.left >= visible.left &&
+          player.top >= visible.top &&
+          player.right <= visible.right &&
+          player.bottom <= visible.bottom &&
+          canvas.left >= player.left &&
+          canvas.top >= player.top &&
+          canvas.right <= player.right &&
+          canvas.bottom <= player.bottom,
+        'Presentation geometry exceeds the visible viewport: ' + JSON.stringify(presentationBounds)
       );
       const paidId = PRESENTATION_IDS[scene].paid;
       const key = `presentation${scene[0]?.toUpperCase()}${scene.slice(1)}` as
@@ -3316,6 +3345,25 @@ async function runBackend(options: {
         ] as const) {
           failureStage = `presentation:${scene}:${width}:${layout}:${role}`;
           const planning = await snapshot(page, backend);
+          const roleIds = Object.values(PRESENTATION_IDS[scene]);
+          const hiddenRoles = planning.activeNow
+            .filter((entry) => roleIds.includes(entry.id) && entry.slotCount === 0)
+            .map(({ id: hiddenId, height, y, slotCount }) => ({
+              id: hiddenId,
+              height,
+              y,
+              slotCount,
+            }));
+          assert.equal(
+            hiddenRoles.length,
+            0,
+            name +
+              ' cannot prove all roles with hidden active cards: ' +
+              JSON.stringify({
+                logicalHeight: planning.frame?.logicalHeight ?? null,
+                hiddenRoles,
+              })
+          );
           const waitBudget = planVisibleItemWait(planning, id, Date.now() - startedAt);
           currentRoleWait = {
             ...waitBudget,

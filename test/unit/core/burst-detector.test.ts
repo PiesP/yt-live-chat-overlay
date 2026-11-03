@@ -58,6 +58,93 @@ describe('BurstDetector', () => {
       // Not directly observable, but threshold changes affect evaluate()
       expect(detector.getLevel()).toBe('normal');
     });
+
+    it('shrinks the current timed window and uses the selected size for later rates', () => {
+      const detector = new BurstDetector();
+      const thresholds = {
+        burstSampleWindow: 10,
+        burstElevatedThreshold: 5,
+        burstHighThreshold: 15,
+        burstExtremeThreshold: 30,
+      };
+      detector.updateThresholds(thresholds);
+      for (let tick = 0; tick < 10; tick++) {
+        detector.onMessageReceived();
+        advanceTime(SAMPLE_INTERVAL);
+      }
+
+      detector.updateThresholds({ ...thresholds, burstSampleWindow: 3 });
+      const state = detector as unknown as {
+        samples: number[];
+        sampleDurations: number[];
+        runningSum: number;
+        runningDurationMs: number;
+      };
+      expect(state.samples).toEqual([1, 1, 1]);
+      expect(state.sampleDurations).toEqual([500, 500, 500]);
+      expect(state.runningSum).toBe(3);
+      expect(state.runningDurationMs).toBe(1_500);
+
+      for (let tick = 0; tick < 3; tick++) {
+        for (let message = 0; message < 10; message++) detector.onMessageReceived();
+        advanceTime(SAMPLE_INTERVAL);
+      }
+      expect(state.samples).toEqual([10, 10, 10]);
+      expect(state.runningSum).toBe(30);
+      expect(state.runningDurationMs).toBe(1_500);
+      expect(detector.getLevel()).toBe('high');
+      detector.destroy();
+    });
+
+    it('keeps sample durations paired through expansion, repeated shrink and pause/resume', () => {
+      const detector = new BurstDetector();
+      const thresholds = {
+        burstSampleWindow: 5,
+        burstElevatedThreshold: 5,
+        burstHighThreshold: 15,
+        burstExtremeThreshold: 30,
+      };
+      detector.updateThresholds(thresholds);
+      for (let tick = 0; tick < 5; tick++) {
+        detector.onMessageReceived();
+        advanceTime(SAMPLE_INTERVAL);
+      }
+      detector.updateThresholds({ ...thresholds, burstSampleWindow: 10 });
+      detector.onMessageReceived();
+      now += 1_000; // A delayed callback must retain its measured elapsed duration.
+      vi.advanceTimersByTime(SAMPLE_INTERVAL);
+
+      const state = detector as unknown as {
+        samples: number[];
+        sampleDurations: number[];
+        runningSum: number;
+        runningDurationMs: number;
+      };
+      expect(state.sampleDurations).toEqual([500, 500, 500, 500, 500, 1_000]);
+      detector.updateThresholds({ ...thresholds, burstSampleWindow: 4 });
+      expect(state.samples).toEqual([1, 1, 1, 1]);
+      expect(state.sampleDurations).toEqual([500, 500, 500, 1_000]);
+      expect(state.runningSum).toBe(4);
+      expect(state.runningDurationMs).toBe(2_500);
+      detector.updateThresholds({ ...thresholds, burstSampleWindow: 3 });
+      expect(state.sampleDurations).toEqual([500, 500, 1_000]);
+      expect(state.runningSum).toBe(3);
+      expect(state.runningDurationMs).toBe(2_000);
+
+      detector.pause();
+      expect(state.samples).toEqual([]);
+      detector.updateThresholds(thresholds);
+      detector.resume();
+      for (let message = 0; message < 10; message++) detector.onMessageReceived();
+      advanceTime(SAMPLE_INTERVAL);
+      expect(state.sampleDurations).toEqual([500]);
+      expect(state.runningSum).toBe(10);
+      expect(detector.getLevel()).toBe('high');
+      advanceTime(16_000); // Idle auto-stop clears the window before the next arrival.
+      expect(state.samples).toEqual([]);
+      expect(detector.getLevel()).toBe('normal');
+      detector.destroy();
+    });
   });
 
   // ── start / stop ─────────────────────────────────────────────────────

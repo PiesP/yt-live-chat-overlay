@@ -11,6 +11,11 @@ import { join } from 'node:path';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 
 import { buildVisibleWatchHtml } from '../visible-watch.ts';
+import {
+  checkCandidateSettings,
+  exportSettingsThroughUi,
+  type CandidateSettingsReceipt,
+} from './candidate-settings.ts';
 import { INSTALLED_SCRIPT_ROW_SELECTOR } from './manager-row.ts';
 
 export { INSTALLED_SCRIPT_ROW_SELECTOR } from './manager-row.ts';
@@ -82,6 +87,7 @@ type UpgradeObservation = {
   settingsBefore?: Settings;
   settingsAfterDeferral?: Settings;
   settingsAfter?: Settings;
+  candidateSettings?: CandidateSettingsReceipt;
   settingsRestoredForFixture?: Settings;
   activeStage?: string;
   cleanupErrors?: string[];
@@ -107,6 +113,11 @@ const PUBLIC_RELEASES = {
     file: `${DIRECTORY}/public-v0.45.8.user.js`,
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay.user.js',
   },
+  '0.46.0': {
+    baselineVersion: '0.45.9',
+    file: `${DIRECTORY}/public-v0.45.9.user.js`,
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay.user.js',
+  },
 } as const;
 const UPDATE_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js';
@@ -116,7 +127,7 @@ const MAX_SCRIPT_BYTES = 16 * 1024 * 1024;
 
 function publicRelease(candidateVersion: string) {
   assert(
-    candidateVersion === '0.45.8' || candidateVersion === '0.45.9',
+    candidateVersion === '0.45.8' || candidateVersion === '0.45.9' || candidateVersion === '0.46.0',
     'Unexpected candidate version'
   );
   return PUBLIC_RELEASES[candidateVersion];
@@ -920,12 +931,51 @@ export async function runManagerUpgrade(
     await fixture.reload({ waitUntil: 'domcontentloaded' });
     result.settingsAfter = await observeSettings(fixture);
     requireRetainedSettings(result.settingsBefore, result.settingsAfter);
-    result.settingsRestoredForFixture = await setSettingsThroughUi(
-      fixture,
-      result.settingsOriginal,
-      managerId,
-      root
-    );
+    let candidateSettingsError: unknown;
+    if (inputs.candidate.version === '0.46.0') {
+      result.activeStage = 'verify-candidate-settings-controls';
+      result.candidateSettings = { status: 'incomplete', stage: 'start' };
+      try {
+        await checkCandidateSettings(
+          fixture,
+          async () => {
+            const readback = await openOwnedWatchFixture(context, managerId, root);
+            try {
+              return await exportSettingsThroughUi(readback);
+            } finally {
+              // Closing the readback tab avoids saving its stale form over the fixture.
+              await readback.close();
+            }
+          },
+          result.candidateSettings
+        );
+      } catch (error) {
+        candidateSettingsError =
+          error instanceof Error
+            ? error
+            : new Error('Candidate settings check failed', { cause: error });
+      }
+    }
+    result.activeStage = 'restore-fixture-settings-through-ui';
+    try {
+      result.settingsRestoredForFixture = await setSettingsThroughUi(
+        fixture,
+        result.settingsOriginal,
+        managerId,
+        root
+      );
+    } catch (error) {
+      if (candidateSettingsError)
+        throw new AggregateError(
+          [candidateSettingsError, error],
+          'Candidate settings and fixture restoration failed'
+        );
+      throw error;
+    }
+    if (candidateSettingsError) {
+      result.activeStage = 'verify-candidate-settings-controls';
+      throw candidateSettingsError;
+    }
     result.activeStage = 'complete';
     result.status = 'passed';
   } catch (error) {

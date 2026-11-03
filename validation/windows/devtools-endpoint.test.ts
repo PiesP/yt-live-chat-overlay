@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -394,13 +395,19 @@ test('actual launcher refuses a connected browser if final listener ownership dr
   const sandbox = {
     assert,
     Buffer,
+    createHash,
     AggregateError,
     JSON,
     Error,
     Reflect,
     join: path.join,
     STDERR_LIMIT_BYTES: 65_536,
+    FAILURE_RECEIPT_MAX_BYTES: 192 * 1024,
     FIXED_DEBUG_PORT: 27_683,
+    boundedEvidenceText: (value: unknown, limit: number) =>
+      typeof value === 'string' ? value.slice(0, limit) : null,
+    createNaturalPortRecorder: () =>
+      positive.createNaturalPortRecorder(async () => validSnapshot()),
     discoverInstalledChrome: async () => ({
       executablePath: identity.executablePath,
       browserVersion: '155.0.8059.85',
@@ -468,4 +475,260 @@ test('actual launcher refuses a connected browser if final listener ownership dr
     'owned-cleanup',
     'failure-evidence',
   ]);
+});
+
+test('failure recorder bounds existing listener and CIM snapshots', async () => {
+  let tick = 0;
+  const huge = 'x'.repeat(100_000);
+  const recorder = positive.createNaturalPortRecorder(
+    async () => ({
+      listeners: Array.from({ length: 20 }, () => ({
+        localAddress: huge,
+        localPort: 27683,
+        state: 'Listen',
+        owningProcess: identity.processId,
+      })),
+      process: { ...validSnapshot().process, CommandLine: huge },
+    }),
+    () => tick++
+  );
+  for (let index = 0; index < 40; index++) await recorder.inspect(identity.processId);
+  const retained = recorder.observations();
+  assert.equal(retained.length, 16);
+  assert.equal(retained[0]?.atEpochMs, 24);
+  for (const observation of retained) {
+    assert.equal(observation.listenerCount, 20);
+    assert.equal(observation.listenersTruncated, true);
+    const listeners = observation.listeners as Array<{ localAddress: string }>;
+    assert.equal(listeners.length, 8);
+    assert.equal(listeners[0]?.localAddress.length, 128);
+    const process = observation.process as {
+      CommandLine: string;
+      commandLineTruncated: boolean;
+      commandLineSha256: string;
+    };
+    assert.equal(process.CommandLine.length, 2048);
+    assert.equal(process.commandLineTruncated, true);
+    assert.equal(process.commandLineSha256, createHash('sha256').update(huge).digest('hex'));
+  }
+  assert(Buffer.byteLength(JSON.stringify(retained), 'utf8') < 90_000);
+  const worstCaseReceipt = JSON.stringify(
+    {
+      diagnostic: {
+        portObservations: retained,
+        chromeStderr: { retainedTailBase64: Buffer.alloc(65_536).toString('base64') },
+      },
+    },
+    null,
+    2
+  );
+  assert(Buffer.byteLength(worstCaseReceipt, 'utf8') <= 192 * 1024);
+});
+
+test('negative preconnect snapshot is retained before CDP and cleanup still runs', async () => {
+  const snapshots = [
+    { listeners: [], process: null },
+    validSnapshot(),
+    { ...validSnapshot(), listeners: [] },
+  ];
+  let connections = 0;
+  let cleanups = 0;
+  let receipt = '';
+  const childProcess = Object.assign(new EventEmitter(), {
+    pid: identity.processId,
+    exitCode: null,
+    signalCode: null,
+    stderr: new EventEmitter(),
+  });
+  const stderr = Buffer.alloc(70 * 1024, 0x41);
+  const sandbox = {
+    assert,
+    Buffer,
+    createHash,
+    JSON,
+    Error,
+    AggregateError,
+    join: path.join,
+    STDERR_LIMIT_BYTES: 65_536,
+    FAILURE_RECEIPT_MAX_BYTES: 192 * 1024,
+    FIXED_DEBUG_PORT: 27_683,
+    boundedEvidenceText: (value: unknown, limit: number) =>
+      typeof value === 'string' ? value.slice(0, limit) : null,
+    createNaturalPortRecorder: () =>
+      positive.createNaturalPortRecorder(async () => {
+        const next = snapshots.shift();
+        assert(next, 'Unexpected additional port inspection');
+        return next;
+      }),
+    discoverInstalledChrome: async () => ({
+      executablePath: identity.executablePath,
+      browserVersion: '155.0.8059.85',
+    }),
+    assertFixedPortUnused: positive.assertFixedPortUnused,
+    mkdtemp: async () => 'C:\\Owned\\profile',
+    spawn: () => {
+      queueMicrotask(() => childProcess.stderr.emit('data', stderr));
+      return childProcess;
+    },
+    naturalChromeArguments: positive.naturalChromeArguments,
+    captureSpawnedChromeIdentity: async () => identity,
+    readOwnedFixedPortEndpoint: async (
+      child: typeof childProcess,
+      childState: { spawnError: Error | null },
+      owned: typeof identity,
+      options: { inspectPort: (processId?: number) => Promise<Snapshot> }
+    ) => {
+      assert.equal(
+        await positive.verifyOwnedFixedPort(child, childState, owned, {
+          inspectPort: options.inspectPort,
+        }),
+        true
+      );
+      return endpoint;
+    },
+    connectOwnedFixedPort: positive.connectOwnedFixedPort,
+    cleanupFailedNaturalChrome: async () => {
+      cleanups++;
+      return { cleanup: { processIdentityCaptured: true, processTreeExited: true }, errors: [] };
+    },
+    writeFile: async (_file: string, contents: string) => {
+      receipt = contents;
+    },
+  };
+  const launch = runInNewContext(`(${positive.launchOwnedNaturalChrome.toString()})`, sandbox);
+  await assert.rejects(
+    launch({
+      chromium: { connectOverCDP: async () => connections++ },
+      root: 'C:\\Owned',
+      output: 'C:\\Owned\\out',
+      checkpoint: async () => {},
+    }),
+    /listener disappeared before connect/
+  );
+  assert.equal(connections, 0);
+  assert.equal(cleanups, 1);
+  assert.equal(snapshots.length, 0);
+  assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
+  const evidence = JSON.parse(receipt);
+  assert.equal(evidence.status, 'failed');
+  assert.equal(evidence.diagnostic.stage, 'preconnect');
+  assert.equal(evidence.diagnostic.discoveryBrowserVersion, '155.0.8059.85');
+  assert.equal(evidence.diagnostic.childAtFailure.pid, identity.processId);
+  assert.equal(evidence.diagnostic.childAtFailure.exitCode, null);
+  assert.deepEqual(
+    evidence.diagnostic.portObservations.map(
+      (observation: { stage: string; listenerCount: number }) => [
+        observation.stage,
+        observation.listenerCount,
+      ]
+    ),
+    [
+      ['fixed-port-preflight', 0],
+      ['devtools-endpoint', 1],
+      ['preconnect', 0],
+    ]
+  );
+  assert.equal(evidence.diagnostic.portObservations[2].process.ProcessId, identity.processId);
+  assert.equal(evidence.diagnostic.chromeStderr.totalBytes, stderr.length);
+  assert.equal(evidence.diagnostic.chromeStderr.retainedTailBytes, 65_536);
+  assert.equal(
+    evidence.diagnostic.chromeStderr.retainedTailSha256,
+    createHash('sha256').update(stderr.subarray(-65_536)).digest('hex')
+  );
+  assert.equal(evidence.cleanup.processTreeExited, true);
+});
+
+test('rejected preconnect inspection retains its bounded error before cleanup', async () => {
+  const inspectionError = new Error('fixed-port CIM inspection timed out ' + 'x'.repeat(10_000));
+  inspectionError.name = 'PortInspectionTimeout' + 'n'.repeat(1000);
+  let inspections = 0;
+  let connections = 0;
+  let cleanups = 0;
+  let receipt = '';
+  const childProcess = Object.assign(new EventEmitter(), {
+    pid: identity.processId,
+    exitCode: null,
+    signalCode: null,
+    stderr: new EventEmitter(),
+  });
+  const sandbox = {
+    assert,
+    Buffer,
+    createHash,
+    JSON,
+    Error,
+    AggregateError,
+    join: path.join,
+    STDERR_LIMIT_BYTES: 65_536,
+    FAILURE_RECEIPT_MAX_BYTES: 192 * 1024,
+    FIXED_DEBUG_PORT: 27_683,
+    boundedEvidenceText: (value: unknown, limit: number) =>
+      typeof value === 'string' ? value.slice(0, limit) : null,
+    createNaturalPortRecorder: () =>
+      positive.createNaturalPortRecorder(async () => {
+        inspections++;
+        if (inspections === 1) return { listeners: [], process: null };
+        if (inspections === 2) return validSnapshot();
+        throw inspectionError;
+      }),
+    discoverInstalledChrome: async () => ({
+      executablePath: identity.executablePath,
+      browserVersion: '155.0.8059.85',
+    }),
+    assertFixedPortUnused: positive.assertFixedPortUnused,
+    mkdtemp: async () => 'C:\\Owned\\profile',
+    spawn: () => childProcess,
+    naturalChromeArguments: positive.naturalChromeArguments,
+    captureSpawnedChromeIdentity: async () => identity,
+    readOwnedFixedPortEndpoint: async (
+      child: typeof childProcess,
+      childState: { spawnError: Error | null },
+      owned: typeof identity,
+      options: { inspectPort: (processId?: number) => Promise<Snapshot> }
+    ) => {
+      assert.equal(
+        await positive.verifyOwnedFixedPort(child, childState, owned, {
+          inspectPort: options.inspectPort,
+        }),
+        true
+      );
+      return endpoint;
+    },
+    connectOwnedFixedPort: positive.connectOwnedFixedPort,
+    cleanupFailedNaturalChrome: async () => {
+      cleanups++;
+      return { cleanup: { processIdentityCaptured: true, processTreeExited: true }, errors: [] };
+    },
+    writeFile: async (_file: string, contents: string) => {
+      receipt = contents;
+    },
+  };
+  const launch = runInNewContext(`(${positive.launchOwnedNaturalChrome.toString()})`, sandbox);
+  await assert.rejects(
+    launch({
+      chromium: { connectOverCDP: async () => connections++ },
+      root: 'C:\\Owned',
+      output: 'C:\\Owned\\out',
+      checkpoint: async () => {},
+    }),
+    (error: unknown) => error === inspectionError
+  );
+  assert.equal(inspections, 3);
+  assert.equal(connections, 0);
+  assert.equal(cleanups, 1);
+  assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
+  const evidence = JSON.parse(receipt);
+  assert.equal(evidence.diagnostic.stage, 'preconnect');
+  const observations = evidence.diagnostic.portObservations;
+  assert.deepEqual(
+    observations.map((observation: { listenerCount: number | null }) => observation.listenerCount),
+    [0, 1, null]
+  );
+  assert.equal(observations[2].requestedProcessId, identity.processId);
+  assert.equal(observations[2].listeners, null);
+  assert.equal(observations[2].process, null);
+  assert.equal(observations[2].inspectionError.name.length, 128);
+  assert.equal(observations[2].inspectionError.message.length, 1024);
+  assert.equal(evidence.errorType.length, 128);
+  assert.equal(evidence.cleanup.processTreeExited, true);
 });

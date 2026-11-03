@@ -12,6 +12,7 @@ import { inflateRawSync } from 'node:zlib';
 import type { BrowserContext, CDPSession, Page } from '@playwright/test';
 
 import { buildVisibleWatchHtml } from '../visible-watch.ts';
+import { checkCandidateSettings, type CandidateSettingsReceipt } from './candidate-settings.ts';
 
 const INPUT = 'validation/windows/release-upgrade/extension-input.json';
 const CANDIDATE = 'dist-extension';
@@ -27,6 +28,12 @@ const PUBLIC_RELEASES = {
     archive: 'validation/windows/release-upgrade/public-v0.45.8-chrome/artifact.zip',
     baseline: 'validation/windows/release-upgrade/public-v0.45.8-chrome/unpacked',
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip',
+  },
+  '0.45.9': {
+    candidateVersions: ['0.46.0'],
+    archive: 'validation/windows/release-upgrade/public-v0.45.9-chrome/artifact.zip',
+    baseline: 'validation/windows/release-upgrade/public-v0.45.9-chrome/unpacked',
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay-chrome.zip',
   },
 } as const;
 type PublicVersion = keyof typeof PUBLIC_RELEASES;
@@ -73,7 +80,7 @@ const DIRECTORIES = ['icons', 'workers'] as const;
 type ExtensionInput = {
   schemaVersion: 1;
   previousVersion: PublicVersion;
-  candidateVersion: '0.45.8' | '0.45.9';
+  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0';
   publicAssetUrl: PublicRelease['url'];
   publicArchive: { path: PublicRelease['archive']; sha256: string };
   previousExtension: { path: PublicRelease['baseline']; inventorySha256: string };
@@ -114,7 +121,11 @@ export function validateExtensionUpgradeInput(value: unknown): ExtensionInput {
     'candidateExtension',
   ]);
   assert.equal(input.schemaVersion, 1);
-  assert(input.previousVersion === '0.45.7' || input.previousVersion === '0.45.8');
+  assert(
+    input.previousVersion === '0.45.7' ||
+      input.previousVersion === '0.45.8' ||
+      input.previousVersion === '0.45.9'
+  );
   const release = PUBLIC_RELEASES[input.previousVersion];
   assert(
     release.candidateVersions.some((version) => version === input.candidateVersion),
@@ -457,6 +468,7 @@ type UpgradeReceipt = {
   baselineStorageFontSize: number | null;
   candidateStorageFontSize: number | null;
   candidateUiFontSize: number | null;
+  candidateSettings?: CandidateSettingsReceipt;
   restoredFontSize: number | null;
   baselineRuntimeScripts: RuntimeScriptEvidence | null;
   candidateRuntimeScripts: RuntimeScriptEvidence | null;
@@ -654,6 +666,27 @@ export async function readExtensionStoredFontSize(page: Page): Promise<number | 
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const fontSize = (parsed as Record<string, unknown>).fontSize;
     return typeof fontSize === 'number' && Number.isFinite(fontSize) ? fontSize : null;
+  }, STORAGE_KEY);
+}
+
+async function readExtensionStoredSettings(page: Page): Promise<unknown> {
+  return page.evaluate(async (key) => {
+    const storage = (
+      globalThis as typeof globalThis & {
+        chrome?: {
+          storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } };
+        };
+      }
+    ).chrome?.storage?.local;
+    if (!storage) throw new Error('Extension storage unavailable');
+    const value = (await storage.get(key))[key];
+    if (typeof value !== 'string' || value.length === 0 || value.length > 256 * 1024)
+      throw new Error('Extension stored settings are missing or oversized');
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      throw new Error('Extension stored settings are not valid JSON');
+    }
   }, STORAGE_KEY);
 }
 
@@ -951,16 +984,47 @@ export async function runExtensionUpgrade({
       selected,
       'Fresh candidate page did not show retained preference'
     );
+    let candidateSettingsError: unknown;
+    if (verified.input.candidateVersion === '0.46.0') {
+      receipt.activeStage = 'verify-candidate-settings-controls';
+      receipt.candidateSettings = { status: 'incomplete', stage: 'start' };
+      const settingsStoragePage = candidateExtensionPage;
+      try {
+        await checkCandidateSettings(
+          candidatePage,
+          () => readExtensionStoredSettings(settingsStoragePage),
+          receipt.candidateSettings
+        );
+      } catch (error) {
+        candidateSettingsError =
+          error instanceof Error
+            ? error
+            : new Error('Candidate settings check failed', { cause: error });
+      }
+    }
     receipt.activeStage = 'restore-fixture-settings-through-ui';
-    await setFontSizeThroughUi(candidatePage, original);
-    await waitForStoredFont(candidateExtensionPage, original);
-    await candidatePage.reload({ waitUntil: 'domcontentloaded' });
-    receipt.restoredFontSize = await settingsFontSize(candidatePage);
-    assert.equal(
-      receipt.restoredFontSize,
-      original,
-      'Candidate fixture preference was not restored through UI'
-    );
+    try {
+      await setFontSizeThroughUi(candidatePage, original);
+      await waitForStoredFont(candidateExtensionPage, original);
+      await candidatePage.reload({ waitUntil: 'domcontentloaded' });
+      receipt.restoredFontSize = await settingsFontSize(candidatePage);
+      assert.equal(
+        receipt.restoredFontSize,
+        original,
+        'Candidate fixture preference was not restored through UI'
+      );
+    } catch (error) {
+      if (candidateSettingsError)
+        throw new AggregateError(
+          [candidateSettingsError, error],
+          'Candidate settings and fixture restoration failed'
+        );
+      throw error;
+    }
+    if (candidateSettingsError) {
+      receipt.activeStage = 'verify-candidate-settings-controls';
+      throw candidateSettingsError;
+    }
     assert.equal(
       (await extensionInventory(installedPath)).sha256,
       verified.candidate.sha256,

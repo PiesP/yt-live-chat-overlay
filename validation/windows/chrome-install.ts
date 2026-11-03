@@ -19,6 +19,7 @@ import type {
 } from '@playwright/test';
 
 import { runAcquisitionBoundaries } from './acquisition-boundaries.ts';
+import { readBacklogResetSelector, runBacklogResetFixture } from './backlog-reset.ts';
 import { runBitmapLifecycleFixture } from './bitmap-lifecycle.ts';
 import { runCanvasRecoveryFixture } from './canvas-recovery.ts';
 import {
@@ -292,6 +293,7 @@ type ChromeResult<Live = LiveObservation> = {
     ReturnType<typeof runInstalledTranslationWorkerFixture>
   > | null;
   managerIngressFifo?: Awaited<ReturnType<typeof runManagerIngressFifo>> | null;
+  backlogReset?: Awaited<ReturnType<typeof runBacklogResetFixture>> | null;
   cleanup: Record<string, unknown>;
   browserVersion?: string;
   installationMethod?: string;
@@ -2480,13 +2482,15 @@ export async function runChromeInstallation({
   const translatorNativeSelected = await readTranslatorNativeSelector(root);
   const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
   const managerFifoSelected = await readManagerIngressFifoSelector(root);
+  const backlogResetSelected = await readBacklogResetSelector(root);
   assert(
     Number(opacitySelected) +
       Number(requestDeadlineSelected) +
       Number(installedViewingSelected) +
       Number(Boolean(translatorNativeSelected)) +
       Number(translationWorkerSelected) +
-      Number(managerFifoSelected) <=
+      Number(managerFifoSelected) +
+      Number(backlogResetSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
@@ -2530,6 +2534,13 @@ export async function runChromeInstallation({
     assert.equal(browserName, 'msedge', 'Manager FIFO requires installed Edge');
     assert.equal(installation, 'extension', 'Manager FIFO requires the extension');
     assert.deepEqual(liveUrls, [], 'Manager FIFO cannot use public live URLs');
+  }
+  if (backlogResetSelected) {
+    assert.equal(await readFocusedScenario(root), null, 'Backlog reset cannot combine selectors');
+    assert.equal(liveObservation, null, 'Backlog reset cannot use duration observation');
+    assert.equal(browserName, 'msedge', 'Backlog reset requires installed Edge');
+    assert.equal(installation, 'extension', 'Backlog reset requires the extension');
+    assert.deepEqual(liveUrls, [], 'Backlog reset cannot use public live URLs');
   }
   if (translatorNativeSelected) {
     assert.equal(
@@ -2772,6 +2783,12 @@ export async function runChromeInstallation({
         extensionId,
       });
       assert.equal(result.managerIngressFifo.status, 'passed');
+      return result;
+    }
+    if (backlogResetSelected) {
+      assert(extensionId, 'Backlog reset requires an installed extension ID');
+      result.backlogReset = await runBacklogResetFixture({ context, root, output, extensionId });
+      assert.equal(result.backlogReset.status, 'passed');
       return result;
     }
     if (requestDeadlineSelected) {

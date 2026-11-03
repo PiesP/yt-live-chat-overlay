@@ -48,8 +48,10 @@ fresh positive cohort returns to the 720-by-540 viewport before source input.
 It then navigates to fresh owned pages for
 matched stacked/wide presentation captures over the existing bright, dark, and
 detailed videos at 400px and 960px viewport widths. Each page uses a measured
-900px player inside a 1100px high physical viewport, with an actual config and
-viewport-fit barrier before source input. This provides measured lanes for paid,
+900px player at 400px width and a 940px player at 960px width, inside a 1100px high
+browser viewport with an actual config and measured player/canvas fit barrier
+before source input. Active presentation roles
+must retain allocated slots before their positive-ink waits. This provides measured lanes for paid,
 sticker, membership, and ordinary rows at 32px without changing source or
 scheduling policy; a row can still have a future planned start. Recorded viewport
 dimensions come from the live page and player bounds are the actual overlay size.
@@ -69,8 +71,10 @@ command is excluded from the hold measurement. The horizontal resize holds the
 measured player height constant so its physical-row Y comparison has the same
 vertical geometry on both sides.
 On the detailed scene, a page-owned Translator stub records
-the accepted canonical tail and supplies a distinct selected translation; the
-probe requires its positive-alpha draw in the same complete frame. The fixture
+the accepted canonical tail and supplies a distinct selected paid-card translation.
+It returns source text for the other presentation roles so their dual-mode cards
+do not gain incidental translation rows. The probe requires the paid translation's
+positive-alpha draw in the same complete frame. The fixture
 binds paid body and translation draws to the actual prepared plan row passed to
 the shared text painter, so fragmented text and reused glyph bitmaps retain the
 source card ID and section. A plan allocation alone never counts as a draw.
@@ -827,6 +831,17 @@ prior-document Canvas marker does not establish same-document SPA teardown;
 the receipt marks that property unverified. The deterministic fixture checks
 its separate simulated SPA lifecycle. A missing required public observation
 keeps that public-page run unverified.
+The post-translation next-row wait records up to 16 passive, time-correlated
+snapshots of native chat and overlay accessible row counts and ID digests,
+alongside the current ad, pause and video-ready states. Scheduled snapshots
+cover the bounded 100-by-100-ms wait; additional row or player-state change
+snapshots have an explicit omitted count after the cap. Native chat remains
+`unknown` when its iframe is unavailable or inaccessible, or its expected
+`#items` container is missing. Poll/source counters remain
+`unavailable` because the installed application exposes none. The digests are
+diagnostic fingerprints, not raw chat IDs or proof of network delivery. These
+observations do not change the original next-row acceptance condition; a
+missing new overlay row keeps the public page unverified.
 
 The settings fixture also exercises independent font group and input names,
 keyboard weight/preset/custom edits, preview font updates, and the existing
@@ -880,6 +895,14 @@ player-error UI, and accessible-render fingerprint evidence. Public chat volume 
 uncontrolled, so a stream with no accessible chat is recorded as unverified. The
 structured observation records only chat counts and fingerprints. It does not
 retain raw chat text.
+
+If the task-owned natural Chrome launch fails, its private
+`natural-chrome-launch-result.json` retains the last 16 existing fixed-port
+inspections with stage, listener rows and bounded CIM fields, plus the child
+state, discovered browser version, and at most 64 KiB of Chrome stderr. A failed
+inspection retains its bounded error and has no listener or CIM snapshot. The
+receipt has a 192 KiB cap. An absent listener still fails before CDP connects;
+the record diagnoses that boundary without establishing why Chrome lost it.
 
 Conditional fixture fields need their execution context: `paidCardInkContained:
 false` does not itself mean the installed Worker fixture failed when the
@@ -970,33 +993,31 @@ those source identities. Before preparing another upgrade, match the intended
 candidate version and public predecessor to the supported transition in
 [`release-upgrade/upgrade.ts`](release-upgrade/upgrade.ts) for userscripts or
 [`release-upgrade/extension.ts`](release-upgrade/extension.ts) for extensions.
-The current v0.45.9 userscript transition uses public v0.45.8. Download its
+For the v0.46.0 candidate, use the public v0.45.9 userscript. Download
 `yt-live-chat-overlay.user.js` to
-`validation/windows/release-upgrade/public-v0.45.8.user.js` and independently
-verify it against the published v0.45.8 checksum. Place an ignored
-`validation/windows/release-upgrade/input.json` beside it with exactly:
+`validation/windows/release-upgrade/public-v0.45.9.user.js` and independently
+verify it against both the published asset digest and checksum file. Place an
+ignored `validation/windows/release-upgrade/input.json` beside it with exactly:
 
 ```json
 {
   "schemaVersion": 1,
-  "baselineSha256": "57086baac72b02815916edc99dfb679a7eb627a28835e47a2b80ca235448a9a2",
-  "candidateVersion": "0.45.9",
-  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay.user.js"
+  "baselineSha256": "995ef950597c5ed2b6e15f83db4ff666fe7efddfaa3b862e13a18d877e6b08f1",
+  "candidateVersion": "0.46.0",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay.user.js"
 }
 ```
 
-The digest above matches the published v0.45.8 release asset and its checksum
-file; recheck both against the downloaded bytes before use. Check the selected
-candidate's source and produced bytes separately: the retained v0.45.9
-candidate from #339 is bound to source
-`eb689bb2cf159c57357554d62979b96577d190dd`; building a later maintenance
-HEAD does not recreate that qualification. The earlier public v0.45.7 to
-candidate v0.45.8 example belongs to its historical receipt. Remove or replace
-any ignored selector for that older pair before packaging a new attempt; an
-invalid supplied selector fails preflight rather than selecting fresh install.
+Recheck the digest against the downloaded bytes before use. Bind the selected
+candidate's source and produced bytes separately. Historical upgrade receipts
+retain their original executed sources and do not qualify a later build.
+Remove or replace an ignored selector for an older pair before packaging a new
+attempt; an invalid supplied selector fails preflight rather than selecting a
+fresh install. Supported historical transitions retain their original fixed
+paths and URLs.
 
 The `publishedAssetUrl` identifies the version-specific URL used to retrieve
-the public baseline; it is not that file's `@downloadURL`. Public v0.45.8
+the public baseline; it is not that file's `@downloadURL`. Public v0.45.9
 already has a Latest `@downloadURL`, which the candidate must retain. The existing
 `--installation userscript` invocation then uses the same fresh, owned
 Tampermonkey profile for both versions. It verifies fixed paths, public
@@ -1006,6 +1027,16 @@ opacity and safe-top through the installed script's settings UI; observes the
 manager's update confirmation, dismisses it once to verify that the prior
 version and settings remain active, then approves a second import. It checks one
 displayed installation, version, editor source bytes and retained settings.
+For the v0.46.0 candidate, the separate `candidateSettings` receipt then checks
+that the upgraded layout defaults to `stacked` and that text and outline opacity
+controls expose their respective 50–100% and 0–100% domains. It selects `wide`
+and both domain boundaries through the settings UI, waits for the full settings
+record in a fresh manager-backed page, and checks the selection and all other
+settings after reload. It exports the real settings JSON, imports the original
+and selected exports through the file picker, and checks each saved result after
+reload. The original full settings export is imported again and verified in
+storage and after reload before the upgrade fixture continues. The receipt keeps
+only bounded digests and control results, never the settings JSON.
 The original settings are restored through the UI after retention is proven so
 the ordinary seven-phase installed fixture can run on the candidate from its
 normal initial state, including actual page fetch ingress. The candidate digest
@@ -1034,11 +1065,11 @@ publication.
 
 For Chrome or Edge manual extension-update qualification, provide the separate
 ignored `validation/windows/release-upgrade/extension-input.json`. For the
-current v0.45.9 candidate, set `previousVersion` to `0.45.8`,
-`candidateVersion` to `0.45.9`, and `publicAssetUrl` to
-`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip`.
+v0.46.0 candidate, set `previousVersion` to `0.45.9`,
+`candidateVersion` to `0.46.0`, and `publicAssetUrl` to
+`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay-chrome.zip`.
 Place the checksum-verified public ZIP at
-`validation/windows/release-upgrade/public-v0.45.8-chrome/artifact.zip` and its
+`validation/windows/release-upgrade/public-v0.45.9-chrome/artifact.zip` and its
 unpacked files under the adjacent `unpacked` directory. The exact schema and
 fixed paths are defined by `validateExtensionUpgradeInput` in
 [release-upgrade/extension.ts](release-upgrade/extension.ts).
@@ -1051,6 +1082,10 @@ checks real extension storage. It replaces the same unpacked directory with the
 candidate and calls the installed extension's runtime reload. The check requires
 the same extension ID, the candidate runtime version, retained storage and a
 fresh page showing the saved preference, then restores the original setting.
+For v0.46.0, the same `candidateSettings` check runs after candidate runtime
+identity and font retention are verified. It reads the full stored record from
+the installed extension's `chrome.storage.local` and restores the selected
+baseline settings before the existing font-size fixture cleanup.
 The receipt records this separately as `extensionUpgrade`. Without the input it
 records `not-requested` and installs the candidate directly; an invalid supplied
 input retains a failed preflight receipt before browser launch.
@@ -1118,3 +1153,23 @@ after collecting the run. Review `chat-request-deadline.json`, its screenshot
 and the central bundle/result/collection/transport receipts together; Browser
 Mode regressions cover pre-abort, fetch/body, all retry waits, reason races and
 replay retirement.
+
+## Main Backlog reset fixture
+
+Create the ignored `inputs/backlog-reset.json` with
+`{"scenario":"backlog-reset"}` for a focused installed Edge extension run.
+Use the prepared Windows controller with `--browser msedge --mode desktop
+--installation extension`. The selector is exclusive with other focused inputs,
+upgrade inputs and public URLs. Remove the task-owned selector after collecting
+its receipts.
+
+The fixture restricts the exact extension renderer Worker constructor so the
+installed production application uses its Main fallback. A source-bound observer
+forwards the real runtime/controller methods and records bounded delivery and
+congestion transitions. Two controlled live-chat batches exercise user pause,
+font/opacity/card-layout resets with the same controller, remaining Backlog
+delivery after the real queue drains, and final session teardown. Review the
+`backlogReset` record in `installation-result.json` with the central source,
+bundle, collection and cleanup receipts. A failure also writes
+`backlog-reset-failure.json`. These state and ingress observations do not
+establish pixel presentation, public YouTube compatibility or Worker behavior.

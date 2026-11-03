@@ -4,12 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-03
+
 ### Added
 
 - **Super Chat layout** — Add an opt-in wide card with an adaptive author-and-amount header, bounded translated body, sticker fallback, and production card previews. Existing stacked defaults and saved settings remain compatible. Paid text colors and reduced-motion membership decoration agree across Canvas and Worker.
 
 ### Fixed
 
+- **Backlog control** — Keep Main-renderer congestion callbacks connected across font, opacity and card-layout changes, and resume pending Backlog delivery after resets and overlay refreshes. Stop scheduling injection while congestion has paused it, and allow natural queue draining to resume delivery. User pause no longer triggers recovery for an intentionally inactive queue; Worker and chat health checks remain active.
+- **Burst sampling window** — Apply a smaller sample window immediately, trimming message counts and elapsed durations together so the configured window controls the current rate.
 - **Worker ingress freshness** — Preserve fresh ordinary messages and FIFO order when the full Manager buffer evicts older messages under paid Worker backpressure.
 - **Main placement settings** — Apply changed maximum wait, headway and exit padding to new lane placements while retaining existing reservations.
 - **Saturated comment queues** — Give ordinary comments successful-placement opportunities during recurring compatible vacancies, preserve paid priority and time-budget rotation, and favor fresh ordinary arrivals at equal-priority overflow. Existing queue bounds, pause/replay eligibility and motion speeds remain compatible.
@@ -22,6 +26,12 @@ All notable changes to this project will be documented in this file.
 - **Opacity controls** — Preserve outline opacity across its full 0–100% range through preview, import, save and reload. Text opacity keeps its 50–100% range; each slider and number input now shares its range and adjustment feedback.
 - **Release preparation** — Reject missing or empty version changelog entries before replacing an existing local candidate bundle.
 - **Chat request deadlines** — Preserve request timeouts during internal retry waits so live polling counts the failure and can recover on the next healthy response. Session stop and replay seek still cancel their owned requests.
+
+### Changed
+
+- **Firefox extension support** — Raise the extension minimum from Firefox 128 to 140 and use Firefox's built-in consent for functional data access. The Android consent API floor is 142; Android acceptance remains unverified and the product remains desktop-only. The userscript retains its separate compatibility range.
+- **Request context** — Send origin-only referrers for YouTube bootstrap and chat API requests, avoiding watch paths and query strings.
+- **Upgrade qualification** — Add the published v0.45.9 → v0.46.0 userscript and Chromium-extension transition to the optional source-bound Windows validation inputs.
 
 ## [0.45.9] - 2026-10-28
 
