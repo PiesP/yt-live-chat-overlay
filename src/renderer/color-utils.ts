@@ -18,12 +18,13 @@ export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && HEX_COLOR.test(value);
 }
 
-interface ParsedColor {
+export interface ParsedColor {
   rgb: RgbColor;
   alpha?: number;
 }
 
-function parseColor(color: string): ParsedColor | null {
+/** Decode supported hex and runtime RGB colors, retaining their optional alpha. */
+export function parseColor(color: string): ParsedColor | null {
   if (color.startsWith('#')) {
     if (!isHexColor(color)) return null;
     const hex = color.slice(1);

@@ -1107,3 +1107,67 @@ describe('SettingsUiForm', () => {
     modal.remove();
   });
 });
+
+describe('author color picker round trip', () => {
+  it.each(['#abc', '#abcd', '#aabbcc', '#aabbccdd'])(
+    'retains saved %s for every author through native inputs and an unrelated edit',
+    (color) => {
+      let settings = makeDefaults();
+      settings.colors = {
+        normal: color,
+        member: color,
+        moderator: color,
+        owner: color,
+        verified: color,
+      };
+      const populatedColors = { ...settings.colors };
+      const form = new SettingsUiForm(() => settings);
+      const modal = document.createElement('dialog');
+      modal.id = BACKDROP_ID;
+      modal.append(...form.createModalContent());
+      document.body.appendChild(modal);
+      form.setModal(modal);
+      try {
+        form.populateForm(settings);
+        expect(form.collectSettings().colors).toEqual(populatedColors);
+        const font = modal.querySelector<HTMLInputElement>('input[name="fontSize"]');
+        if (!font) throw new Error('Font input is unavailable');
+        font.value = '36';
+        // Collection must use the form's populated color snapshot, even if live settings move.
+        settings = makeDefaults({ colors: { ...settings.colors, normal: '#ff0000' } });
+        expect(form.collectSettings()).toMatchObject({ fontSize: 36, colors: populatedColors });
+      } finally {
+        form.destroy();
+        modal.remove();
+      }
+    }
+  );
+
+  it.each([
+    ['#abc', '#123456'],
+    ['#abcd', '#123456dd'],
+    ['#aabbcc', '#123456'],
+    ['#aabbccdd', '#123456dd'],
+    ['#0000', '#12345600'],
+    ['#ff000088', '#12345688'],
+  ])('retains authored alpha when the RGB picker edits %s', (color, expected) => {
+    const settings = makeDefaults();
+    settings.colors.normal = color;
+    const form = new SettingsUiForm(() => settings);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    try {
+      form.populateForm(settings);
+      const picker = modal.querySelector<HTMLInputElement>('input[name="color-normal"]');
+      if (!picker) throw new Error('Author color input is unavailable');
+      picker.value = '#123456';
+      expect(form.collectSettings().colors.normal).toBe(expected);
+    } finally {
+      form.destroy();
+      modal.remove();
+    }
+  });
+});

@@ -141,6 +141,7 @@ describe('SettingsUi', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     document.body.innerHTML = '';
     resolveActiveLanguage('en');
   });
@@ -1390,4 +1391,101 @@ describe('SettingsUi', () => {
     expect(footer?.firstElementChild).toBe(toast);
     c.destroy();
   });
+});
+
+describe('imported author RGBA persistence', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+    resolveActiveLanguage('en');
+  });
+
+  it.each([
+    { color: '#f008', nativeClose: false, unrelatedEdit: false },
+    { color: '#abcd', nativeClose: true, unrelatedEdit: true },
+    { color: '#ff000088', nativeClose: true, unrelatedEdit: false },
+    { color: '#aabbccdd', nativeClose: false, unrelatedEdit: true },
+  ])(
+    'retains imported $color across close and a fresh settings owner',
+    async ({ color, nativeClose, unrelatedEdit }) => {
+      const player = document.createElement('div');
+      player.id = 'movie_player';
+      document.body.appendChild(player);
+      vi.mocked(mockFinder).mockResolvedValue(player);
+      let stored: string | null = null;
+      vi.mocked(getStorageAdapter).mockReturnValue({
+        getItem: vi.fn(async () => stored),
+        setItem: vi.fn(async (_key: string, value: string) => {
+          stored = value;
+        }),
+      });
+      const settings = new Settings();
+      await settings.initialize();
+      let persistenceCalls = 0;
+      const pending: Promise<unknown>[] = [];
+      const controller = new SettingsUi(
+        () => settings.get(),
+        (patch) => settings.preview(patch),
+        () => settings.reset(),
+        (patch) => {
+          persistenceCalls++;
+          if (Object.keys(patch).length > 0) settings.set(patch);
+          else settings.endPreview();
+          const save = settings.persistNow();
+          pending.push(save);
+          return save;
+        }
+      );
+      const unsubscribe = settings.subscribe(() => controller.syncForm());
+      try {
+        await controller.attach();
+        player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+        const createElement = vi.spyOn(document, 'createElement');
+        document.querySelector<HTMLButtonElement>('[data-action="import"]')?.click();
+        const input = createElement.mock.results.findLast(
+          (_result, index) => createElement.mock.calls[index]?.[0] === 'input'
+        )?.value as HTMLInputElement | undefined;
+        if (!input) throw new Error('Import file input is unavailable');
+        const colors = { ...DEFAULT_SETTINGS.colors, normal: color };
+        Object.defineProperty(input, 'files', {
+          configurable: true,
+          value: [new File([JSON.stringify({ ...DEFAULT_SETTINGS, colors })], 'settings.json')],
+        });
+        input.dispatchEvent(new Event('change'));
+        await vi.waitFor(() => expect(JSON.parse(stored ?? '{}').colors?.normal).toBe(color));
+        const modal = document.querySelector<HTMLDialogElement>(
+          '#yt-chat-overlay-settings-backdrop'
+        );
+        if (!modal) throw new Error('Settings dialog is unavailable');
+        if (unrelatedEdit) {
+          const font = modal.querySelector<HTMLInputElement>('input[name="fontSize"]');
+          if (!font) throw new Error('Font input is unavailable');
+          font.value = '36';
+          font.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (nativeClose) modal.close();
+        else controller.close();
+        await vi.waitFor(() => expect(persistenceCalls).toBe(2));
+        await Promise.all(pending);
+        expect(settings.get().colors).toEqual(colors);
+        expect(JSON.parse(stored ?? '{}')).toMatchObject({
+          colors,
+          fontSize: unrelatedEdit ? 36 : DEFAULT_SETTINGS.fontSize,
+        });
+      } finally {
+        unsubscribe();
+        controller.destroy();
+        await settings.destroy();
+      }
+      const fresh = new Settings();
+      try {
+        await fresh.initialize();
+        expect(fresh.get().colors.normal).toBe(color);
+        expect(fresh.get().fontSize).toBe(unrelatedEdit ? 36 : DEFAULT_SETTINGS.fontSize);
+      } finally {
+        await fresh.destroy();
+      }
+    }
+  );
 });
