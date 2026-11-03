@@ -135,6 +135,27 @@ describe('BacklogInjectionController', () => {
   // ═══════════════════════════════════════════════════════
 
   describe('startBacklogInjection', () => {
+    it('does not schedule another delivery after the renderer pauses during a delivery', () => {
+      const delivered: string[] = [];
+      controller.onBacklogMessage = (message) => {
+        if (!message.id) throw new Error('Expected backlog ID');
+        delivered.push(message.id);
+        controller.setPaused(true);
+      };
+
+      controller.startBacklogInjection([makeMsg({ id: 'first' }), makeMsg({ id: 'second' })]);
+      vi.advanceTimersByTime(30_000);
+      expect(delivered).toEqual(['first']);
+      expect(controller.drainPending().map((message) => message.id)).toEqual(['second']);
+
+      controller.onBacklogMessage = (message) => {
+        if (!message.id) throw new Error('Expected backlog ID');
+        delivered.push(message.id);
+      };
+      controller.setPaused(false);
+      expect(delivered).toEqual(['first', 'second']);
+    });
+
     it('ignores empty message arrays', () => {
       const cb = vi.fn();
       controller.onBacklogMessage = cb;

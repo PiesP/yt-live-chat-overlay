@@ -2560,7 +2560,6 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.clear();
     this.workerManager.clearState();
     this.backlogPaused = false;
-    this.onBacklogPauseChange = null;
     clearTextMeasurementCaches();
     resetBidiLayoutCaches();
     this.textBitmapCache.clear();

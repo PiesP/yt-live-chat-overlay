@@ -91,6 +91,7 @@ export class BurstDetector {
     burstExtremeThreshold: number;
   }): void {
     this.rateSampleWindow = settings.burstSampleWindow;
+    this.trimRateWindow();
     this.elevatedThreshold = settings.burstElevatedThreshold;
     this.highThreshold = settings.burstHighThreshold;
     this.extremeThreshold = settings.burstExtremeThreshold;
@@ -151,14 +152,17 @@ export class BurstDetector {
       this.sampleDurations.push(elapsedMs);
       this.runningSum += count;
       this.runningDurationMs += elapsedMs;
-      if (this.samples.length > this.rateSampleWindow) {
-        const removed = this.samples.shift() ?? 0;
-        this.runningSum -= removed;
-        this.runningDurationMs -= this.sampleDurations.shift() ?? 0;
-      }
+      this.trimRateWindow();
       this.samplesSinceLastCheck = 0;
       this.evaluate();
     }, BurstDetector.SAMPLE_INTERVAL_MS);
+  }
+
+  private trimRateWindow(): void {
+    while (this.samples.length > this.rateSampleWindow) {
+      this.runningSum -= this.samples.shift() ?? 0;
+      this.runningDurationMs -= this.sampleDurations.shift() ?? 0;
+    }
   }
 
   /** Get current EMA-smoothed message rate for speed adaptation */

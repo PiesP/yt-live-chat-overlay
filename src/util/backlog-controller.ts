@@ -605,6 +605,9 @@ export class BacklogInjectionController implements Pauseable {
     this.indicator.update(this.processedBacklog, this.totalBacklog);
     this.onBacklogMessage?.(message);
 
+    // Delivery can synchronously signal renderer congestion. Do not leave a
+    // newly scheduled tick behind after setPaused(true) cleared the old one.
+    if (this.paused) return;
     this.injectionTimer = this.scheduler.scheduleNextTick(() => this.processTick(), meanInterval);
   }
 

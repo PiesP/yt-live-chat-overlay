@@ -908,6 +908,12 @@ export class RuntimeManager {
         backlogInjectionRateMin: settings.backlogInjectionRateMin,
         pendingCapacity: settings.queueMaxSize,
       });
+      if (shouldResetRenderer) {
+        // The renderer's queue and pause state are fully reset at this point.
+        // Resume the retained controller only after allocator/config updates:
+        // setPaused(false) can synchronously deliver its next backlog message.
+        this.backlogController.setPaused(false);
+      }
     }
 
     if (!shouldResetRenderer) {
