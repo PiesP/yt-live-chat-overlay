@@ -36,6 +36,7 @@ const {
   removeOwnedProfile,
   selectOwnedFirefoxListener,
   selectOwnedFirefoxProcesses,
+  selectWindowsEndpointOwnerPids,
   terminateOwnedProcessTree,
   waitForWindowsEndpoint,
 } = firefoxBidiModule;
@@ -369,6 +370,70 @@ afterEach(async () => {
 });
 
 describe('Windows Firefox installation profile', () => {
+  it('binds a state-less Windows endpoint to the exact address family, port and owner', () => {
+    const ipv4 = {
+      localAddress: '127.0.0.1',
+      localPort: 50947,
+      remoteAddress: '0.0.0.0',
+      remotePort: 0,
+      pid: 21,
+      state: 0,
+    };
+    const ipv6 = { ...ipv4, localAddress: '::1', remoteAddress: '::', pid: 22 };
+    const connected = { ...ipv4, remoteAddress: '127.0.0.1', remotePort: 50000 };
+    const otherPort = { ...ipv4, localPort: 50948 };
+    const wildcard = { ...ipv4, localAddress: '0.0.0.0' };
+    const nonLoopback = { ...ipv4, localAddress: '192.0.2.1' };
+    const records = [ipv4, ipv6, connected, otherPort, wildcard, nonLoopback];
+    expect(selectWindowsEndpointOwnerPids(records, '127.0.0.1', 50947)).toEqual([21]);
+    expect(selectWindowsEndpointOwnerPids(records, '::1', 50947)).toEqual([22]);
+    expect(selectWindowsEndpointOwnerPids([ipv6], '127.0.0.1', 50947)).toEqual([]);
+    expect(
+      selectWindowsEndpointOwnerPids(
+        [{ ...ipv4, remotePort: 0, remoteAddress: '::' }],
+        '127.0.0.1',
+        50947
+      )
+    ).toEqual([]);
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { pid: 21 },
+    {
+      localAddress: '127.0.0.1',
+      localPort: 50947,
+      remoteAddress: '0.0.0.0',
+      remotePort: 0,
+      pid: 0,
+    },
+    {
+      localAddress: '127.0.0.1',
+      localPort: 50947,
+      remoteAddress: '0.0.0.0',
+      remotePort: null,
+      pid: 21,
+    },
+  ])('rejects incomplete endpoint ownership records: %j', (record) => {
+    expect(() => selectWindowsEndpointOwnerPids([record], '127.0.0.1', 50947)).toThrow(
+      'Invalid Windows TCP endpoint record'
+    );
+  });
+
+  it('rejects unsupported endpoint targets and non-array OS results', () => {
+    expect(() => selectWindowsEndpointOwnerPids([], 'localhost', 50947)).toThrow(
+      'Invalid Windows Firefox endpoint inspection'
+    );
+    expect(() => selectWindowsEndpointOwnerPids([], '127.0.0.1', 0)).toThrow(
+      'Invalid Windows Firefox endpoint inspection'
+    );
+    expect(() => selectWindowsEndpointOwnerPids({}, '127.0.0.1', 50947)).toThrow(
+      'Invalid Windows Firefox endpoint inspection'
+    );
+  });
+
   it('preserves typed command timeout identity without command parameters', async () => {
     const { session } = createBidiSession(() => {});
     const failure = await session
