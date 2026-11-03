@@ -184,13 +184,14 @@ function pagePrelude(): void {
   };
 }
 
-function instrument(source: string): string {
+export function instrumentBacklogResetSource(source: string): string {
   assert.equal(source.split(ENTRY_MARKER).length, 2, 'Packaged page entry changed');
   for (const name of ['CanvasRenderer', 'BacklogInjectionController', 'RuntimeManager'])
     assert(source.includes(`var ${name} = class ${name}`), `Packaged ${name} changed`);
   for (const method of [
     'updateBacklogPause()',
     'setPaused(paused)',
+    'createRenderer(overlay, settings)',
     'ensureBacklogController(renderer)',
     'replayMessage(message)',
     'performOverlayRefresh(reason)',
@@ -217,6 +218,17 @@ function instrument(source: string): string {
 \tconst acceptedForMain = (renderer, message) =>
 \t\trenderer.pendingQueue.toArray().includes(message) ||
 \t\trenderer.activeMessages.some((entry) => entry.message === message);
+\tconst nativeCreateRenderer = RuntimeManager.prototype.createRenderer;
+\tRuntimeManager.prototype.createRenderer = function(...args) {
+\t\tconst renderer = Reflect.apply(nativeCreateRenderer, this, args);
+\t\tif (!backlogState.manager && !backlogState.renderer) {
+\t\t\tbacklogState.manager = this;
+\t\t\tbacklogState.renderer = renderer;
+\t\t} else if (this !== backlogState.manager || renderer !== backlogState.renderer) {
+\t\t\trecordLifecycle('identity-changed', this, null);
+\t\t}
+\t\treturn renderer;
+\t};
 \tconst nativeEnsureBacklog = RuntimeManager.prototype.ensureBacklogController;
 \tRuntimeManager.prototype.ensureBacklogController = function(...args) {
 \t\tconst result = Reflect.apply(nativeEnsureBacklog, this, args);
@@ -366,7 +378,7 @@ export async function runBacklogResetFixture({
   assert(BATCH_SIZE > 50, 'Live seed must enter the production backlog batch path');
   assert(QUEUE_MAX_SIZE > BATCH_SIZE, 'Parser capacity must retain the full live seed');
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
-  const instrumented = instrument(source);
+  const instrumented = instrumentBacklogResetSource(source);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   const html = buildVisibleWatchHtml(preview, 'Backlog reset fixture video');
   const page = await context.newPage();
@@ -477,6 +489,7 @@ export async function runBacklogResetFixture({
     const initial = await snapshot(page);
     assert.deepEqual(initial.workerAttempts, [{ type: 'module', error: 'SecurityError' }]);
     assert.equal(initial.workerOverflow, 0);
+    assert(initial.managerRetained && initial.rendererRetained);
     assert.equal(initial.controllerPaused, null);
 
     stage = 'configure';
