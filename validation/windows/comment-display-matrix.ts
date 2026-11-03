@@ -71,7 +71,8 @@ const MAX_CAPTURES_PER_BACKEND = 12;
 const MAX_OVERLOAD_MS = 120_000;
 const MAX_OVERLOAD_RECORDS = 128;
 const PRESENTATION_VIEWPORT_HEIGHT = 1100;
-const PRESENTATION_PLAYER_HEIGHT = 940;
+const PRESENTATION_NARROW_PLAYER_HEIGHT = 900;
+const PRESENTATION_WIDE_PLAYER_HEIGHT = 940;
 const MIN_PAID_BODY_LINES = resolveLimits('superChatMaxBodyLines').min;
 const MIN_FONT_SIZE = resolveLimits('fontSize').min;
 const MAX_FONT_SIZE = resolveLimits('fontSize').max;
@@ -3101,6 +3102,8 @@ async function runBackend(options: {
       ['dark', 400],
       ['detailed', 960],
     ] as const) {
+      const playerHeight =
+        width === 400 ? PRESENTATION_NARROW_PLAYER_HEIGHT : PRESENTATION_WIDE_PLAYER_HEIGHT;
       if (backend === 'main') {
         const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
         const instrumentedSource = instrumentCanvasPageScript(source, undefined, true);
@@ -3126,7 +3129,7 @@ async function runBackend(options: {
       }
       await page.waitForFunction(() => Boolean(window.__ytChatOverlay?.getSettings));
       await page.addStyleTag({
-        content: `#movie_player { height: ${PRESENTATION_PLAYER_HEIGHT}px !important; aspect-ratio: auto !important; }`,
+        content: `#movie_player { height: ${playerHeight}px !important; aspect-ratio: auto !important; }`,
       });
       await page.evaluate(
         (selectedScene) =>
@@ -3154,7 +3157,7 @@ async function runBackend(options: {
       failureStage = `presentation:${scene}:${width}:geometry`;
       await waitForProbeConfig(page, backend, {
         viewportWidth: width,
-        playerHeight: PRESENTATION_PLAYER_HEIGHT,
+        playerHeight,
         fontSize: 32,
         laneSpacing: 0,
         safeTop: 0,
