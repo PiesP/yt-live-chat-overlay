@@ -271,6 +271,92 @@ describe('RuntimeManager', () => {
     rm.destroy();
   });
 
+  it('keeps the watchdog active without treating a 45-second user pause as renderer failure', () => {
+    vi.useFakeTimers();
+    const rm = new RuntimeManager(createOpts());
+    const overlay = new Overlay();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = {
+      isWorkerAlive: vi.fn(() => true),
+      getQueueLength: vi.fn(() => 5),
+      getActiveMessageCount: vi.fn(() => 0),
+      getMsSinceLastRenderActivity: vi.fn(() => 45_000),
+      fallbackToMainThread: vi.fn(),
+      setConnectionStatus: vi.fn(),
+    };
+    let chatHealthy = true;
+    const source = {
+      getHealthSnapshot: vi.fn(() => ({
+        observerAlive: true,
+        recentlyActive: chatHealthy,
+        consecutiveErrors: 0,
+        isInBackoff: false,
+      })),
+    };
+    const internals = rm as unknown as {
+      state: string;
+      overlay: Overlay | null;
+      renderer: typeof renderer | null;
+      chatSource: typeof source | null;
+      getVideoElement: () => HTMLVideoElement | null;
+      getRuntimeHealthSnapshot: () => { isRendererStuck: boolean; shouldRestart: boolean };
+      performOverlayRefresh: (reason: string) => void;
+      requestManagedRestart: (reason: 'watchdog') => void;
+      startChatWatchdog: () => void;
+      stopChatWatchdog: () => void;
+    };
+    internals.state = 'active';
+    internals.overlay = overlay;
+    internals.renderer = renderer;
+    internals.chatSource = source;
+    vi.spyOn(internals, 'getVideoElement').mockReturnValue(null);
+    const refresh = vi.spyOn(internals, 'performOverlayRefresh').mockImplementation(() => {});
+    const restart = vi.spyOn(internals, 'requestManagedRestart').mockImplementation(() => {});
+
+    try {
+      expect(overlay.toggleUserPause()).toBe(true);
+      internals.startChatWatchdog();
+      vi.advanceTimersByTime(45_000);
+      expect(internals.getRuntimeHealthSnapshot()).toMatchObject({
+        isRendererStuck: false,
+        shouldRestart: false,
+      });
+      expect(refresh).not.toHaveBeenCalled();
+      expect(restart).not.toHaveBeenCalled();
+
+      expect(overlay.toggleUserPause()).toBe(false);
+      expect(internals.getRuntimeHealthSnapshot().isRendererStuck).toBe(true);
+      vi.advanceTimersByTime(15_000);
+      expect(refresh).toHaveBeenCalledExactlyOnceWith('renderer-stuck');
+
+      expect(overlay.toggleUserPause()).toBe(true);
+      chatHealthy = false;
+      expect(internals.getRuntimeHealthSnapshot()).toMatchObject({
+        isRendererStuck: false,
+        shouldRestart: true,
+      });
+      vi.advanceTimersByTime(15_000);
+      expect(restart).toHaveBeenCalledExactlyOnceWith('watchdog');
+
+      chatHealthy = true;
+      renderer.isWorkerAlive.mockReturnValue(false);
+      expect(internals.getRuntimeHealthSnapshot().isRendererStuck).toBe(true);
+      vi.advanceTimersByTime(15_000);
+      expect(renderer.fallbackToMainThread).toHaveBeenCalledExactlyOnceWith('worker-dead');
+    } finally {
+      internals.stopChatWatchdog();
+      internals.chatSource = null;
+      internals.renderer = null;
+      internals.overlay = null;
+      rm.destroy();
+      overlay.destroy();
+      container.remove();
+    }
+  });
+
   it('attributes late replay drops only to the current session', async () => {
     vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce({
       status: 'ready',

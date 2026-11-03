@@ -645,6 +645,11 @@ export class RuntimeManager {
     // 6. Clear session dedup so re-injected messages aren't blocked
     this.sessionDedup.clear();
 
+    // The renderer reset clears its congestion state, but the retained
+    // backlog controller may still be paused. Resume only after the full
+    // reset and dedup clear: setPaused(false) can deliver synchronously.
+    this.backlogController?.setPaused(false);
+
     // 6a. Drain accumulated ReplayBuffer messages (BUG-4 fix).
     //     performOverlayRefresh was only re-injecting getLatestMessages(20)
     //     from the messageBuffer — ReplayBuffer messages accumulated during
@@ -1367,10 +1372,12 @@ export class RuntimeManager {
     // main-thread rendering.
     const r = this.renderer;
     const isWorkerDead = r != null && !r.isWorkerAlive();
+    const isUserPaused = this.overlay?.getUserPauseState() === true;
     const isRendererStuck =
       r != null &&
       (isWorkerDead ||
-        (r.getQueueLength() > 0 &&
+        (!isUserPaused &&
+          r.getQueueLength() > 0 &&
           r.getActiveMessageCount() === 0 &&
           r.getMsSinceLastRenderActivity() >= RENDERER_STUCK_THRESHOLD_MS));
 

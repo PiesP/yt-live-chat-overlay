@@ -299,6 +299,99 @@ describe('Backlog control across visual resets', () => {
     expect(renderer.onBacklogPauseChange).toBeNull();
     expect(state.backlogController).toBeNull();
   });
+
+  it('resumes a retained paused backlog only after the full overlay refresh reset', () => {
+    const settings = makeSettings({
+      backlogMode: 'full',
+      backlogToggleCooldownMs: 0,
+      backlogPauseThreshold: 0.2,
+      backlogResumeThreshold: 0.1,
+      queueMaxSize: 10,
+    });
+    const overlay = new Overlay();
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, settings);
+    renderer.setReplayMode(true);
+    const manager = new RuntimeManager({
+      getCurrentUrl: () => location.href,
+      getSettings: () => settings,
+      isValidPage: () => true,
+    });
+    const state = manager as unknown as {
+      state: string;
+      settings: OverlaySettings | null;
+      renderer: CanvasRenderer | null;
+      overlay: Overlay | null;
+      chatSource: {
+        setPauseReason: (reason: string, paused: boolean) => void;
+        getLatestMessages: (limit: number) => ChatMessage[];
+      } | null;
+      backlogController: {
+        startBacklogInjection(messages: ChatMessage[]): void;
+        drainPending(): ChatMessage[];
+        paused: boolean;
+      } | null;
+      sessionDedup: { clear(): void };
+      ensureBacklogController(renderer: CanvasRenderer): void;
+      performOverlayRefresh(reason: string): void;
+    };
+    state.state = 'active';
+    state.settings = settings;
+    state.renderer = renderer;
+    state.overlay = overlay;
+    state.chatSource = {
+      setPauseReason: vi.fn(),
+      getLatestMessages: () => [makeMessage('recent', 'recent')],
+    };
+    state.ensureBacklogController(renderer);
+    const controller = state.backlogController;
+    expect(controller).not.toBeNull();
+    if (!controller) throw new Error('Backlog controller was not created');
+    const callback = renderer.onBacklogPauseChange;
+    const addMessage = renderer.addMessage.bind(renderer);
+    const deliveredAfterReset: string[] = [];
+    let refreshStarted = false;
+    let resetComplete = false;
+    vi.spyOn(renderer, 'addMessage').mockImplementation((message) => {
+      if (refreshStarted && message.id?.startsWith('backlog-')) {
+        expect(resetComplete).toBe(true);
+        deliveredAfterReset.push(message.id);
+      }
+      addMessage(message);
+    });
+    const clearDedup = state.sessionDedup.clear.bind(state.sessionDedup);
+    vi.spyOn(state.sessionDedup, 'clear').mockImplementation(() => {
+      clearDedup();
+      resetComplete = true;
+    });
+
+    try {
+      controller.startBacklogInjection(
+        Array.from({ length: 8 }, (_, index) => makeMessage(`backlog-${index}`, 'backlog'))
+      );
+      renderer.addMessage(makeMessage('congestion-a', 'filler'));
+      renderer.addMessage(makeMessage('congestion-b', 'filler'));
+      expect(controller.paused).toBe(true);
+      const pending = controller.drainPending().map((message) => message.id);
+      expect(pending.length).toBeGreaterThan(0);
+
+      refreshStarted = true;
+      state.performOverlayRefresh('test-paused-backlog');
+
+      expect(resetComplete).toBe(true);
+      expect(renderer.onBacklogPauseChange).toBe(callback);
+      expect(controller.paused).toBe(false);
+      expect(deliveredAfterReset).toContain(pending[0]);
+      expect(renderer.getQueueLength()).toBeGreaterThan(0);
+      expect([
+        ...deliveredAfterReset,
+        ...controller.drainPending().map((message) => message.id),
+      ]).toEqual([...pending, 'recent']);
+    } finally {
+      state.chatSource = null;
+      manager.destroy();
+    }
+  });
 });
 
 describe('Canvas gradient cache', () => {
