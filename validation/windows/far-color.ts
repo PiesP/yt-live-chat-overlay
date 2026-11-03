@@ -361,7 +361,7 @@ export async function runFarColorFixture({
         await page.waitForFunction(
           () => window.__ytChatOverlay?.getSettings().colors.normal === '#f008'
         );
-        await page.locator('button[data-action="close"]').click();
+        await page.locator('button.yt-chat-overlay-settings-close').click();
         await page.evaluate(async () => {
           await window.__ytChatOverlay?.stop();
         });
