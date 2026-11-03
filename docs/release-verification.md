@@ -23,8 +23,11 @@ publication; they do not establish which live or installed flows executed.
    installation instructions, changelog and build details in their existing
    generated section. The coverage text should state only evidence supported by
    that release's records, with links to the detailed reports. Verify links and
-   the rendered Markdown before publication.
-4. If coverage is added after publication, capture the original release body
+   the rendered Markdown before publication. After the maintained workflow
+   publishes its generated notes, the release owner appends the reviewed
+   coverage text using the next step. Neither `prepare.ts` nor the workflow
+   includes the draft automatically.
+4. Before adding coverage to the published description, capture the original release body
    and asset IDs, names, sizes and digests first. Append a dated heading and the
    reviewed text to the body, preserving the original text, tag and assets.
    Read back the release body, links, tag and asset identities. Record the
