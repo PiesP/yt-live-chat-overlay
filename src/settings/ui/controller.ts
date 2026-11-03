@@ -4,6 +4,7 @@
 import type { OverlaySettings } from '@app-types';
 import type { RuntimeRecoveryStatus } from '@app/runtime-manager';
 import { getActiveLanguage, t } from '@i18n/index';
+import { getInterfaceLanguageDirection } from '@i18n/language-domains';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
 import {
   applySettingsPatch,
@@ -523,7 +524,7 @@ export class SettingsUi {
       this.reloadFeedback.textContent = state === 'idle' ? '' : message;
       this.reloadFeedback.hidden = state === 'idle';
       this.reloadFeedback.lang = getActiveLanguage();
-      this.reloadFeedback.dir = getActiveLanguage() === 'ar' ? 'rtl' : 'ltr';
+      this.reloadFeedback.dir = getInterfaceLanguageDirection(getActiveLanguage());
     }
   }
 
@@ -792,7 +793,7 @@ export class SettingsUi {
     if (!this.modal) return;
     const lang = getActiveLanguage();
     this.modal.lang = lang;
-    this.modal.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    this.modal.dir = getInterfaceLanguageDirection(lang);
   }
 
   /** Restore modal lang/dir to default. No-op since we never touched the document root. */

@@ -15,7 +15,12 @@
  * - Unicode fallback covers CJK, Hangul, Hiragana/Katakana, Latin-1 Supplement.
  */
 
-import type { TranslationLanguage, TranslationSourceLanguage } from '@app-types';
+import type { TranslationSourceLanguage } from '@app-types';
+import {
+  isTranslationSourceCode,
+  TRANSLATION_SOURCE_FALLBACK,
+  type TranslationSourceCode,
+} from '@i18n/language-domains';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('LanguageDetector');
@@ -49,7 +54,7 @@ declare global {
  * Hangul reliably indicates Korean, CJK Unified is shared across CJK but
  * we treat it as Chinese (most likely in YouTube context when no kana present).
  */
-const UNICODE_HINTS: ReadonlyArray<[TranslationLanguage, [number, number]]> = [
+const UNICODE_HINTS: ReadonlyArray<[TranslationSourceCode, [number, number]]> = [
   ['ja', [0x3040, 0x309f]], // Hiragana
   ['ja', [0x30a0, 0x30ff]], // Katakana
   ['ko', [0xac00, 0xd7af]], // Hangul Syllables
@@ -58,8 +63,8 @@ const UNICODE_HINTS: ReadonlyArray<[TranslationLanguage, [number, number]]> = [
   ['ar', [0x0600, 0x06ff]], // Arabic
 ];
 
-function detectByUnicodeRange(text: string): TranslationLanguage | null {
-  const scores = new Map<TranslationLanguage, number>();
+function detectByUnicodeRange(text: string): TranslationSourceCode | null {
+  const scores = new Map<TranslationSourceCode, number>();
   // Sample first 100 chars — sufficient for language detection by Unicode range
   const sample = text.slice(0, 100);
   for (const ch of sample) {
@@ -71,9 +76,9 @@ function detectByUnicodeRange(text: string): TranslationLanguage | null {
       }
     }
   }
-  if (scores.size === 0) return 'en'; // ASCII-only text → most likely English
+  if (scores.size === 0) return TRANSLATION_SOURCE_FALLBACK; // ASCII-only text → most likely English
   // Sort by score descending, take top
-  return [...scores.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'en';
+  return [...scores.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? TRANSLATION_SOURCE_FALLBACK;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────
@@ -147,7 +152,7 @@ export class LanguageDetectorService {
    * Returns the detected source language or 'en' as fallback.
    */
   async detect(text: string): Promise<TranslationSourceLanguage> {
-    if (!text.trim()) return 'en';
+    if (!text.trim()) return TRANSLATION_SOURCE_FALLBACK;
 
     if (this.detector) {
       try {
@@ -162,7 +167,7 @@ export class LanguageDetectorService {
       }
     }
 
-    return detectByUnicodeRange(text) ?? 'en';
+    return detectByUnicodeRange(text) ?? TRANSLATION_SOURCE_FALLBACK;
   }
 
   /**
@@ -174,8 +179,8 @@ export class LanguageDetectorService {
       const lang = await this.detect(sample);
       votes.set(lang, (votes.get(lang) ?? 0) + 1);
     }
-    if (votes.size === 0) return 'en';
-    return [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'en';
+    if (votes.size === 0) return TRANSLATION_SOURCE_FALLBACK;
+    return [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? TRANSLATION_SOURCE_FALLBACK;
   }
 
   /** Map a BCP 47 language tag to a source language supported by Translator. */
@@ -187,26 +192,14 @@ export class LanguageDetectorService {
       .filter(Boolean)
       .map((subtag) => subtag.toLowerCase());
     const language = subtags[0];
-    switch (language) {
-      case 'en':
-        return 'en';
-      case 'ko':
-        return 'ko';
-      case 'ja':
-        return 'ja';
-      case 'es':
-        return 'es';
-      case 'zh':
-        if (subtags.includes('hant')) return 'zh-Hant';
-        if (subtags.includes('hans')) return 'zh-Hans';
-        if (subtags.some((subtag) => ['tw', 'hk', 'mo'].includes(subtag))) return 'zh-Hant';
-        if (subtags.some((subtag) => ['cn', 'sg'].includes(subtag))) return 'zh-Hans';
-        return 'zh-CN';
-      case 'ar':
-        return 'ar';
-      default:
-        return null;
+    if (language === 'zh') {
+      if (subtags.includes('hant')) return 'zh-Hant';
+      if (subtags.includes('hans')) return 'zh-Hans';
+      if (subtags.some((subtag) => ['tw', 'hk', 'mo'].includes(subtag))) return 'zh-Hant';
+      if (subtags.some((subtag) => ['cn', 'sg'].includes(subtag))) return 'zh-Hans';
+      return 'zh-CN';
     }
+    return isTranslationSourceCode(language) ? language : null;
   }
 
   destroy(): void {

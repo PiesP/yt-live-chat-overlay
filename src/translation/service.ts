@@ -14,8 +14,10 @@
  * - Sequential translations only — a large text blocks subsequent calls.
  *   For chat (short messages), this is acceptable.
  */
+
 import type { TranslationSource, TranslationSourceLanguage, TranslationTarget } from '@app-types';
 import { resolveTranslationTarget } from '@i18n/index';
+import { TRANSLATION_SOURCE_FALLBACK } from '@i18n/language-domains';
 import { ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import { createLogger } from '@util/logging';
 
@@ -245,7 +247,8 @@ export class TranslationService {
 
     // Resolve 'auto' source — use 'en' as initial fallback until Language Detector
     // determines the actual language via setDetectedSource().
-    const resolvedSource = settings.source === 'auto' ? 'en' : settings.source;
+    const resolvedSource =
+      settings.source === 'auto' ? TRANSLATION_SOURCE_FALLBACK : settings.source;
 
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {

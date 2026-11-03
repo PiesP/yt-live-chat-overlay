@@ -162,6 +162,39 @@ describe('SettingsUi', () => {
     );
   }
 
+  it('scopes Arabic direction to the modal and preserves all three selector presentations', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const rootBefore = { lang: document.documentElement.lang, dir: document.documentElement.dir };
+    resolveActiveLanguage('ar');
+    const controller = makeController({
+      getSettings: () => ({ ...cloneSettings(DEFAULT_SETTINGS), language: 'ar' }),
+    });
+    try {
+      await controller.attach();
+      player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button')?.click();
+      const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+      expect(modal?.lang).toBe('ar');
+      expect(modal?.dir).toBe('rtl');
+      expect({ lang: document.documentElement.lang, dir: document.documentElement.dir }).toEqual(
+        rootBefore
+      );
+      for (const [key, expectedAuto] of [
+        ['language', 'تلقائي (المتصفح)'],
+        ['translationSource', 'كشف تلقائي'],
+        ['translationTarget', 'تلقائي (المتصفح)'],
+      ]) {
+        const select = modal?.querySelector<HTMLSelectElement>(`select[name="${key}"]`);
+        expect(select?.options[0]?.textContent).toBe(expectedAuto);
+        expect(select?.querySelector('option[value="zh-CN"]')?.textContent).toBe('الصينية');
+      }
+    } finally {
+      controller.destroy();
+    }
+  });
+
   it('constructs without throwing', () => {
     expect(() => makeController()).not.toThrow();
   });
