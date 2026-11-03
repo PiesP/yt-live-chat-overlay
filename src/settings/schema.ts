@@ -14,6 +14,7 @@ import type {
   TranslationSource,
   TranslationTarget,
 } from '@app-types';
+import { isHexColor } from '@renderer/color-utils';
 import { AUTHOR_BACKGROUND_ALPHA_HEX, DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
 import { resolveLimits, resolveOutlineLimits } from '@settings/limits';
 import {
@@ -131,8 +132,7 @@ const WHOLE_MEGABYTE_SETTING_KEYS = new Set<keyof OverlaySettings>([
 /**
  * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
  */
-export const isColorValue = (value: unknown): value is string =>
-  typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6,8})$/i.test(value);
+export const isColorValue = isHexColor;
 
 export function clampNumber(
   value: unknown,

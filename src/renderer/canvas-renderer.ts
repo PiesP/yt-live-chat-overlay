@@ -73,10 +73,9 @@ import {
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
 import { getSpeedTier } from '@renderer/canvas/speed-tier';
-import { desaturateColor } from '@renderer/color-utils';
+import { resolveRegularMessageColor } from '@renderer/color-utils';
 import {
   type CanvasMessage,
-  FAR_LAYER_DESATURATION_FACTOR,
   GRADIENT_CACHE_MAX,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT,
@@ -933,19 +932,7 @@ export class CanvasRenderer extends RendererBase {
     delete active.translatedRenderMessage;
     delete active.translationHeight;
 
-    if (
-      this.settings.depthLayersEnabled &&
-      active.speedTier === SPEED_TIER.FAR &&
-      message.userColor
-    ) {
-      active.desaturatedUserColor = desaturateColor(
-        message.userColor,
-        FAR_LAYER_DESATURATION_FACTOR
-      );
-      active.renderMessage = { ...message, userColor: active.desaturatedUserColor };
-    } else {
-      delete active.desaturatedUserColor;
-    }
+    delete active.desaturatedUserColor;
 
     const geometry = this.estimateTranslatedDimensions(message, null);
     const geometryChanged = this.applyMessageGeometry(active, geometry);
@@ -1640,10 +1627,15 @@ export class CanvasRenderer extends RendererBase {
       this.settings.outline.widthPx > 0 &&
       this.settings.outline.opacity > 0
     ) {
-      const warmColor =
-        this.settings.preserveUserColor && message.userColor
-          ? message.userColor
-          : (this.settings.colors[message.authorType] ?? this.settings.colors.normal);
+      const warmColor = resolveRegularMessageColor(
+        message.userColor,
+        this.settings.preserveUserColor,
+        this.settings.colors[message.authorType],
+        this.settings.colors.normal,
+        message.kind === 'text' &&
+          this.settings.depthLayersEnabled &&
+          result.speedTier === SPEED_TIER.FAR
+      );
       const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
       const renderCtx = this.ctx;
       if (renderCtx) {

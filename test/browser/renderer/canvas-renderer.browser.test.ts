@@ -1115,8 +1115,11 @@ describe('CanvasRenderer', () => {
   });
 
   it('updates active message content and geometry for a replacement', () => {
-    const renderer = new CanvasRenderer(overlay, makeSettings({ fontSize: 16 }));
-    const original = makeMessage('replace-active', 'old');
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ fontSize: 16, depthLayersEnabled: true, preserveUserColor: false })
+    );
+    const original = { ...makeMessage('replace-active', 'old'), userColor: '#ff0000' };
     const active = {
       message: original,
       renderMessage: original,
@@ -1132,7 +1135,7 @@ describe('CanvasRenderer', () => {
       pausedDuration: 0,
       laneIndex: 0,
       staggerDelay: 0,
-      speedTier: 1,
+      speedTier: 0,
       ghostText: 'old',
       laneArrayIndices: [],
       translatedText: 'stale translation',
@@ -1142,12 +1145,15 @@ describe('CanvasRenderer', () => {
 
     renderer.addMessage({
       ...makeMessage('replace-active', 'updated active content'),
+      userColor: '#0000ff',
       actionType: 'replace',
     });
 
     expect(internals.activeMessages).toHaveLength(1);
     expect(active.message.text).toBe('updated active content');
     expect(active.renderMessage.text).toBe('updated active content');
+    expect(active.renderMessage.userColor).toBe('#0000ff');
+    expect(active.desaturatedUserColor).toBeUndefined();
     expect(active.ghostText).toBe('updated active content');
     expect(active.translatedText).toBeNull();
     expect(active.width).toBeGreaterThan(24);

@@ -6,7 +6,7 @@ import { t } from '@i18n/index';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { renderRegularMessage, splitGraphemeClusters } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
-import { computeOutlineColor } from '@renderer/color-utils';
+import { computeOutlineColor, parseColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import { resolveEffectiveMotionMode } from '@renderer/layout/message-schedule';
@@ -413,6 +413,10 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 export class SettingsUiForm {
   private modal: HTMLDialogElement | null = null;
   private isUpdating = false;
+  private readonly populatedAuthorColors = new WeakMap<
+    HTMLInputElement,
+    { source: string; rgb: string; alpha: number | undefined }
+  >();
   private previewResizeObserver: ResizeObserver | null = null;
   private previewLayoutFrame: number | null = null;
   private previewSettings: Readonly<OverlaySettings> | null = null;
@@ -1338,7 +1342,19 @@ export class SettingsUiForm {
       }
 
       if (target.group === 'color') {
-        el.value = settings.colors[target.key];
+        const source = settings.colors[target.key];
+        const parsed = parseColor(source);
+        if (el instanceof HTMLInputElement && parsed) {
+          // Native color inputs own RGB only; keep the saved color with this populated control.
+          const rgb = `#${[parsed.rgb.r, parsed.rgb.g, parsed.rgb.b]
+            .map((channel) => channel.toString(16).padStart(2, '0'))
+            .join('')}`;
+          this.populatedAuthorColors.set(el, { source, rgb, alpha: parsed.alpha });
+          el.value = rgb;
+        } else {
+          if (el instanceof HTMLInputElement) this.populatedAuthorColors.delete(el);
+          el.value = source;
+        }
         continue;
       }
 
@@ -1855,7 +1871,18 @@ export class SettingsUiForm {
 
       if (target.group === 'color') {
         if (!partial.colors) partial.colors = {};
-        (partial.colors as Record<string, string>)[target.key] = el.value;
+        const populated =
+          el instanceof HTMLInputElement ? this.populatedAuthorColors.get(el) : undefined;
+        const alpha =
+          populated?.alpha === undefined
+            ? ''
+            : Math.round(populated.alpha * 255)
+                .toString(16)
+                .padStart(2, '0');
+        (partial.colors as Record<string, string>)[target.key] =
+          populated && el.value.toLowerCase() === populated.rgb
+            ? populated.source
+            : `${el.value}${alpha}`;
         continue;
       }
 

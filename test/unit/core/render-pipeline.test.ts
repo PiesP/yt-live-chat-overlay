@@ -292,6 +292,70 @@ describe('drainStage', () => {
 });
 
 describe('drawStage', () => {
+  it.each([
+    [0, true, undefined, true, 'rgb(201,23,23)'],
+    [0, true, '#0000ff', false, 'rgb(201,23,23)'],
+    [0, true, '#0000ff', true, 'rgb(9,9,187)'],
+    [1, true, undefined, true, '#ff0000'],
+    [2, true, undefined, true, '#ff0000'],
+    [0, false, undefined, true, '#ff0000'],
+  ] as const)(
+    'Main resolves tier=%s depth=%s user=%s preserve=%s',
+    (tier, depth, user, preserve, expected) => {
+      const original: ChatMessage = {
+        id: 'far-policy',
+        text: 'body',
+        kind: 'text',
+        content: [],
+        timestamp: 1,
+        authorType: 'normal',
+        ...(user ? { userColor: user } : {}),
+      };
+      const message = {
+        message: original,
+        renderMessage: original,
+        duration: 1000,
+        width: 100,
+        height: 20,
+        x: 20,
+        y: 20,
+        speedTier: tier,
+        _frameElapsed: 100,
+      };
+      const ctx = makeDrainCtx({
+        settings: {
+          ...DEFAULT_SETTINGS,
+          depthLayersEnabled: depth,
+          preserveUserColor: preserve,
+          colors: { ...DEFAULT_SETTINGS.colors, normal: '#ff0000' },
+        },
+        imageFetchManager: {
+          emojiCache: {},
+          authorPhotoCache: {},
+        } as CanvasRenderContext['imageFetchManager'],
+      });
+      const buckets = Array.from({ length: 32 }, () => [] as (typeof message)[]);
+      buckets[20]!.push(message);
+      drawStage(ctx, { globalAlpha: 1 } as CanvasRenderingContext2D, buckets as never, 1, {
+        width: 640,
+        height: 360,
+      });
+      expect(mocks.renderRegularMessage.mock.lastCall?.[4].color).toBe(expected);
+      ctx.settings = {
+        ...ctx.settings,
+        colors: { ...ctx.settings.colors, normal: '#00ff00' },
+        preserveUserColor: false,
+      };
+      drawStage(ctx, { globalAlpha: 1 } as CanvasRenderingContext2D, buckets as never, 2, {
+        width: 640,
+        height: 360,
+      });
+      expect(mocks.renderRegularMessage.mock.lastCall?.[4].color).toBe(
+        tier === 0 && depth ? 'rgb(45,223,45)' : '#00ff00'
+      );
+    }
+  );
+
   beforeEach(() => {
     mocks.renderPaidCard.mockClear();
     mocks.renderRegularMessage.mockClear();

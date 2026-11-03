@@ -324,6 +324,8 @@ export interface ActiveMessage {
   canonicalText?: string;
   /** Per-author color CSS string. */
   color: string;
+  /** Source color retained so an active message can reflect settings changes. */
+  userColor?: string;
   /** Author type for stats/desaturation. */
   authorType?: string;
   /** Message kind for speed tiering. */

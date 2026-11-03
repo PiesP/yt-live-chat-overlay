@@ -3114,3 +3114,144 @@ describe('Worker types', () => {
     expect(config).toBeDefined();
   });
 });
+
+describe('Worker regular color policy', () => {
+  function setupColor(config: Record<string, unknown> = {}, userColor?: string) {
+    vi.spyOn(performance, 'now').mockReturnValue(10_000);
+    const renderer = initializeRenderer({
+      depthLayersEnabled: true,
+      preserveUserColor: true,
+      authorColors: { normal: '#ff0000' },
+      outlineWidthPx: 0,
+      outlineOpacity: 0,
+      showAuthor: { normal: false },
+      ...config,
+    });
+    const internals = renderer as unknown as {
+      activeMessages: ActiveMessage[];
+      regularRenderConfig: { color: string };
+      drainQueue(now: number, width: number, height: number): void;
+      renderFrame(): void;
+    };
+    const original = makeWorkerMessage({
+      id: 'far-policy',
+      kind: 'text',
+      authorType: 'normal',
+      text: 'body',
+      content: [{ type: 'text', content: 'body' }],
+      ...(userColor ? { userColor } : {}),
+    });
+    renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [original] }));
+    internals.drainQueue(10_000, 640, 360);
+    const active = internals.activeMessages[0];
+    if (!active) throw new Error('Color fixture was not admitted');
+    // Keep a real activation but fix timing/tier to test each drawing input independently.
+    Object.assign(active, {
+      speedTier: 0,
+      startTime: 9_500,
+      fadeStartTime: 9_500,
+      duration: 5000,
+      invDuration: 1 / 5000,
+      startX: 100,
+      x: 100,
+    });
+    return { renderer, internals, active, original };
+  }
+
+  it.each([
+    [undefined, true, 0, true, 'rgb(201,23,23)'],
+    ['#0000ff', false, 0, true, 'rgb(201,23,23)'],
+    ['#0000ff', true, 0, true, 'rgb(9,9,187)'],
+    ['#f008', true, 0, true, 'rgba(201,23,23,0.5333333333333333)'],
+    [undefined, true, 1, true, '#ff0000'],
+    [undefined, true, 2, true, '#ff0000'],
+    [undefined, true, 0, false, '#ff0000'],
+  ] as const)(
+    'draws user=%s preserve=%s tier=%s depth=%s',
+    (user, preserve, tier, depth, expected) => {
+      const { internals, active } = setupColor(
+        { preserveUserColor: preserve, depthLayersEnabled: depth },
+        user
+      );
+      active.speedTier = tier;
+      internals.renderFrame();
+      expect(internals.regularRenderConfig.color).toBe(expected);
+      expect(active.userColor).toBe(user);
+    }
+  );
+
+  it('invalidates an active resolved color and FAR override when config or replacement inputs change', () => {
+    const { renderer, internals, active, original } = setupColor({}, '#0000ff');
+    internals.renderFrame();
+    expect(active.colorOverride).toBe('rgb(9,9,187)');
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateConfig',
+        config: { preserveUserColor: false, authorColors: { normal: '#00ff00' } },
+      })
+    );
+    expect(active.color).toBe('#00ff00');
+    expect(active.colorOverride).toBeUndefined();
+    internals.renderFrame();
+    expect(internals.regularRenderConfig.color).toBe('rgb(45,223,45)');
+    renderer.handleMessage(
+      makeEvent({ type: 'updateConfig', config: { depthLayersEnabled: false } })
+    );
+    expect(active.colorOverride).toBeUndefined();
+    internals.renderFrame();
+    expect(internals.regularRenderConfig.color).toBe('#00ff00');
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateConfig',
+        config: { depthLayersEnabled: true, preserveUserColor: true },
+      })
+    );
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [{ ...original, userColor: '#ff000088', actionType: 'replace' }],
+      })
+    );
+    expect(active.userColor).toBe('#ff000088');
+    expect(active.colorOverride).toBeUndefined();
+    Object.assign(active, { speedTier: 0, startTime: 9_500, fadeStartTime: 9_500, startX: 100 });
+    internals.renderFrame();
+    expect(internals.regularRenderConfig.color).toBe('rgba(201,23,23,0.5333333333333333)');
+    const { userColor: _removed, ...withoutColor } = original;
+    renderer.handleMessage(
+      makeEvent({ type: 'addMessages', messages: [{ ...withoutColor, actionType: 'replace' }] })
+    );
+    expect(active.userColor).toBeUndefined();
+    expect(active.color).toBe('#00ff00');
+    expect(active.colorOverride).toBeUndefined();
+  });
+
+  it('refreshes the default fallback when an author has no configured color', () => {
+    const { renderer, internals, active } = setupColor({ authorColors: {}, color: '#ff0000' });
+    internals.renderFrame();
+    expect(internals.regularRenderConfig.color).toBe('rgb(201,23,23)');
+    renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { color: '#00ff00' } }));
+    expect(active.colorOverride).toBeUndefined();
+    internals.renderFrame();
+    expect(internals.regularRenderConfig.color).toBe('rgb(45,223,45)');
+  });
+
+  it('uses the same color for the body and dual translation', () => {
+    const { internals, active } = setupColor(
+      { translationEnabled: true, translationMode: 'dual' },
+      '#0000ff'
+    );
+    active.translatedText = 'translated';
+    const draws: { text: string; color: string }[] = [];
+    mockCtx.fillText.mockImplementation((...args: unknown[]) => {
+      draws.push({ text: String(args[0]), color: mockCtx.fillStyle });
+    });
+    try {
+      internals.renderFrame();
+      expect(draws).toContainEqual({ text: 'body', color: 'rgb(9,9,187)' });
+      expect(draws).toContainEqual({ text: 'translated', color: 'rgb(9,9,187)' });
+    } finally {
+      mockCtx.fillText.mockReset();
+    }
+  });
+});
