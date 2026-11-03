@@ -17,6 +17,7 @@ function manifest() {
           required: ['authenticationInfo', 'browsingActivity', 'websiteContent', 'websiteActivity'],
         },
       },
+      gecko_android: { strict_min_version: '142.0' },
     },
   };
 }
@@ -53,6 +54,20 @@ describe('Firefox data consent contract', () => {
     }
   );
 
+  it.each([undefined, null, '141.99', '142.*', 'not-a-version'])(
+    'rejects a missing or unsupported Android consent floor: %j',
+    (minimum) => {
+      const source = manifest();
+      const browser_specific_settings = {
+        ...source.browser_specific_settings,
+        gecko_android: minimum === undefined ? undefined : { strict_min_version: minimum },
+      };
+      expect(() => assertFirefoxDataConsent({ browser_specific_settings }, 'fixture')).toThrow(
+        'Android 142+'
+      );
+    }
+  );
+
   it.each([
     undefined,
     null,
@@ -80,7 +95,10 @@ describe('Firefox data consent contract', () => {
       data_collection_permissions: permissions,
     };
     expect(() =>
-      assertFirefoxDataConsent({ browser_specific_settings: { gecko } }, 'fixture')
+      assertFirefoxDataConsent(
+        { browser_specific_settings: { ...source.browser_specific_settings, gecko } },
+        'fixture'
+      )
     ).toThrow('data_collection_permissions.required');
   });
 });

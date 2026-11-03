@@ -14,19 +14,28 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function minimumAtLeast(value: unknown, major: number): boolean {
+  return (
+    typeof value === 'string' &&
+    /^\d+\.\d+(?:\.\d+)?$/.test(value) &&
+    Number(value.split('.')[0]) >= major
+  );
+}
+
 /** Keep packaged consent aligned with the functional requests described in PRIVACY.md. */
 export function assertFirefoxDataConsent(manifest: unknown, artifact: string): void {
-  const gecko = record(record(record(manifest)?.browser_specific_settings)?.gecko);
-  const minimum = gecko?.strict_min_version;
+  const settings = record(record(manifest)?.browser_specific_settings);
+  const gecko = record(settings?.gecko);
   if (
     gecko?.id !== 'yt-live-chat-overlay@piesp.github.io' ||
-    typeof minimum !== 'string' ||
-    !/^\d+(?:\.\d+)*$/.test(minimum) ||
-    Number(minimum.split('.')[0]) < 140
+    !minimumAtLeast(gecko.strict_min_version, 140)
   ) {
     throw new Error(
       `${artifact} must declare its Gecko identity and Firefox 140+ built-in consent.`
     );
+  }
+  if (!minimumAtLeast(record(settings?.gecko_android)?.strict_min_version, 142)) {
+    throw new Error(`${artifact} must require Firefox for Android 142+ built-in consent.`);
   }
 
   const permissions = record(gecko.data_collection_permissions);
