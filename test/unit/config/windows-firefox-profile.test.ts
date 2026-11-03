@@ -25,10 +25,12 @@ const {
   FirefoxBidiCommandTimeout,
   FirefoxBidiSession,
   buildFirefoxLaunchArguments,
+  buildFirefoxLaunchEnvironment,
   cleanupFirefoxResources,
   combineFirefoxCloseFailures,
   extensionInstallParameters,
   extensionUninstallParameters,
+  launchFirefoxBidi,
   parseFirefoxProfileEndpoint,
   readOwnedFirefoxEndpoint,
   removeOwnedProfile,
@@ -731,7 +733,6 @@ describe('Windows Firefox installation profile', () => {
       'C:\\task\\.firefox-install-profile-a',
       '--remote-debugging-port',
       '0',
-      '--remote-allow-system-access',
       'about:blank',
     ]);
     expect(
@@ -749,7 +750,6 @@ describe('Windows Firefox installation profile', () => {
       'C:\\task\\.firefox-install-profile-b',
       '--remote-debugging-port',
       '0',
-      '--remote-allow-system-access',
       'about:blank',
     ]);
     expect(
@@ -766,7 +766,6 @@ describe('Windows Firefox installation profile', () => {
       '/tmp/.firefox-install-profile-c',
       '--remote-debugging-port',
       '0',
-      '--remote-allow-system-access',
       'about:blank',
     ]);
     expect(extensionInstallParameters('C:\\task\\dist-extension-firefox')).toEqual({
@@ -781,6 +780,36 @@ describe('Windows Firefox installation profile', () => {
       })
     ).toBe('C:\\Program Files\\Mozilla Firefox\\firefox.exe');
   });
+
+  it('scopes Firefox system access to the spawned child across supported versions', () => {
+    const environment = { MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '0', FIREFOX_FIXTURE: 'preserved' };
+    const before = { ...process.env };
+    expect(buildFirefoxLaunchEnvironment(environment)).toEqual({
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '1',
+      FIREFOX_FIXTURE: 'preserved',
+    });
+    expect(environment.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS).toBe('0');
+    expect(buildFirefoxLaunchEnvironment().MOZ_REMOTE_ALLOW_SYSTEM_ACCESS).toBe('1');
+    expect(process.env).toEqual(before);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'retains startup output and removes the owned profile when Firefox exits before its endpoint',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'yt-firefox-startup-'));
+      temporaryDirectories.push(root);
+      const executablePath = join(root, 'firefox-startup-fixture');
+      await writeFile(
+        executablePath,
+        "#!/bin/sh\nprintf '%s\\n' 'known Firefox startup failure' >&2\nexit 17\n",
+        { mode: 0o700 }
+      );
+      await expect(launchFirefoxBidi({ root, executablePath, headless: true })).rejects.toThrow(
+        'known Firefox startup failure'
+      );
+      expect(await readdir(root)).toEqual(['firefox-startup-fixture']);
+    }
+  );
 
   it('rejects non-public live URLs and returns only categorized error counts', () => {
     expect(normalizeLiveUrls(['https://www.youtube.com/watch?v=public'])).toEqual([

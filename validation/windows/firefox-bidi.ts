@@ -604,9 +604,13 @@ export function buildFirefoxLaunchArguments({
     profileDir,
     '--remote-debugging-port',
     '0',
-    '--remote-allow-system-access',
     'about:blank',
   ];
+}
+
+export function buildFirefoxLaunchEnvironment(environment: NodeJS.ProcessEnv = process.env) {
+  // Firefox 159 removed the CLI switch; the child-scoped environment also supports ESR 140.
+  return { ...environment, MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '1' };
 }
 
 export function extensionInstallParameters(extensionPath: string) {
@@ -1246,6 +1250,7 @@ export async function launchFirefoxBidi({
   assertOwnedProfile(taskRoot, profileDir);
   const ownership: FirefoxOwnership = { executablePath, profileDir, spawnedAt: Date.now() };
   const child = spawn(executablePath, buildFirefoxLaunchArguments({ profileDir, headless }), {
+    env: buildFirefoxLaunchEnvironment(),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: headless,
   });
@@ -1293,6 +1298,14 @@ export async function launchFirefoxBidi({
       await session.close();
     } else {
       await cleanupFirefoxResources({ child, ownership, profileDir, root: taskRoot, socket: null });
+    }
+    if (output.trim()) {
+      throw new Error(
+        `${errorMessage(error)}\nFirefox startup output:\n${output.trim().slice(-8192)}`,
+        {
+          cause: error,
+        }
+      );
     }
     throw error;
   }
