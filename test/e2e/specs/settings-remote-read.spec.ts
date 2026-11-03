@@ -5,7 +5,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { expect, test } from '@playwright/test';
-import { SETTINGS_VERSION } from '@settings/schema';
+import { SETTINGS_VERSION } from '@settings/defaults';
 
 import { createMockWatchHtml } from '../../../validation/windows/profile';
 import { runRemoteReadStatusCase } from '../../../validation/windows/settings-persistence';
