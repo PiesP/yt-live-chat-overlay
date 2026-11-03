@@ -970,33 +970,31 @@ those source identities. Before preparing another upgrade, match the intended
 candidate version and public predecessor to the supported transition in
 [`release-upgrade/upgrade.ts`](release-upgrade/upgrade.ts) for userscripts or
 [`release-upgrade/extension.ts`](release-upgrade/extension.ts) for extensions.
-The current v0.45.9 userscript transition uses public v0.45.8. Download its
+For the v0.46.0 candidate, use the public v0.45.9 userscript. Download
 `yt-live-chat-overlay.user.js` to
-`validation/windows/release-upgrade/public-v0.45.8.user.js` and independently
-verify it against the published v0.45.8 checksum. Place an ignored
-`validation/windows/release-upgrade/input.json` beside it with exactly:
+`validation/windows/release-upgrade/public-v0.45.9.user.js` and independently
+verify it against both the published asset digest and checksum file. Place an
+ignored `validation/windows/release-upgrade/input.json` beside it with exactly:
 
 ```json
 {
   "schemaVersion": 1,
-  "baselineSha256": "57086baac72b02815916edc99dfb679a7eb627a28835e47a2b80ca235448a9a2",
-  "candidateVersion": "0.45.9",
-  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay.user.js"
+  "baselineSha256": "995ef950597c5ed2b6e15f83db4ff666fe7efddfaa3b862e13a18d877e6b08f1",
+  "candidateVersion": "0.46.0",
+  "publishedAssetUrl": "https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay.user.js"
 }
 ```
 
-The digest above matches the published v0.45.8 release asset and its checksum
-file; recheck both against the downloaded bytes before use. Check the selected
-candidate's source and produced bytes separately: the retained v0.45.9
-candidate from #339 is bound to source
-`eb689bb2cf159c57357554d62979b96577d190dd`; building a later maintenance
-HEAD does not recreate that qualification. The earlier public v0.45.7 to
-candidate v0.45.8 example belongs to its historical receipt. Remove or replace
-any ignored selector for that older pair before packaging a new attempt; an
-invalid supplied selector fails preflight rather than selecting fresh install.
+Recheck the digest against the downloaded bytes before use. Bind the selected
+candidate's source and produced bytes separately. Historical upgrade receipts
+retain their original executed sources and do not qualify a later build.
+Remove or replace an ignored selector for an older pair before packaging a new
+attempt; an invalid supplied selector fails preflight rather than selecting a
+fresh install. Supported historical transitions retain their original fixed
+paths and URLs.
 
 The `publishedAssetUrl` identifies the version-specific URL used to retrieve
-the public baseline; it is not that file's `@downloadURL`. Public v0.45.8
+the public baseline; it is not that file's `@downloadURL`. Public v0.45.9
 already has a Latest `@downloadURL`, which the candidate must retain. The existing
 `--installation userscript` invocation then uses the same fresh, owned
 Tampermonkey profile for both versions. It verifies fixed paths, public
@@ -1034,11 +1032,11 @@ publication.
 
 For Chrome or Edge manual extension-update qualification, provide the separate
 ignored `validation/windows/release-upgrade/extension-input.json`. For the
-current v0.45.9 candidate, set `previousVersion` to `0.45.8`,
-`candidateVersion` to `0.45.9`, and `publicAssetUrl` to
-`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip`.
+v0.46.0 candidate, set `previousVersion` to `0.45.9`,
+`candidateVersion` to `0.46.0`, and `publicAssetUrl` to
+`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay-chrome.zip`.
 Place the checksum-verified public ZIP at
-`validation/windows/release-upgrade/public-v0.45.8-chrome/artifact.zip` and its
+`validation/windows/release-upgrade/public-v0.45.9-chrome/artifact.zip` and its
 unpacked files under the adjacent `unpacked` directory. The exact schema and
 fixed paths are defined by `validateExtensionUpgradeInput` in
 [release-upgrade/extension.ts](release-upgrade/extension.ts).

@@ -127,13 +127,13 @@ function archive(files: Record<string, Buffer>, replacement?: { name: string; by
 }
 
 async function makeFixture(
-  previousVersion: '0.45.7' | '0.45.8' = '0.45.7',
-  candidateVersion: '0.45.8' | '0.45.9' = '0.45.8'
+  previousVersion: '0.45.7' | '0.45.8' | '0.45.9' = '0.45.7',
+  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0' = '0.45.8'
 ) {
   const root = await mkdtemp(join(tmpdir(), 'yt-extension-upgrade-'));
   roots.push(root);
-  const publicPath = previousVersion === '0.45.7' ? PUBLIC : SAME_VERSION_PUBLIC;
-  const publicUrl = previousVersion === '0.45.7' ? URL : SAME_VERSION_URL;
+  const publicPath = `validation/windows/release-upgrade/public-v${previousVersion}-chrome`;
+  const publicUrl = `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${previousVersion}/yt-live-chat-overlay-chrome.zip`;
   const baseline = join(root, publicPath, 'unpacked');
   const candidate = join(root, 'dist-extension');
   for (const directory of [baseline, candidate]) {
@@ -423,6 +423,51 @@ describe('optional public Chrome extension update inputs', () => {
     ]) {
       expect(() => validateExtensionUpgradeInput({ ...fixture.input, ...overrides })).toThrow();
     }
+  });
+
+  it('admits public 0.45.9 to candidate 0.46.0 with exact archive and inventory binding', async () => {
+    const fixture = await makeFixture('0.45.9', '0.46.0');
+    const checked = await readExtensionUpgradeInput(fixture.root);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.45.9-to-candidate-0.46.0'
+    );
+    expect(checked?.input.publicArchive.path).toBe(
+      'validation/windows/release-upgrade/public-v0.45.9-chrome/artifact.zip'
+    );
+    expect(checked?.baseline.files['manifest.json']).not.toBe(
+      checked?.candidate.files['manifest.json']
+    );
+    for (const overrides of [
+      { candidateVersion: '0.45.9' },
+      { candidateVersion: '0.46.1' },
+      { previousVersion: '0.45.8' },
+      { publicAssetUrl: SAME_VERSION_URL },
+      {
+        publicArchive: {
+          ...fixture.input.publicArchive,
+          path: `${SAME_VERSION_PUBLIC}/artifact.zip`,
+        },
+      },
+      {
+        previousExtension: {
+          ...fixture.input.previousExtension,
+          path: `${SAME_VERSION_PUBLIC}/unpacked`,
+        },
+      },
+    ]) {
+      expect(() => validateExtensionUpgradeInput({ ...fixture.input, ...overrides })).toThrow();
+    }
+    expect(await readFile('.gitignore', 'utf8')).toContain(
+      '/validation/windows/release-upgrade/public-v0.45.9-chrome/'
+    );
+    await writeFile(
+      join(fixture.root, INPUT),
+      JSON.stringify({
+        ...fixture.input,
+        publicArchive: { ...fixture.input.publicArchive, sha256: '0'.repeat(64) },
+      })
+    );
+    await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow();
   });
 
   it('rejects a same-version update when the actual inventories are identical', async () => {

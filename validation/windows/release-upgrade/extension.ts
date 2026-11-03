@@ -28,6 +28,12 @@ const PUBLIC_RELEASES = {
     baseline: 'validation/windows/release-upgrade/public-v0.45.8-chrome/unpacked',
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay-chrome.zip',
   },
+  '0.45.9': {
+    candidateVersions: ['0.46.0'],
+    archive: 'validation/windows/release-upgrade/public-v0.45.9-chrome/artifact.zip',
+    baseline: 'validation/windows/release-upgrade/public-v0.45.9-chrome/unpacked',
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay-chrome.zip',
+  },
 } as const;
 type PublicVersion = keyof typeof PUBLIC_RELEASES;
 type PublicRelease = (typeof PUBLIC_RELEASES)[PublicVersion];
@@ -73,7 +79,7 @@ const DIRECTORIES = ['icons', 'workers'] as const;
 type ExtensionInput = {
   schemaVersion: 1;
   previousVersion: PublicVersion;
-  candidateVersion: '0.45.8' | '0.45.9';
+  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0';
   publicAssetUrl: PublicRelease['url'];
   publicArchive: { path: PublicRelease['archive']; sha256: string };
   previousExtension: { path: PublicRelease['baseline']; inventorySha256: string };
@@ -114,7 +120,11 @@ export function validateExtensionUpgradeInput(value: unknown): ExtensionInput {
     'candidateExtension',
   ]);
   assert.equal(input.schemaVersion, 1);
-  assert(input.previousVersion === '0.45.7' || input.previousVersion === '0.45.8');
+  assert(
+    input.previousVersion === '0.45.7' ||
+      input.previousVersion === '0.45.8' ||
+      input.previousVersion === '0.45.9'
+  );
   const release = PUBLIC_RELEASES[input.previousVersion];
   assert(
     release.candidateVersions.some((version) => version === input.candidateVersion),

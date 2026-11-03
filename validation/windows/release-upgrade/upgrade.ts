@@ -107,6 +107,11 @@ const PUBLIC_RELEASES = {
     file: `${DIRECTORY}/public-v0.45.8.user.js`,
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.8/yt-live-chat-overlay.user.js',
   },
+  '0.46.0': {
+    baselineVersion: '0.45.9',
+    file: `${DIRECTORY}/public-v0.45.9.user.js`,
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay.user.js',
+  },
 } as const;
 const UPDATE_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js';
@@ -116,7 +121,7 @@ const MAX_SCRIPT_BYTES = 16 * 1024 * 1024;
 
 function publicRelease(candidateVersion: string) {
   assert(
-    candidateVersion === '0.45.8' || candidateVersion === '0.45.9',
+    candidateVersion === '0.45.8' || candidateVersion === '0.45.9' || candidateVersion === '0.46.0',
     'Unexpected candidate version'
   );
   return PUBLIC_RELEASES[candidateVersion];
