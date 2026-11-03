@@ -931,29 +931,51 @@ export async function runManagerUpgrade(
     await fixture.reload({ waitUntil: 'domcontentloaded' });
     result.settingsAfter = await observeSettings(fixture);
     requireRetainedSettings(result.settingsBefore, result.settingsAfter);
+    let candidateSettingsError: unknown;
     if (inputs.candidate.version === '0.46.0') {
       result.activeStage = 'verify-candidate-settings-controls';
       result.candidateSettings = { status: 'incomplete', stage: 'start' };
-      await checkCandidateSettings(
-        fixture,
-        async () => {
-          const readback = await openOwnedWatchFixture(context, managerId, root);
-          try {
-            return await exportSettingsThroughUi(readback);
-          } finally {
-            // Closing the readback tab avoids saving its stale form over the fixture.
-            await readback.close();
-          }
-        },
-        result.candidateSettings
-      );
+      try {
+        await checkCandidateSettings(
+          fixture,
+          async () => {
+            const readback = await openOwnedWatchFixture(context, managerId, root);
+            try {
+              return await exportSettingsThroughUi(readback);
+            } finally {
+              // Closing the readback tab avoids saving its stale form over the fixture.
+              await readback.close();
+            }
+          },
+          result.candidateSettings
+        );
+      } catch (error) {
+        candidateSettingsError =
+          error instanceof Error
+            ? error
+            : new Error('Candidate settings check failed', { cause: error });
+      }
     }
-    result.settingsRestoredForFixture = await setSettingsThroughUi(
-      fixture,
-      result.settingsOriginal,
-      managerId,
-      root
-    );
+    result.activeStage = 'restore-fixture-settings-through-ui';
+    try {
+      result.settingsRestoredForFixture = await setSettingsThroughUi(
+        fixture,
+        result.settingsOriginal,
+        managerId,
+        root
+      );
+    } catch (error) {
+      if (candidateSettingsError)
+        throw new AggregateError(
+          [candidateSettingsError, error],
+          'Candidate settings and fixture restoration failed'
+        );
+      throw error;
+    }
+    if (candidateSettingsError) {
+      result.activeStage = 'verify-candidate-settings-controls';
+      throw candidateSettingsError;
+    }
     result.activeStage = 'complete';
     result.status = 'passed';
   } catch (error) {

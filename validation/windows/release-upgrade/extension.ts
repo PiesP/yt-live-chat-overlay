@@ -984,26 +984,47 @@ export async function runExtensionUpgrade({
       selected,
       'Fresh candidate page did not show retained preference'
     );
+    let candidateSettingsError: unknown;
     if (verified.input.candidateVersion === '0.46.0') {
       receipt.activeStage = 'verify-candidate-settings-controls';
       receipt.candidateSettings = { status: 'incomplete', stage: 'start' };
       const settingsStoragePage = candidateExtensionPage;
-      await checkCandidateSettings(
-        candidatePage,
-        () => readExtensionStoredSettings(settingsStoragePage),
-        receipt.candidateSettings
-      );
+      try {
+        await checkCandidateSettings(
+          candidatePage,
+          () => readExtensionStoredSettings(settingsStoragePage),
+          receipt.candidateSettings
+        );
+      } catch (error) {
+        candidateSettingsError =
+          error instanceof Error
+            ? error
+            : new Error('Candidate settings check failed', { cause: error });
+      }
     }
     receipt.activeStage = 'restore-fixture-settings-through-ui';
-    await setFontSizeThroughUi(candidatePage, original);
-    await waitForStoredFont(candidateExtensionPage, original);
-    await candidatePage.reload({ waitUntil: 'domcontentloaded' });
-    receipt.restoredFontSize = await settingsFontSize(candidatePage);
-    assert.equal(
-      receipt.restoredFontSize,
-      original,
-      'Candidate fixture preference was not restored through UI'
-    );
+    try {
+      await setFontSizeThroughUi(candidatePage, original);
+      await waitForStoredFont(candidateExtensionPage, original);
+      await candidatePage.reload({ waitUntil: 'domcontentloaded' });
+      receipt.restoredFontSize = await settingsFontSize(candidatePage);
+      assert.equal(
+        receipt.restoredFontSize,
+        original,
+        'Candidate fixture preference was not restored through UI'
+      );
+    } catch (error) {
+      if (candidateSettingsError)
+        throw new AggregateError(
+          [candidateSettingsError, error],
+          'Candidate settings and fixture restoration failed'
+        );
+      throw error;
+    }
+    if (candidateSettingsError) {
+      receipt.activeStage = 'verify-candidate-settings-controls';
+      throw candidateSettingsError;
+    }
     assert.equal(
       (await extensionInventory(installedPath)).sha256,
       verified.candidate.sha256,

@@ -8,7 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import type { Page } from '@playwright/test';
 
-type ExportedSettings = Record<string, unknown> & {
+export type ExportedSettings = Record<string, unknown> & {
   _version: number;
   superChatLayout: 'stacked' | 'wide';
   opacity: number;
@@ -112,18 +112,31 @@ async function importSettingsThroughUi(page: Page, settings: ExportedSettings): 
   await closeSettings(page);
 }
 
-async function waitForStored(
+export async function waitForStoredSettings(
   readStored: () => Promise<unknown>,
-  expected: ExportedSettings
+  expected: ExportedSettings,
+  timeoutMs = 15_000
 ): Promise<void> {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + timeoutMs;
+  let lastState = 'not-read';
   do {
-    const actual = await readStored();
-    validateExport(actual);
-    if (isDeepStrictEqual(actual, expected)) return;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    try {
+      const actual = await readStored();
+      if (isDeepStrictEqual(actual, expected)) return;
+      try {
+        validateExport(actual);
+        lastState = 'different';
+      } catch {
+        lastState = 'incomplete-or-invalid';
+      }
+    } catch {
+      lastState = 'read-failed';
+    }
+    const remaining = deadline - Date.now();
+    if (remaining > 0)
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, remaining)));
   } while (Date.now() < deadline);
-  assert.fail('Full settings export did not reach persistent storage');
+  assert.fail(`Full settings export did not reach persistent storage (${lastState})`);
 }
 
 async function reloadAndCompare(page: Page, expected: ExportedSettings): Promise<void> {
@@ -160,6 +173,8 @@ export async function checkCandidateSettings(
   let original: ExportedSettings | undefined;
   let changed = false;
   let primaryError: unknown;
+  receipt.exportImportVerified = false;
+  receipt.restorationVerified = false;
   try {
     receipt.stage = 'export-original';
     original = await exportSettingsThroughUi(page);
@@ -194,34 +209,44 @@ export async function checkCandidateSettings(
       opacity: 0.5,
       outline: { ...original.outline, opacity: 0 },
     };
-    await waitForStored(readStored, wide);
+    await waitForStoredSettings(readStored, wide);
     await reloadAndCompare(page, wide);
     receipt.selectedLayout = 'wide';
     receipt.selectedSha256 = digest(wide);
     receipt.stage = 'import-original-through-ui';
     await importSettingsThroughUi(page, original);
-    await waitForStored(readStored, original);
+    await waitForStoredSettings(readStored, original);
     await reloadAndCompare(page, original);
     receipt.stage = 'import-selected-through-ui';
     await importSettingsThroughUi(page, wide);
-    await waitForStored(readStored, wide);
+    await waitForStoredSettings(readStored, wide);
     await reloadAndCompare(page, wide);
     receipt.exportImportVerified = true;
   } catch (error) {
-    primaryError = error;
+    primaryError =
+      error instanceof Error
+        ? error
+        : new Error('Candidate settings check failed', { cause: error });
   } finally {
     if (original && changed) {
       try {
         receipt.stage = 'restore-original-through-ui';
         await importSettingsThroughUi(page, original);
-        await waitForStored(readStored, original);
+        await waitForStoredSettings(readStored, original);
         await reloadAndCompare(page, original);
         receipt.restoredSha256 = digest(original);
         receipt.restorationVerified = true;
       } catch (error) {
+        const restorationError =
+          error instanceof Error
+            ? error
+            : new Error('Candidate settings restoration failed', { cause: error });
         primaryError = primaryError
-          ? new AggregateError([primaryError, error], 'Candidate settings and restoration failed')
-          : error;
+          ? new AggregateError(
+              [primaryError, restorationError],
+              'Candidate settings and restoration failed'
+            )
+          : restorationError;
       }
     }
   }
