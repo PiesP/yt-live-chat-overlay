@@ -15,6 +15,7 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
   const inputs = join(root, 'validation/windows/inputs');
   const settings = join(inputs, 'settings-persistence.json');
   const opacity = join(inputs, 'settings-opacity.json');
+  const locales = join(inputs, 'locale-domains.json');
   const reload = join(inputs, 'reload-feedback.json');
   const translation = join(inputs, 'translation-runtime.json');
   const viewing = join(inputs, 'viewing-experience.json');
@@ -22,6 +23,13 @@ test('focused Windows selectors dispatch by their own file and reject ambiguity'
   try {
     await mkdir(inputs, { recursive: true });
     assert.equal(await readFocusedScenario(root), null);
+
+    await writeFile(locales, '{"scenario":"locale-domains"}');
+    assert.equal(await readFocusedScenario(root), 'locale-domains');
+    await writeFile(settings, '{"scenario":"settings-persistence"}');
+    await assert.rejects(readFocusedScenario(root), /mutually exclusive/u);
+    await rm(settings);
+    await rm(locales);
 
     await writeFile(opacity, '{"scenario":"settings-opacity"}');
     assert.equal(await readFocusedScenario(root), 'settings-opacity');

@@ -1171,3 +1171,36 @@ describe('author color picker round trip', () => {
     }
   });
 });
+
+describe('language domain native selectors', () => {
+  it.each(['language', 'translationSource', 'translationTarget'] as const)(
+    'round trips every persisted %s option through the real form',
+    (key) => {
+      const form = new SettingsUiForm(() => makeDefaults());
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      document.body.appendChild(modal);
+      form.setModal(modal);
+      try {
+        const select = modal.querySelector<HTMLSelectElement>(`select[name="${key}"]`);
+        if (!select) throw new Error('Language selector is unavailable');
+        expect(Array.from(select.options, (option) => option.value)).toEqual(
+          key === 'translationTarget'
+            ? ['auto', 'ko', 'en', 'ja', 'es', 'zh-CN', 'ar']
+            : ['auto', 'en', 'ko', 'ja', 'es', 'zh-CN', 'ar']
+        );
+        for (const value of ['auto', 'en', 'ko', 'ja', 'es', 'zh-CN', 'ar'] as const) {
+          const settings = makeDefaults({ [key]: value });
+          form.populateForm(settings);
+          expect(select.value).toBe(value);
+          expect(form.collectSettings()[key]).toBe(value);
+          select.value = value === 'ar' ? 'auto' : 'ar';
+          expect(form.collectSettings()[key]).toBe(value === 'ar' ? 'auto' : 'ar');
+        }
+      } finally {
+        form.destroy();
+        modal.remove();
+      }
+    }
+  );
+});

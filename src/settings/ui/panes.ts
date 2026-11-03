@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import {
+  INTERFACE_LANGUAGE_OPTIONS,
+  TRANSLATION_SOURCE_OPTIONS,
+  TRANSLATION_TARGET_OPTIONS,
+} from '@i18n/language-domains';
+
 // ── Field & pane type definitions ─────────────────────────────────────────────
 
 interface BaseField {
@@ -552,15 +558,7 @@ export const PANES: PaneDef[] = [
           sel(
             'translation.language',
             'language',
-            [
-              ['auto', 'translation.languageAuto'],
-              ['en', 'English'],
-              ['ko', '한국어'],
-              ['ja', '日本語'],
-              ['es', 'Español'],
-              ['zh-CN', '中文'],
-              ['ar', 'العربية'],
-            ],
+            INTERFACE_LANGUAGE_OPTIONS,
             'translation.languageDesc'
           ),
         ],
@@ -581,29 +579,13 @@ export const PANES: PaneDef[] = [
           sel(
             'translation.source',
             'translationSource',
-            [
-              ['auto', 'translation.sourceAuto'],
-              ['en', 'English'],
-              ['ko', '한국어'],
-              ['ja', '日本語'],
-              ['es', 'Español'],
-              ['zh-CN', '中文'],
-              ['ar', 'العربية'],
-            ],
+            TRANSLATION_SOURCE_OPTIONS,
             "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection."
           ),
           sel(
             'translation.target',
             'translationTarget',
-            [
-              ['auto', 'translation.languageAuto'],
-              ['ko', '한국어'],
-              ['en', 'English'],
-              ['ja', '日本語'],
-              ['es', 'Español'],
-              ['zh-CN', '中文'],
-              ['ar', 'العربية'],
-            ],
+            TRANSLATION_TARGET_OPTIONS,
             'translation.sourceDesc'
           ),
           sel(

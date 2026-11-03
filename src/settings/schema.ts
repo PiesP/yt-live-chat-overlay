@@ -6,14 +6,16 @@ import type {
   BacklogMode,
   DanmakuMode,
   FontWeight,
-  LanguageSetting,
   LogLevel,
   OverlaySettings,
   TranslationMode,
   TranslationService,
-  TranslationSource,
-  TranslationTarget,
 } from '@app-types';
+import {
+  isLanguageSetting,
+  isTranslationSource,
+  isTranslationTarget,
+} from '@i18n/language-domains';
 import { isHexColor } from '@renderer/color-utils';
 import { AUTHOR_BACKGROUND_ALPHA_HEX, DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
 import { resolveLimits, resolveOutlineLimits } from '@settings/limits';
@@ -89,34 +91,7 @@ const AUTHOR_RATE_LIMIT_VALUES = [
   'normal',
   'strict',
 ] as const satisfies readonly AuthorRateLimitPreset[];
-const LANGUAGE_VALUES = [
-  'auto',
-  'en',
-  'ko',
-  'ja',
-  'es',
-  'zh-CN',
-  'ar',
-] as const satisfies readonly LanguageSetting[];
 const TRANSLATION_SERVICE_VALUES = ['auto', 'off'] as const satisfies readonly TranslationService[];
-const TRANSLATION_TARGET_VALUES = [
-  'auto',
-  'en',
-  'ko',
-  'ja',
-  'es',
-  'zh-CN',
-  'ar',
-] as const satisfies readonly TranslationTarget[];
-const TRANSLATION_SOURCE_VALUES = [
-  'auto',
-  'en',
-  'ko',
-  'ja',
-  'es',
-  'zh-CN',
-  'ar',
-] as const satisfies readonly TranslationSource[];
 const TRANSLATION_MODE_VALUES = ['dual', 'replace'] as const satisfies readonly TranslationMode[];
 const FONT_WEIGHT_VALUES = ['normal', 'bold'] as const satisfies readonly FontWeight[];
 const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly LogLevel[];
@@ -186,11 +161,11 @@ const STRING_VALIDATORS: Record<ScalarKeyOf<string>, (v: string) => boolean> = {
   fontWeight: (v) => FONT_WEIGHT_VALUES.includes(v as FontWeight),
   fontFamily: (v) => isSafeFontFamily(v),
   authorRateLimit: (v) => AUTHOR_RATE_LIMIT_VALUES.includes(v as AuthorRateLimitPreset),
-  language: (v) => LANGUAGE_VALUES.includes(v as LanguageSetting),
+  language: isLanguageSetting,
   translationService: (v) => TRANSLATION_SERVICE_VALUES.includes(v as TranslationService),
-  translationTarget: (v) => TRANSLATION_TARGET_VALUES.includes(v as TranslationTarget),
+  translationTarget: isTranslationTarget,
   translationMode: (v) => TRANSLATION_MODE_VALUES.includes(v as TranslationMode),
-  translationSource: (v) => TRANSLATION_SOURCE_VALUES.includes(v as TranslationSource),
+  translationSource: isTranslationSource,
 };
 
 type ScalarKeyOf<T> = {
