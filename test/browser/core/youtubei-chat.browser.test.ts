@@ -3,6 +3,7 @@ import {
   buildWatchUrl,
   fetchWatchHtml,
   findLiveChatRenderer,
+  fetchReplayChat,
   getVideoIdFromUrl,
   MAX_WATCH_HTML_BYTES,
   WATCH_HTML_TIMEOUT_MS,
@@ -155,6 +156,70 @@ describe('bootstrapChatSession page identity', () => {
         },
       },
     },
+  });
+
+  it('sends bounded protocol context without device, region or browser-derived metadata', async () => {
+    vi.stubGlobal('ytcfg', {
+      data_: {
+        INNERTUBE_API_KEY: 'functional-key',
+        VISITOR_DATA: 'functional-session',
+        INNERTUBE_CONTEXT: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '1.2.3',
+            hl: 'ko',
+            timeZone: 'private-time-zone',
+            utcOffsetMinutes: 999,
+            userAgent: 'private-browser',
+            deviceModel: 'private-device',
+            gl: 'private-region',
+            arbitraryFutureField: 'private-value',
+          },
+        },
+      },
+    });
+    vi.stubGlobal('ytInitialData', pageData('privacy-video', 'functional-continuation'));
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response('{}'))
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await bootstrapChatSession(undefined, buildWatchUrl('privacy-video'));
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready') throw new Error(result.reason);
+    await fetchReplayChat(result.data, result.data.initialContinuation, 1234);
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.credentials).toBe('include');
+    expect(init?.referrerPolicy).toBe('origin');
+    expect(init?.headers).toMatchObject({ 'x-goog-visitor-id': 'functional-session' });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      context: { client: { clientName: 'WEB', clientVersion: '1.2.3', hl: 'ko' } },
+      continuation: 'functional-continuation',
+      currentPlayerState: { playerOffsetMs: '1234' },
+    });
+  });
+
+  it('uses protocol defaults without synthesizing browser locale or timezone fields', async () => {
+    const priorLanguage = document.documentElement.lang;
+    document.documentElement.lang = '';
+    try {
+      vi.stubGlobal('ytcfg', { data_: { INNERTUBE_CONTEXT_CLIENT_VERSION: 'fallback-version' } });
+      vi.stubGlobal('ytInitialData', pageData('fallback-video'));
+      const result = await bootstrapChatSession(undefined, buildWatchUrl('fallback-video'));
+      expect(result).toMatchObject({
+        status: 'ready',
+        data: { clientContext: { clientName: 'WEB', clientVersion: 'fallback-version', hl: 'en' } },
+      });
+      if (result.status !== 'ready') throw new Error(result.reason);
+      expect(Object.keys(result.data.clientContext).sort()).toEqual([
+        'clientName',
+        'clientVersion',
+        'hl',
+      ]);
+    } finally {
+      document.documentElement.lang = priorLanguage;
+    }
   });
 
   it.each([
@@ -343,6 +408,14 @@ describe('fetchWatchHtml', () => {
     );
 
     await expect(fetchWatchHtml('video-id')).rejects.toBeInstanceOf(ResponseTooLargeError);
+    expect(fetch).toHaveBeenCalledWith(
+      buildWatchUrl('video-id'),
+      expect.objectContaining({
+        credentials: 'include',
+        mode: 'same-origin',
+        referrerPolicy: 'origin',
+      })
+    );
     expect(cancel).toHaveBeenCalledOnce();
   });
 

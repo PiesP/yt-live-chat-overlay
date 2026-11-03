@@ -9,7 +9,6 @@ import {
   findFirstNestedRecordByKey,
   findFirstNestedStringByKey,
   getNestedRecord,
-  getNumber,
   getString,
   isRecord,
   type JsonObject,
@@ -133,7 +132,7 @@ export const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Pro
       credentials: 'include',
       cache: 'no-store',
       mode: 'same-origin',
-      referrerPolicy: 'origin-when-cross-origin',
+      referrerPolicy: 'origin',
       headers: {
         accept: 'text/html,application/json',
       },
@@ -306,33 +305,16 @@ export function findLiveChatRenderer(initialData: JsonObject): JsonObject | null
 const resolveApiKey = (ytcfg: JsonObject): string | undefined =>
   getString(ytcfg.INNERTUBE_API_KEY) ?? findFirstNestedStringByKey(ytcfg, 'innertubeApiKey');
 
-const resolveClientContext = (ytcfg: JsonObject): JsonObject | null => {
-  const clientContext = getNestedRecord(ytcfg, ['INNERTUBE_CONTEXT', 'client']) ?? {};
-  const client = { ...clientContext };
-
-  if (!getString(client.clientName)) {
-    client.clientName = 'WEB';
-  }
-
-  if (!getString(client.clientVersion)) {
-    const version = getString(ytcfg.INNERTUBE_CONTEXT_CLIENT_VERSION);
-    if (version) {
-      client.clientVersion = version;
-    }
-  }
-
-  if (!getString(client.hl)) {
-    client.hl = document.documentElement.lang || navigator.language || 'en';
-  }
-
-  if (!getString(client.timeZone)) {
-    client.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  }
-
-  if (getNumber(client.utcOffsetMinutes) === undefined) {
-    client.utcOffsetMinutes = -new Date().getTimezoneOffset();
-  }
-
+const resolveClientContext = (ytcfg: JsonObject): JsonObject => {
+  const pageClient = getNestedRecord(ytcfg, ['INNERTUBE_CONTEXT', 'client']) ?? {};
+  // Send protocol identity and page language without copying device/location metadata.
+  const client: JsonObject = {
+    clientName: getString(pageClient.clientName) ?? 'WEB',
+    hl: getString(pageClient.hl) ?? (document.documentElement.lang || 'en'),
+  };
+  const version =
+    getString(pageClient.clientVersion) ?? getString(ytcfg.INNERTUBE_CONTEXT_CLIENT_VERSION);
+  if (version) client.clientVersion = version;
   return client;
 };
 
@@ -436,12 +418,6 @@ export async function bootstrapChatSession(
     }
 
     const clientContext = resolveClientContext(ytcfg);
-    if (!clientContext) {
-      return {
-        status: 'retryable',
-        reason: 'Could not build Innertube client context',
-      };
-    }
 
     const apiKey = resolveApiKey(ytcfg);
     const clientVersionHeader =
@@ -478,7 +454,7 @@ export async function bootstrapChatSession(
 const createInnertubeHeaders = (data: ChatBootstrapData): Record<string, string> => {
   const headers: Record<string, string> = {
     accept: '*/*',
-    'accept-language': document.documentElement.lang || navigator.language || 'en',
+    'accept-language': document.documentElement.lang || 'en',
     'cache-control': 'no-store',
     'content-type': 'application/json',
     pragma: 'no-cache',
@@ -557,7 +533,7 @@ const fetchChatEndpoint = async (
         credentials: 'include',
         cache: 'no-store',
         mode: 'same-origin',
-        referrerPolicy: 'origin-when-cross-origin',
+        referrerPolicy: 'origin',
         headers: createInnertubeHeaders(data),
         body: JSON.stringify(
           buildInnertubeBody(

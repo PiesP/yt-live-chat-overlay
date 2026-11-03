@@ -78,7 +78,7 @@ spacing rules.
 | --- | --- |
 | Userscript | Current desktop browsers supported by Tampermonkey or Violentmonkey |
 | Chromium extension | Chrome/Chromium 116+ developer mode |
-| Firefox extension | Firefox 128+ technical minimum; temporary developer installation |
+| Firefox extension | Firefox 140+ with built-in data consent; temporary developer installation |
 
 Translation support is detected at runtime and is independent of these browser
 floors. Translation requires the browser's built-in Translator API and support
@@ -88,9 +88,9 @@ Unicode heuristics. The browser may download a required language model or
 language pack. Without Translator, the overlay continues to work without
 translation.
 
-Firefox 128 is the extension's technical compatibility floor, not a claim that
-Firefox 128 remains a currently serviced ESR. Use a currently supported Firefox
-release for normal use and release validation.
+The Firefox extension requires the browser's built-in data consent introduced in
+Firefox 140. See [Privacy](./PRIVACY.md#firefox-data-consent) for the declared data types.
+Use a currently supported Firefox release for normal use and release validation.
 
 ## Privacy and security
 

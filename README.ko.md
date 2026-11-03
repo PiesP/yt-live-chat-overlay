@@ -79,7 +79,7 @@ YouTube 페이지의 채팅 요청을 관찰하기 위해 `unsafeWindow` 권한�
 | --- | --- |
 | 사용자 스크립트 | Tampermonkey 또는 Violentmonkey가 지원하는 최신 데스크톱 브라우저 |
 | Chromium 확장 프로그램 | Chrome/Chromium 116+ 개발자 모드 |
-| Firefox 확장 프로그램 | Firefox 128+ 기술적 최소 버전, 임시 개발자 설치 |
+| Firefox 확장 프로그램 | 내장 데이터 동의를 지원하는 Firefox 140+, 임시 개발자 설치 |
 
 번역 지원 여부는 실행 중에 감지되며 위 브라우저 최소 버전과는 별개입니다.
 번역하려면 브라우저에 내장된 Translator API가 있고 선택한 언어 쌍을 지원해야
@@ -88,9 +88,9 @@ YouTube 페이지의 채팅 요청을 관찰하기 위해 `unsafeWindow` 권한�
 브라우저가 필요한 언어 모델이나 언어 팩을 다운로드할 수 있습니다. Translator를
 사용할 수 없어도 오버레이는 번역 없이 계속 작동합니다.
 
-Firefox 128은 확장 프로그램의 기술적 호환성 최소 버전이며, Firefox 128이 현재
-지원되는 ESR이라는 뜻은 아닙니다. 일반 사용과 릴리스 검증에는 현재 지원되는
-Firefox 릴리스를 사용하세요.
+Firefox 확장 프로그램은 Firefox 140부터 제공되는 내장 데이터 동의 기능을 사용합니다.
+선언된 데이터 유형은 [개인정보 보호](./PRIVACY.md#firefox-data-consent)를 참고하세요.
+일반 사용과 릴리스 검증에는 현재 지원되는 Firefox 릴리스를 사용하세요.
 
 ## 개인정보 보호 및 보안
 

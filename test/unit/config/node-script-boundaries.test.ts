@@ -198,6 +198,10 @@ describe('Node script boundaries', () => {
     const directory = fixtureRoot();
     mkdirSync(join(directory, 'scripts/check'), { recursive: true });
     copyFileSync(
+      join(root, 'scripts/check/firefox-manifest.ts'),
+      join(directory, 'scripts/check/firefox-manifest.ts')
+    );
+    copyFileSync(
       join(root, 'scripts/check/artifacts.ts'),
       join(directory, 'scripts/check/artifacts.ts')
     );
@@ -219,6 +223,11 @@ describe('Node script boundaries', () => {
 
   it('rejects an invalid direct release request before creating a bundle', () => {
     const directory = fixtureRoot();
+    mkdirSync(join(directory, 'scripts/check'), { recursive: true });
+    copyFileSync(
+      join(root, 'scripts/check/firefox-manifest.ts'),
+      join(directory, 'scripts/check/firefox-manifest.ts')
+    );
     mkdirSync(join(directory, 'scripts/release'), { recursive: true });
     copyFileSync(
       join(root, 'scripts/release/prepare.ts'),

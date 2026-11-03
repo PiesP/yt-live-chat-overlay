@@ -25,6 +25,11 @@ function createReleaseFixture(): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'yt-overlay-release-'));
   temporaryRoots.push(fixtureRoot);
   mkdirSync(join(fixtureRoot, 'scripts', 'release'), { recursive: true });
+  mkdirSync(join(fixtureRoot, 'scripts', 'check'), { recursive: true });
+  copyFileSync(
+    join(root, 'scripts', 'check', 'firefox-manifest.ts'),
+    join(fixtureRoot, 'scripts', 'check', 'firefox-manifest.ts')
+  );
   mkdirSync(join(fixtureRoot, 'dist'), { recursive: true });
   mkdirSync(join(fixtureRoot, 'dist-extension'), { recursive: true });
   mkdirSync(join(fixtureRoot, 'dist-extension-firefox'), { recursive: true });
@@ -78,7 +83,10 @@ function createReleaseFixture(): string {
   writeFileSync(join(fixtureRoot, 'dist-extension', 'manifest.json'), '{"version":"1.2.3"}\n');
   writeFileSync(
     join(fixtureRoot, 'dist-extension-firefox', 'manifest.json'),
-    '{"version":"1.2.3"}\n'
+    JSON.stringify({
+      ...JSON.parse(readFileSync(join(root, 'extension', 'manifest.firefox.json'), 'utf8')),
+      version: '1.2.3',
+    })
   );
   for (const target of ['dist-extension', 'dist-extension-firefox']) {
     mkdirSync(join(fixtureRoot, target, 'workers'), { recursive: true });
@@ -149,6 +157,33 @@ afterEach(() => {
 });
 
 describe('release preparation artifact versions', () => {
+  it.each(['missing', 'none', 'old-firefox'])(
+    'preserves the prior bundle when Firefox consent is %s',
+    (mutation) => {
+      const fixtureRoot = createReleaseFixture();
+      const manifestPath = join(fixtureRoot, 'dist-extension-firefox', 'manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      const gecko = manifest.browser_specific_settings.gecko;
+      if (mutation === 'missing') delete gecko.data_collection_permissions;
+      else if (mutation === 'none') gecko.data_collection_permissions = { required: ['none'] };
+      else gecko.strict_min_version = '128.0';
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      const previous = join(fixtureRoot, 'release-bundle', 'release', 'retained.zip');
+      mkdirSync(join(fixtureRoot, 'release-bundle', 'release'), { recursive: true });
+      const bytes = Buffer.from([0, 255, 10, 42]);
+      writeFileSync(previous, bytes);
+
+      const result = runPrepare(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        mutation === 'old-firefox' ? 'Firefox 140+' : 'data_collection_permissions'
+      );
+      expect(readFileSync(previous)).toEqual(bytes);
+      expect(readdirSync(join(fixtureRoot, 'release-bundle', 'release'))).toEqual(['retained.zip']);
+    }
+  );
+
   it.each([
     ['missing', undefined, 'CHANGELOG.md'],
     ['unmatched', '# Changelog\n\n## [1.2.2]\n\n- Old release.\n', 'has no entry'],
@@ -189,6 +224,14 @@ describe('release preparation artifact versions', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Prepared release-bundle/ for v1.2.3');
     const releaseDirectory = join(fixtureRoot, 'release-bundle', 'release');
+    const zippedManifest = execFileSync(
+      'unzip',
+      ['-p', join(releaseDirectory, 'yt-live-chat-overlay-firefox.zip'), 'manifest.json'],
+      { encoding: 'utf8' }
+    );
+    expect(zippedManifest).toBe(
+      readFileSync(join(fixtureRoot, 'dist-extension-firefox', 'manifest.json'), 'utf8')
+    );
     const metadata = JSON.parse(readFileSync(join(releaseDirectory, 'metadata.json'), 'utf8')) as {
       commit: string;
       version: string;

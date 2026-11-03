@@ -13,9 +13,9 @@ import {
 import { join, resolve } from 'node:path';
 
 import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit.ts';
+import { assertFirefoxDataConsent } from './firefox-manifest.ts';
 
 interface ExtensionManifest {
-  browser_specific_settings?: { gecko?: { id?: string; strict_min_version?: string } };
   content_scripts?: Array<{ js?: string[]; world?: string }>;
   background?: { service_worker?: string; scripts?: string[] };
   permissions?: string[];
@@ -140,10 +140,7 @@ function checkFirefoxContract(): void {
   const manifest = JSON.parse(
     readFileSync(join(directory, 'manifest.json'), 'utf8')
   ) as ExtensionManifest;
-  const gecko = manifest.browser_specific_settings?.gecko;
-  if (!gecko?.id || !gecko.strict_min_version) {
-    throw new Error(`${relativeDirectory}/manifest.json is missing the Gecko identity contract.`);
-  }
+  assertFirefoxDataConsent(manifest, `${relativeDirectory}/manifest.json`);
   if (!manifest.permissions?.includes('storage') || !manifest.permissions.includes('menus')) {
     throw new Error(`${relativeDirectory}/manifest.json is missing Firefox runtime permissions.`);
   }
