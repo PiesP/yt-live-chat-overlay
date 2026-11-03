@@ -885,6 +885,14 @@ uncontrolled, so a stream with no accessible chat is recorded as unverified. The
 structured observation records only chat counts and fingerprints. It does not
 retain raw chat text.
 
+If the task-owned natural Chrome launch fails, its private
+`natural-chrome-launch-result.json` retains the last 16 existing fixed-port
+inspections with stage, listener rows and bounded CIM fields, plus the child
+state, discovered browser version, and at most 64 KiB of Chrome stderr. A failed
+inspection retains its bounded error and has no listener or CIM snapshot. The
+receipt has a 192 KiB cap. An absent listener still fails before CDP connects;
+the record diagnoses that boundary without establishing why Chrome lost it.
+
 Conditional fixture fields need their execution context: `paidCardInkContained:
 false` does not itself mean the installed Worker fixture failed when the
 main-renderer-only pixel probe was not run and its observation is `null`.

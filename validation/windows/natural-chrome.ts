@@ -3,6 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join, win32 } from 'node:path';
@@ -31,6 +32,9 @@ const FIXED_DEBUG_PORT = 27_683;
 const VERSION_MAX_BYTES = 4096;
 const VERSION_TIMEOUT_MS = 3_000;
 const PORT_INSPECT_TIMEOUT_MS = 3_000;
+const FAILURE_PORT_OBSERVATIONS = 16;
+const FAILURE_LISTENER_ROWS = 8;
+const FAILURE_RECEIPT_MAX_BYTES = 192 * 1024;
 type ChildState = { spawnError: Error | null };
 type ChildStatus = {
   exitCode: number | null;
@@ -115,6 +119,85 @@ type PortInspection = {
   process: WindowsProcessRecord | null;
 };
 type InspectPort = (processId?: number) => Promise<PortInspection>;
+
+function boundedEvidenceText(value: unknown, limit: number): string | null {
+  return typeof value === 'string' ? value.slice(0, limit) : null;
+}
+
+function boundedEvidenceScalar(value: unknown): string | number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  return boundedEvidenceText(value, 128);
+}
+
+/** Retain the existing fixed-port inspections without adding a new OS query. */
+export function createNaturalPortRecorder(
+  inspectPort: InspectPort = inspectFixedPort,
+  now: () => number = Date.now
+) {
+  let stage = 'fixed-port-preflight';
+  const observations: Array<Record<string, unknown>> = [];
+  const retain = (observation: Record<string, unknown>) => {
+    observations.push(observation);
+    if (observations.length > FAILURE_PORT_OBSERVATIONS) observations.shift();
+  };
+  return {
+    setStage(value: string) {
+      stage = value;
+    },
+    async inspect(processId?: number): Promise<PortInspection> {
+      let snapshot: PortInspection;
+      try {
+        snapshot = await inspectPort(processId);
+      } catch (error) {
+        retain({
+          stage: boundedEvidenceText(stage, 64),
+          atEpochMs: now(),
+          requestedProcessId: processId ?? null,
+          listenerCount: null,
+          listeners: null,
+          process: null,
+          inspectionError: {
+            name: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
+            message: boundedEvidenceText(error instanceof Error ? error.message : error, 1024),
+          },
+        });
+        throw error;
+      }
+      const listeners = Array.isArray(snapshot.listeners) ? snapshot.listeners : [];
+      const process = snapshot.process;
+      retain({
+        stage: boundedEvidenceText(stage, 64),
+        atEpochMs: now(),
+        requestedProcessId: processId ?? null,
+        listenerCount: listeners.length,
+        listenersTruncated: listeners.length > FAILURE_LISTENER_ROWS,
+        listeners: listeners.slice(0, FAILURE_LISTENER_ROWS).map((listener) => ({
+          localAddress: boundedEvidenceText(listener?.localAddress, 128),
+          localPort: boundedEvidenceScalar(listener?.localPort),
+          state: boundedEvidenceText(listener?.state, 32),
+          owningProcess: boundedEvidenceScalar(listener?.owningProcess),
+        })),
+        process: process
+          ? {
+              ProcessId: boundedEvidenceScalar(process.ProcessId),
+              CreationDate: boundedEvidenceText(process.CreationDate, 128),
+              ExecutablePath: boundedEvidenceText(process.ExecutablePath, 512),
+              CommandLine: boundedEvidenceText(process.CommandLine, 2048),
+              commandLineTruncated:
+                typeof process.CommandLine === 'string' && process.CommandLine.length > 2048,
+              commandLineSha256:
+                typeof process.CommandLine === 'string'
+                  ? createHash('sha256').update(process.CommandLine).digest('hex')
+                  : null,
+            }
+          : null,
+      });
+      return snapshot;
+    },
+    observations: () => observations.slice(),
+    stage: () => stage,
+  };
+}
 
 function powershellExecutable(): string {
   const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
@@ -588,7 +671,8 @@ export async function launchOwnedNaturalChrome({
   requireAutoplayGesture?: boolean;
 }) {
   const discovered = await discoverInstalledChrome(chromium, root, output, checkpoint);
-  await assertFixedPortUnused();
+  const portEvidence = createNaturalPortRecorder();
+  await assertFixedPortUnused({ inspectPort: portEvidence.inspect });
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let child: ReturnType<typeof spawn>;
   try {
@@ -621,6 +705,7 @@ export async function launchOwnedNaturalChrome({
   });
 
   let browser: Browser | undefined;
+  let attachedBrowserVersion: string | null = null;
   let browserCdp: CDPSession | undefined;
   let browserProcessId: number | undefined;
   let browserProcessIdentity: ChromeProcessIdentity | undefined;
@@ -635,15 +720,21 @@ export async function launchOwnedNaturalChrome({
     browserProcessId = browserProcessIdentity.processId;
     await checkpoint('natural-launch:process-identity', 'after');
     await checkpoint('natural-launch:devtools-endpoint', 'before');
-    const endpoint = await readOwnedFixedPortEndpoint(child, childState, browserProcessIdentity);
+    portEvidence.setStage('devtools-endpoint');
+    const endpoint = await readOwnedFixedPortEndpoint(child, childState, browserProcessIdentity, {
+      inspectPort: portEvidence.inspect,
+    });
     await checkpoint('natural-launch:connect', 'before');
+    portEvidence.setStage('preconnect');
     browser = await connectOwnedFixedPort(
       chromium,
       endpoint,
       child,
       childState,
-      browserProcessIdentity
+      browserProcessIdentity,
+      { inspectPort: portEvidence.inspect }
     );
+    attachedBrowserVersion = browser.version();
     await checkpoint('natural-launch:connect', 'after');
     const contexts = browser.contexts();
     assert.equal(contexts.length, 1, 'Owned Chrome did not expose one default context');
@@ -668,8 +759,11 @@ export async function launchOwnedNaturalChrome({
       browserProcessIdentity,
       'Owned Chrome process identity changed between spawn and CDP verification'
     );
+    portEvidence.setStage('postconnect');
     assert(
-      await verifyOwnedFixedPort(child, childState, browserProcessIdentity),
+      await verifyOwnedFixedPort(child, childState, browserProcessIdentity, {
+        inspectPort: portEvidence.inspect,
+      }),
       'Owned IPv4 DevTools listener changed after CDP verification'
     );
     const autoplayArgumentObserved = currentIdentity.commandLine.includes(
@@ -699,7 +793,7 @@ export async function launchOwnedNaturalChrome({
         }),
       } satisfies CleanupContext,
       launchEvidence: {
-        browserVersion: browser.version(),
+        browserVersion: attachedBrowserVersion,
         discoveryBrowserVersion: discovered.browserVersion,
         loopbackDevTools: true,
         remoteDebuggingPort: FIXED_DEBUG_PORT,
@@ -713,6 +807,13 @@ export async function launchOwnedNaturalChrome({
       },
     };
   } catch (error) {
+    const childAtFailure = {
+      pid: child.pid ?? null,
+      exitCode: child.exitCode,
+      signalCode: child.signalCode,
+      spawnErrorName: boundedEvidenceText(childState.spawnError?.name, 128),
+      spawnErrorMessage: boundedEvidenceText(childState.spawnError?.message, 1024),
+    };
     const { cleanup, errors: cleanupErrors } = await cleanupFailedNaturalChrome({
       child,
       childState,
@@ -721,23 +822,35 @@ export async function launchOwnedNaturalChrome({
       root,
     });
     try {
-      await writeFile(
-        join(output, 'natural-chrome-launch-result.json'),
-        JSON.stringify(
-          {
-            schemaVersion: 1,
-            kind: 'natural-chrome-launch',
-            status: 'failed',
-            errorType: error instanceof Error ? error.name : typeof error,
-            cleanup: {
-              ...cleanup,
-              errorCount: cleanupErrors.length,
-            },
+      const evidence = {
+        schemaVersion: 1,
+        kind: 'natural-chrome-launch',
+        status: 'failed',
+        errorType: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
+        diagnostic: {
+          stage: portEvidence.stage(),
+          discoveryBrowserVersion: boundedEvidenceText(discovered.browserVersion, 128),
+          attachedBrowserVersion: boundedEvidenceText(attachedBrowserVersion, 128),
+          childAtFailure,
+          portObservations: portEvidence.observations(),
+          chromeStderr: {
+            totalBytes: stderrBytes,
+            retainedTailBytes: stderrTail.length,
+            retainedTailSha256: createHash('sha256').update(stderrTail).digest('hex'),
+            retainedTailBase64: stderrTail.toString('base64'),
           },
-          null,
-          2
-        )
+        },
+        cleanup: {
+          ...cleanup,
+          errorCount: cleanupErrors.length,
+        },
+      };
+      const serialized = JSON.stringify(evidence, null, 2);
+      assert(
+        Buffer.byteLength(serialized, 'utf8') <= FAILURE_RECEIPT_MAX_BYTES,
+        'Natural Chrome failure evidence exceeded its byte cap'
       );
+      await writeFile(join(output, 'natural-chrome-launch-result.json'), serialized);
     } catch (evidenceError) {
       cleanupErrors.push(evidenceError);
     }
