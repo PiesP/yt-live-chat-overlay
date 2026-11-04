@@ -942,8 +942,9 @@ node validation/windows/prepare-userscript-manager.ts \
 ```
 
 This is a host-side preparation step before VM installation, not an asset bundled
-in `profile.json` or code run by the Windows profile. Run it with the `.node-version`-pinned
-Node 26.13.0. The dependency-free TypeScript helper owns the reviewed Tampermonkey
+in `profile.json` or code run by the Windows profile. Run it with the runtime selected by
+[`.node-version`](../../.node-version) and enforced by the helper's `assertQualifiedRuntime`.
+The dependency-free TypeScript helper owns the reviewed Tampermonkey
 5.5.1 version, extension ID, exact Store URL, and SHA-256 pin. Importing the
 module has no preparation side effects; the CLI checks its runtime before any
 network or filesystem mutation. It takes `--output` as its only operational input,
@@ -970,8 +971,9 @@ exercise the package, receipt, runtime guard, pin, existing output, redirect and
 HTTP limits, direct agent, timeout destruction, malformed and colliding archives,
 CRC and size lies, plus staged-write cleanup. The reviewed CRX has also been
 read by Node 26.9.0 and compared byte-for-byte after extraction with the former
-Python preparer. The same fixtures pass on the actual Node 26.12.1 binary; the
-earlier CRX comparison remains historical Node 26.9.0 evidence. Do not reuse the
+Python preparer. The local fixtures also pass on the selected `.node-version` runtime.
+Earlier fixture runs on Node 26.12.1 and the CRX comparison on Node 26.9.0 remain
+historical evidence. Do not reuse the
 old versioned Node staging cache for the new runtime. Immutable older-tag replays
 remain deferred until their exact runtime is separately qualified. Local fixtures
 and host extraction do not establish prepared Windows userscript-manager
