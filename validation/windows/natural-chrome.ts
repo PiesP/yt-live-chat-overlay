@@ -6,6 +6,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
+import { isIP } from 'node:net';
 import { join, win32 } from 'node:path';
 
 import type { Browser, BrowserContext, BrowserType, CDPSession } from '@playwright/test';
@@ -33,7 +34,7 @@ const VERSION_MAX_BYTES = 4096;
 const VERSION_TIMEOUT_MS = 3_000;
 const PORT_INSPECT_TIMEOUT_MS = 3_000;
 const FAILURE_PORT_OBSERVATIONS = 16;
-const FAILURE_LISTENER_ROWS = 8;
+const FAILURE_CONNECTION_ROWS = 8;
 const FAILURE_RECEIPT_MAX_BYTES = 192 * 1024;
 type ChildState = { spawnError: Error | null };
 type ChildStatus = {
@@ -108,25 +109,71 @@ type WindowsProcessRecord = {
   ExecutablePath: unknown;
   CommandLine: unknown;
 };
-type PortListener = {
+type PortConnection = {
   localAddress: unknown;
   localPort: unknown;
   state: unknown;
+  rawState: unknown;
   owningProcess: unknown;
 };
 type PortInspection = {
-  listeners: PortListener[];
+  connections: unknown[];
   process: WindowsProcessRecord | null;
 };
 type InspectPort = (processId?: number) => Promise<PortInspection>;
+
+/** Unknown states or malformed rows cannot prove that the fixed port is unused. */
+function classifyPortConnections(snapshot: PortInspection) {
+  const states: Record<string, number> = {
+    Closed: 1,
+    Listen: 2,
+    SynSent: 3,
+    SynReceived: 4,
+    Established: 5,
+    FinWait1: 6,
+    FinWait2: 7,
+    CloseWait: 8,
+    Closing: 9,
+    LastAck: 10,
+    TimeWait: 11,
+    DeleteTCB: 12,
+    Bound: 100,
+  };
+  const listeners: PortConnection[] = [];
+  const connections = Array.isArray(snapshot?.connections) ? snapshot.connections : null;
+  let complete = connections !== null;
+  for (const row of connections ?? []) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      complete = false;
+      continue;
+    }
+    const connection = row as PortConnection;
+    if (
+      typeof connection.localAddress !== 'string' ||
+      isIP(connection.localAddress) === 0 ||
+      connection.localPort !== FIXED_DEBUG_PORT ||
+      typeof connection.owningProcess !== 'number' ||
+      !Number.isSafeInteger(connection.owningProcess) ||
+      connection.owningProcess < 0 ||
+      typeof connection.state !== 'string' ||
+      !Object.hasOwn(states, connection.state) ||
+      connection.rawState !== states[connection.state]
+    ) {
+      complete = false;
+      continue;
+    }
+    if (connection.state === 'Listen') listeners.push(connection);
+  }
+  return { complete, connections, listeners };
+}
 
 function boundedEvidenceText(value: unknown, limit: number): string | null {
   return typeof value === 'string' ? value.slice(0, limit) : null;
 }
 
-function boundedEvidenceScalar(value: unknown): string | number | null {
+function boundedEvidenceScalar(value: unknown, limit = 128): string | number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  return boundedEvidenceText(value, 128);
+  return boundedEvidenceText(value, limit);
 }
 
 /** Retain the existing fixed-port inspections without adding a new OS query. */
@@ -153,8 +200,10 @@ export function createNaturalPortRecorder(
           stage: boundedEvidenceText(stage, 64),
           atEpochMs: now(),
           requestedProcessId: processId ?? null,
+          inspectionStatus: 'unavailable',
           listenerCount: null,
-          listeners: null,
+          connectionCount: null,
+          connections: null,
           process: null,
           inspectionError: {
             name: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
@@ -163,20 +212,27 @@ export function createNaturalPortRecorder(
         });
         throw error;
       }
-      const listeners = Array.isArray(snapshot.listeners) ? snapshot.listeners : [];
+      const { complete, connections, listeners } = classifyPortConnections(snapshot);
       const process = snapshot.process;
       retain({
         stage: boundedEvidenceText(stage, 64),
         atEpochMs: now(),
         requestedProcessId: processId ?? null,
-        listenerCount: listeners.length,
-        listenersTruncated: listeners.length > FAILURE_LISTENER_ROWS,
-        listeners: listeners.slice(0, FAILURE_LISTENER_ROWS).map((listener) => ({
-          localAddress: boundedEvidenceText(listener?.localAddress, 128),
-          localPort: boundedEvidenceScalar(listener?.localPort),
-          state: boundedEvidenceText(listener?.state, 32),
-          owningProcess: boundedEvidenceScalar(listener?.owningProcess),
-        })),
+        inspectionStatus: complete ? 'complete' : 'unavailable',
+        listenerCount: connections === null ? null : listeners.length,
+        connectionCount: connections?.length ?? null,
+        connectionsTruncated: connections !== null && connections.length > FAILURE_CONNECTION_ROWS,
+        connections:
+          connections?.slice(0, FAILURE_CONNECTION_ROWS).map((row: unknown) => {
+            const connection = row && typeof row === 'object' ? (row as PortConnection) : null;
+            return {
+              localAddress: boundedEvidenceText(connection?.localAddress, 128),
+              localPort: boundedEvidenceScalar(connection?.localPort),
+              state: boundedEvidenceScalar(connection?.state, 32),
+              rawState: boundedEvidenceScalar(connection?.rawState, 32),
+              owningProcess: boundedEvidenceScalar(connection?.owningProcess),
+            };
+          }) ?? null,
         process: process
           ? {
               ProcessId: boundedEvidenceScalar(process.ProcessId),
@@ -206,23 +262,27 @@ function powershellExecutable(): string {
 }
 
 /** Inspect one declared port without making a network connection. */
-function inspectFixedPort(processId?: number): Promise<PortInspection> {
+export function inspectFixedPort(
+  processId?: number,
+  { runPowerShell = execFile }: { runPowerShell?: typeof execFile } = {}
+): Promise<PortInspection> {
   if (processId !== undefined)
     assert(Number.isSafeInteger(processId) && processId > 0, 'Invalid owned Chrome process id');
   const script = [
     "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'",
-    '$listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | ' +
+    '$connections=@(Get-NetTCPConnection -ErrorAction Stop | ' +
       `Where-Object { [int]$_.LocalPort -eq ${FIXED_DEBUG_PORT} } | ` +
-      'ForEach-Object { @{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;' +
-      'state=[string]$_.State;owningProcess=[int]$_.OwningProcess} })',
+      'ForEach-Object { @{localAddress=[string]$_.LocalAddress;localPort=$_.LocalPort;' +
+      "state=[string]$_.State;rawState=$_.CimInstanceProperties['State'].Value;" +
+      'owningProcess=$_.OwningProcess} })',
     processId === undefined
       ? '$record=$null'
       : `$record=Get-CimInstance Win32_Process -Filter 'ProcessId = ${processId}' ` +
         '-ErrorAction Stop | Select-Object ProcessId,CreationDate,ExecutablePath,CommandLine',
-    '@{listeners=$listeners;process=$record}|ConvertTo-Json -Compress -Depth 4',
+    '@{connections=$connections;process=$record}|ConvertTo-Json -Compress -Depth 4',
   ].join(';');
   return new Promise((resolveInspection, rejectInspection) => {
-    execFile(
+    runPowerShell(
       powershellExecutable(),
       [
         '-NoLogo',
@@ -240,7 +300,7 @@ function inspectFixedPort(processId?: number): Promise<PortInspection> {
         try {
           const parsed: unknown = JSON.parse(stdout.trim().replace(/^\uFEFF/u, ''));
           assert(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
-          assert('listeners' in parsed && Array.isArray(parsed.listeners));
+          assert('connections' in parsed && Array.isArray(parsed.connections));
           assert(
             'process' in parsed &&
               (parsed.process === null ||
@@ -265,8 +325,9 @@ export async function assertFixedPortUnused({
   inspectPort = inspectFixedPort,
 }: { inspectPort?: InspectPort } = {}): Promise<void> {
   const snapshot = await inspectPort();
-  assert(Array.isArray(snapshot?.listeners), 'Fixed DevTools port inspection unavailable');
-  assert.equal(snapshot.listeners.length, 0, 'Fixed DevTools port is already in use');
+  const { complete, listeners } = classifyPortConnections(snapshot);
+  assert(complete, 'Fixed DevTools port inspection unavailable or unsupported');
+  assert.equal(listeners.length, 0, 'Fixed DevTools port is already in use');
 }
 
 export async function verifyOwnedFixedPort(
@@ -283,14 +344,15 @@ export async function verifyOwnedFixedPort(
   );
   const snapshot = await inspectPort(identity.processId);
   assertChildLive(child, childState);
-  assert(Array.isArray(snapshot?.listeners), 'Fixed DevTools port inspection unavailable');
+  const { complete, listeners } = classifyPortConnections(snapshot);
+  assert(complete, 'Fixed DevTools port inspection unavailable or unsupported');
   assert(
     isOwnedChromeProcess(snapshot.process, identity),
     'Owned Chrome CIM identity changed before DevTools access'
   );
-  if (snapshot.listeners.length === 0) return false;
-  assert.equal(snapshot.listeners.length, 1, 'Fixed DevTools port has ambiguous listeners');
-  const [listener] = snapshot.listeners;
+  if (listeners.length === 0) return false;
+  assert.equal(listeners.length, 1, 'Fixed DevTools port has ambiguous listeners');
+  const [listener] = listeners;
   assert(
     listener &&
       listener.localAddress === '127.0.0.1' &&
@@ -672,7 +734,57 @@ export async function launchOwnedNaturalChrome({
 }) {
   const discovered = await discoverInstalledChrome(chromium, root, output, checkpoint);
   const portEvidence = createNaturalPortRecorder();
-  await assertFixedPortUnused({ inspectPort: portEvidence.inspect });
+  const failWithReceipt = async (
+    error: unknown,
+    diagnostic: {
+      attachedBrowserVersion: string | null;
+      childAtFailure: Record<string, unknown> | null;
+      chromeStderr: Record<string, unknown> | null;
+    },
+    cleanup: Record<string, unknown>,
+    cleanupErrors: unknown[]
+  ): Promise<never> => {
+    try {
+      const evidence = {
+        schemaVersion: 1,
+        kind: 'natural-chrome-launch',
+        status: 'failed',
+        errorType: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
+        diagnostic: {
+          stage: portEvidence.stage(),
+          discoveryBrowserVersion: boundedEvidenceText(discovered.browserVersion, 128),
+          ...diagnostic,
+          portObservations: portEvidence.observations(),
+        },
+        cleanup: {
+          ...cleanup,
+          errorCount: cleanupErrors.length,
+        },
+      };
+      const serialized = JSON.stringify(evidence, null, 2);
+      assert(
+        Buffer.byteLength(serialized, 'utf8') <= FAILURE_RECEIPT_MAX_BYTES,
+        'Natural Chrome failure evidence exceeded its byte cap'
+      );
+      await writeFile(join(output, 'natural-chrome-launch-result.json'), serialized);
+    } catch (evidenceError) {
+      cleanupErrors.push(evidenceError);
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError([error, ...cleanupErrors], 'Owned Chrome launch and cleanup failed');
+    }
+    throw error;
+  };
+  try {
+    await assertFixedPortUnused({ inspectPort: portEvidence.inspect });
+  } catch (error) {
+    return failWithReceipt(
+      error,
+      { attachedBrowserVersion: null, childAtFailure: null, chromeStderr: null },
+      {},
+      []
+    );
+  }
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let child: ReturnType<typeof spawn>;
   try {
@@ -821,42 +933,20 @@ export async function launchOwnedNaturalChrome({
       profile,
       root,
     });
-    try {
-      const evidence = {
-        schemaVersion: 1,
-        kind: 'natural-chrome-launch',
-        status: 'failed',
-        errorType: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
-        diagnostic: {
-          stage: portEvidence.stage(),
-          discoveryBrowserVersion: boundedEvidenceText(discovered.browserVersion, 128),
-          attachedBrowserVersion: boundedEvidenceText(attachedBrowserVersion, 128),
-          childAtFailure,
-          portObservations: portEvidence.observations(),
-          chromeStderr: {
-            totalBytes: stderrBytes,
-            retainedTailBytes: stderrTail.length,
-            retainedTailSha256: createHash('sha256').update(stderrTail).digest('hex'),
-            retainedTailBase64: stderrTail.toString('base64'),
-          },
+    return failWithReceipt(
+      error,
+      {
+        attachedBrowserVersion: boundedEvidenceText(attachedBrowserVersion, 128),
+        childAtFailure,
+        chromeStderr: {
+          totalBytes: stderrBytes,
+          retainedTailBytes: stderrTail.length,
+          retainedTailSha256: createHash('sha256').update(stderrTail).digest('hex'),
+          retainedTailBase64: stderrTail.toString('base64'),
         },
-        cleanup: {
-          ...cleanup,
-          errorCount: cleanupErrors.length,
-        },
-      };
-      const serialized = JSON.stringify(evidence, null, 2);
-      assert(
-        Buffer.byteLength(serialized, 'utf8') <= FAILURE_RECEIPT_MAX_BYTES,
-        'Natural Chrome failure evidence exceeded its byte cap'
-      );
-      await writeFile(join(output, 'natural-chrome-launch-result.json'), serialized);
-    } catch (evidenceError) {
-      cleanupErrors.push(evidenceError);
-    }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError([error, ...cleanupErrors], 'Owned Chrome launch and cleanup failed');
-    }
-    throw error;
+      },
+      cleanup,
+      cleanupErrors
+    );
   }
 }

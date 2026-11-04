@@ -898,11 +898,17 @@ retain raw chat text.
 
 If the task-owned natural Chrome launch fails, its private
 `natural-chrome-launch-result.json` retains the last 16 existing fixed-port
-inspections with stage, listener rows and bounded CIM fields, plus the child
-state, discovered browser version, and at most 64 KiB of Chrome stderr. A failed
-inspection retains its bounded error and has no listener or CIM snapshot. The
-receipt has a 192 KiB cap. An absent listener still fails before CDP connects;
-the record diagnoses that boundary without establishing why Chrome lost it.
+inspections with stage, up to eight unfiltered fixed-local-port connection rows
+(including named and raw TCP state), separate total connection and positive Listen
+counts, and bounded CIM fields, plus the child state, discovered browser version,
+and at most 64 KiB of Chrome stderr. Unknown states or malformed rows mark the
+inspection unavailable and fail before HTTP or CDP; they cannot establish listener
+absence. A complete empty inspection remains distinct from unavailable inspection.
+An initial preflight failure is retained before the task-owned natural Chrome
+profile or process is created, with no child or cleanup proof for that launch.
+A failed query retains its bounded error and has no connection or CIM snapshot.
+The receipt has a 192 KiB cap. The strict owned IPv4 Listen gate still applies;
+the record does not establish the cause of a TCP-table mismatch.
 
 Conditional fixture fields need their execution context: `paidCardInkContained:
 false` does not itself mean the installed Worker fixture failed when the
