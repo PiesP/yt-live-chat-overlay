@@ -20,11 +20,12 @@ const identity = {
 const child = { pid: identity.processId, exitCode: null, signalCode: null };
 const childState = { spawnError: null };
 const validSnapshot = () => ({
-  listeners: [
+  connections: [
     {
       localAddress: '127.0.0.1',
       localPort: 27683,
       state: 'Listen',
+      rawState: 2,
       owningProcess: identity.processId,
     },
   ],
@@ -38,12 +39,165 @@ const validSnapshot = () => ({
 type Snapshot = ReturnType<typeof validSnapshot>;
 type BrowserType = Parameters<typeof positive.connectOwnedFixedPort>[0];
 function firstListener(snapshot: Snapshot) {
-  const listener = snapshot.listeners[0];
+  const listener = snapshot.connections[0];
   assert(listener);
   return listener;
 }
 const version = (value: string) =>
   Buffer.from(JSON.stringify({ Browser: 'Chrome/155.0.8059.85', webSocketDebuggerUrl: value }));
+
+type RunPowerShell = NonNullable<
+  NonNullable<Parameters<typeof positive.inspectFixedPort>[1]>['runPowerShell']
+>;
+function mockPortInspection(response: unknown, error: Error | null = null) {
+  const queries: string[] = [];
+  const runPowerShell = ((
+    executable: string,
+    args: string[],
+    options: unknown,
+    callback: (error: Error | null, stdout: string) => void
+  ) => {
+    assert.equal(path.win32.basename(executable), 'powershell.exe');
+    assert.equal(args.at(-2), '-EncodedCommand');
+    const encoded = args.at(-1);
+    assert(encoded);
+    queries.push(Buffer.from(encoded, 'base64').toString('utf16le'));
+    assert.deepEqual(options, {
+      encoding: 'utf8',
+      maxBuffer: 65_536,
+      timeout: 3_000,
+      windowsHide: true,
+    });
+    callback(error, '\uFEFF' + JSON.stringify(response));
+  }) as unknown as RunPowerShell;
+  return {
+    queries,
+    inspectPort: (processId?: number) => positive.inspectFixedPort(processId, { runPowerShell }),
+  };
+}
+
+test('emitted fixed-port query preserves unnamed raw state instead of claiming absence', async () => {
+  const row = { ...firstListener(validSnapshot()), state: '', rawState: 0 };
+  const response = { ...validSnapshot(), connections: [row] };
+  const mock = mockPortInspection(response);
+  const recorder = positive.createNaturalPortRecorder(mock.inspectPort);
+  assert.deepEqual(await recorder.inspect(identity.processId), response);
+  assert.equal(mock.queries.length, 1);
+  const query = mock.queries[0];
+  assert(query);
+  assert.match(query, /Get-NetTCPConnection\s+-ErrorAction Stop/u);
+  assert.doesNotMatch(query, /-State\b/iu);
+  assert.match(query, /LocalPort -eq 27683/u);
+  assert.match(query, /rawState=\$_.CimInstanceProperties\['State'\]\.Value/u);
+  assert.match(query, /ProcessId = 4321/u);
+  const observation = recorder.observations()[0];
+  assert(observation);
+  assert.equal(observation.inspectionStatus, 'unavailable');
+  assert.equal(observation.listenerCount, 0);
+  assert.equal(observation.connectionCount, 1);
+  assert.deepEqual(observation.connections, [row]);
+});
+
+test('unsupported or malformed parsed rows stop preflight, HTTP and CDP without retry', async () => {
+  const listener = firstListener(validSnapshot());
+  const rows: unknown[] = [
+    { ...listener, state: '', rawState: 0 },
+    { ...listener, state: '0', rawState: 0 },
+    { ...listener, state: 0, rawState: 0 },
+    { ...listener, state: 'Unknown', rawState: 999 },
+    { ...listener, rawState: 0 },
+    { ...listener, localPort: '27683' },
+    { ...listener, owningProcess: null },
+    { ...listener, localAddress: null },
+    { ...listener, localAddress: 'invalid-address' },
+    null,
+  ];
+  for (const row of rows) {
+    const mock = mockPortInspection({ ...validSnapshot(), connections: [listener, row] });
+    const recorder = positive.createNaturalPortRecorder(mock.inspectPort);
+    await assert.rejects(
+      positive.assertFixedPortUnused({ inspectPort: recorder.inspect }),
+      /inspection unavailable or unsupported/
+    );
+    let requests = 0;
+    await assert.rejects(
+      positive.readOwnedFixedPortEndpoint(child, childState, identity, {
+        inspectPort: recorder.inspect,
+        fetchVersion: async () => {
+          requests++;
+          return version(endpoint);
+        },
+        sleep: async () => {
+          throw new Error('Unexpected retry');
+        },
+      }),
+      /inspection unavailable or unsupported/
+    );
+    await assert.rejects(
+      positive.connectOwnedFixedPort(
+        {
+          connectOverCDP: async () => {
+            requests++;
+          },
+        } as unknown as BrowserType,
+        endpoint,
+        child,
+        childState,
+        identity,
+        { inspectPort: recorder.inspect }
+      ),
+      /inspection unavailable or unsupported/
+    );
+    assert.equal(requests, 0);
+    assert.equal(mock.queries.length, 3);
+    for (const observation of recorder.observations()) {
+      assert.equal(observation.inspectionStatus, 'unavailable');
+      assert.equal(observation.listenerCount, 1);
+      assert.equal(observation.connectionCount, 2);
+    }
+  }
+});
+
+test('parsed complete empty inspection and unavailable inspection remain distinct', async () => {
+  const empty = mockPortInspection({ connections: [], process: null });
+  const recorder = positive.createNaturalPortRecorder(empty.inspectPort);
+  await positive.assertFixedPortUnused({ inspectPort: recorder.inspect });
+  assert.equal(recorder.observations()[0]?.inspectionStatus, 'complete');
+  assert.equal(recorder.observations()[0]?.listenerCount, 0);
+  assert.equal(recorder.observations()[0]?.connectionCount, 0);
+  for (const mock of [
+    mockPortInspection({ connections: null, process: null }),
+    mockPortInspection(null, new Error('TCP inspection unavailable')),
+  ]) {
+    const failed = positive.createNaturalPortRecorder(mock.inspectPort);
+    await assert.rejects(positive.assertFixedPortUnused({ inspectPort: failed.inspect }));
+    const observation = failed.observations()[0];
+    assert(observation);
+    assert.equal(observation.inspectionStatus, 'unavailable');
+    assert.equal(observation.listenerCount, null);
+    assert.equal(observation.connectionCount, null);
+    assert.equal(observation.connections, null);
+  }
+});
+
+test('parsed named non-listening connections do not inflate listener count or block strict listener', async () => {
+  const listener = firstListener(validSnapshot());
+  const mock = mockPortInspection({
+    ...validSnapshot(),
+    connections: [{ ...listener, state: 'Established', rawState: 5 }, listener],
+  });
+  const recorder = positive.createNaturalPortRecorder(mock.inspectPort);
+  assert.equal(
+    await positive.readOwnedFixedPortEndpoint(child, childState, identity, {
+      inspectPort: recorder.inspect,
+      fetchVersion: async () => version(endpoint),
+    }),
+    endpoint
+  );
+  assert.equal(recorder.observations()[0]?.inspectionStatus, 'complete');
+  assert.equal(recorder.observations()[0]?.listenerCount, 1);
+  assert.equal(recorder.observations()[0]?.connectionCount, 2);
+});
 
 type RequestVersion = NonNullable<
   NonNullable<Parameters<typeof positive.fetchFixedVersion>[0]>['requestVersion']
@@ -147,7 +301,7 @@ test('fixed launch port and every busy listener are rejected', async () => {
   assert.equal(changed.filter((value) => value === '--remote-debugging-port=27683').length, 1);
   await positive.assertFixedPortUnused({
     inspectPort: async () => ({
-      listeners: [],
+      connections: [],
       process: null,
     }),
   });
@@ -155,7 +309,9 @@ test('fixed launch port and every busy listener are rejected', async () => {
     await assert.rejects(
       positive.assertFixedPortUnused({
         inspectPort: async () => ({
-          listeners: [{ localAddress, localPort: 27683, state: 'Listen', owningProcess: 999 }],
+          connections: [
+            { localAddress, localPort: 27683, state: 'Listen', rawState: 2, owningProcess: 999 },
+          ],
           process: null,
         }),
       }),
@@ -208,7 +364,7 @@ test('no HTTP request precedes exact listener and current CIM ownership', async 
     [
       'multiple',
       (snapshot) => {
-        snapshot.listeners.push({ ...firstListener(snapshot) });
+        snapshot.connections.push({ ...firstListener(snapshot) });
       },
     ],
   ];
@@ -233,7 +389,7 @@ test('no HTTP request precedes exact listener and current CIM ownership', async 
   let absentHttp = 0;
   await assert.rejects(
     positive.readOwnedFixedPortEndpoint(child, childState, identity, {
-      inspectPort: async () => ({ ...validSnapshot(), listeners: [] }),
+      inspectPort: async () => ({ ...validSnapshot(), connections: [] }),
       fetchVersion: async () => {
         absentHttp++;
         return version(endpoint);
@@ -378,6 +534,97 @@ test('unidentified child cleanup preserves its profile when tree exit is uncerta
   assert.equal(removals, 0);
 });
 
+test('actual launcher retains unavailable preflight evidence before creating the task-owned natural Chrome profile or process', async () => {
+  const listener = firstListener(validSnapshot());
+  const unavailable = new Error('TCP provider unavailable');
+  const cases = [
+    mockPortInspection({ connections: [{ ...listener, state: '', rawState: 0 }], process: null }),
+    mockPortInspection({ connections: [{ ...listener, owningProcess: null }], process: null }),
+    mockPortInspection(null, unavailable),
+  ];
+  for (const [index, mock] of cases.entries()) {
+    const calls: string[] = [];
+    let receipt = '';
+    let originalError: unknown;
+    const unexpected = (name: string) => () => {
+      calls.push(name);
+      throw new Error(`Unexpected ${name}`);
+    };
+    const sandbox = {
+      assert,
+      Buffer,
+      JSON,
+      Error,
+      AggregateError,
+      join: path.join,
+      FAILURE_RECEIPT_MAX_BYTES: 192 * 1024,
+      boundedEvidenceText: (value: unknown, limit: number) =>
+        typeof value === 'string' ? value.slice(0, limit) : null,
+      createNaturalPortRecorder: () => positive.createNaturalPortRecorder(mock.inspectPort),
+      discoverInstalledChrome: async () => {
+        calls.push('discovery');
+        return { executablePath: identity.executablePath, browserVersion: '155.0.8059.85' };
+      },
+      assertFixedPortUnused: async (
+        options: Parameters<typeof positive.assertFixedPortUnused>[0]
+      ) => {
+        calls.push('preflight');
+        try {
+          await positive.assertFixedPortUnused(options);
+        } catch (error) {
+          originalError = error;
+          throw error;
+        }
+      },
+      mkdtemp: unexpected('profile'),
+      spawn: unexpected('spawn'),
+      readOwnedFixedPortEndpoint: unexpected('http'),
+      connectOwnedFixedPort: unexpected('cdp'),
+      cleanupFailedNaturalChrome: unexpected('process-cleanup'),
+      removeOwnedChromeProfile: unexpected('profile-cleanup'),
+      writeFile: async (file: string, contents: string) => {
+        calls.push('failure-evidence');
+        assert.equal(path.basename(file), 'natural-chrome-launch-result.json');
+        receipt = contents;
+      },
+    };
+    const launch = runInNewContext(`(${positive.launchOwnedNaturalChrome.toString()})`, sandbox);
+    await assert.rejects(
+      launch({ chromium: {}, root: 'C:\\Owned', output: 'C:\\Owned\\out' }),
+      (error: unknown) => error === originalError
+    );
+    assert(originalError);
+    if (index === 2) assert.equal(originalError, unavailable);
+    assert.deepEqual(calls, ['discovery', 'preflight', 'failure-evidence']);
+    assert.equal(mock.queries.length, 1);
+    assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
+    const evidence = JSON.parse(receipt);
+    assert.equal(evidence.status, 'failed');
+    assert.equal(evidence.diagnostic.stage, 'fixed-port-preflight');
+    assert.equal(evidence.diagnostic.discoveryBrowserVersion, '155.0.8059.85');
+    assert.equal(evidence.diagnostic.attachedBrowserVersion, null);
+    assert.equal(evidence.diagnostic.childAtFailure, null);
+    assert.equal(evidence.diagnostic.chromeStderr, null);
+    assert.deepEqual(evidence.cleanup, { errorCount: 0 });
+    const observations = evidence.diagnostic.portObservations;
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].inspectionStatus, 'unavailable');
+    assert.equal(observations[0].requestedProcessId, null);
+    assert.equal(observations[0].process, null);
+    if (index < 2) {
+      assert.equal(observations[0].connectionCount, 1);
+      assert.equal(observations[0].listenerCount, 0);
+      assert.equal(observations[0].connections[0].rawState, index === 0 ? 0 : 2);
+      assert.equal(observations[0].connections[0].state, index === 0 ? '' : 'Listen');
+    } else {
+      assert.equal(observations[0].connectionCount, null);
+      assert.equal(observations[0].listenerCount, null);
+      assert.equal(observations[0].connections, null);
+      assert.equal(observations[0].inspectionError.message, unavailable.message);
+    }
+  }
+});
+
 test('actual launcher refuses a connected browser if final listener ownership drifts', async () => {
   const calls: string[] = [];
   const context = { setDefaultTimeout: () => {}, setDefaultNavigationTimeout: () => {} };
@@ -477,15 +724,16 @@ test('actual launcher refuses a connected browser if final listener ownership dr
   ]);
 });
 
-test('failure recorder bounds existing listener and CIM snapshots', async () => {
+test('failure recorder bounds all connection rows while counting listeners before truncation', async () => {
   let tick = 0;
   const huge = 'x'.repeat(100_000);
   const recorder = positive.createNaturalPortRecorder(
     async () => ({
-      listeners: Array.from({ length: 20 }, () => ({
-        localAddress: huge,
+      connections: Array.from({ length: 20 }, (_, index) => ({
+        localAddress: index === 0 ? huge : '127.0.0.1',
         localPort: 27683,
-        state: 'Listen',
+        state: index < 10 ? 'Established' : 'Listen',
+        rawState: index < 10 ? 5 : 2,
         owningProcess: identity.processId,
       })),
       process: { ...validSnapshot().process, CommandLine: huge },
@@ -497,9 +745,11 @@ test('failure recorder bounds existing listener and CIM snapshots', async () => 
   assert.equal(retained.length, 16);
   assert.equal(retained[0]?.atEpochMs, 24);
   for (const observation of retained) {
-    assert.equal(observation.listenerCount, 20);
-    assert.equal(observation.listenersTruncated, true);
-    const listeners = observation.listeners as Array<{ localAddress: string }>;
+    assert.equal(observation.inspectionStatus, 'unavailable');
+    assert.equal(observation.listenerCount, 10);
+    assert.equal(observation.connectionCount, 20);
+    assert.equal(observation.connectionsTruncated, true);
+    const listeners = observation.connections as Array<{ localAddress: string }>;
     assert.equal(listeners.length, 8);
     assert.equal(listeners[0]?.localAddress.length, 128);
     const process = observation.process as {
@@ -527,9 +777,9 @@ test('failure recorder bounds existing listener and CIM snapshots', async () => 
 
 test('negative preconnect snapshot is retained before CDP and cleanup still runs', async () => {
   const snapshots = [
-    { listeners: [], process: null },
+    { connections: [], process: null },
     validSnapshot(),
-    { ...validSnapshot(), listeners: [] },
+    { ...validSnapshot(), connections: [] },
   ];
   let connections = 0;
   let cleanups = 0;
@@ -667,7 +917,7 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
     createNaturalPortRecorder: () =>
       positive.createNaturalPortRecorder(async () => {
         inspections++;
-        if (inspections === 1) return { listeners: [], process: null };
+        if (inspections === 1) return { connections: [], process: null };
         if (inspections === 2) return validSnapshot();
         throw inspectionError;
       }),
@@ -725,7 +975,7 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
     [0, 1, null]
   );
   assert.equal(observations[2].requestedProcessId, identity.processId);
-  assert.equal(observations[2].listeners, null);
+  assert.equal(observations[2].connections, null);
   assert.equal(observations[2].process, null);
   assert.equal(observations[2].inspectionError.name.length, 128);
   assert.equal(observations[2].inspectionError.message.length, 1024);
