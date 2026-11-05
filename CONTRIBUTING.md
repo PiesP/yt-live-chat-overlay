@@ -57,7 +57,7 @@ here as a reviewed gitlink update.
 ### Runtime and task ownership
 
 The immutable shared `automation/actions/setup-project` revision configures
-Vite+ 1.4.0 from the exact workspace catalog, Node from `.node-version`, and
+Vite+ 1.5.0 from the exact workspace catalog, Node from `.node-version`, and
 pnpm from `packageManager`; `vp install --frozen-lockfile -- --no-runtime`
 keeps the reviewed pnpm patch and supply-chain policy. The independent
 `prepare-node-trust` Action still runs first. Shared Action revisions are
@@ -256,17 +256,27 @@ that has cleared the 24-hour window, then run from the repository root:
 Replace `VERSION` in both commands with that selected exact release.
 
 ```sh
-pnpm dlx --package=vite-plus@VERSION vp help migrate
-pnpm dlx --package=vite-plus@VERSION vp migrate --no-interactive --no-agent --no-editor --no-hooks
+vp exec pnpm dlx --package=vite-plus@VERSION vp help migrate
+vp exec pnpm dlx --package=vite-plus@VERSION vp migrate --no-interactive --no-agent --no-editor --no-hooks
 ```
 
+The repository overrides also apply to the pinned migrator. If they still
+force the previous toolchain into its graph, first align the reviewed CLI,
+managed alias, direct Vitest companions and exact peer allowances while
+retaining the existing supply-chain controls. Check a fresh resolution and
+its publication ages and integrities before the migrator installs dependencies.
+
 Review the managed Vite alias, bundled Vitest/coverage catalogs, lockfile and
-exact peer entries together. Preserve Vite+ runtime selection and Git hook ownership; finish with
-fresh resolution, frozen installation and the maintained quality, build and test
-gates. Dependabot keeps Vite+ updates visible for manual alignment review and
+exact peer entries together. Preserve Vite+ runtime selection and Git hook
+ownership. Finish with fresh resolution under the original controls, clean
+frozen installation, and the maintained quality, build and test gates.
+Dependabot keeps Vite+ updates visible for manual alignment review and
 excludes only normal version updates of its bundled components. Security alerts
 and security updates retain their existing handling. A package-only Vite+ bump
 is not an aligned migration and is ineligible for normal automatic merge.
+Retain any migrator-generated relaxed policy and installed graph as a separate
+attempt; restore the reviewed controls and resolve a new lockfile before the
+accepted frozen install. Do not use an age exemption or broad peer allowance.
 See [project updates](https://viteplus.dev/guide/upgrade-project); global
 `vp upgrade` alone does not update the project.
 
