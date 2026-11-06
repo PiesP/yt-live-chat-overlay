@@ -414,9 +414,11 @@ directly; the retired local setup Action has no updater entry. The nested
 `setup-vp` revision is reviewed in the
 independently pinned shared provider. For each Action SHA update, verify the
 full commit against the official upstream release and wait at least 24 hours
-from that release. Review changed executable behavior and update independent
-allowed-SHA assertions in `test/unit/config/toolchain-action.test.ts` and any
-affected workflow tests in the same PR. Never derive the trusted expected SHA
+from that release. Review changed executable behavior and update any affected
+independent allowed-SHA assertions and workflow tests in the same PR.
+`test/unit/config/toolchain-action.test.ts` owns setup-provider and scanner
+sources; do not add unrelated expectations for other actions. Never derive the
+trusted expected SHA
 from the workflow or action under test. Preserve current `.node-version`
 selection, the verified numeric override for older tagged source without that
 file, the frozen Vite+ install, and the no-publish boundary. Review a major
