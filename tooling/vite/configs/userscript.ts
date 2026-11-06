@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { type ConfigEnv, mergeConfig, type UserConfig } from 'vite';
-import monkeyPlugin from 'vite-plugin-monkey';
+import { lazyPlugins } from 'vite-plus';
 
 import { BIDI_LICENSE_BANNER } from '../bidi-license.ts';
 import { basePreset } from '../presets/base.ts';
@@ -28,45 +28,49 @@ export function createUserscriptConfig({ mode }: ConfigEnv): UserConfig {
     : 'yt-live-chat-overlay.user.js';
 
   return mergeConfig(mergeConfig(basePreset, userscriptPreset), {
-    plugins: [
-      monkeyPlugin({
-        entry: resolve(root, 'src/main.ts'),
-        userscript: {
-          name: `YouTube Live Chat Overlay${isDev ? ' (dev)' : ''}`,
-          version: baseVersion,
-          description: packageMeta.description,
-          author: packageMeta.author,
-          match: ['https://www.youtube.com/*'],
-          grant: [
-            'GM_addValueChangeListener',
-            'GM_deleteValue',
-            'GM_getValue',
-            'GM_registerMenuCommand',
-            'GM_removeValueChangeListener',
-            'GM_setValue',
-            'unsafeWindow',
-          ],
-          'run-at': 'document-end',
-          icon: 'https://www.youtube.com/favicon.ico',
-          homepage: packageMeta.homepage,
-          supportURL: `${packageMeta.homepage}/issues`,
-          license: packageMeta.license,
-          namespace: packageMeta.homepage.replace(/\/[^/]+$/, ''),
-          downloadURL: isDev
-            ? `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${baseVersion}/yt-live-chat-overlay.user.js`
-            : 'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js',
-          updateURL:
-            'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js',
-        },
-        build: {
-          fileName: outputFileName,
-          metaFileName: isDev ? false : 'yt-live-chat-overlay.meta.js',
-        },
-        server: {
-          open: false,
-        },
-      }),
-    ],
+    plugins:
+      lazyPlugins(async () => {
+        const { default: monkeyPlugin } = await import('vite-plugin-monkey');
+        return [
+          monkeyPlugin({
+            entry: resolve(root, 'src/main.ts'),
+            userscript: {
+              name: `YouTube Live Chat Overlay${isDev ? ' (dev)' : ''}`,
+              version: baseVersion,
+              description: packageMeta.description,
+              author: packageMeta.author,
+              match: ['https://www.youtube.com/*'],
+              grant: [
+                'GM_addValueChangeListener',
+                'GM_deleteValue',
+                'GM_getValue',
+                'GM_registerMenuCommand',
+                'GM_removeValueChangeListener',
+                'GM_setValue',
+                'unsafeWindow',
+              ],
+              'run-at': 'document-end',
+              icon: 'https://www.youtube.com/favicon.ico',
+              homepage: packageMeta.homepage,
+              supportURL: `${packageMeta.homepage}/issues`,
+              license: packageMeta.license,
+              namespace: packageMeta.homepage.replace(/\/[^/]+$/, ''),
+              downloadURL: isDev
+                ? `https://github.com/PiesP/yt-live-chat-overlay/releases/download/v${baseVersion}/yt-live-chat-overlay.user.js`
+                : 'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js',
+              updateURL:
+                'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js',
+            },
+            build: {
+              fileName: outputFileName,
+              metaFileName: isDev ? false : 'yt-live-chat-overlay.meta.js',
+            },
+            server: {
+              open: false,
+            },
+          }),
+        ];
+      }) ?? [],
     build: {
       sourcemap: isDev ? 'inline' : false,
       rollupOptions: { output: { banner: BIDI_LICENSE_BANNER } },
