@@ -1084,8 +1084,9 @@ export async function launchOwnedNaturalChrome({
         inspectPort: portEvidence.inspect,
         beforeConnect: async () => {
           finishPhase('preconnect-ownership', 'completed');
-          launchStage = 'cdp-connect';
+          launchStage = 'connect-checkpoint-before';
           await checkpoint('natural-launch:connect', 'before');
+          launchStage = 'cdp-connect';
           startPhase('cdp-connect');
         },
       }

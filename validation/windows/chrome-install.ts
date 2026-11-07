@@ -301,6 +301,7 @@ type ChromeResult<Live = LiveObservation> = {
   installationMethod?: string;
   userscriptManager?: unknown;
   naturalChrome?: unknown;
+  qualification?: { mode: 'launcher' | 'native-tab'; status: 'started' | 'completed' };
 };
 type CleanupOptions = {
   context?:
@@ -3049,7 +3050,7 @@ export async function runChromeInstallation({
 }
 
 /** A separate natural browser avoids persistent-launch focus-emulation leases. */
-async function runNativeTabInstallation({
+export async function runNativeTabInstallation({
   chromium,
   root,
   output,
@@ -3123,6 +3124,81 @@ async function runNativeTabInstallation({
       }
     }
   }
+}
+
+/** Qualify only the natural launcher or the existing native tab/PiP fixtures. */
+export async function runNaturalChromeQualification(
+  {
+    chromium,
+    root,
+    output,
+    mode,
+  }: Pick<ChromeOptions, 'chromium' | 'root' | 'output'> & {
+    mode: 'launcher' | 'native-tab';
+  },
+  {
+    launchNaturalChrome = async (
+      options: Parameters<typeof import('./natural-chrome.ts').launchOwnedNaturalChrome>[0]
+    ) => (await import('./natural-chrome.ts')).launchOwnedNaturalChrome(options),
+    cleanupInstallation = cleanupChromeInstallation,
+    persistResult = writeFile,
+  }: {
+    launchNaturalChrome?: typeof import('./natural-chrome.ts').launchOwnedNaturalChrome;
+    cleanupInstallation?: typeof cleanupChromeInstallation;
+    persistResult?: (path: string, contents: string) => Promise<unknown>;
+  } = {}
+) {
+  assert(mode === 'launcher' || mode === 'native-tab', 'Unknown natural Chrome qualification');
+  const result: ChromeResult = {
+    installation: 'extension',
+    fixture: null,
+    live: [],
+    cleanup: {},
+  };
+  result.qualification = { mode, status: 'started' };
+  if (mode === 'native-tab') {
+    await runNativeTabInstallation({ chromium, root, output, result });
+  } else {
+    const ownedChrome = await launchNaturalChrome({
+      chromium,
+      root,
+      output,
+      requireAutoplayGesture: true,
+    });
+    let primaryError: unknown;
+    try {
+      result.browserVersion = ownedChrome.browser.version();
+      result.naturalChrome = ownedChrome.launchEvidence;
+      result.cleanup.browserProcessIdentified = true;
+    } catch (error) {
+      primaryError = error;
+      throw error;
+    } finally {
+      try {
+        await cleanupInstallation({
+          browserProcessId: ownedChrome.browserProcessId,
+          browserProcessIdentity: ownedChrome.browserProcessIdentity,
+          context: ownedChrome.cleanupContext,
+          cdp: ownedChrome.cleanupCdp,
+          extensionId: null,
+          profile: ownedChrome.profile,
+          output,
+          result,
+          root,
+        });
+      } catch (cleanupError) {
+        if (primaryError)
+          throw new AggregateError(
+            [primaryError, cleanupError],
+            'Qualification and cleanup failed'
+          );
+        throw cleanupError;
+      }
+    }
+  }
+  result.qualification = { mode, status: 'completed' };
+  await persistResult(join(output, 'installation-result.json'), JSON.stringify(result, null, 2));
+  return result;
 }
 
 async function runChromeDurationInstallation({

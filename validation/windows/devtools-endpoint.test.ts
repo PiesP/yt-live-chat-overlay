@@ -1216,9 +1216,11 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
 });
 
 type LauncherFailure =
+  | 'process-identity'
   | 'endpoint-owner'
   | 'http'
   | 'preconnect-owner'
+  | 'connect-checkpoint'
   | 'cdp'
   | 'pid'
   | 'cim'
@@ -1287,7 +1289,10 @@ function launcherHarness(failAt?: LauncherFailure, cleanupError?: Error) {
     mkdtemp: async () => 'C:\\Owned\\profile',
     spawn: () => childProcess,
     naturalChromeArguments: positive.naturalChromeArguments,
-    captureSpawnedChromeIdentity: async () => identity,
+    captureSpawnedChromeIdentity: async () => {
+      if (failAt === 'process-identity') throw new Error('Process identity failed');
+      return identity;
+    },
     readOwnedFixedPortEndpoint: (
       ownedChild: typeof childProcess,
       state: { spawnError: Error | null },
@@ -1336,7 +1341,15 @@ function launcherHarness(failAt?: LauncherFailure, cleanupError?: Error) {
       },
       root: 'C:\\Owned',
       output: 'C:\\Owned\\out',
-      checkpoint: async (name: string, phase: string) => calls.push(`${name}:${phase}`),
+      checkpoint: async (name: string, phase: string) => {
+        calls.push(`${name}:${phase}`);
+        if (
+          failAt === 'connect-checkpoint' &&
+          name === 'natural-launch:connect' &&
+          phase === 'before'
+        )
+          throw new Error('Connect checkpoint failed');
+      },
       requireAutoplayGesture: false,
     });
   return { run, calls, receipts };
@@ -1344,6 +1357,7 @@ function launcherHarness(failAt?: LauncherFailure, cleanupError?: Error) {
 
 test('launcher phase evidence distinguishes ownership, HTTP, and actual CDP failures', async () => {
   const cases: Array<[LauncherFailure, string, string[]]> = [
+    ['process-identity', 'process-identity', []],
     ['endpoint-owner', 'devtools-endpoint-ownership', []],
     ['http', 'http-request', ['http']],
     ['preconnect-owner', 'preconnect-ownership', ['http']],
@@ -1355,6 +1369,8 @@ test('launcher phase evidence distinguishes ownership, HTTP, and actual CDP fail
     const evidence = JSON.parse(harness.receipts[0] ?? '{}');
     assert.equal(evidence.status, 'failed');
     assert.equal(evidence.diagnostic.stage, stage);
+    if (failure === 'process-identity')
+      assert.equal(evidence.diagnostic.portObservationStage, 'fixed-port-preflight');
     assert.deepEqual(
       harness.calls.filter((call) => call === 'http' || call === 'cdp-connect'),
       operations
@@ -1386,6 +1402,16 @@ test('connected browser remains failed until CDP PID, CIM identity, and postconn
     assert(harness.calls.includes('cdp-connect'));
     assert.equal(harness.calls.at(-1), 'cleanup');
   }
+});
+
+test('failed pre-CDP checkpoint does not claim an actual connection attempt', async () => {
+  const harness = launcherHarness('connect-checkpoint');
+  await assert.rejects(harness.run(), /Connect checkpoint failed/);
+  const evidence = JSON.parse(harness.receipts[0] ?? '{}');
+  assert.equal(evidence.diagnostic.stage, 'connect-checkpoint-before');
+  assert.equal(evidence.diagnostic.phases['preconnect-ownership'].status, 'completed');
+  assert.equal(evidence.diagnostic.phases['cdp-connect'].status, 'not-run');
+  assert.equal(harness.calls.includes('cdp-connect'), false);
 });
 
 test('success retains the late qualifying LISTEN row and each lifetime has a fresh preflight', async () => {

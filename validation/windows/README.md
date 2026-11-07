@@ -896,18 +896,32 @@ uncontrolled, so a stream with no accessible chat is recorded as unverified. The
 structured observation records only chat counts and fingerprints. It does not
 retain raw chat text.
 
-If the task-owned natural Chrome launch fails, its private
-`natural-chrome-launch-result.json` retains the last 16 existing fixed-port
-inspections with stage, up to eight unfiltered fixed-local-port connection rows
+Natural Chrome launch evidence retains up to 16 existing fixed-port inspections
+on success and failure. The bounded observation history reserves the initial
+preflight and the latest complete single-listener observations at endpoint,
+preconnect and postconnect stages, then fills the remaining budget from the
+recent tail in sequence order. A failed launch writes the private
+`natural-chrome-launch-result.json`. Each inspection records its own stage and
+up to eight fixed-local-port connection rows
 (including named and raw TCP state), separate total connection and positive Listen
 counts, and bounded CIM fields, plus the child state, discovered browser version,
-and at most 64 KiB of Chrome stderr. Unknown states or malformed rows mark the
+and at most 64 KiB of Chrome stderr on failure. Rows normally use the first eight
+positions. If the unique qualifying owned IPv4 LISTEN is later in the original
+snapshot, the record keeps the first seven rows and that qualifying row instead.
+The selection policy, original retained indices and qualifying index are explicit;
+acceptance always uses the complete original snapshot. Unknown states or malformed rows mark the
 inspection unavailable and fail before HTTP or CDP; they cannot establish listener
 absence. A complete empty inspection remains distinct from unavailable inspection.
 An initial preflight failure is retained before the task-owned natural Chrome
 profile or process is created, with no child or cleanup proof for that launch.
 A failed query retains its bounded error and has no connection or CIM snapshot.
-The private receipt also records the failure stage, available exit/code/signal
+The launcher failure stage is separate from the last port-observation stage.
+Bounded phase records distinguish not-run, started, completed and failed HTTP,
+response parsing, preconnect ownership, actual CDP invocation, PID/CIM matching
+and postconnect verification. HTTP starts only after the owned-listener gate;
+`connect:before` occurs after preconnect ownership and immediately before the
+CDP call. A completed CDP call alone is not a successful launch. Recording adds
+no OS queries. The private receipt also records available exit/code/signal
 metadata, and at most 384 UTF-8 bytes of each decoded stdout/stderr stream with
 its decoded-text length and digest. It labels complete, incomplete, and retained-text
 truncation separately; a max-buffer failure does not identify which stream was
@@ -916,6 +930,36 @@ bytes or prove that invalid input was detected; a retained decoded string is not
 an original-byte capture.
 The receipt has a 192 KiB cap. The strict owned IPv4 Listen gate still applies;
 the record does not establish the cause of a TCP-table mismatch.
+
+### Focused natural Chrome qualification (#407)
+
+For a clean, committed prepared checkout, create the ignored source-owned input
+`validation/windows/inputs/natural-chrome-qualification.json` containing
+`{"naturalChromeQualification":"launcher"}`. It must be the only input besides
+the directory's `.gitignore`. Run the maintained controller with headed Chrome,
+`--installation extension`, no public URL and no duration option. This selects a
+launcher qualification; extension mode is the controller route, and the launcher
+qualification does not install an extension.
+
+The scope has **two browser lifetimes**. Installed-Chrome discovery first launches
+a separate headed persistent profile, uses CDP to identify its process and exact
+installation, and cleans it up. The task-owned natural lifetime then performs
+its own fresh fixed-port preflight, launches with
+`--autoplay-policy=user-gesture-required`, verifies exact process/profile identity
+and owned IPv4 LISTEN at 27683, requests `/json/version` after that gate, revalidates
+before CDP, matches CDP PID/CIM identity and checks postconnect LISTEN. It immediately
+uses the ordinary installation cleanup path. No site navigation, extension loading,
+native-player or PiP fixture runs in `launcher` mode. Discovery is a browser/CDP
+operation; this is not a browser-free preflight. A historical standalone preflight
+cannot qualify this new natural lifetime.
+
+Only after that prerequisite qualifies, replace the selector value with
+`"native-tab"` for a separate fresh run. It reuses `runNativeTabInstallation`,
+`runNativePlayerBoundaries` and `runVideoPiPFixture`, including the fresh
+gesture-required context, autoplay denial before trusted PiP/Play, native tab
+visibility, pause/restoration and normal owned cleanup. It does not select the
+ordinary installation campaign, public YouTube, duration or a browser matrix.
+Unknown modes, combined inputs and cleanup errors fail the qualification.
 
 Conditional fixture fields need their execution context: `paidCardInkContained:
 false` does not itself mean the installed Worker fixture failed when the
