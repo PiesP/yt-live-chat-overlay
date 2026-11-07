@@ -95,3 +95,4 @@ __pycache__/
 /validation/windows/inputs/settings-opacity.json
 /validation/windows/inputs/installed-viewing-tasks.json
 /validation/windows/inputs/translator-native-cancellation.json
+/validation/windows/inputs/composition-runtime.json

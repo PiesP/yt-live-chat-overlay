@@ -1216,6 +1216,26 @@ and the central bundle/result/collection/transport receipts together; Browser
 Mode regressions cover pre-abort, fetch/body, all retry waits, reason races and
 replay retirement.
 
+## Composition runtime installation check (#431)
+
+Place exactly `{"scenario":"composition-runtime"}` in the ignored
+`validation/windows/inputs/composition-runtime.json` before bundling a committed
+candidate. Run the maintained headed installed Edge extension profile with
+`--browser msedge --mode desktop --installation extension`, without public URLs
+or a duration option. The selector is exclusive with other focused and upgrade
+inputs.
+
+This route keeps the ordinary installed Worker fixture, bootstrap, retirement,
+Canvas recovery, continuity, acquisition, bitmap, placement and Main image
+recovery checks. Placement runs every maintained scenario and its Worker/Main
+comment matrix with the strict source-bound Canvas observer. It returns through
+the primary browser's normal cleanup before the separate natural Chrome/native
+tab and PiP routes. Review `installation-result.json` with the bundled source,
+core, page-script, probe and cleanup receipts. A failed or missing check remains
+failed; the focused result does not qualify public YouTube, native tab or PiP
+behavior. Remove only the task-owned selector after retaining the run's inputs
+and receipts.
+
 ## Main Backlog reset fixture
 
 Create the ignored `inputs/backlog-reset.json` with

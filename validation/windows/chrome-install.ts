@@ -108,6 +108,22 @@ const OWNED_EXTENSION_RESOURCES = {
   'workers/renderer.js': 524_288,
   'page-script.js': 2_097_152,
 };
+
+/** Select the installed renderer/composition checks without the native tab route. */
+export async function readCompositionRuntimeSelector(root: string): Promise<boolean> {
+  let source: string;
+  try {
+    source = await readFile(
+      join(root, 'validation/windows/inputs/composition-runtime.json'),
+      'utf8'
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(JSON.parse(source), { scenario: 'composition-runtime' });
+  return true;
+}
 type ExpectedResource = { maxBytes: number; bytes: number; sha256: string };
 type ResourceEntry = {
   path: string;
@@ -2480,13 +2496,15 @@ export async function runChromeInstallation({
     'At most three live URLs can run within the guest deadline'
   );
   const requestDeadlineSelected = await readChatRequestDeadlineSelector(root);
-  const opacitySelected = (await readFocusedScenario(root)) === 'settings-opacity';
+  const focusedScenario = await readFocusedScenario(root);
+  const opacitySelected = focusedScenario === 'settings-opacity';
   const installedViewingSelected = await readInstalledViewingTaskSelector(root);
   const translatorNativeSelected = await readTranslatorNativeSelector(root);
   const translationWorkerSelected = await readInstalledTranslationWorkerSelector(root);
   const managerFifoSelected = await readManagerIngressFifoSelector(root);
   const backlogResetSelected = await readBacklogResetSelector(root);
   const farColorSelected = await readFarColorSelector(root);
+  const compositionRuntimeSelected = await readCompositionRuntimeSelector(root);
   assert(
     Number(opacitySelected) +
       Number(requestDeadlineSelected) +
@@ -2495,7 +2513,8 @@ export async function runChromeInstallation({
       Number(translationWorkerSelected) +
       Number(managerFifoSelected) +
       Number(backlogResetSelected) +
-      Number(farColorSelected) <=
+      Number(farColorSelected) +
+      Number(compositionRuntimeSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
@@ -2554,6 +2573,14 @@ export async function runChromeInstallation({
     assert.equal(browserName, 'msedge', 'Backlog reset requires installed Edge');
     assert.equal(installation, 'extension', 'Backlog reset requires the extension');
     assert.deepEqual(liveUrls, [], 'Backlog reset cannot use public live URLs');
+  }
+  if (compositionRuntimeSelected) {
+    assert.equal(focusedScenario, null, 'Composition runtime cannot combine selectors');
+    assert.equal(liveObservation, null, 'Composition runtime cannot use duration observation');
+    assert.equal(browserName, 'msedge', 'Composition runtime requires installed Edge');
+    assert.equal(installation, 'extension', 'Composition runtime requires the extension');
+    assert.equal(headless, false, 'Composition runtime requires headed Edge');
+    assert.deepEqual(liveUrls, [], 'Composition runtime cannot use public live URLs');
   }
   if (translatorNativeSelected) {
     assert.equal(
@@ -2633,12 +2660,13 @@ export async function runChromeInstallation({
       translatorNativeSelected ||
       translationWorkerSelected ||
       managerFifoSelected ||
-      farColorSelected
+      farColorSelected ||
+      compositionRuntimeSelected
     ) {
       assert.equal(
         extensionUpgradeInput,
         null,
-        'Focused translation probes require a fresh installed extension without upgrade inputs'
+        'Focused installation probes require a fresh installed extension without upgrade inputs'
       );
     }
     if (installation === 'extension') {
@@ -2890,8 +2918,14 @@ export async function runChromeInstallation({
         });
         // Late image route cancellation remains explicitly partial evidence.
         assert.equal(result.acquisitionBoundaries.controlStatus, 'passed');
-        result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
-        assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native PiP fixture failed');
+        if (!compositionRuntimeSelected) {
+          result.videoPiP = await runVideoPiPFixture({ context, root, output, extensionId });
+          assert.equal(
+            result.videoPiP.status,
+            'passed',
+            'Installed Edge native PiP fixture failed'
+          );
+        }
         result.bitmapLifecycle = await runBitmapLifecycleFixture({
           context,
           root,
@@ -2924,6 +2958,7 @@ export async function runChromeInstallation({
           extensionId,
         });
         assert.equal(result.mainImageRecovery.status, 'passed', 'Installed Main recovery failed');
+        if (compositionRuntimeSelected) return result;
         result.nativeTabInstallation = {
           installation: 'extension',
           fixture: null,
