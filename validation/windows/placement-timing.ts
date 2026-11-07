@@ -2438,7 +2438,7 @@ function attachCanvasRendererProbe(
   getRegularCardInsets: (
     fontSize: number,
     outlineWidthPx: number,
-    drawOutline: boolean,
+    hasAuthorPhoto: boolean,
     backgroundVisible: boolean
   ) => unknown
 ) {
