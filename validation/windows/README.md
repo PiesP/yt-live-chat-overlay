@@ -680,7 +680,7 @@ pitch in `data-preview-rows`, `data-preview-row-height` and
 An optional run can explicitly select
 `['worker-spacing-speed', 'main-spacing-speed']` and set `spacingOnly: true`
 to stop after the gap-8 capture; candidate acceptance keeps
-`comparisonOnly: false`. Default runs still exercise all eleven scenarios,
+`comparisonOnly: false`. Default runs still exercise all thirteen placement scenarios,
 including Backlog and recovery. Retained complete frames can be reanalyzed as
 post-processing, with the original source/probe hashes and receipts preserved;
 this is not a fresh browser execution. Older allocation-only data cannot supply
