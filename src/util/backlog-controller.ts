@@ -110,7 +110,7 @@ export class BacklogInjectionController implements Pauseable {
   public onUtilizationQuery: (() => number) | null = null;
   /** Callback for replacement targets already accepted outside this backlog. */
   public isKnownMessageId: ((id: string) => boolean) | null = null;
-  /** Callback to be set by RuntimeSession */
+  /** Callback to be set by RuntimeManager */
   public onBacklogMessage: ((message: ChatMessage) => void) | null = null;
 
   constructor(

@@ -250,7 +250,7 @@ export class Overlay {
     this.liveRegion = null;
 
     // Clean up stray overlay elements from previous sessions where destroy()
-    // was never called (e.g. RuntimeSession restart without full teardown)
+    // was never called (e.g. RuntimeManager restart without full teardown)
     const strayOverlays = document.querySelectorAll(OVERLAY_SELECTOR);
     for (const el of strayOverlays) {
       el.remove();
@@ -543,7 +543,7 @@ export class Overlay {
 
     // Remove the container from the DOM entirely so successive create() calls
     // always start from a clean slate (no hidden ghost containers). The
-    // downstream RuntimeSession.removeLeftoverOverlays() provides a secondary
+    // downstream RuntimeManager.removeLeftoverOverlays() provides a secondary
     // defense against strays.
     if (this.container) {
       this.container.remove();
