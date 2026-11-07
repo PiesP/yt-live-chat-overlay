@@ -4,21 +4,57 @@
 /** Hard cap for a single YouTube live-chat response body. */
 export const MAX_CHAT_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export class ResponseTooLargeError extends Error {
+export interface ResponseSizeError extends Error {
+  readonly category: 'response-too-large';
+  readonly observedBytes: number;
+  readonly maxBytes: number;
+  readonly responseLabel: string;
+}
+
+function responseSizeMessage(
+  details: Readonly<Pick<ResponseSizeError, 'maxBytes' | 'responseLabel'>>
+): string {
+  return `${details.responseLabel} exceeded ${details.maxBytes} bytes.`;
+}
+
+/** Shared checked category for chat and other bounded response failures. */
+export function isResponseSizeError(error: unknown): error is ResponseSizeError {
+  return (
+    error instanceof Error &&
+    'category' in error &&
+    error.category === 'response-too-large' &&
+    'observedBytes' in error &&
+    typeof error.observedBytes === 'number' &&
+    'maxBytes' in error &&
+    typeof error.maxBytes === 'number' &&
+    'responseLabel' in error &&
+    typeof error.responseLabel === 'string'
+  );
+}
+
+export class ResponseTooLargeError extends Error implements ResponseSizeError {
+  readonly category = 'response-too-large';
+
   constructor(
     readonly observedBytes: number,
     readonly maxBytes: number,
     readonly responseLabel = 'Response'
   ) {
-    super(`${responseLabel} exceeded ${maxBytes} bytes.`);
+    super(responseSizeMessage({ maxBytes, responseLabel }));
     this.name = 'ResponseTooLargeError';
   }
 }
 
-/** Stable live-chat-specific error contract retained for existing callers. */
-export class ChatResponseTooLargeError extends ResponseTooLargeError {
-  constructor(observedBytes: number, maxBytes: number) {
-    super(observedBytes, maxBytes, 'Chat response');
+/** Stable chat identity; broad response-size checks use isResponseSizeError. */
+export class ChatResponseTooLargeError extends Error implements ResponseSizeError {
+  readonly category = 'response-too-large';
+  readonly responseLabel = 'Chat response';
+
+  constructor(
+    readonly observedBytes: number,
+    readonly maxBytes: number
+  ) {
+    super(responseSizeMessage({ maxBytes, responseLabel: 'Chat response' }));
     this.name = 'ChatResponseTooLargeError';
   }
 }
@@ -30,7 +66,7 @@ function parseDeclaredLength(response: Response): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function cancelBody(response: Response, error: ResponseTooLargeError): void {
+function cancelBody(response: Response, error: ResponseSizeError): void {
   try {
     // A cloned response body is a tee branch whose cancellation can stay
     // pending until the original branch completes. Start cleanup without
@@ -59,7 +95,7 @@ export async function readBoundedResponseText(
 async function readBoundedResponseTextWithError(
   response: Response,
   maxBytes: number,
-  createTooLargeError: (observedBytes: number) => ResponseTooLargeError
+  createTooLargeError: (observedBytes: number) => ResponseSizeError
 ): Promise<string> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new RangeError('maxBytes must be a positive safe integer.');

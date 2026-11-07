@@ -29,17 +29,20 @@ Backlog cleanup stays with the owners described by
 The following product implementation-inheritance edges are temporary and have
 separate removal owners:
 
-| Exact edge                                                                    | Why it remains in this stage                                                     | Removal condition                                                                                                                                                                  |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LiveChatSource extends ChatSource` and `ReplayChatSource extends ChatSource` | Session bootstrap, pause, polling and delivery state still live in the base.     | [#430](https://github.com/PiesP/yt-live-chat-overlay/issues/430) replaces both with composed session and live/replay drivers, including cancellation and due-only delivery checks. |
-| `CanvasRenderer extends RendererBase`                                         | Shared pause, queue and lifecycle state still lives in the base.                 | [#431](https://github.com/PiesP/yt-live-chat-overlay/issues/431) composes renderer state and migrates the shape-bound Windows observer with Main/Worker checks.                    |
-| `ChatResponseTooLargeError extends ResponseTooLargeError`                     | Consumers still rely on the parent error class for response-size categorization. | [#432](https://github.com/PiesP/yt-live-chat-overlay/issues/432) removes the product-defined error edge and verifies every category check.                                         |
+| Exact edge                                                                    | Why it remains in this stage                                                 | Removal condition                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LiveChatSource extends ChatSource` and `ReplayChatSource extends ChatSource` | Session bootstrap, pause, polling and delivery state still live in the base. | [#430](https://github.com/PiesP/yt-live-chat-overlay/issues/430) replaces both with composed session and live/replay drivers, including cancellation and due-only delivery checks. |
+| `CanvasRenderer extends RendererBase`                                         | Shared pause, queue and lifecycle state still lives in the base.             | [#431](https://github.com/PiesP/yt-live-chat-overlay/issues/431) composes renderer state and migrates the shape-bound Windows observer with Main/Worker checks.                    |
 
 The direct native `Error` subclasses `LiveChatProtocolError`,
-`YoutubeInnertubeRequestError`, `ResponseTooLargeError`, and
+`YoutubeInnertubeRequestError`, `ResponseTooLargeError`, `ChatResponseTooLargeError`, and
 `ImageResponseTooLargeError` represent narrow request/media boundary failures.
 Their internal retry, cancellation and recovery policies stay in the owning
-modules. The temporary error-to-error edge above is not covered by that
-exception. Generated/vendor and developer test/tooling inheritance are outside
+modules. Chat and other bounded-response failures share the checked
+`isResponseSizeError` category and readonly detail contract in
+`src/chat/youtube/response-text.ts`; each keeps its own native error identity,
+name/message and fields. A parent `instanceof ResponseTooLargeError` check only
+identifies that concrete variant; use the category guard for both response-size
+variants. Generated/vendor and developer test/tooling inheritance are outside
 this product migration. This architecture rule does not introduce a DI
 container, common runtime or renderer framework, or another dependency.
