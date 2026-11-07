@@ -33,12 +33,19 @@ expose protected rendering state. Shared queue helpers call the pure
 Backlog cleanup stays with the owners described by
 [chat request lifetime](chat-request-lifetime.md) and the current implementation.
 
-The following product implementation-inheritance edges are temporary and have
-separate removal owners:
+The ordinary `CanvasRenderer` composes private `RenderPauseState` and
+`BacklogHysteresis` collaborators. Pause state accounts for overlapping
+visibility, video and explicit user causes and owns the bounded video-pause
+buffer. Backlog state retains its session callback across visual resets and
+releases it at destruction. CanvasRenderer directly orders concrete rendering,
+settings, Worker recovery and resource teardown; its collaborators do not
+receive a mutable renderer context or replacement hook table. Worker DTOs and
+transfer ownership remain separate from these main-realm collaborators.
+The Windows observer admits the exact emitted composed class and required own
+methods, rejecting missing, ambiguous or unsupported output.
 
-| Exact edge                            | Why it remains in this stage                                     | Removal condition                                                                                                                                               |
-| ------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CanvasRenderer extends RendererBase` | Shared pause, queue and lifecycle state still lives in the base. | [#431](https://github.com/PiesP/yt-live-chat-overlay/issues/431) composes renderer state and migrates the shape-bound Windows observer with Main/Worker checks. |
+No product implementation inherits state or behavior from a repository-defined
+base. There are no remaining temporary hierarchy exceptions.
 
 The direct native `Error` subclasses `LiveChatProtocolError`,
 `YoutubeInnertubeRequestError`, `ResponseTooLargeError`, `ChatResponseTooLargeError`, and

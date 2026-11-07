@@ -504,7 +504,7 @@ export class ChatSession implements Pauseable {
     }
 
     // YouTube may complete an already-started chat request while the video is
-    // paused. Let those messages reach RendererBase's bounded pause buffer;
+    // paused. Let those messages reach the renderer's bounded video-pause buffer;
     // visibility/general pauses still suppress delivery because they do not
     // have an equivalent renderer buffer.
     const isVideoOnlyPause = this.pauseReasons.size === 1 && this.pauseReasons.has('video');
