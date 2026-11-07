@@ -2,17 +2,23 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * ReplayChatSource — replay chat source with independent display and I/O timing.
- *
- * Separated from chat-source.ts. A short setTimeout display loop synchronizes
- * buffered emission with video playback without awaiting the independently
- * scheduled, single-concurrency replay request loop.
+ * ReplayChatDriver owns independent replay display and I/O timing.
+ * ReplayChatSource is the runtime port backed by a composed ChatSession.
  */
 
-import type { ChatMessage } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@chat/message-parser';
 import { ReplayBuffer } from '@chat/replay-buffer';
-import { type ChatHealthSnapshot, ChatSource, type PlaybackSnapshot } from '@chat/source-base';
+import {
+  ChatSession,
+  type ChatDriverContext,
+  type ChatSessionDriver,
+  type ChatHealthSnapshot,
+  type ChatSourceStartStatus,
+  type PlaybackSnapshot,
+} from '@chat/source-base';
+import type { ReplayChatPort } from '@chat/source-contracts';
+import type { ChatBootstrapData } from '@chat/youtube/api';
 import { fetchReplayChat, type LiveChatPayload } from '@chat/youtube/api';
 import {
   extractPlayerSeekContinuation,
@@ -45,21 +51,17 @@ const REPLAY_PREFETCH_MAX_BYTES = 6 * 1024 * 1024;
 const REPLAY_PREFETCH_RESUME_BYTES = 3 * 1024 * 1024;
 /** Maximum replay request duration before the cooperative loop can recover. */
 const REPLAY_FETCH_TIMEOUT_MS = 20_000;
-// replayPrefetchPages — read from this.getSettings()
+// replayPrefetchPages — read from this.context.getSettings()
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
-export class ReplayChatSource extends ChatSource {
-  get mode(): 'replay' {
-    return 'replay';
-  }
-  // replayBatchLimit — read from this.getSettings()
-
-  /** Notifies the runtime that all display state belongs to an old timeline. */
-  onSeek?: () => void;
-
-  /** Reports due messages discarded because playback has passed their tolerance window. */
-  onLateDrop?: (count: number) => void;
+class ReplayChatDriver implements ChatSessionDriver {
+  constructor(
+    private readonly context: ChatDriverContext,
+    private readonly getOnSeek: () => (() => void) | undefined,
+    private readonly getOnLateDrop: () => ((count: number) => void) | undefined
+  ) {}
+  // replayBatchLimit — read from this.context.getSettings()
 
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
@@ -92,8 +94,12 @@ export class ReplayChatSource extends ChatSource {
   private prefetchBudgetSuspended = false;
   /** Drain reached replay messages for the runtime's visibility backlog. */
   drainPendingMessages(): ChatMessage[] {
-    const playback = this.getPlaybackSnapshot();
-    if (!playback || playback.paused || (this.isPaused && !this.isVisibilityOnlyPause())) {
+    const playback = this.context.getPlaybackSnapshot();
+    if (
+      !playback ||
+      playback.paused ||
+      (this.context.isPaused() && !this.context.isVisibilityOnlyPause())
+    ) {
       return [];
     }
     // Use the same due-time and late-drop policy as normal display. Prefetch
@@ -104,32 +110,24 @@ export class ReplayChatSource extends ChatSource {
     return batch;
   }
 
-  protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
+  seed(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
   }
 
-  protected launchCurrentPollLoop(signal?: AbortSignal): void {
+  launch(signal?: AbortSignal): void {
     this.startCooperativeLoop(signal);
     this.installSeekListeners(signal);
   }
 
-  /**
-   * Override health check to reflect cooperative loop lifetime.
-   */
-  protected override isObserverAlive(): boolean {
-    return this.cooperativeLoopRunning && this.callback !== null;
+  isObserverAlive(): boolean {
+    return this.cooperativeLoopRunning && this.context.hasDelivery();
   }
 
-  override getHealthSnapshot(options: { activeTimeoutMs?: number } = {}): ChatHealthSnapshot {
-    const base = super.getHealthSnapshot(options);
-    return {
-      ...base,
-      isInBackoff: Date.now() < this.replayNextAllowedFetchAt,
-    };
+  isInBackoff(): boolean {
+    return Date.now() < this.replayNextAllowedFetchAt;
   }
 
-  protected override resetSessionState(): void {
-    super.resetSessionState();
+  reset(): void {
     this.resetReplayState();
   }
 
@@ -156,21 +154,23 @@ export class ReplayChatSource extends ChatSource {
         return;
       }
 
-      if (this.isPaused) {
-        this.markActivity();
+      if (this.context.isPaused()) {
+        this.context.markActivity();
       }
 
-      const playback = this.getPlaybackSnapshot();
+      const playback = this.context.getPlaybackSnapshot();
       const isPlaying = playback && !playback.paused;
-      if (!this.isPaused && isPlaying) {
-        this.markActivity();
+      if (!this.context.isPaused() && isPlaying) {
+        this.context.markActivity();
         this.flushReplayBuffer(playback);
       }
 
       const hasPendingFlushes = !this.replayBuffer.isEmpty;
       const videoPaused = playback?.paused ?? true;
       const adaptiveDelay =
-        hasPendingFlushes && !this.isPaused && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
+        hasPendingFlushes && !this.context.isPaused() && !videoPaused
+          ? 16
+          : BACKGROUND_FETCH_INTERVAL_MS;
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
         this.displayLoopTimer = setTimeout(displayTick, adaptiveDelay);
@@ -203,9 +203,9 @@ export class ReplayChatSource extends ChatSource {
       }
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
-        const playback = this.getPlaybackSnapshot();
+        const playback = this.context.getPlaybackSnapshot();
         const delay = this.canFetchForPlayback(playback)
-          ? this.isVisibilityOnlyPause()
+          ? this.context.isVisibilityOnlyPause()
             ? BACKGROUND_FETCH_INTERVAL_MS
             : REPLAY_PREFETCH_MIN_INTERVAL_MS
           : BACKGROUND_FETCH_INTERVAL_MS;
@@ -218,7 +218,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private async runNetworkCycle(gen: number, signal?: AbortSignal): Promise<void> {
-    const playback = this.getPlaybackSnapshot();
+    const playback = this.context.getPlaybackSnapshot();
     if (!this.canFetchForPlayback(playback) || !this.hasReplayFetchDemand(signal, playback)) {
       return;
     }
@@ -234,7 +234,7 @@ export class ReplayChatSource extends ChatSource {
 
     // A pause or large playback jump may occur while the request is in flight.
     // Re-read playback and resource demand before starting another request.
-    const currentPlayback = this.getPlaybackSnapshot();
+    const currentPlayback = this.context.getPlaybackSnapshot();
     if (
       !this.canFetchForPlayback(currentPlayback) ||
       !this.hasReplayFetchDemand(signal, currentPlayback)
@@ -263,19 +263,19 @@ export class ReplayChatSource extends ChatSource {
         return;
       }
 
-      const latestPlayback = this.getPlaybackSnapshot();
+      const latestPlayback = this.context.getPlaybackSnapshot();
       const minimumOffsetMs = Math.max(
         0,
         (latestPlayback?.offsetMs ?? currentPlayback.offsetMs) - REPLAY_PREFETCH_WINDOW_MS
       );
       const events = extractChatEvents(
         payload.actions,
-        this.getSettings,
+        this.context.getSettings,
         undefined,
-        this.isKnownReplacementTarget
+        this.context.isKnownReplacementTarget
       );
       this.appendReplayEvents(events, minimumOffsetMs);
-      this.markActivity();
+      this.context.markActivity();
       this.prefetchContinuation = extractPlayerSeekContinuation(payload.continuations);
       this.prefetchPagesFetched += 1;
     } catch (error: unknown) {
@@ -291,19 +291,21 @@ export class ReplayChatSource extends ChatSource {
 
   private canFetchForPlayback(playback: PlaybackSnapshot | null): playback is PlaybackSnapshot {
     return Boolean(
-      playback && !playback.paused && (!this.isPaused || this.isVisibilityOnlyPause())
+      playback &&
+      !playback.paused &&
+      (!this.context.isPaused() || this.context.isVisibilityOnlyPause())
     );
   }
 
   private shouldPrefetch(
     now: number,
     signal?: AbortSignal,
-    playback = this.getPlaybackSnapshot()
+    playback = this.context.getPlaybackSnapshot()
   ): boolean {
     if (!this.prefetchContinuation) return false;
     if (
       !this.hasReplayFetchDemand(signal, playback) ||
-      this.prefetchPagesFetched >= this.getSettings().replayPrefetchPages ||
+      this.prefetchPagesFetched >= this.context.getSettings().replayPrefetchPages ||
       now < this.prefetchBackoffUntil ||
       now < this.prefetchNextAllowedAt
     ) {
@@ -315,9 +317,13 @@ export class ReplayChatSource extends ChatSource {
 
   private hasReplayFetchDemand(
     signal?: AbortSignal,
-    playback = this.getPlaybackSnapshot()
+    playback = this.context.getPlaybackSnapshot()
   ): boolean {
-    if (signal?.aborted || playback?.paused || (this.isPaused && !this.isVisibilityOnlyPause())) {
+    if (
+      signal?.aborted ||
+      playback?.paused ||
+      (this.context.isPaused() && !this.context.isVisibilityOnlyPause())
+    ) {
       return false;
     }
 
@@ -419,7 +425,7 @@ export class ReplayChatSource extends ChatSource {
     // If the session was already stopped, callback is null and all downstream
     // operations (flushReplayBuffer, startPrefetch, pollContinuationReplay)
     // will no-op. Bail out early to avoid unnecessary async work.
-    if (!this.callback) return;
+    if (!this.context.hasDelivery()) return;
 
     const shouldRestartContinuation =
       this.replayMode === 'continuation' && offsetMs < this.replayFallbackLastOffsetMs;
@@ -443,14 +449,14 @@ export class ReplayChatSource extends ChatSource {
       : this.seekAbortController.signal;
 
     this.replayBuffer.clear();
-    this.resetMessageDeliveryState();
+    this.context.resetMessageDeliveryState();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
     this.replayTotalFailuresSinceSuccess = 0;
 
     // Cancel in-flight prefetch — new one starts from seek position below.
     this.stopPrefetch();
-    this.onSeek?.();
+    this.getOnSeek()?.();
 
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void (async () => {
@@ -516,7 +522,8 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
-    if (!this.bootstrap) {
+    const bootstrap = this.context.bootstrap();
+    if (!bootstrap) {
       return false;
     }
 
@@ -524,10 +531,7 @@ export class ReplayChatSource extends ChatSource {
     const generation = this.seekGeneration;
 
     try {
-      const initialPayload = await this.requestReplayPayload(
-        this.bootstrap.initialContinuation,
-        signal
-      );
+      const initialPayload = await this.requestReplayPayload(bootstrap.initialContinuation, signal);
       if (generation !== this.seekGeneration) {
         return false;
       }
@@ -540,7 +544,7 @@ export class ReplayChatSource extends ChatSource {
         this.replayMode = 'playerSeek';
         this.replayPlayerSeekContinuation = playerSeekContinuation;
 
-        const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
+        const currentOffsetMs = this.context.getPlaybackSnapshot()?.offsetMs ?? 0;
         const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal, generation);
         if (generation !== this.seekGeneration) {
           return false;
@@ -558,14 +562,14 @@ export class ReplayChatSource extends ChatSource {
       this.replayMode = 'continuation';
       this.replayContinuation = replayContinuation;
 
-      const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
+      const currentOffsetMs = this.context.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
       this.replayFallbackLastOffsetMs = this.appendReplayEvents(
         extractChatEvents(
           initialPayload.actions,
-          this.getSettings,
+          this.context.getSettings,
           undefined,
-          this.isKnownReplacementTarget
+          this.context.isKnownReplacementTarget
         ),
         minimumOffsetMs
       );
@@ -573,7 +577,7 @@ export class ReplayChatSource extends ChatSource {
       while (
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < this.getSettings().replayBatchLimit &&
+        batchesFetched < this.context.getSettings().replayBatchLimit &&
         this.hasReplayFetchDemand(signal, {
           offsetMs: currentOffsetMs,
           paused: false,
@@ -640,12 +644,14 @@ export class ReplayChatSource extends ChatSource {
           : [timeoutSignal, requestController.signal]
       );
       try {
-        return await this.requestPayload(
+        const payload = await this.context.requestPayload(
           fetchReplayChat,
           continuation,
           playerOffsetMs,
           mergedSignal
         );
+        mergedSignal.throwIfAborted();
+        return payload;
       } catch (error: unknown) {
         if (
           timeoutSignal.aborted &&
@@ -671,7 +677,7 @@ export class ReplayChatSource extends ChatSource {
     signal?: AbortSignal,
     generation = this.seekGeneration
   ): Promise<boolean> {
-    const initialContinuation = this.bootstrap?.initialContinuation;
+    const initialContinuation = this.context.bootstrap()?.initialContinuation;
     if (!initialContinuation) return false;
 
     const initialPayload = await this.requestReplayPayload(initialContinuation, signal);
@@ -682,9 +688,9 @@ export class ReplayChatSource extends ChatSource {
     this.replayFallbackLastOffsetMs = this.appendReplayEvents(
       extractChatEvents(
         initialPayload.actions,
-        this.getSettings,
+        this.context.getSettings,
         undefined,
-        this.isKnownReplacementTarget
+        this.context.isKnownReplacementTarget
       ),
       minimumOffsetMs
     );
@@ -696,7 +702,7 @@ export class ReplayChatSource extends ChatSource {
     while (
       this.replayContinuation &&
       this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batchesFetched < this.getSettings().replayBatchLimit
+      batchesFetched < this.context.getSettings().replayBatchLimit
     ) {
       throwIfAborted(signal);
       const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
@@ -716,8 +722,8 @@ export class ReplayChatSource extends ChatSource {
    * visual clumping — same-timestamp messages spread naturally across
    * multiple frames (~16ms each) for a smooth stream.
    */
-  private flushReplayBuffer(playback = this.getPlaybackSnapshot()): void {
-    if (!this.callback || this.isPaused) return;
+  private flushReplayBuffer(playback = this.context.getPlaybackSnapshot()): void {
+    if (!this.context.hasDelivery() || this.context.isPaused()) return;
     // Async callers re-read video time after fetches and seeks. The display
     // loop passes its current snapshot to avoid a second DOM lookup per tick.
     if (!playback || playback.paused) return;
@@ -726,14 +732,14 @@ export class ReplayChatSource extends ChatSource {
     this.reportLateDrops();
 
     if (batch.length === 0) return;
-    this.emitBatch(batch, false);
+    this.context.emitBatch(batch, false);
   }
 
   private reportLateDrops(): void {
     const count = this.replayBuffer.takeLateDropCount();
     if (count > 0) {
       try {
-        this.onLateDrop?.(count);
+        this.getOnLateDrop()?.(count);
       } catch {
         // Observability must not interrupt replay delivery.
       }
@@ -772,9 +778,9 @@ export class ReplayChatSource extends ChatSource {
       this.appendReplayEvents(
         extractChatEvents(
           payload.actions,
-          this.getSettings,
+          this.context.getSettings,
           undefined,
-          this.isKnownReplacementTarget
+          this.context.isKnownReplacementTarget
         ),
         Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS)
       );
@@ -820,9 +826,9 @@ export class ReplayChatSource extends ChatSource {
 
       const events = extractChatEvents(
         payload.actions,
-        this.getSettings,
+        this.context.getSettings,
         undefined,
-        this.isKnownReplacementTarget
+        this.context.isKnownReplacementTarget
       );
       const pageLastOffsetMs = this.appendReplayEvents(events, minimumOffsetMs);
       this.replayFallbackLastOffsetMs = Math.max(this.replayFallbackLastOffsetMs, pageLastOffsetMs);
@@ -897,7 +903,10 @@ export class ReplayChatSource extends ChatSource {
         're-initializing replay session'
     );
 
-    const bootstrap = await this.refreshBootstrap(signal, (candidate) => candidate.isReplay);
+    const bootstrap = await this.context.refreshBootstrap(
+      signal,
+      (candidate) => candidate.isReplay
+    );
     if (!bootstrap) {
       return false;
     }
@@ -934,5 +943,59 @@ export class ReplayChatSource extends ChatSource {
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
     throwIfAborted(signal);
     return this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
+  }
+}
+
+/** Public replay source port. Session and driver lifetimes retire together. */
+export class ReplayChatSource implements ReplayChatPort {
+  readonly mode = 'replay' as const;
+  private readonly session: ChatSession;
+  private readonly driver: ReplayChatDriver;
+  onSeek?: () => void;
+  onLateDrop?: (count: number) => void;
+
+  constructor(getSettings: () => Readonly<OverlaySettings>) {
+    let driver: ReplayChatDriver | undefined;
+    this.session = new ChatSession(getSettings, (context) => {
+      driver = new ReplayChatDriver(
+        context,
+        () => this.onSeek,
+        () => this.onLateDrop
+      );
+      return driver;
+    });
+    if (!driver) throw new Error('Replay chat driver was not created');
+    this.driver = driver;
+  }
+
+  setInitialBootstrap(data: ChatBootstrapData): void {
+    this.session.setInitialBootstrap(data);
+  }
+  start(
+    callback: (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void,
+    signal?: AbortSignal
+  ): Promise<ChatSourceStartStatus> {
+    return this.session.start(callback, signal);
+  }
+  stop(): void {
+    this.session.stop();
+  }
+  isActive(timeoutMs?: number): boolean {
+    return this.session.isActive(timeoutMs);
+  }
+  getLatestMessages(limit: number): ChatMessage[] {
+    return this.session.getLatestMessages(limit);
+  }
+  getHealthSnapshot(options?: { activeTimeoutMs?: number }): ChatHealthSnapshot {
+    return { ...this.session.getHealthSnapshot(options), isInBackoff: this.driver.isInBackoff() };
+  }
+  setPauseReason(reason: string, paused: boolean): void {
+    this.session.setPauseReason(reason, paused);
+  }
+  setPaused(paused: boolean): void {
+    this.session.setPaused(paused);
+  }
+  drainPendingMessages(): ChatMessage[] {
+    return this.driver.drainPendingMessages();
   }
 }

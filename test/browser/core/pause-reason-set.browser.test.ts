@@ -1,33 +1,29 @@
 import type { OverlaySettings } from '@app-types';
-import { ChatSource } from '@chat/source-base';
+import { ChatSession, type ChatDriverContext } from '@chat/source-base';
 import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
-// ── Minimal concrete ChatSource for testing pause reason set ────────
-
-class TestChatSource extends ChatSource {
-  lastLaunchedSignal: AbortSignal | undefined;
-
-  constructor(getSettings: () => Readonly<OverlaySettings>) {
-    super(getSettings);
-  }
-
-  protected async seedCurrentSession(): Promise<boolean> {
-    return true;
-  }
-
-  protected launchCurrentPollLoop(signal?: AbortSignal): void {
-    this.lastLaunchedSignal = signal;
-  }
-
-  waitForResume(signal?: AbortSignal): Promise<void> {
-    return this.waitWhilePaused(signal);
-  }
-
-  registerCallback(callback: (messages: unknown) => void): void {
-    this.callback = callback;
-  }
+// A fake protocol driver keeps session behavior independent of live/replay I/O.
+function createSource(getSettings: () => Readonly<OverlaySettings>): {
+  source: ChatSession;
+  context: ChatDriverContext;
+  launched: { signal: AbortSignal | undefined };
+} {
+  let context: ChatDriverContext | undefined;
+  const launched: { signal: AbortSignal | undefined } = { signal: undefined };
+  const source = new ChatSession(getSettings, (operations) => {
+    context = operations;
+    return {
+      reset: () => {},
+      seed: async () => true,
+      launch: (signal) => {
+        launched.signal = signal;
+      },
+    };
+  });
+  if (!context) throw new Error('Session context was not created');
+  return { source, context, launched };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -35,19 +31,19 @@ class TestChatSource extends ChatSource {
 describe('ChatSource pause reason set', () => {
   const settings = Object.freeze({ ...DEFAULT_SETTINGS } as OverlaySettings);
 
-  function createSource(): TestChatSource {
-    return new TestChatSource(() => settings);
+  function createTestSource(): ChatSession {
+    return createSource(() => settings).source;
   }
 
   it('setPauseReason add and remove does not throw', () => {
-    const source = createSource();
+    const source = createTestSource();
     source.setPauseReason('visibility', true);
     source.setPauseReason('visibility', false);
     // API exercised without throwing — set is functional
   });
 
   it('multiple reasons can be added and removed independently', () => {
-    const source = createSource();
+    const source = createTestSource();
 
     source.setPauseReason('visibility', true);
     source.setPauseReason('video', true);
@@ -64,7 +60,7 @@ describe('ChatSource pause reason set', () => {
   });
 
   it('setPaused (legacy) uses "general" reason key', () => {
-    const source = createSource();
+    const source = createTestSource();
 
     source.setPaused(true);
     // Legacy setPaused uses 'general' reason
@@ -76,7 +72,7 @@ describe('ChatSource pause reason set', () => {
   });
 
   it('duplicate add/remove is idempotent', () => {
-    const source = createSource();
+    const source = createTestSource();
 
     source.setPauseReason('video', true);
     source.setPauseReason('video', true); // duplicate add — no-op
@@ -89,7 +85,7 @@ describe('ChatSource pause reason set', () => {
   });
 
   it('three distinct reasons can coexist', () => {
-    const source = createSource();
+    const source = createTestSource();
 
     source.setPauseReason('visibility', true);
     source.setPauseReason('video', true);
@@ -102,13 +98,13 @@ describe('ChatSource pause reason set', () => {
   });
 
   it('waits for every pause reason without scheduling polling timers', async () => {
-    const source = createSource();
+    const { source, context } = createSource(() => settings);
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     source.setPauseReason('visibility', true);
     source.setPauseReason('video', true);
 
     let resumed = false;
-    const waiting = source.waitForResume().then(() => {
+    const waiting = context.waitWhilePaused().then(() => {
       resumed = true;
     });
     await Promise.resolve();
@@ -125,18 +121,18 @@ describe('ChatSource pause reason set', () => {
   });
 
   it('rejects the event-driven pause wait when the session aborts', async () => {
-    const source = createSource();
+    const { source, context } = createSource(() => settings);
     const controller = new AbortController();
     source.setPauseReason('visibility', true);
 
-    const waiting = source.waitForResume(controller.signal);
+    const waiting = context.waitWhilePaused(controller.signal);
     controller.abort();
 
     await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('injectExternalMessages ignores duplicates when callback is registered', () => {
-    const source = createSource();
+    const source = createTestSource();
     const received: unknown[] = [];
 
     // Set up callback and inject a message
@@ -151,10 +147,11 @@ describe('ChatSource pause reason set', () => {
     source.stop();
   });
 
-  it('delivers externally observed messages to the renderer pause buffer during video pause', () => {
-    const source = createSource();
+  it('delivers externally observed messages to the renderer pause buffer during video pause', async () => {
+    const source = createTestSource();
     const received: unknown[] = [];
-    source.registerCallback((messages) => received.push(messages));
+    source.setInitialBootstrap({} as ChatBootstrapData);
+    await source.start((messages) => received.push(messages));
     source.setPauseReason('video', true);
 
     source.injectExternalMessages([
@@ -171,10 +168,11 @@ describe('ChatSource pause reason set', () => {
     expect(received).toHaveLength(1);
   });
 
-  it('continues suppressing external messages while visibility is paused', () => {
-    const source = createSource();
+  it('continues suppressing external messages while visibility is paused', async () => {
+    const source = createTestSource();
     const received: unknown[] = [];
-    source.registerCallback((messages) => received.push(messages));
+    source.setInitialBootstrap({} as ChatBootstrapData);
+    await source.start((messages) => received.push(messages));
     source.setPauseReason('visibility', true);
 
     source.injectExternalMessages([
@@ -192,21 +190,21 @@ describe('ChatSource pause reason set', () => {
   });
 
   it('stop aborts the polling signal even when start receives an external signal', async () => {
-    const source = createSource();
+    const { source, launched } = createSource(() => settings);
     source.setInitialBootstrap({} as ChatBootstrapData);
     const externalController = new AbortController();
 
     const status = await source.start(() => {}, externalController.signal);
 
     expect(status).toBe('started');
-    expect(source.lastLaunchedSignal?.aborted).toBe(false);
+    expect(launched.signal?.aborted).toBe(false);
     source.stop();
-    expect(source.lastLaunchedSignal?.aborted).toBe(true);
+    expect(launched.signal?.aborted).toBe(true);
     expect(externalController.signal.aborted).toBe(false);
   });
 
   it('does not reuse consumed bootstrap data on a later start', async () => {
-    const source = createSource();
+    const source = createTestSource();
     source.setInitialBootstrap({} as ChatBootstrapData);
 
     await expect(source.start(() => {})).resolves.toBe('started');

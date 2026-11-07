@@ -2,19 +2,27 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * LiveChatSource — live polling loop with adaptive delay and density-aware seeding.
- *
- * Extracted from chat-source.ts to separate live and replay chat concerns.
+ * LiveChatDriver owns live continuation, failure recovery and adaptive polling.
+ * LiveChatSource is the runtime port backed by a composed ChatSession.
  */
 
-import type { ChatMessage } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import {
   calculateAdaptiveDelay,
   DENSITY_WINDOW_SIZE,
   recordDensitySample,
 } from '@chat/live-poll-math';
 import { extractChatEvents } from '@chat/message-parser';
-import { type ChatHealthSnapshot, ChatSource, LiveChatProtocolError } from '@chat/source-base';
+import {
+  ChatSession,
+  type ChatDriverContext,
+  type ChatSessionDriver,
+  type ChatHealthSnapshot,
+  type ChatSourceStartStatus,
+  LiveChatProtocolError,
+} from '@chat/source-base';
+import type { LiveChatPort } from '@chat/source-contracts';
+import type { ChatBootstrapData } from '@chat/youtube/api';
 import {
   fetchLiveChat,
   type LiveChatPayload,
@@ -30,9 +38,9 @@ import { createLogger } from '@util/logging';
 
 const log = createLogger('LiveChatSource');
 
-// livePollFallbackMs — read from this.getSettings()
+// livePollFallbackMs — read from this.context.getSettings()
 const LIVE_SEED_CUTOFF_MS = 60_000;
-// livePollFailureLimit — read from this.getSettings()
+// livePollFailureLimit — read from this.context.getSettings()
 /** Base interval for periodic bootstrap refresh during sustained errors. */
 const LIVE_BOOTSTRAP_REFRESH_BASE = 5;
 /** Maximum multiplier for bootstrap refresh interval. */
@@ -42,12 +50,13 @@ const LIVE_BOOTSTRAP_REFRESH_MAX = 50;
  *  stalling the live-chat poll loop indefinitely. */
 const LIVE_POLL_TIMEOUT_MS = 20_000;
 
-export class LiveChatSource extends ChatSource {
-  get mode(): 'live' {
-    return 'live';
-  }
+class LiveChatDriver implements ChatSessionDriver {
+  constructor(
+    private readonly context: ChatDriverContext,
+    private readonly getBurstRate: () => number | undefined
+  ) {}
   private liveContinuation: InnertubeContinuationData | null = null;
-  protected consecutiveErrors = 0;
+  private consecutiveErrors = 0;
   /** Fixed-size circular buffer for moving-window density tracking. */
   private readonly densityRing = new Uint16Array(DENSITY_WINDOW_SIZE);
   private densityRingWrite = 0;
@@ -55,22 +64,19 @@ export class LiveChatSource extends ChatSource {
   /** Whether the latest successful payload contained parsed chat events. */
   private lastSuccessfulPayloadHadEvents = false;
 
-  protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
+  seed(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
   }
 
-  protected launchCurrentPollLoop(signal?: AbortSignal): void {
-    this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
+  launch(signal?: AbortSignal): void {
+    this.context.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
   }
 
-  /** Expose consecutive error count via health snapshot for status bar feedback. */
-  override getHealthSnapshot(options?: { activeTimeoutMs?: number }): ChatHealthSnapshot {
-    const base = super.getHealthSnapshot(options);
-    return { ...base, consecutiveErrors: this.consecutiveErrors };
+  getConsecutiveErrors(): number {
+    return this.consecutiveErrors;
   }
 
-  protected override resetSessionState(): void {
-    super.resetSessionState();
+  reset(): void {
     this.liveContinuation = null;
     this.consecutiveErrors = 0;
     this.densityRing.fill(0);
@@ -80,17 +86,18 @@ export class LiveChatSource extends ChatSource {
   }
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
-    if (!this.bootstrap) {
+    const bootstrap = this.context.bootstrap();
+    if (!bootstrap) {
       return false;
     }
 
     try {
-      const payload = await this.requestLivePayload(this.bootstrap.initialContinuation, signal);
+      const payload = await this.requestLivePayload(bootstrap.initialContinuation, signal);
       if (!payload) {
         return false;
       }
 
-      await this.handleLivePayload(payload, true); // isInitialSeed: apply time-based filtering
+      await this.handleLivePayload(payload, true, signal); // isInitialSeed: apply time-based filtering
       return true;
     } catch (error: unknown) {
       if (isAbortError(error)) {
@@ -114,18 +121,18 @@ export class LiveChatSource extends ChatSource {
   }
 
   private getLimits(): { minPollIntervalMs: number; maxPollIntervalMs: number } {
-    const s = this.getSettings();
+    const s = this.context.getSettings();
     return { minPollIntervalMs: s.minPollIntervalMs, maxPollIntervalMs: s.maxPollIntervalMs };
   }
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
-    const settings = this.getSettings();
+    const settings = this.context.getSettings();
     const useActivitySignals = this.lastSuccessfulPayloadHadEvents;
     return calculateAdaptiveDelay(
       timeoutMs,
       settings.livePollFallbackMs,
       this.consecutiveErrors,
-      useActivitySignals ? this.burstRateProvider?.() : undefined,
+      useActivitySignals ? this.getBurstRate() : undefined,
       this.densityRing,
       useActivitySignals ? this.densityRingFilled : 0,
       this.getLimits()
@@ -136,15 +143,20 @@ export class LiveChatSource extends ChatSource {
     while (!signal?.aborted) {
       throwIfAborted(signal);
 
-      await this.waitWhilePaused(signal);
+      await this.context.waitWhilePaused(signal);
 
-      const playback = this.getPlaybackSnapshot();
+      const playback = this.context.getPlaybackSnapshot();
       if (playback?.paused) {
-        await this.pollWhilePaused(this.getSettings().livePollFallbackMs, 250, signal);
+        await this.context.pollWhilePaused(
+          this.context.getSettings().livePollFallbackMs,
+          250,
+          signal
+        );
         continue;
       }
 
-      const timeoutMs = this.liveContinuation?.timeoutMs ?? this.getSettings().livePollFallbackMs;
+      const timeoutMs =
+        this.liveContinuation?.timeoutMs ?? this.context.getSettings().livePollFallbackMs;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
 
       // Even sustained bursts yield for the configured minimum interval.
@@ -155,7 +167,7 @@ export class LiveChatSource extends ChatSource {
       // Re-check pause state after sleep — the tab may have been hidden
       // during the delay. Without this guard, the next fetch+emitBatch
       // would deliver messages while the renderer is paused.
-      await this.waitWhilePaused(signal);
+      await this.context.waitWhilePaused(signal);
 
       const continuation = this.liveContinuation;
       if (!continuation) {
@@ -170,7 +182,7 @@ export class LiveChatSource extends ChatSource {
           continue;
         }
 
-        await this.handleLivePayload(payload, false);
+        await this.handleLivePayload(payload, false, signal);
       } catch (error: unknown) {
         if (isAbortError(error)) {
           throw error;
@@ -181,13 +193,13 @@ export class LiveChatSource extends ChatSource {
         // ── Circuit breaker: stop the poll loop after consecutive failures ──
         // The watchdog (RuntimeManager) will detect the stopped loop via
         // observerAlive/recentlyActive and trigger a managed restart.
-        if (this.consecutiveErrors >= this.getSettings().livePollFailureLimit) {
+        if (this.consecutiveErrors >= this.context.getSettings().livePollFailureLimit) {
           log.error(
             `Live poll failed ${this.consecutiveErrors} times consecutively; ` +
               'circuit breaker tripped — stopping poll loop for watchdog restart'
           );
           throw new Error(
-            `Live poll consecutive failure limit (${this.getSettings().livePollFailureLimit}) reached`
+            `Live poll consecutive failure limit (${this.context.getSettings().livePollFailureLimit}) reached`
           );
         }
 
@@ -252,7 +264,9 @@ export class LiveChatSource extends ChatSource {
     const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
     try {
-      return await this.requestPayload(fetchLiveChat, continuation, mergedSignal);
+      const payload = await this.context.requestPayload(fetchLiveChat, continuation, mergedSignal);
+      mergedSignal.throwIfAborted();
+      return payload;
     } catch (error: unknown) {
       if (
         timeoutSignal.aborted &&
@@ -267,20 +281,22 @@ export class LiveChatSource extends ChatSource {
 
   private async handleLivePayload(
     payload: LiveChatPayload,
-    isInitialSeed: boolean = false
+    isInitialSeed: boolean = false,
+    signal?: AbortSignal
   ): Promise<void> {
+    if (signal?.aborted) return;
     const events = extractChatEvents(
       payload.actions,
-      this.getSettings,
+      this.context.getSettings,
       undefined,
-      this.isKnownReplacementTarget
+      this.context.isKnownReplacementTarget
     );
 
     if (events.length > 0) {
       let messages: ChatMessage[];
 
       if (isInitialSeed) {
-        const playback = this.getPlaybackSnapshot();
+        const playback = this.context.getPlaybackSnapshot();
         const offsetMs = playback?.offsetMs ?? 0;
         const cutoffMs = Math.max(0, offsetMs - LIVE_SEED_CUTOFF_MS);
 
@@ -303,10 +319,14 @@ export class LiveChatSource extends ChatSource {
       }
 
       if (messages.length > 0) {
-        this.emitBatch(messages, isInitialSeed);
+        this.context.emitBatch(messages, isInitialSeed, signal);
+        if (signal?.aborted) return;
         this.recordMessageCount(messages.length);
       }
     }
+
+    // Delivery may synchronously retire this source through the runtime callback.
+    if (signal?.aborted) return;
 
     const nextContinuation = extractNextLiveContinuation(payload.continuations);
     if (!nextContinuation) {
@@ -321,9 +341,61 @@ export class LiveChatSource extends ChatSource {
   }
 
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
-    const bootstrap = await this.refreshBootstrap(signal);
+    const bootstrap = await this.context.refreshBootstrap(signal);
     if (bootstrap) {
       this.liveContinuation = bootstrap.initialContinuation ?? null;
     }
+  }
+}
+
+/** Public live source port. The session owns shared state; the driver owns protocol state. */
+export class LiveChatSource implements LiveChatPort {
+  readonly mode = 'live' as const;
+  private readonly session: ChatSession;
+  private readonly driver: LiveChatDriver;
+  burstRateProvider?: () => number;
+
+  constructor(getSettings: () => Readonly<OverlaySettings>) {
+    let driver: LiveChatDriver | undefined;
+    this.session = new ChatSession(getSettings, (context) => {
+      driver = new LiveChatDriver(context, () => this.burstRateProvider?.());
+      return driver;
+    });
+    if (!driver) throw new Error('Live chat driver was not created');
+    this.driver = driver;
+  }
+
+  setInitialBootstrap(data: ChatBootstrapData): void {
+    this.session.setInitialBootstrap(data);
+  }
+  start(
+    callback: (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void,
+    signal?: AbortSignal
+  ): Promise<ChatSourceStartStatus> {
+    return this.session.start(callback, signal);
+  }
+  stop(): void {
+    this.session.stop();
+  }
+  isActive(timeoutMs?: number): boolean {
+    return this.session.isActive(timeoutMs);
+  }
+  getLatestMessages(limit: number): ChatMessage[] {
+    return this.session.getLatestMessages(limit);
+  }
+  getHealthSnapshot(options?: { activeTimeoutMs?: number }): ChatHealthSnapshot {
+    return {
+      ...this.session.getHealthSnapshot(options),
+      consecutiveErrors: this.driver.getConsecutiveErrors(),
+    };
+  }
+  setPauseReason(reason: string, paused: boolean): void {
+    this.session.setPauseReason(reason, paused);
+  }
+  setPaused(paused: boolean): void {
+    this.session.setPaused(paused);
+  }
+  injectExternalMessages(messages: ChatMessage[]): void {
+    this.session.injectExternalMessages(messages);
   }
 }
