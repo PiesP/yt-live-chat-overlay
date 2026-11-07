@@ -269,8 +269,23 @@ export function createNaturalPortRecorder(
   now: () => number = Date.now
 ) {
   let stage = 'fixed-port-preflight';
+  let observationCount = 0;
   const observations: Array<Record<string, unknown>> = [];
+  const pinned = new Map<string, Record<string, unknown>>();
   const retain = (observation: Record<string, unknown>) => {
+    observation.sequenceIndex = observationCount++;
+    const observationStage = observation.stage;
+    if (observationStage === 'fixed-port-preflight' && !pinned.has(observationStage)) {
+      pinned.set(observationStage, observation);
+    } else if (
+      (observationStage === 'devtools-endpoint' ||
+        observationStage === 'preconnect' ||
+        observationStage === 'postconnect') &&
+      observation.inspectionStatus === 'complete' &&
+      observation.listenerCount === 1
+    ) {
+      pinned.set(observationStage, observation);
+    }
     observations.push(observation);
     if (observations.length > FAILURE_PORT_OBSERVATIONS) observations.shift();
   };
@@ -303,6 +318,22 @@ export function createNaturalPortRecorder(
       }
       const { complete, connections, listeners } = classifyPortConnections(snapshot);
       const process = snapshot.process;
+      const qualifyingListener =
+        complete &&
+        processId !== undefined &&
+        listeners.length === 1 &&
+        listeners[0]?.localAddress === '127.0.0.1' &&
+        listeners[0]?.owningProcess === processId
+          ? listeners[0]
+          : null;
+      const qualifyingListenerOriginalIndex =
+        qualifyingListener && connections ? connections.indexOf(qualifyingListener) : -1;
+      const retainedConnectionIndices = connections
+        ? Array.from({ length: Math.min(connections.length, FAILURE_CONNECTION_ROWS) }, (_, i) => i)
+        : null;
+      if (retainedConnectionIndices && qualifyingListenerOriginalIndex >= FAILURE_CONNECTION_ROWS) {
+        retainedConnectionIndices[FAILURE_CONNECTION_ROWS - 1] = qualifyingListenerOriginalIndex;
+      }
       retain({
         stage: boundedEvidenceText(stage, 64),
         atEpochMs: now(),
@@ -311,8 +342,16 @@ export function createNaturalPortRecorder(
         listenerCount: connections === null ? null : listeners.length,
         connectionCount: connections?.length ?? null,
         connectionsTruncated: connections !== null && connections.length > FAILURE_CONNECTION_ROWS,
+        connectionsSelectionPolicy:
+          qualifyingListenerOriginalIndex >= FAILURE_CONNECTION_ROWS
+            ? 'first-seven-plus-qualifying-owned-listen'
+            : 'first-eight',
+        retainedConnectionIndices,
+        qualifyingListenerOriginalIndex:
+          qualifyingListenerOriginalIndex >= 0 ? qualifyingListenerOriginalIndex : null,
         connections:
-          connections?.slice(0, FAILURE_CONNECTION_ROWS).map((row: unknown) => {
+          retainedConnectionIndices?.map((index) => {
+            const row = connections?.[index];
             const connection = row && typeof row === 'object' ? (row as PortConnection) : null;
             return {
               localAddress: boundedEvidenceText(connection?.localAddress, 128),
@@ -339,7 +378,15 @@ export function createNaturalPortRecorder(
       });
       return snapshot;
     },
-    observations: () => observations.slice(),
+    observations: () => {
+      const required = [...pinned.values()];
+      const tail = observations
+        .filter((observation) => !required.includes(observation))
+        .slice(-(FAILURE_PORT_OBSERVATIONS - required.length));
+      return [...required, ...tail].sort(
+        (left, right) => (left.sequenceIndex as number) - (right.sequenceIndex as number)
+      );
+    },
     stage: () => stage,
   };
 }
@@ -579,18 +626,27 @@ export async function readOwnedFixedPortEndpoint(
     fetchVersion = fetchFixedVersion,
     sleep = delay,
     timeoutMs = DEVTOOLS_WAIT_MS,
+    onHttpPhase = () => {},
   }: {
     inspectPort?: InspectPort;
     fetchVersion?: () => Promise<Buffer>;
     sleep?: (ms: number) => Promise<void>;
     timeoutMs?: number;
+    onHttpPhase?: (phase: 'request-started' | 'response-complete' | 'parse-complete') => void;
   } = {}
 ): Promise<string> {
   assert(Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= DEVTOOLS_WAIT_MS);
   const deadline = Date.now() + timeoutMs;
   do {
     const ready = await verifyOwnedFixedPort(child, childState, identity, { inspectPort });
-    if (ready) return parseFixedVersion(await fetchVersion());
+    if (ready) {
+      onHttpPhase('request-started');
+      const bytes = await fetchVersion();
+      onHttpPhase('response-complete');
+      const endpoint = parseFixedVersion(bytes);
+      onHttpPhase('parse-complete');
+      return endpoint;
+    }
     const remaining = deadline - Date.now();
     if (remaining > 0) await sleep(Math.min(100, remaining));
   } while (Date.now() < deadline);
@@ -603,7 +659,10 @@ export async function connectOwnedFixedPort(
   child: ChildStatus,
   childState: ChildState,
   identity: ChromeProcessIdentity,
-  { inspectPort = inspectFixedPort }: { inspectPort?: InspectPort } = {}
+  {
+    inspectPort = inspectFixedPort,
+    beforeConnect = async () => {},
+  }: { inspectPort?: InspectPort; beforeConnect?: () => Promise<void> } = {}
 ): Promise<Browser> {
   // Validate the raw string again before any WebSocket connection.
   assert.equal(
@@ -614,6 +673,7 @@ export async function connectOwnedFixedPort(
     await verifyOwnedFixedPort(child, childState, identity, { inspectPort }),
     'Owned IPv4 DevTools listener disappeared before connect'
   );
+  await beforeConnect();
   return chromium.connectOverCDP(endpoint, {
     noDefaults: true,
     isLocal: true,
@@ -848,6 +908,43 @@ export async function launchOwnedNaturalChrome({
 }) {
   const discovered = await discoverInstalledChrome(chromium, root, output, checkpoint);
   const portEvidence = createNaturalPortRecorder();
+  const phaseNames = [
+    'fixed-port-preflight',
+    'process-identity',
+    'devtools-endpoint-ownership',
+    'http-request',
+    'http-response-parse',
+    'preconnect-ownership',
+    'cdp-connect',
+    'cdp-pid',
+    'cim-identity',
+    'postconnect-ownership',
+  ] as const;
+  type PhaseName = (typeof phaseNames)[number];
+  type PhaseRecord = {
+    status: 'not-run' | 'started' | 'completed' | 'failed';
+    startedAtEpochMs: number | null;
+    finishedAtEpochMs: number | null;
+  };
+  const phases = Object.fromEntries(
+    phaseNames.map((name) => [
+      name,
+      { status: 'not-run', startedAtEpochMs: null, finishedAtEpochMs: null },
+    ])
+  ) as Record<PhaseName, PhaseRecord>;
+  let launchStage = 'fixed-port-preflight';
+  const startPhase = (name: PhaseName) => {
+    phases[name] = { status: 'started', startedAtEpochMs: Date.now(), finishedAtEpochMs: null };
+  };
+  const finishPhase = (name: PhaseName, status: 'completed' | 'failed') => {
+    const phase = phases[name];
+    if (phase.status === 'started') {
+      phases[name] = { ...phase, status, finishedAtEpochMs: Date.now() };
+    }
+  };
+  const failStartedPhase = () => {
+    for (const name of phaseNames) finishPhase(name, 'failed');
+  };
   const failWithReceipt = async (
     error: unknown,
     diagnostic: {
@@ -865,7 +962,9 @@ export async function launchOwnedNaturalChrome({
         status: 'failed',
         errorType: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
         diagnostic: {
-          stage: portEvidence.stage(),
+          stage: launchStage,
+          portObservationStage: portEvidence.stage(),
+          phases,
           discoveryBrowserVersion: boundedEvidenceText(discovered.browserVersion, 128),
           ...diagnostic,
           portObservations: portEvidence.observations(),
@@ -890,8 +989,11 @@ export async function launchOwnedNaturalChrome({
     throw error;
   };
   try {
+    startPhase('fixed-port-preflight');
     await assertFixedPortUnused({ inspectPort: portEvidence.inspect });
+    finishPhase('fixed-port-preflight', 'completed');
   } catch (error) {
+    failStartedPhase();
     return failWithReceipt(
       error,
       { attachedBrowserVersion: null, childAtFailure: null, chromeStderr: null },
@@ -936,7 +1038,9 @@ export async function launchOwnedNaturalChrome({
   let browserProcessId: number | undefined;
   let browserProcessIdentity: ChromeProcessIdentity | undefined;
   try {
+    launchStage = 'process-identity';
     await checkpoint('natural-launch:process-identity', 'before');
+    startPhase('process-identity');
     browserProcessIdentity = await captureSpawnedChromeIdentity(
       child,
       childState,
@@ -945,12 +1049,30 @@ export async function launchOwnedNaturalChrome({
     );
     browserProcessId = browserProcessIdentity.processId;
     await checkpoint('natural-launch:process-identity', 'after');
+    finishPhase('process-identity', 'completed');
+    launchStage = 'devtools-endpoint-ownership';
     await checkpoint('natural-launch:devtools-endpoint', 'before');
+    startPhase('devtools-endpoint-ownership');
     portEvidence.setStage('devtools-endpoint');
     const endpoint = await readOwnedFixedPortEndpoint(child, childState, browserProcessIdentity, {
       inspectPort: portEvidence.inspect,
+      onHttpPhase: (event) => {
+        if (event === 'request-started') {
+          finishPhase('devtools-endpoint-ownership', 'completed');
+          launchStage = 'http-request';
+          startPhase('http-request');
+        } else if (event === 'response-complete') {
+          finishPhase('http-request', 'completed');
+          launchStage = 'http-response-parse';
+          startPhase('http-response-parse');
+        } else {
+          finishPhase('http-response-parse', 'completed');
+        }
+      },
     });
-    await checkpoint('natural-launch:connect', 'before');
+    finishPhase('devtools-endpoint-ownership', 'completed');
+    launchStage = 'preconnect-ownership';
+    startPhase('preconnect-ownership');
     portEvidence.setStage('preconnect');
     browser = await connectOwnedFixedPort(
       chromium,
@@ -958,9 +1080,20 @@ export async function launchOwnedNaturalChrome({
       child,
       childState,
       browserProcessIdentity,
-      { inspectPort: portEvidence.inspect }
+      {
+        inspectPort: portEvidence.inspect,
+        beforeConnect: async () => {
+          finishPhase('preconnect-ownership', 'completed');
+          launchStage = 'connect-checkpoint-before';
+          await checkpoint('natural-launch:connect', 'before');
+          launchStage = 'cdp-connect';
+          startPhase('cdp-connect');
+        },
+      }
     );
+    finishPhase('cdp-connect', 'completed');
     attachedBrowserVersion = browser.version();
+    launchStage = 'connect-checkpoint-after';
     await checkpoint('natural-launch:connect', 'after');
     const contexts = browser.contexts();
     assert.equal(contexts.length, 1, 'Owned Chrome did not expose one default context');
@@ -968,6 +1101,8 @@ export async function launchOwnedNaturalChrome({
     assert(context);
     context.setDefaultTimeout(15_000);
     context.setDefaultNavigationTimeout(45_000);
+    launchStage = 'cdp-pid';
+    startPhase('cdp-pid');
     browserCdp = await browser.newBrowserCDPSession();
     const activeCdp = browserCdp;
     const activeBrowser = browser;
@@ -979,12 +1114,18 @@ export async function launchOwnedNaturalChrome({
       child.pid,
       'Owned Chrome CDP browser process did not match the spawned process'
     );
+    finishPhase('cdp-pid', 'completed');
+    launchStage = 'cim-identity';
+    startPhase('cim-identity');
     const currentIdentity = await captureOwnedChromeProcess(cdpBrowserProcessId, profile);
     assert.deepEqual(
       currentIdentity,
       browserProcessIdentity,
       'Owned Chrome process identity changed between spawn and CDP verification'
     );
+    finishPhase('cim-identity', 'completed');
+    launchStage = 'postconnect-ownership';
+    startPhase('postconnect-ownership');
     portEvidence.setStage('postconnect');
     assert(
       await verifyOwnedFixedPort(child, childState, browserProcessIdentity, {
@@ -992,6 +1133,8 @@ export async function launchOwnedNaturalChrome({
       }),
       'Owned IPv4 DevTools listener changed after CDP verification'
     );
+    finishPhase('postconnect-ownership', 'completed');
+    launchStage = 'autoplay-argument';
     const autoplayArgumentObserved = currentIdentity.commandLine.includes(
       '--autoplay-policy=user-gesture-required'
     );
@@ -1028,11 +1171,14 @@ export async function launchOwnedNaturalChrome({
         autoplayPolicy: requireAutoplayGesture ? 'user-gesture-required' : 'default',
         autoplayArgumentObserved,
         spawnedProcessMatchedCdp: true,
+        phases,
+        portObservations: portEvidence.observations(),
         stderrBytes,
         stderrTruncated: stderrBytes > stderrTail.length,
       },
     };
   } catch (error) {
+    failStartedPhase();
     const childAtFailure = {
       pid: child.pid ?? null,
       exitCode: child.exitCode,
@@ -1040,13 +1186,21 @@ export async function launchOwnedNaturalChrome({
       spawnErrorName: boundedEvidenceText(childState.spawnError?.name, 128),
       spawnErrorMessage: boundedEvidenceText(childState.spawnError?.message, 1024),
     };
-    const { cleanup, errors: cleanupErrors } = await cleanupFailedNaturalChrome({
-      child,
-      childState,
-      browserProcessIdentity,
-      profile,
-      root,
-    });
+    let cleanup: Record<string, unknown> = {};
+    let cleanupErrors: unknown[] = [];
+    try {
+      const cleaned = await cleanupFailedNaturalChrome({
+        child,
+        childState,
+        browserProcessIdentity,
+        profile,
+        root,
+      });
+      cleanup = cleaned.cleanup;
+      cleanupErrors = cleaned.errors;
+    } catch (cleanupError) {
+      cleanupErrors = [cleanupError];
+    }
     return failWithReceipt(
       error,
       {
