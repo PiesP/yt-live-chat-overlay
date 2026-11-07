@@ -8,7 +8,7 @@ import {
   MAX_WATCH_HTML_BYTES,
   WATCH_HTML_TIMEOUT_MS,
 } from '@chat/youtube/api';
-import { ResponseTooLargeError } from '@chat/youtube/response-text';
+import { isResponseSizeError, ResponseTooLargeError } from '@chat/youtube/response-text';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 afterEach(() => {
@@ -407,7 +407,13 @@ describe('fetchWatchHtml', () => {
       )
     );
 
-    await expect(fetchWatchHtml('video-id')).rejects.toBeInstanceOf(ResponseTooLargeError);
+    const error: unknown = await fetchWatchHtml('video-id').catch((reason: unknown) => reason);
+    expect(isResponseSizeError(error)).toBe(true);
+    expect(error).toBeInstanceOf(ResponseTooLargeError);
+    expect(error).toMatchObject({
+      observedBytes: MAX_WATCH_HTML_BYTES + 1,
+      maxBytes: MAX_WATCH_HTML_BYTES,
+    });
     expect(fetch).toHaveBeenCalledWith(
       buildWatchUrl('video-id'),
       expect.objectContaining({

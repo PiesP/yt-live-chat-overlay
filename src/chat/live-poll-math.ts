@@ -2,15 +2,15 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Pure computation functions extracted from LiveChatSource.
+ * Pure computation functions used by LiveChatDriver.
  *
  * These functions implement the adaptive polling delay algorithm:
  * error backoff, burst reactivity, and density adaptation — isolated
- * from the LiveChatSource class so they can be unit-tested independently
+ * from the live driver so they can be unit-tested independently
  * of YouTube API, DOM, and AbortSignal dependencies.
  */
 
-// ── Threshold constants (mirror LiveChatSource) ──────────────────────────
+// ── Threshold constants for live polling ──────────────────────────
 
 export const DENSITY_WINDOW_SIZE = 5;
 export const DENSITY_HIGH_THRESHOLD = 10;

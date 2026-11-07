@@ -4,6 +4,8 @@
 import { MAX_WATCH_HTML_BYTES } from '@chat/youtube/api';
 import {
   MAX_CHAT_RESPONSE_BYTES,
+  ChatResponseTooLargeError,
+  isResponseSizeError,
   readBoundedChatResponseText,
   readBoundedResponseText,
   ResponseTooLargeError,
@@ -21,7 +23,7 @@ describe.each([
     limit: MAX_WATCH_HTML_BYTES,
     read: (response: Response) => readBoundedResponseText(response, MAX_WATCH_HTML_BYTES),
   },
-])('$name production byte boundaries', ({ limit, read }) => {
+])('$name production byte boundaries', ({ name, limit, read }) => {
   it.each([-1, 0, 1])(
     'checks actual bytes at limit%+i with misleading or absent length',
     async (delta) => {
@@ -42,7 +44,12 @@ describe.each([
           headers: declared === undefined ? {} : { 'content-length': declared },
         });
         if (delta > 0) {
-          await expect(read(response)).rejects.toBeInstanceOf(ResponseTooLargeError);
+          const error: unknown = await read(response).catch((reason: unknown) => reason);
+          expect(isResponseSizeError(error)).toBe(true);
+          expect(error).toBeInstanceOf(
+            name === 'chat' ? ChatResponseTooLargeError : ResponseTooLargeError
+          );
+          expect(error).toMatchObject({ observedBytes: limit + delta, maxBytes: limit });
           expect(cancel).toHaveBeenCalledOnce();
         } else {
           const text = await read(response);

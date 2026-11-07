@@ -680,7 +680,7 @@ pitch in `data-preview-rows`, `data-preview-row-height` and
 An optional run can explicitly select
 `['worker-spacing-speed', 'main-spacing-speed']` and set `spacingOnly: true`
 to stop after the gap-8 capture; candidate acceptance keeps
-`comparisonOnly: false`. Default runs still exercise all eleven scenarios,
+`comparisonOnly: false`. Default runs still exercise all thirteen placement scenarios,
 including Backlog and recovery. Retained complete frames can be reanalyzed as
 post-processing, with the original source/probe hashes and receipts preserved;
 this is not a fresh browser execution. Older allocation-only data cannot supply
@@ -702,8 +702,11 @@ resize reflow and pause/resume observations. An observed Worker error
 event exercises the application's recovery into Canvas; public YouTube traffic
 is never altered. A private source-bound probe is inserted into the packaged
 `page-script.js` closure before its ordinary `main()` call to observe Canvas
-internals. The original app source executes intact; a changed closure/class
-shape fails the scenario. Worker instrumentation uses the existing Blob
+internals. The admitted candidate has one `var CanvasRenderer = class CanvasRenderer {`
+declaration, one `getRegularCardInsets` declaration and one app entry. The
+observer also requires the Canvas enqueue, placement and frame methods at
+runtime. Missing, repeated or inherited class shapes fail; the original app
+source executes intact. Worker instrumentation uses the existing Blob
 prefix/suffix guard. These additive probes can affect timings, so the recorded
 frame work is diagnostic rather than a general performance claim.
 
@@ -1212,6 +1215,26 @@ after collecting the run. Review `chat-request-deadline.json`, its screenshot
 and the central bundle/result/collection/transport receipts together; Browser
 Mode regressions cover pre-abort, fetch/body, all retry waits, reason races and
 replay retirement.
+
+## Composition runtime installation check (#431)
+
+Place exactly `{"scenario":"composition-runtime"}` in the ignored
+`validation/windows/inputs/composition-runtime.json` before bundling a committed
+candidate. Run the maintained headed installed Edge extension profile with
+`--browser msedge --mode desktop --installation extension`, without public URLs
+or a duration option. The selector is exclusive with other focused and upgrade
+inputs.
+
+This route keeps the ordinary installed Worker fixture, bootstrap, retirement,
+Canvas recovery, continuity, acquisition, bitmap, placement and Main image
+recovery checks. Placement runs every maintained scenario and its Worker/Main
+comment matrix with the strict source-bound Canvas observer. It returns through
+the primary browser's normal cleanup before the separate natural Chrome/native
+tab and PiP routes. Review `installation-result.json` with the bundled source,
+core, page-script, probe and cleanup receipts. A failed or missing check remains
+failed; the focused result does not qualify public YouTube, native tab or PiP
+behavior. Remove only the task-owned selector after retaining the run's inputs
+and receipts.
 
 ## Main Backlog reset fixture
 

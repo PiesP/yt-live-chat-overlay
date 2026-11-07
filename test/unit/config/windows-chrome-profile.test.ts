@@ -22,6 +22,8 @@ import type { BrowserContext, BrowserType, Page } from '@playwright/test';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import * as chromeInstallModule from '../../../validation/windows/chrome-install.ts';
+import * as firefoxInstallModule from '../../../validation/windows/firefox-install.ts';
+import * as installProfileModule from '../../../validation/windows/install-profile.ts';
 import * as liveRenderingModule from '../../../validation/windows/live-rendering.ts';
 import * as naturalChromeModule from '../../../validation/windows/natural-chrome.ts';
 
@@ -149,6 +151,155 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('admits only the exact composition selector and uses the ordinary installed Edge profile', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    const selector = join(inputDir, 'composition-runtime.json');
+    expect(await chromeInstallModule.readCompositionRuntimeSelector(paths.root)).toBe(false);
+    await writeFile(selector, JSON.stringify({ scenario: 'composition-runtime', extra: true }));
+    await expect(chromeInstallModule.readCompositionRuntimeSelector(paths.root)).rejects.toThrow();
+    await writeFile(selector, JSON.stringify({ scenario: 'composition-runtime' }));
+    expect(await chromeInstallModule.readCompositionRuntimeSelector(paths.root)).toBe(true);
+
+    const launchError = new Error('ordinary Edge launch reached');
+    const launchPersistentContext = vi.fn().mockRejectedValueOnce(launchError);
+    const launchOwnedNaturalChrome = vi.spyOn(naturalChromeModule, 'launchOwnedNaturalChrome');
+    try {
+      await expect(
+        installProfileModule.run({
+          chromium: { launchPersistentContext } as unknown as BrowserType,
+          root: paths.root,
+          output: paths.output,
+          browserName: 'msedge',
+          installation: 'extension',
+        })
+      ).rejects.toBe(launchError);
+      expect(launchPersistentContext).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ channel: 'msedge', headless: false })
+      );
+      expect(launchOwnedNaturalChrome).not.toHaveBeenCalled();
+    } finally {
+      launchOwnedNaturalChrome.mockRestore();
+    }
+  });
+
+  it('rejects incompatible composition inputs before browser launch', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    await writeFile(
+      join(inputDir, 'composition-runtime.json'),
+      JSON.stringify({ scenario: 'composition-runtime' })
+    );
+    const launchPersistentContext = vi.fn();
+    const options = {
+      chromium: { launchPersistentContext } as unknown as BrowserType,
+      root: paths.root,
+      output: paths.output,
+      browserName: 'msedge' as const,
+      installation: 'extension' as const,
+    };
+    await expect(
+      chromeInstallModule.runChromeInstallation({ ...options, browserName: 'chrome' })
+    ).rejects.toThrow('requires installed Edge');
+    await expect(
+      chromeInstallModule.runChromeInstallation({ ...options, installation: 'userscript' })
+    ).rejects.toThrow('requires the extension');
+    await expect(
+      chromeInstallModule.runChromeInstallation({
+        ...options,
+        liveUrls: ['https://www.youtube.com/watch?v=public'],
+      })
+    ).rejects.toThrow('cannot use public live URLs');
+    await expect(
+      chromeInstallModule.runChromeInstallation({ ...options, headless: true })
+    ).rejects.toThrow('requires headed Edge');
+    await expect(
+      chromeInstallModule.runChromeInstallation({
+        ...options,
+        liveObservation: { mode: 'duration', duration_seconds: 1200 },
+      })
+    ).rejects.toThrow('cannot use duration observation');
+    await writeFile(
+      join(inputDir, 'settings-persistence.json'),
+      JSON.stringify({ scenario: 'settings-persistence' })
+    );
+    await expect(chromeInstallModule.runChromeInstallation(options)).rejects.toThrow(
+      'cannot combine selectors'
+    );
+    await rm(join(inputDir, 'settings-persistence.json'));
+    await writeFile(
+      join(inputDir, 'backlog-reset.json'),
+      JSON.stringify({ scenario: 'backlog-reset' })
+    );
+    await expect(chromeInstallModule.runChromeInstallation(options)).rejects.toThrow(
+      'Composition runtime cannot combine selectors'
+    );
+    expect(launchPersistentContext).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported composition browsers through the actual installation dispatcher', async () => {
+    const paths = await fixture();
+    const inputs = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputs, { recursive: true });
+    await writeFile(join(inputs, 'composition-runtime.json'), '{"scenario":"composition-runtime"}');
+    const launchPersistentContext = vi.fn();
+    const runFirefox = vi
+      .spyOn(firefoxInstallModule, 'runFirefoxInstallation')
+      .mockRejectedValue(new Error('Firefox setup must not run'));
+    try {
+      for (const browserName of ['firefox', 'chrome'] as const) {
+        await expect(
+          installProfileModule.run({
+            chromium: { launchPersistentContext } as unknown as BrowserType,
+            browserName,
+            root: paths.root,
+            output: paths.output,
+            installation: 'extension',
+          })
+        ).rejects.toThrow('Composition runtime requires installed Edge');
+      }
+      expect(runFirefox).not.toHaveBeenCalled();
+      expect(launchPersistentContext).not.toHaveBeenCalled();
+    } finally {
+      runFirefox.mockRestore();
+    }
+  });
+
+  it('rejects companion focused inputs and both upgrade inputs before installed composition setup', async () => {
+    const paths = await fixture();
+    const inputs = join(paths.root, 'validation/windows/inputs');
+    const upgrades = join(paths.root, 'validation/windows/release-upgrade');
+    await mkdir(inputs, { recursive: true });
+    await mkdir(upgrades, { recursive: true });
+    await writeFile(join(inputs, 'composition-runtime.json'), '{"scenario":"composition-runtime"}');
+    const launchPersistentContext = vi.fn();
+    const options = {
+      chromium: { launchPersistentContext } as unknown as BrowserType,
+      browserName: 'msedge' as const,
+      root: paths.root,
+      output: paths.output,
+      installation: 'extension' as const,
+    };
+    for (const name of ['viewing-experience-ime.json', 'unknown-focused.json']) {
+      await writeFile(join(inputs, name), '{}');
+      await expect(installProfileModule.run(options)).rejects.toThrow(
+        'Composition runtime cannot combine selectors'
+      );
+      await rm(join(inputs, name));
+    }
+    for (const name of ['input.json', 'extension-input.json']) {
+      await writeFile(join(upgrades, name), '{}');
+      await expect(installProfileModule.run(options)).rejects.toThrow(
+        'Composition runtime cannot use upgrade inputs'
+      );
+      await rm(join(upgrades, name));
+    }
+    expect(launchPersistentContext).not.toHaveBeenCalled();
+  });
+
   it('selects the owned natural Chrome route only for focused public tab visibility', async () => {
     const paths = await fixture();
     const inputDir = join(paths.root, 'validation/windows/inputs');

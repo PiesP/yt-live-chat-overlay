@@ -228,11 +228,13 @@ function createHarness(
   runtimeInternals.chatSource = source;
   runtimeInternals.overlay = overlay;
   const delivered: string[] = [];
-  const sourceInternals = source as unknown as {
-    callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+  const sourceInternals = (source as unknown as { driver: unknown }).driver as {
     replayBuffer: { insert(message: ChatMessage, offsetMs: number): void };
-    getPlaybackSnapshot(): { offsetMs: number; paused: boolean };
     flushReplayBuffer(): void;
+  };
+  const sessionInternals = (source as unknown as { session: unknown }).session as {
+    callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+    getPlaybackSnapshot(): { offsetMs: number; paused: boolean };
   };
   const harness: Harness = {
     source,
@@ -304,8 +306,8 @@ function createHarness(
       container.remove();
     },
   };
-  vi.spyOn(sourceInternals, 'getPlaybackSnapshot').mockImplementation(() => harness.playback);
-  sourceInternals.callback = (messages) => {
+  vi.spyOn(sessionInternals, 'getPlaybackSnapshot').mockImplementation(() => harness.playback);
+  sessionInternals.callback = (messages) => {
     const batch = Array.isArray(messages) ? messages : [messages];
     delivered.push(...batch.map((message) => message.id ?? ''));
     runtimeInternals.routeMessages(batch);
@@ -395,7 +397,11 @@ describe('Placement through source, runtime and renderer', () => {
       harness.frame(10_000);
       expect(harness.active().map((message) => message.id)).toContain('old');
 
-      (harness.source as unknown as { handleSeeked(offsetMs: number): void }).handleSeeked(5_000);
+      (
+        harness.source as unknown as {
+          driver: { handleSeeked(offsetMs: number): void };
+        }
+      ).driver.handleSeeked(5_000);
       await Promise.resolve();
       expect(harness.active()).toEqual([]);
       harness.playback = { offsetMs: 5_000, paused: false };

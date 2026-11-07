@@ -796,15 +796,58 @@ describe('Windows placement timing probe', () => {
   it('adds a Canvas probe only at the expected packaged app entry', () => {
     const source =
       'function getRegularCardInsets() { return { vertical: 1 }; }\n' +
-      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};' +
+      'var CanvasRenderer = class CanvasRenderer {};' +
       '\n\tmain();\n})();';
     const instrumented = instrumentCanvasPageScript(source, 'function probe() {}');
     expect(instrumented).toContain(';(function probe() {})(CanvasRenderer, getRegularCardInsets);');
     expect(
       instrumented?.replace('\n\t;(function probe() {})(CanvasRenderer, getRegularCardInsets);', '')
     ).toBe(source);
-    expect(instrumentCanvasPageScript(source.replace('RendererBase', 'OtherBase'))).toBeNull();
+    expect(
+      instrumentCanvasPageScript(source.replace('class CanvasRenderer {', 'class OtherRenderer {'))
+    ).toBeNull();
+    expect(
+      instrumentCanvasPageScript(
+        source.replace('class CanvasRenderer {', 'class CanvasRenderer extends RendererBase {')
+      )
+    ).toBeNull();
+    expect(
+      instrumentCanvasPageScript(
+        source.replace('\n\tmain();', '\nvar CanvasRenderer = class CanvasRenderer {};\n\tmain();')
+      )
+    ).toBeNull();
+    expect(
+      instrumentCanvasPageScript(
+        source.replace('function getRegularCardInsets(', 'function otherInsets(')
+      )
+    ).toBeNull();
     expect(instrumentCanvasPageScript(source.replace('})();', '\n\tmain();\n})();'))).toBeNull();
+  });
+
+  it('fails execution when the admitted class lacks required probe methods', () => {
+    const source =
+      '(() => { function getRegularCardInsets() {}\n' +
+      'var CanvasRenderer = class CanvasRenderer {};\n' +
+      'function main() {}\n\tmain();\n})();';
+    const instrumented = instrumentCanvasPageScript(source);
+    expect(instrumented).not.toBeNull();
+    expect(() => runInNewContext(instrumented!, { __ytPlacementProbe: {} })).toThrow(
+      'Unsupported Canvas observer prototype or missing probe state'
+    );
+  });
+
+  it('rejects inherited probe methods even when the emitted class name matches', () => {
+    const source =
+      '(() => { function getRegularCardInsets() {}\n' +
+      'var CanvasRenderer = class CanvasRenderer {};\n' +
+      'Object.setPrototypeOf(CanvasRenderer.prototype, {' +
+      'enqueueMessage() {}, placeQueuedMessage() {}, renderFrame() {} });\n' +
+      'function main() {}\n\tmain();\n})();';
+    const instrumented = instrumentCanvasPageScript(source);
+    expect(instrumented).not.toBeNull();
+    expect(() => runInNewContext(instrumented!, { __ytPlacementProbe: {} })).toThrow(
+      'Unsupported Canvas observer prototype or missing probe state'
+    );
   });
 
   it('observes shared paid plans in readable and minified emitted shapes and rejects drift', () => {
@@ -816,7 +859,7 @@ describe('Windows placement timing probe', () => {
       'function paint() { const plan = preparePaidCardPlan({ width: 1 }); ' +
       'renderWrappedContentSegments(ctx, plan.body); renderWrappedContentSegments(ctx, plan.translation); }\n' +
       'function getRegularCardInsets() {}\n' +
-      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n\tmain();\n})();';
+      'var CanvasRenderer = class CanvasRenderer {};\n\tmain();\n})();';
     const canvas = instrumentCanvasPageScript(readable, 'function probe() {}', true);
     expect(() => assertInstrumentedPageScript(readable, canvas!)).not.toThrow();
     expect(canvas).toContain('var __ytOriginalPaidPlan = preparePaidCardPlan;');
@@ -895,12 +938,11 @@ describe('Windows placement timing probe', () => {
       'function paint(input) { const plan = preparePaidCardPlan({ width: input }); ' +
       'renderWrappedContentSegments(ctx, plan.body); renderWrappedContentSegments(ctx, plan.translation); return plan; }\n' +
       'function getRegularCardInsets() {}\n' +
-      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n' +
+      'var CanvasRenderer = class CanvasRenderer {};\n' +
       'function main() { globalThis.planResult = paint(123); }\n\tmain();\n})();';
     const instrumented = instrumentCanvasPageScript(source, 'function probe() {}', true)!;
     expect(() => assertInstrumentedPageScript(source, instrumented)).not.toThrow();
     const sandbox = {
-      RendererBase: class {},
       ctx: {},
       planCalls: 0,
       planResult: null,
@@ -986,7 +1028,9 @@ describe('Windows placement timing probe', () => {
       function renderRegularMessage(ctx, message) {}
       function drawAuthorSection() {}
       function getRegularCardInsets() {}
-      var CanvasRenderer = class CanvasRenderer extends RendererBase {};
+      var CanvasRenderer = class CanvasRenderer {
+        enqueueMessage() {} placeQueuedMessage() {} renderFrame() {}
+      };
       function main() {
         const probe = globalThis.__ytPlacementProbe;
         const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
@@ -1007,7 +1051,7 @@ describe('Windows placement timing probe', () => {
     expect(() => assertInstrumentedPageScript(source, instrumented!)).not.toThrow();
     const sandbox = {
       FakeContext,
-      RendererBase: class {},
+
       overlay,
       glyph,
       ctx: new FakeContext(overlay),
@@ -1103,9 +1147,9 @@ describe('Windows placement timing probe', () => {
         function renderRegularMessage(...args) { return globalThis.realRegular(...args); }
         function drawAuthorSection() {}
         function getRegularCardInsets() { return { vertical: 1 }; }
-        var CanvasRenderer = class CanvasRenderer extends RendererBase {
+        var CanvasRenderer = class CanvasRenderer {
           constructor() {
-            super(); this.ctx = ctx; this.activeMessages = [];
+            this.ctx = ctx; this.activeMessages = [];
             this.settings = { fontSize: 20, laneSpacing: 0, danmakuMode: '${mode === 'top' ? 'top' : 'scroll'}',
               safeTop: 0, safeBottom: 0, speedPxPerSec: 100, backlogSpeedMultiplier: 1,
               outline: { enabled: false }, backgroundColors: {} };
@@ -1149,7 +1193,7 @@ describe('Windows placement timing probe', () => {
         ctx: new FakeContext(),
         fixtureMessage: message,
         realRegular: (...args: unknown[]) => Reflect.apply(renderRegularMessage, null, args),
-        RendererBase: class {},
+
         CanvasRenderingContext2D: FakeContext,
         performance: { timeOrigin: 1000, now: () => 1 },
         requestAnimationFrame: () => 1,
@@ -1239,7 +1283,7 @@ describe('Windows placement timing probe', () => {
         drawAuthorSection(ctx); ctx.fillText('body piece', 20, 45);
       }
       function getRegularCardInsets() {}
-      var CanvasRenderer = class CanvasRenderer extends RendererBase {};
+      var CanvasRenderer = class CanvasRenderer {};
       function main() {
         const probe = __ytPlacementProbe;
         const frame = probe.beginRenderFrame({ ctx, logicalWidth: 400, logicalHeight: 200,
@@ -1257,7 +1301,7 @@ describe('Windows placement timing probe', () => {
     expect(instrumented).not.toBeNull();
     const sandbox = {
       ctx: new FakeContext(),
-      RendererBase: class {},
+
       CanvasRenderingContext2D: FakeContext,
       performance: { timeOrigin: 1000, now: () => 1 },
       requestAnimationFrame: () => 1,
@@ -1326,11 +1370,11 @@ describe('Windows placement timing probe', () => {
     'observes Canvas queue, committed motion, and %i unknown presentations for %s',
     (unknownPresentations, id) => {
       const source = `(() => {
-      class RendererBase {}
+
       function getRegularCardInsets() { return { vertical: 1 }; }
-      var CanvasRenderer = class CanvasRenderer extends RendererBase {
+      var CanvasRenderer = class CanvasRenderer {
         constructor() {
-          super(); this.settings = { fontSize: 32, laneSpacing: 0 }; this.activeMessages = [];
+          this.settings = { fontSize: 32, laneSpacing: 0 }; this.activeMessages = [];
           this.pendingQueue = { items: [], get size() { return this.items.length; },
             toArray() { return this.items; } };
           this.laneAllocator = { getLaneHeight: () => 34, getLaneCount: () => 20 };
@@ -1479,11 +1523,11 @@ describe('Windows placement timing probe', () => {
       startTime: -100, pausedDuration: 0, duration: 1000 }]`;
       if (renderer === 'main') {
         const source = `(() => {
-        class RendererBase {}
+
         function getRegularCardInsets() { return { vertical: 1 }; }
-        var CanvasRenderer = class CanvasRenderer extends RendererBase {
+        var CanvasRenderer = class CanvasRenderer {
           constructor() {
-            super(); this.ctx = new FakeContext(overlay); this.canvas = overlay;
+            this.ctx = new FakeContext(overlay); this.canvas = overlay;
             this.settings = { fontSize: 32, laneSpacing: 0 }; this.activeMessages =
               ${active}.map((entry) => ({ ...entry, message: { id: entry.id } }));
             this.pendingQueue = { size: 0, toArray: () => [] };

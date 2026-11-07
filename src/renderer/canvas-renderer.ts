@@ -9,8 +9,8 @@
  * coordinates, eliminating the sub-pixel text jitter inherent in CSS
  * transform interpolation.
  *
- * Extends RendererBase for shared state machine, rate limiting, burst
- * detection, and lane allocation.
+ * Composes pause and backlog lifetimes with its lane, admission, Worker,
+ * image, and translation collaborators.
  *
  * Temporal and horizontal entry effects share one pressure-dependent window.
  * Instance-owned priority/tier cursors carry geometric entry across frames;
@@ -22,6 +22,7 @@ import type {
   AccessibleChatMessage,
   ChatMessage,
   DropReason,
+  BurstLevel,
   OverlayDimensions,
   OverlaySettings,
 } from '@app-types';
@@ -29,6 +30,7 @@ import type { Overlay } from '@app/overlay';
 import { getTranslatableText } from '@chat/message-helpers';
 import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { t } from '@i18n/index';
+import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { clearSafeAnimationFrame } from '@piesp/browser-core/async';
 import {
@@ -36,6 +38,7 @@ import {
   ResizableByteLimitedCache,
   yieldIfOverBudgetAsync,
 } from '@piesp/browser-core/util';
+import { BacklogHysteresis } from '@renderer/backlog-hysteresis';
 import { resetBidiLayoutCaches } from '@renderer/canvas/bidi-layout';
 import {
   applyDevicePixelRatio,
@@ -81,9 +84,12 @@ import {
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
 } from '@renderer/constants';
+import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { computeBacklogSpeed } from '@renderer/layout/backlog-speed';
+import { BurstDetector } from '@renderer/layout/burst-detector';
 import { EntryPacingState } from '@renderer/layout/entry-pacing';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
+import { LaneAllocator } from '@renderer/layout/lane-allocator';
 import {
   applyReflowMotion,
   previousMotionPlan,
@@ -102,7 +108,9 @@ import {
   getRowSlotCount,
   rowsNeedVerticalClearance,
 } from '@renderer/layout/row-geometry';
-import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
+import { getMessagePriority } from '@renderer/message-priority';
+import { RenderPauseState } from '@renderer/render-pause-state';
+import type { ConnectionStatus, RuntimeRenderer } from '@renderer/renderer-contracts';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -112,6 +120,7 @@ import {
 } from '@renderer/shared';
 import {
   clearTextMeasurementCaches,
+  setTextMeasureCallback,
   getFontString,
   measureTextHeight,
   measureTextWidth,
@@ -121,10 +130,11 @@ import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService, type TranslationRuntimeStatus } from '@translation/service';
 import { DensityIndicator } from '@util/density-indicator';
-import { statusBarLayout } from '@util/design-tokens';
+import { rendererLayout, statusBarLayout } from '@util/design-tokens';
 import { forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { MessageActivator } from '@util/message-activator';
+import { ObservabilityReporter } from '@util/observability';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import { scheduleOverlayTask } from '@util/scheduler-utils';
 
@@ -148,14 +158,57 @@ interface FallbackIngressEntry {
   presentationAccounting?: NonNullable<WorkerRecoveryMessage['presentationAccounting']>;
 }
 
-export class CanvasRenderer extends RendererBase {
+export class CanvasRenderer implements RuntimeRenderer {
+  readonly observability: ObservabilityReporter;
+  onStatusBarClick: (() => void) | null = null;
+  private readonly pauseState = new RenderPauseState();
+  private readonly backlog = new BacklogHysteresis();
+  private readonly overlay: Overlay;
+  private settings: OverlaySettings;
+  private readonly laneAllocator: LaneAllocator;
+  private readonly burstDetector: BurstDetector;
+  private readonly authorRateLimiter: PerAuthorRateLimiter;
+  private currentLaneDensityFactor = 1.0;
+  private replayMode = false;
+  private drainLocked = false;
+  private lastRenderActivity = performance.now();
+
+  private static readonly LANE_DENSITY_BY_BURST: Record<BurstLevel, number> = {
+    normal: 1.0,
+    elevated: 1.0,
+    high: 0.75,
+    extreme: 0.5,
+  };
+
+  get isPaused(): boolean {
+    return this.pauseState.isPaused;
+  }
+  get isVideoPaused(): boolean {
+    return this.pauseState.isVideoPaused;
+  }
+  private get isUserPaused(): boolean {
+    return this.pauseState.isUserPaused;
+  }
+  private get pausedAt(): number | null {
+    return this.pauseState.pausedAt;
+  }
+  private get backlogPaused(): boolean {
+    return this.backlog.paused;
+  }
+  get onBacklogPauseChange(): ((paused: boolean) => void) | null {
+    return this.backlog.onChange;
+  }
+  set onBacklogPauseChange(callback: ((paused: boolean) => void) | null) {
+    this.backlog.onChange = callback;
+  }
+
   private readonly entryPacing = new EntryPacingState();
   private readonly drainCursors = new Map<number, ChatMessage>();
   private drainResumePriority: number | undefined;
   private higherPrioritySuccesses = 0;
   private canvas: HTMLCanvasElement | null = null;
   private statusActionButton: HTMLButtonElement | null = null;
-  /** Set to true during onDestroy() — checked after async awaits in drainQueueAsync. */
+  /** Set to true during destroyResources() — checked after async awaits in drainQueueAsync. */
   private _destroyed = false;
   /** Prevent concurrent Worker recovery attempts from replacing the canvas twice. */
   private fallbackInProgress = false;
@@ -193,7 +246,7 @@ export class CanvasRenderer extends RendererBase {
   /** Cached prefers-reduced-motion media query result. */
   private reducedMotionQuery: MediaQueryList | null = null;
   private reducedMotion = false;
-  /** Bound listener for reduced-motion changes — stored for cleanup in onDestroy. */
+  /** Bound listener for reduced-motion changes — stored for resource cleanup. */
   private reducedMotionListener: ((e: MediaQueryListEvent) => void) | null = null;
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
@@ -270,10 +323,7 @@ export class CanvasRenderer extends RendererBase {
    * Bounded to 200 entries (FIFO eviction with LRU touch on re-insert) to prevent unbounded memory growth
    * in long-running streams.
    */
-  private readonly textBitmapCache = new ResizableByteLimitedCache<HTMLCanvasElement>(
-    this.settings.textCacheMb * 1_000_000, // configurable MB
-    (c) => c.width * c.height * 4 // RGBA bytes
-  );
+  private readonly textBitmapCache: ResizableByteLimitedCache<HTMLCanvasElement>;
   private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
@@ -369,7 +419,38 @@ export class CanvasRenderer extends RendererBase {
     settings: OverlaySettings,
     onTranslationStatus?: (status: TranslationRuntimeStatus) => void
   ) {
-    super(overlay, settings);
+    this.overlay = overlay;
+    this.settings = settings;
+    this.textBitmapCache = new ResizableByteLimitedCache<HTMLCanvasElement>(
+      settings.textCacheMb * 1_000_000,
+      (canvas) => canvas.width * canvas.height * 4
+    );
+    this.observability = new ObservabilityReporter(settings.showDebugOverlay);
+    setTextMeasureCallback((ms) => this.observability.recordTextMeasure(ms));
+    this.laneAllocator = new LaneAllocator({
+      safeTop: settings.safeTop,
+      safeBottom: settings.safeBottom,
+      fontSize: settings.fontSize,
+      fontWeight: settings.fontWeight,
+      fontFamily: settings.fontFamily,
+      laneSpacing: settings.laneSpacing,
+      outlineWidthPx: settings.outline.enabled ? settings.outline.widthPx : 0,
+      headwayGapRatio: settings.headwayGapRatio,
+      exitPaddingPx: settings.exitPaddingPx,
+      scrollDurationMaxMs: settings.scrollDurationMaxMs,
+      laneDensityFactor: 1.0,
+    });
+    this.laneAllocator.reset(overlay.getDimensions());
+    this.burstDetector = new BurstDetector(this.observability);
+    this.burstDetector.updateThresholds({
+      burstSampleWindow: settings.burstSampleWindow,
+      burstElevatedThreshold: settings.burstElevatedThreshold,
+      burstHighThreshold: settings.burstHighThreshold,
+      burstExtremeThreshold: settings.burstExtremeThreshold,
+    });
+    this.burstDetector.start();
+    this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
+    this.authorRateLimiter.updateConfig({ preset: settings.authorRateLimit });
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
@@ -455,7 +536,7 @@ export class CanvasRenderer extends RendererBase {
       this.statusActionButton = statusActionButton;
     }
 
-    // Note: ImageFetchManager cleanup is handled by onDestroy(), which is
+    // Note: ImageFetchManager cleanup is handled by destroyResources(), which is
     // called by RuntimeManager.disposeSession() before a new renderer is
     // created.  The old guard here never fired because the field is only
     // assigned later in this constructor (line 311).
@@ -767,19 +848,19 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Get current lane utilization ratio (0–1): occupied lanes / total lanes. */
-  override getLaneUtilization(): number {
+  getLaneUtilization(): number {
     return this.workerManager.isActive
       ? this.workerManager.laneUtilization
       : this.laneAllocator.getUtilization();
   }
 
   /** Update standby status via ConnectionStatus — backward compat. */
-  override setStandbyStatus(standby: boolean): void {
+  setStandbyStatus(standby: boolean): void {
     this.setConnectionStatus(standby ? 'standby' : 'connected');
   }
 
   /** Inform the renderer of the current connection health status. */
-  override setConnectionStatus(status: ConnectionStatus): void {
+  setConnectionStatus(status: ConnectionStatus): void {
     if (status !== this.connectionStatus) {
       // H2: Reset status bar render flag so the idle-detection logic
       // allows one extra frame to render the new status bar before
@@ -811,8 +892,8 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Set replay mode and propagate to the worker. */
-  override setReplayMode(enabled: boolean): void {
-    super.setReplayMode(enabled);
+  setReplayMode(enabled: boolean): void {
+    this.replayMode = enabled;
     this.workerManager.sendReplayModeToWorker(enabled);
   }
 
@@ -820,18 +901,18 @@ export class CanvasRenderer extends RendererBase {
     return this.pendingQueue.size + this.fallbackIngressQueue.size + this.workerManager.queueDepth;
   }
 
-  override getActiveMessageCount(): number {
+  getActiveMessageCount(): number {
     return this.activeMessages.length + this.workerManager.activeMessageCount;
   }
 
-  override isWorkerAlive(): boolean {
+  isWorkerAlive(): boolean {
     if (this.fallbackInProgress || this.fallbackRecoveryFailed) return false;
     return this.workerManager.isActive ? this.workerManager.isAlive() : true;
   }
 
   /** Override to relay lane density changes to the Worker renderer. */
-  protected override applyLaneDensityIfChanged(): boolean {
-    const changed = super.applyLaneDensityIfChanged();
+  private applyLaneDensityIfChanged(): boolean {
+    const changed = this.applySharedLaneDensityIfChanged();
     if (changed && this.workerManager.isActive) {
       this.workerManager.sendLaneDensity(this.currentLaneDensityFactor);
     } else if (changed) {
@@ -1001,7 +1082,7 @@ export class CanvasRenderer extends RendererBase {
    * Used by replayLatestMessages so replayed messages don't inflate
    * drop-rate denominators or trigger burst detection / rate limiting.
    */
-  override replayMessage(message: ChatMessage): void {
+  replayMessage(message: ChatMessage): void {
     if (this.isVideoPaused) return;
     if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
       this.enqueueFallbackIngress(message, false);
@@ -1017,10 +1098,10 @@ export class CanvasRenderer extends RendererBase {
 
   /**
    * H1: Replay messages that arrived during video pause.
-   * Called from resumeForVideo() via the base class after the pause flag clears.
+   * Called by resumeForVideo() after the pause owner clears the video flag.
    * Enqueues buffered messages into the pending queue for rendering.
    */
-  protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
+  private flushVideoMessages(messages: ChatMessage[]): void {
     if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
       for (const message of messages) this.enqueueFallbackIngress(message, false);
       return;
@@ -1154,7 +1235,7 @@ export class CanvasRenderer extends RendererBase {
     return merged;
   }
 
-  override trimBackgroundQueue(): void {
+  trimBackgroundQueue(): void {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     // Defer trimming to a background task so it doesn't compete with
     // frame-critical rendering or message processing.
@@ -1170,7 +1251,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Drain all pending queue messages for re-injection (used by overlay refresh). */
-  override drainPendingQueue(): ChatMessage[] {
+  drainPendingQueue(): ChatMessage[] {
     const messages: ChatMessage[] = [];
     while (!this.pendingQueue.isEmpty) {
       const msg = this.pendingQueue.dequeue();
@@ -1183,14 +1264,14 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Clear all active messages (used by overlay refresh). */
-  override clearActiveMessages(): void {
+  clearActiveMessages(): void {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.entryPacing.clear();
   }
 
   /** Clear pending queue (used by overlay refresh). */
-  override clearPendingQueue(): void {
+  clearPendingQueue(): void {
     this.pendingQueue.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -1199,28 +1280,28 @@ export class CanvasRenderer extends RendererBase {
 
   /**
    * Return a snapshot of the pending queue for burst EMA pre-warming.
-   * Called by RendererBase.resume() to seed the BurstDetector EMA with
+   * Called by CanvasRenderer.resume() to seed the BurstDetector EMA with
    * inter-message intervals from messages queued during the pause.
    */
-  override getPendingQueueMessages(): ChatMessage[] {
+  getPendingQueueMessages(): ChatMessage[] {
     return this.pendingQueue.toArray();
   }
 
   /** Explicitly restart the render loop (used by overlay refresh). */
-  override resumeRenderLoop(): void {
+  resumeRenderLoop(): void {
     this.idleSince = null;
     this.hasRenderedStatusBar = false;
     this.startRenderLoop();
   }
 
   /** Prepare for a clean restart while preserving decoded-image and bitmap caches. */
-  override prepareForRefresh(): void {
+  prepareForRefresh(): void {
     this.recoveredPresentationAccounting = new WeakMap();
     this.clearActiveMessages();
     this.clearPendingQueue();
     this.fallbackIngressQueue.clear();
     this.workerManager.clearState();
-    this.backlogPaused = false;
+    this.backlog.resetVisualState();
     this.dimensionCache.clear();
     resetBidiLayoutCaches();
     for (const bucket of this.farOpacityBuckets) bucket.length = 0;
@@ -2240,7 +2321,7 @@ export class CanvasRenderer extends RendererBase {
   /**
    * Prefetch images and trigger translation for a message destined for the
    * worker renderer.  Shared by addMessage, replayMessage, and
-   * onResumeFromVideoPause so replayed and video-unpaused messages receive
+   * flushVideoMessages so replayed and video-unpaused messages receive
    * the same pre-processing as live messages.
    */
   private prefetchAndTranslateForWorker(message: ChatMessage, msgId: string): void {
@@ -2323,9 +2404,9 @@ export class CanvasRenderer extends RendererBase {
    *   6. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
    */
 
-  // ── Abstract hook implementations ────────────────────────────────────
+  // ── Concrete lifecycle effects ────────────────────────────────────
 
-  override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+  updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
     const motionPolicyChanged =
@@ -2382,7 +2463,7 @@ export class CanvasRenderer extends RendererBase {
           settings.colors[key as keyof OverlaySettings['colors']] !==
           this.settings.colors[key as keyof OverlaySettings['colors']]
       );
-    super.updateSettings(settings, options);
+    this.updateSharedSettings(settings, options);
     this.translationBatchSize = settings.translationBatchSize;
     if (translationConfigurationChanged) {
       this.translationConfigurationGeneration++;
@@ -2483,30 +2564,30 @@ export class CanvasRenderer extends RendererBase {
     this.buildOpacityConfig();
   }
 
-  override setChatPanelOpen(open: boolean): void {
+  setChatPanelOpen(open: boolean): void {
     log.debug('renderer.chat-panel.changed', { open });
   }
 
-  protected onPause(): void {
+  private pauseEffects(): void {
     this.stopRenderLoop();
     this.workerManager.setPaused(true);
     this.imageFetchManager.pause();
   }
 
-  protected override onUserPause(): void {
+  private userPauseEffects(): void {
     this.stopRenderLoop();
   }
 
-  protected override onSystemResumeWhileUserPaused(): void {
+  private systemResumeWhileUserPausedEffects(): void {
     this.workerManager.setPaused(false);
     this.imageFetchManager.resume();
   }
 
-  protected override onUserResume(): void {
+  private userResumeEffects(): void {
     if (!this.workerManager.isActive) this.startRenderLoop();
   }
 
-  protected onResume(): void {
+  private resumeEffects(): void {
     this.startRenderLoop();
     const now = performance.now();
     this.laneAllocator.resetBatch(now);
@@ -2526,7 +2607,7 @@ export class CanvasRenderer extends RendererBase {
    * that would already be expired by now are left to expire naturally on
    * the next render frame via the merged cleanup pass.
    */
-  protected override applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
+  private applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
     this.entryPacing.shift(pausedMs);
     const now = performance.now();
     for (const msg of this.activeMessages) {
@@ -2544,7 +2625,7 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
-  protected resetState(): void {
+  private resetState(): void {
     this.recoveredPresentationAccounting = new WeakMap();
     this.cancelAllTranslationOwners();
     this.entryPacing.clear();
@@ -2556,7 +2637,7 @@ export class CanvasRenderer extends RendererBase {
     this.fallbackIngressQueue.clear();
     this.pendingQueue.clear();
     this.workerManager.clearState();
-    this.backlogPaused = false;
+    this.backlog.resetVisualState();
     clearTextMeasurementCaches();
     resetBidiLayoutCaches();
     this.textBitmapCache.clear();
@@ -2644,7 +2725,7 @@ export class CanvasRenderer extends RendererBase {
     this.sourceSampleBuffer = [];
   }
 
-  protected onDestroy(): void {
+  private destroyResources(): void {
     this.cancelAllTranslationOwners();
     this._destroyed = true;
     this.stopRenderLoop();
@@ -2678,7 +2759,7 @@ export class CanvasRenderer extends RendererBase {
     this.fallbackIngressQueue.clear();
     this.fallbackRecoveryFailed = false;
     this.pendingTranslations.length = 0;
-    this.onBacklogPauseChange = null;
+    this.backlog.destroy();
     this.onStatusBarClick = null;
     this.translationStatusUnsubscribe?.();
     this.translationStatusUnsubscribe = null;
@@ -2811,7 +2892,7 @@ export class CanvasRenderer extends RendererBase {
    * Gracefully degrade from Worker-mode to main-thread rendering.
    * Called when the Worker is unrecoverable (dead or canvas context lost).
    */
-  override fallbackToMainThread(reason: string): void {
+  fallbackToMainThread(reason: string): void {
     if (this._destroyed || this.fallbackInProgress) return;
     this.fallbackInProgress = true;
     // Atomically stop routing new ingress to the failed Worker. snapshotMessages
@@ -2854,7 +2935,7 @@ export class CanvasRenderer extends RendererBase {
         this.activeMessages.length = 0;
         this.activeMessagesByLane.clear();
         this.pendingQueue.clear();
-        this.backlogPaused = false;
+        this.backlog.resetVisualState();
         clearTextMeasurementCaches();
         this.textBitmapCache.clear();
         this.dimensionCache.clear();
@@ -3038,5 +3119,286 @@ export class CanvasRenderer extends RendererBase {
       default:
         return '';
     }
+  }
+  /** Get the current EMA-smoothed message rate (msg/s) for adaptive polling. */
+  getBurstEmaRate(): number {
+    return this.burstDetector.getEmaRate();
+  }
+
+  /** Whether the renderer is in replay (VOD) mode. */
+  get isReplayMode(): boolean {
+    return this.replayMode;
+  }
+
+  /** Preserve the configured visible size; viewport changes only change capacity. */
+  private getEffectiveFontSize(): number {
+    return this.settings.fontSize;
+  }
+
+  /** Set user-initiated pause state (Space key toggle). */
+  private updateSharedSettings(
+    settings: OverlaySettings,
+    options: { resetState?: boolean } = {}
+  ): void {
+    // Capture previous values for change detection
+    const prev = {
+      safeTop: this.settings.safeTop,
+      safeBottom: this.settings.safeBottom,
+      fontSize: this.settings.fontSize,
+      fontWeight: this.settings.fontWeight,
+      fontFamily: this.settings.fontFamily,
+      laneSpacing: this.settings.laneSpacing,
+      outlineWidthPx: this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
+    };
+
+    this.settings = settings;
+    this.observability.setShowDebug(settings.showDebugOverlay);
+    this.burstDetector.updateThresholds({
+      burstSampleWindow: settings.burstSampleWindow,
+      burstElevatedThreshold: settings.burstElevatedThreshold,
+      burstHighThreshold: settings.burstHighThreshold,
+      burstExtremeThreshold: settings.burstExtremeThreshold,
+    });
+    this.authorRateLimiter.updateConfig({
+      preset: settings.authorRateLimit,
+    });
+
+    // Font change invalidates cached text measurements (LRU width cache).
+    // Must clear before lane allocator reset to ensure laneHeight recalculation
+    // uses fresh font metrics.
+    const fontChanged =
+      settings.fontSize !== prev.fontSize ||
+      settings.fontWeight !== prev.fontWeight ||
+      settings.fontFamily !== prev.fontFamily;
+
+    this.laneAllocator.updateFontMetrics(
+      this.getEffectiveFontSize(),
+      settings.fontWeight,
+      settings.fontFamily,
+      settings.laneSpacing,
+      settings.outline.enabled ? settings.outline.widthPx : 0
+    );
+    this.laneAllocator.updatePlacementPolicy(
+      settings.headwayGapRatio,
+      settings.exitPaddingPx,
+      settings.scrollDurationMaxMs
+    );
+
+    if (fontChanged) {
+      clearTextMeasurementCaches();
+    }
+
+    // Propagate safe-zone changes to lane allocator even without full reset.
+    // This ensures new lane placements use the correct Y positions immediately.
+    const safeZoneChanged =
+      settings.safeTop !== prev.safeTop || settings.safeBottom !== prev.safeBottom;
+    this.laneAllocator.updateSafeZone(settings.safeTop, settings.safeBottom);
+
+    if (options.resetState) {
+      this.resetState();
+      this.laneAllocator.reset(this.overlay.getDimensions());
+      return;
+    }
+
+    // Safe zone changes affect lane count (usable height), so recalculate.
+    if (safeZoneChanged || this.laneAllocator.isEmpty()) {
+      this.laneAllocator.reset(this.overlay.getDimensions());
+    }
+  }
+  private getEffectiveSpeedPxPerSec(): number {
+    const baseSpeed = this.settings.speedPxPerSec;
+
+    // Replay (VOD): use base speed only — burst adaptation would distort
+    // exact videoOffsetMs-based timing from ReplayChatSource.
+    if (this.replayMode) return Math.max(1, baseSpeed);
+
+    let speed = baseSpeed;
+
+    const emaRate = this.burstDetector.getEmaRate();
+    if (emaRate > this.settings.speedBoostThreshold) {
+      const emaMultiplier =
+        1 +
+        Math.min(
+          (emaRate - this.settings.speedBoostThreshold) / this.settings.speedBoostDenom,
+          this.settings.speedBoostMax
+        );
+      speed *= emaMultiplier;
+    }
+
+    const burstLevel = this.burstDetector.getLevel();
+    return Math.max(1, speed * rendererLayout.burstSpeedMultiplier[burstLevel]);
+  }
+
+  /** Get the current lane density factor based on burst detection level.
+   *  Returns 1.0 (full-cell) during normal/elevated traffic,
+   *  0.75 during high burst, 0.5 (half-cell) during extreme burst. */
+  getLaneDensityFactor(): number {
+    const burstLevel = this.burstDetector.getLevel();
+    return CanvasRenderer.LANE_DENSITY_BY_BURST[burstLevel];
+  }
+
+  /** Apply lane density change if burst level shifted since last check.
+   *  Called at the start of each render frame, before drainStage().
+   *  When density changes, resets the lane allocator with the new effective lane height.
+   *  Active messages are unaffected — they retain their original placement positions.
+   *  New placements from this point use the updated grid.
+   *  Returns true if lanes were reset. */
+  private applySharedLaneDensityIfChanged(): boolean {
+    const newFactor = this.getLaneDensityFactor();
+    if (newFactor === this.currentLaneDensityFactor) return false;
+    this.currentLaneDensityFactor = newFactor;
+    this.laneAllocator.updateLaneDensityFactor(newFactor);
+    this.laneAllocator.reset(this.overlay.getDimensions());
+    return true;
+  }
+  private isMessageAllowed(message: ChatMessage): boolean {
+    // Count every incoming message regardless of outcome for accurate
+    // drop-rate accounting. Previously onVideoPaused drops skipped
+    // onMessageReceived(), freezing the denominator and inflating the ratio.
+    this.observability.onMessageReceived();
+
+    // H1: Buffer messages during video pause instead of dropping them.
+    // The pause owner retains a bounded batch for CanvasRenderer to replay.
+    if (this.pauseState.bufferIfVideoPaused(message)) {
+      this.observability.onMessageDropped('video_paused');
+      return false;
+    }
+
+    // Replay (VOD): messages carry exact videoOffsetMs timing — burst
+    // detection and rate limiting are meaningless for historical data.
+    if (!this.replayMode) {
+      this.burstDetector.onMessageReceived();
+
+      const priority = CanvasRenderer.getMessagePriority(message);
+      if (
+        !this.authorRateLimiter.allow(message.author ?? 'anonymous', priority, message.authorType)
+      ) {
+        log.debug('renderer.message.drop', {
+          reason: 'rate_limited',
+          author: message.author,
+          kind: message.kind,
+        });
+        this.observability.onMessageDropped('rate_limited');
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Check whether anti-block is currently throttling new messages.
+   *
+   * Uses a gradual probabilistic throttle instead of a binary gate.
+   * At ≥95% lane utilization the acceptance probability approaches 0%,
+   * at ≤90% it approaches 100%. This prevents the on/off oscillation
+   * pattern that a binary threshold causes when utilization hovers near 95%.
+   */
+  private isAntiBlockActive(): boolean {
+    const utilization = this.laneAllocator.getUtilization();
+    if (utilization < 1 - ANTI_BLOCK_FREE_RATIO) return false;
+    const acceptProb = (1 - utilization) / ANTI_BLOCK_FREE_RATIO;
+    return Math.random() >= acceptProb;
+  }
+
+  /** Compute priority score for a chat message (higher = more important, rendered first). */
+  static getMessagePriority(message: ChatMessage): number {
+    return getMessagePriority(message);
+  }
+  getLaneCount(): number {
+    return this.laneAllocator.getLaneCount();
+  }
+  getMsSinceLastRenderActivity(now = performance.now()): number {
+    return Math.max(0, now - this.lastRenderActivity);
+  }
+  private computePendingQueueIntervals(): number[] {
+    const msgs = this.getPendingQueueMessages();
+    if (msgs.length < 2) return [];
+    const intervals: number[] = [];
+    for (let i = 1; i < msgs.length; i++) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- both adjacent indices are inside the bounded loop.
+      const delta = msgs[i]!.timestamp - msgs[i - 1]!.timestamp;
+      if (delta >= 0) intervals.push(delta);
+    }
+    return intervals;
+  }
+
+  setUserPaused(paused: boolean): void {
+    if (!this.pauseState.setUserPaused(paused)) return;
+    if (paused) {
+      this.userPauseEffects();
+    } else if (!this.isPaused && !this.isVideoPaused) {
+      this.finishPauseAccounting();
+      this.userResumeEffects();
+    }
+  }
+
+  pause(): void {
+    if (!this.pauseState.beginVisibilityPause()) return;
+    this.burstDetector.pause();
+    this.pauseEffects();
+    log.debug('renderer.paused', { reason: 'user' });
+  }
+
+  resume(): void {
+    if (!this.isPaused) return;
+    const intervals = this.computePendingQueueIntervals();
+    if (intervals.length > 0) this.burstDetector.resumeWithSamples(intervals);
+    else this.burstDetector.resume();
+    this.pauseState.endVisibilityPause();
+    if (this.isVideoPaused) return;
+    if (this.isUserPaused) {
+      this.systemResumeWhileUserPausedEffects();
+      return;
+    }
+    this.finishPauseAccounting();
+    this.resumeEffects();
+    log.debug('renderer.resumed');
+  }
+
+  pauseForVideo(): void {
+    if (!this.pauseState.beginVideoPause()) return;
+    if (!this.isPaused) this.pause();
+  }
+
+  resumeForVideo(): void {
+    if (!this.pauseState.endVideoPause()) return;
+    if (document.visibilityState === 'visible') {
+      if (this.isPaused) this.resume();
+      else if (!this.isUserPaused) {
+        this.finishPauseAccounting();
+        this.resumeEffects();
+        log.debug('renderer.resumed');
+      }
+    }
+    const buffered = this.pauseState.takeVideoBuffer();
+    if (buffered.length > 0) this.flushVideoMessages(buffered);
+  }
+
+  private finishPauseAccounting(): void {
+    const interval = this.pauseState.finish(this.settings.maxMessageAgeMs);
+    if (!interval) return;
+    this.applyPausedDuration(interval.durationMs, interval.preserveElapsed);
+    this.laneAllocator.shiftAll(interval.durationMs);
+  }
+
+  clearPausedDuration(): void {
+    this.pauseState.clearElapsed();
+  }
+  resetAllocator(dims: OverlayDimensions | null): void {
+    this.laneAllocator.reset(dims);
+  }
+  resetBurstDetector(): void {
+    this.burstDetector.resume();
+  }
+  private updateBacklogPause(): void {
+    this.backlog.update(this.getQueueLength(), this.settings);
+  }
+  destroy(): void {
+    this.pauseState.destroy();
+    this.burstDetector.destroy();
+    this.authorRateLimiter.destroy();
+    this.observability.destroy();
+    this.destroyResources();
+    log.debug('renderer.destroyed');
   }
 }

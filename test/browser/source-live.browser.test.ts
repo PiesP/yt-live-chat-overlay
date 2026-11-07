@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import { LiveChatProtocolError } from '@chat/source-base';
+import { type ChatSession, LiveChatProtocolError } from '@chat/source-base';
 import { LiveChatSource } from '@chat/source-live';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
@@ -21,7 +21,7 @@ type LiveSourceInternals = {
   ) => Promise<LiveChatPayload | null>;
   handleLivePayload: (payload: LiveChatPayload, isInitialSeed?: boolean) => Promise<void>;
   calculateAdaptiveDelay: (timeoutMs: number) => number;
-  resetSessionState: () => void;
+  reset: () => void;
   runLiveLoop: (signal?: AbortSignal) => Promise<void>;
   refreshLiveContinuation: (signal?: AbortSignal) => Promise<void>;
 };
@@ -70,7 +70,14 @@ const makeBootstrap = (): ChatBootstrapData => ({
 });
 
 const internalsOf = (source: LiveChatSource): LiveSourceInternals =>
-  source as unknown as LiveSourceInternals;
+  (source as unknown as { driver: unknown }).driver as LiveSourceInternals;
+
+const sessionOf = (source: LiveChatSource) =>
+  (source as unknown as { session: ChatSession }).session as unknown as {
+    callback: unknown;
+    bootstrap: ChatBootstrapData | null;
+    requestPayload: LiveSourceInternals['requestPayload'];
+  };
 
 describe('LiveChatSource empty-response polling', () => {
   afterEach(() => {
@@ -85,7 +92,7 @@ describe('LiveChatSource empty-response polling', () => {
     const internals = internalsOf(source);
     const controller = new AbortController();
     source.burstRateProvider = () => 30;
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     internals.liveContinuation = { continuation: 'burst', timeoutMs: 2_000 };
     await internals.handleLivePayload(makePayload('burst-message'));
 
@@ -121,7 +128,7 @@ describe('LiveChatSource empty-response polling', () => {
     const internals = internalsOf(source);
     const controller = new AbortController();
     source.burstRateProvider = () => 30;
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     internals.liveContinuation = { continuation: 'burst', timeoutMs: 2_000 };
     await internals.handleLivePayload(makePayload('seed'));
 
@@ -165,7 +172,7 @@ describe('LiveChatSource empty-response polling', () => {
     const internals = internalsOf(source);
     const controller = new AbortController();
     source.burstRateProvider = () => 100;
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     await internals.handleLivePayload(makePayload('seed'));
     const request = vi.spyOn(internals, 'requestLivePayload');
     const loop = internals.runLiveLoop(controller.signal);
@@ -189,7 +196,7 @@ describe('LiveChatSource empty-response polling', () => {
     await internals.handleLivePayload(makePayload('active-before-reset'));
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(1_000);
 
-    internals.resetSessionState();
+    internals.reset();
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(2_000);
   });
 
@@ -197,18 +204,17 @@ describe('LiveChatSource empty-response polling', () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
     const source = new LiveChatSource(makeSettings);
-    const internals = internalsOf(source);
-    internals.bootstrap = makeBootstrap();
+    sessionOf(source).bootstrap = makeBootstrap();
 
     await expect(
-      internals.requestPayload(async () => ({ continuationContents: {} }), {
+      sessionOf(source).requestPayload(async () => ({ continuationContents: {} }), {
         continuation: 'current',
       })
     ).rejects.toMatchObject({ name: 'LiveChatProtocolError' });
     expect(source.isActive(1_000)).toBe(false);
 
     await expect(
-      internals.requestPayload(
+      sessionOf(source).requestPayload(
         async () => ({
           continuationContents: { liveChatContinuation: { actions: [], continuations: [] } },
         }),
@@ -223,7 +229,7 @@ describe('LiveChatSource empty-response polling', () => {
     const source = new LiveChatSource(makeSettings);
     const internals = internalsOf(source);
     const controller = new AbortController();
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     internals.liveContinuation = { continuation: 'malformed', timeoutMs: 0 };
     const request = vi
       .spyOn(internals, 'requestLivePayload')
@@ -247,7 +253,7 @@ describe('LiveChatSource empty-response polling', () => {
     const source = new LiveChatSource(() => ({ ...makeSettings(), livePollFailureLimit: 2 }));
     const internals = internalsOf(source);
     const controller = new AbortController();
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     internals.liveContinuation = { continuation: 'repeated-malformed', timeoutMs: 0 };
     const request = vi
       .spyOn(internals, 'requestLivePayload')
@@ -268,13 +274,12 @@ describe('LiveChatSource empty-response polling', () => {
     const source = new LiveChatSource(makeSettings);
     const internals = internalsOf(source);
     const controller = new AbortController();
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     internals.liveContinuation = { continuation: 'recover', timeoutMs: 0 };
     const request = vi.spyOn(internals, 'requestLivePayload').mockImplementation(async () => {
       if (request.mock.calls.length === 1) {
         throw new LiveChatProtocolError('malformed response');
       }
-      controller.abort();
       return makePayload(null);
     });
 
@@ -283,7 +288,8 @@ describe('LiveChatSource empty-response polling', () => {
     expect(internals.consecutiveErrors).toBe(1);
 
     await vi.advanceTimersByTimeAsync(4_000);
-    await expect(loop).resolves.toBeUndefined();
+    controller.abort();
+    await expect(loop).rejects.toMatchObject({ name: 'AbortError' });
     expect(request).toHaveBeenCalledTimes(2);
     expect(internals.consecutiveErrors).toBe(0);
     expect(internals.calculateAdaptiveDelay(2_000)).toBe(2_000);
@@ -308,7 +314,7 @@ describe('LiveChatSource empty-response polling', () => {
     vi.setSystemTime(100_000);
     const source = new LiveChatSource(makeSettings);
     const internals = internalsOf(source);
-    internals.bootstrap = makeBootstrap();
+    sessionOf(source).bootstrap = makeBootstrap();
     internals.consecutiveErrors = 2;
     const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);

@@ -1,6 +1,8 @@
 import {
   ChatResponseTooLargeError,
+  isResponseSizeError,
   readBoundedChatResponseText,
+  ResponseTooLargeError,
 } from '@chat/youtube/response-text';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
@@ -29,10 +31,35 @@ describe('readBoundedChatResponseText', () => {
     );
 
     expect(error).toBeInstanceOf(ChatResponseTooLargeError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ResponseTooLargeError);
+    expect(isResponseSizeError(error)).toBe(true);
     expect(error).toMatchObject({
       name: 'ChatResponseTooLargeError',
       message: 'Chat response exceeded 10 bytes.',
+      observedBytes: 11,
+      maxBytes: 10,
+      responseLabel: 'Chat response',
+      category: 'response-too-large',
     });
+  });
+
+  it('recognizes both response-size variants without accepting unrelated failures', () => {
+    expect(isResponseSizeError(new ResponseTooLargeError(11, 10, 'Watch HTML'))).toBe(true);
+    expect(isResponseSizeError(new ChatResponseTooLargeError(11, 10))).toBe(true);
+    for (const error of [
+      new Error('Response exceeded 10 bytes.'),
+      new DOMException('aborted', 'AbortError'),
+      Object.assign(new Error('tag only'), { category: 'response-too-large' }),
+      {
+        category: 'response-too-large',
+        observedBytes: 11,
+        maxBytes: 10,
+        responseLabel: 'Response',
+      },
+    ]) {
+      expect(isResponseSizeError(error)).toBe(false);
+    }
   });
 
   it('rejects an oversized declared length and cancels the body', async () => {
@@ -40,10 +67,13 @@ describe('readBoundedChatResponseText', () => {
     const body = new ReadableStream<Uint8Array>({ cancel });
     const response = new Response(body, { headers: { 'content-length': '11' } });
 
-    await expect(readBoundedChatResponseText(response, 10)).rejects.toBeInstanceOf(
-      ChatResponseTooLargeError
+    const error: unknown = await readBoundedChatResponseText(response, 10).catch(
+      (reason: unknown) => reason
     );
+    expect(error).toBeInstanceOf(ChatResponseTooLargeError);
+    expect(isResponseSizeError(error)).toBe(true);
     expect(cancel).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith(error);
   });
 
   it('rejects a cloned response with an oversized declared length while the original stays open', async () => {
@@ -81,10 +111,13 @@ describe('readBoundedChatResponseText', () => {
       cancel,
     });
 
-    await expect(readBoundedChatResponseText(new Response(body), 10)).rejects.toBeInstanceOf(
-      ChatResponseTooLargeError
+    const error: unknown = await readBoundedChatResponseText(new Response(body), 10).catch(
+      (reason: unknown) => reason
     );
+    expect(error).toBeInstanceOf(ChatResponseTooLargeError);
+    expect(isResponseSizeError(error)).toBe(true);
     expect(cancel).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith(error);
   });
 
   it('rejects a cloned streamed response over the limit while the original stays open', async () => {

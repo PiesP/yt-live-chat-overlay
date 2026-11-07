@@ -7,7 +7,11 @@ import { join } from 'node:path';
 
 import type { BrowserType } from '@playwright/test';
 
-import { runChromeInstallation, runNaturalChromeQualification } from './chrome-install.ts';
+import {
+  readCompositionRuntimeSelector,
+  runChromeInstallation,
+  runNaturalChromeQualification,
+} from './chrome-install.ts';
 import { runFirefoxInstallation } from './firefox-install.ts';
 
 type LiveObservation = { mode: 'duration'; duration_seconds: 1200 };
@@ -38,6 +42,13 @@ export function validateLiveObservation(value: unknown = null): LiveObservation 
 
 export async function run(options: InstallationOptions) {
   const liveObservation = validateLiveObservation(options.liveObservation);
+  if (await readCompositionRuntimeSelector(options.root)) {
+    assert.equal(options.browserName, 'msedge', 'Composition runtime requires installed Edge');
+    assert.equal(options.installation, 'extension', 'Composition runtime requires the extension');
+    assert.equal(options.headless ?? false, false, 'Composition runtime requires headed Edge');
+    assert.equal(liveObservation, null, 'Composition runtime cannot use duration observation');
+    assert.deepEqual(options.liveUrls ?? [], [], 'Composition runtime cannot use public live URLs');
+  }
   const qualification = await readNaturalChromeQualification(options.root);
   if (qualification !== null) {
     assert.equal(options.browserName, 'chrome', 'Natural qualification requires Chrome');

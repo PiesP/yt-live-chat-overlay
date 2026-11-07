@@ -1095,7 +1095,7 @@ export class TranslationService {
   destroy(): void {
     // Release the underlying Chrome Translator instance to free the per-profile
     // slot (Chromium enforces a 10-instance limit per browsing context).
-    // Without this call, every RuntimeSession restart leaks one slot, and after
+    // Without this call, every RuntimeManager restart leaks one slot, and after
     // ~10 restarts (watchdog, foreground-return, standby-resolved, settings
     // changes) Translator.create() fails permanently.
     this.cancelConfiguration();
