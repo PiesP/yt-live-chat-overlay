@@ -58,6 +58,18 @@ body text, matching its label.
 
 ## Motion and geometry
 
+`CanvasRenderer` implements the runtime renderer contract directly. It owns the
+Canvas, Worker, image and translation lifetimes and coordinates their pause and
+resume effects. Its private `RenderPauseState` holds visibility, video and user
+pause causes, one shared elapsed-time interval, and a 200-message video-pause
+buffer. A user pause preserves raw elapsed time; a system-only pause caps the
+shift at twice `maxMessageAgeMs`. The final pause cause applies the shift once,
+and video resume replays only the retained buffer. `BacklogHysteresis` owns the
+queue-ratio pause decision and session callback. A visual reset clears its
+current pause state while retaining that callback; renderer destruction releases
+it. Worker fallback first stops Worker ingress, then snapshots and transfers
+bounded state to a replacement main-thread canvas.
+
 Canvas and OffscreenCanvas Worker rendering use the shared motion planner in
 `src/renderer/layout/message-schedule.ts`. Each candidate's effective mode,
 start, geometry, actual velocity, viewport entry, and visible interval are

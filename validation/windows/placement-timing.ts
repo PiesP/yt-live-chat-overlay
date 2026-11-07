@@ -2400,9 +2400,12 @@ export function instrumentCanvasPageScript(
   observeCardPlans = false
 ) {
   const marker = '\n\tmain();\n';
+  // Emitted by the candidate extension page target. Admit this exact class
+  // declaration once; a renamed, inherited, or duplicated shape is unsupported.
+  const rendererShape = 'var CanvasRenderer = class CanvasRenderer {';
   if (
-    !source.includes('var CanvasRenderer = class CanvasRenderer extends RendererBase {') ||
-    !source.includes('function getRegularCardInsets(') ||
+    source.split(rendererShape).length !== 2 ||
+    source.split('function getRegularCardInsets(').length !== 2 ||
     source.split(marker).length !== 2
   )
     return null;
@@ -2443,10 +2446,15 @@ function attachCanvasRendererProbe(
     .__ytPlacementProbe;
   if (
     !state ||
-    typeof Renderer?.prototype?.placeQueuedMessage !== 'function' ||
+    !Renderer?.prototype ||
+    !(['enqueueMessage', 'placeQueuedMessage', 'renderFrame'] as const).every(
+      (method) =>
+        Object.prototype.hasOwnProperty.call(Renderer.prototype, method) &&
+        typeof Renderer.prototype[method] === 'function'
+    ) ||
     typeof getRegularCardInsets !== 'function'
   )
-    return;
+    throw new Error('Unsupported Canvas observer prototype or missing probe state');
   state.canvasSourceHooked = true;
   state.readRegularInsets = (fontSize, outlineWidthPx, backgroundVisible) =>
     getRegularCardInsets(fontSize, outlineWidthPx, false, backgroundVisible);

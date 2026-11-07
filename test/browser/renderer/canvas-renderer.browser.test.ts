@@ -422,7 +422,7 @@ describe('Canvas gradient cache', () => {
     const canvas = document.createElement('canvas');
     vi.spyOn(canvas, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
     internals.canvas = canvas;
-    renderer.isPaused = true;
+    renderer.pause();
     internals.superChatGradientCache.set('old', {
       addColorStop: vi.fn(),
     } as unknown as CanvasGradient);
@@ -624,7 +624,7 @@ describe('Canvas reservation safety', () => {
 
   it('rebuilds reservations at the frozen pause clock before resume shifts timers', () => {
     const { renderer, internals } = setup();
-    internals.pausedAt = 1000;
+    (renderer as unknown as { pauseState: { pausedAt: number | null } }).pauseState.pausedAt = 1000;
     vi.spyOn(performance, 'now').mockReturnValue(5000);
     internals.reflowActiveMessages({ width: 640, height: 40 });
     expect(internals.laneAllocator.snapshot().heap.every(([, until]) => until === 1000)).toBe(true);
@@ -2186,7 +2186,7 @@ describe('CanvasRenderer', () => {
     expect(
       internals.pendingQueue.toArray().find((message) => message.id === 'uncertain')?.text
     ).toBe('edited after fallback');
-    renderer.isPaused = false;
+    (renderer as unknown as { pauseState: { isPaused: boolean } }).pauseState.isPaused = false;
     internals.renderFrame();
     const recovered = internals.activeMessages.find((entry) => entry.message.id === 'same-id');
     expect(recovered?.message.text).toBe('edited');

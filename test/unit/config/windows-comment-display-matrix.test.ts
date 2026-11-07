@@ -865,7 +865,7 @@ describe('Windows comment display matrix contract', () => {
   it('rejects planless legacy collection without labeling it an observed backend', () => {
     const legacy =
       'function getRegularCardInsets() {}\n' +
-      'var CanvasRenderer = class CanvasRenderer extends RendererBase {};\n\tmain();\n})();';
+      'var CanvasRenderer = class CanvasRenderer {};\n\tmain();\n})();';
     expect(classifyPlanProbeCapability('baseline', legacy)).toBe('unsupported-legacy-planless');
     expect(classifyPlanProbeCapability('candidate', legacy)).toBe('invalid');
     expect(classifyPlanProbeCapability('baseline', `${legacy} superChatLayout`)).toBe('invalid');
