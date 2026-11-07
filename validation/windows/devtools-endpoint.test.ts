@@ -49,13 +49,18 @@ const version = (value: string) =>
 type RunPowerShell = NonNullable<
   NonNullable<Parameters<typeof positive.inspectFixedPort>[1]>['runPowerShell']
 >;
-function mockPortInspection(response: unknown, error: Error | null = null) {
+function mockPortInspection(
+  response: unknown,
+  error: Error | null = null,
+  stdoutOverride?: string,
+  stderr = ''
+) {
   const queries: string[] = [];
   const runPowerShell = ((
     executable: string,
     args: string[],
     options: unknown,
-    callback: (error: Error | null, stdout: string) => void
+    callback: (error: Error | null, stdout: string, stderr: string) => void
   ) => {
     assert.equal(path.win32.basename(executable), 'powershell.exe');
     assert.equal(args.at(-2), '-EncodedCommand');
@@ -68,13 +73,165 @@ function mockPortInspection(response: unknown, error: Error | null = null) {
       timeout: 3_000,
       windowsHide: true,
     });
-    callback(error, '\uFEFF' + JSON.stringify(response));
+    callback(error, stdoutOverride ?? '\uFEFF' + JSON.stringify(response), stderr);
   }) as unknown as RunPowerShell;
   return {
     queries,
     inspectPort: (processId?: number) => positive.inspectFixedPort(processId, { runPowerShell }),
   };
 }
+
+test('failed fixed-port subprocess retains bounded decoded output and original error identity', async () => {
+  const cases = [
+    {
+      name: 'exit',
+      error: Object.assign(new Error('child exited'), { code: 17, signal: null, killed: false }),
+      stage: 'subprocess-execution',
+      completeness: 'complete',
+    },
+    {
+      name: 'timeout',
+      error: Object.assign(new Error('command stopped'), {
+        code: null,
+        signal: 'SIGTERM',
+        killed: true,
+      }),
+      stage: 'timeout',
+      completeness: 'incomplete',
+    },
+    {
+      name: 'overflow',
+      error: Object.assign(new Error('stdout exceeded maxBuffer'), {
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+        signal: null,
+        killed: true,
+      }),
+      stage: 'output-collection',
+      completeness: 'truncated',
+    },
+  ] as const;
+  for (const { name, error, stage, completeness } of cases) {
+    const stdout = name === 'overflow' ? 'A' + '😀'.repeat(20_000) : 'partial stdout';
+    const stderr = 'partial stderr';
+    const mock = mockPortInspection(null, error, stdout, stderr);
+    const recorder = positive.createNaturalPortRecorder(mock.inspectPort);
+    await assert.rejects(recorder.inspect(), (caught: unknown) => caught === error);
+    const observation = recorder.observations()[0];
+    assert(observation);
+    assert.equal(observation.inspectionStatus, 'unavailable');
+    assert.equal(observation.connectionCount, null);
+    assert.equal(observation.connections, null);
+    assert.equal(observation.process, null);
+    const failure = observation.inspectionFailure as {
+      stage: string;
+      code: string | number | null;
+      exitCode: number | null;
+      killed: boolean | null;
+      signal: string | null;
+      collectionLimitExceeded: boolean;
+      stdout: {
+        decodedText: string;
+        decodedUtf8Bytes: number;
+        retainedUtf8Bytes: number;
+        decodedTextSha256: string;
+        completeness: string;
+        originalBytes: string;
+      };
+      stderr: { decodedText: string; completeness: string; originalBytes: string };
+    };
+    assert.equal(failure.stage, stage);
+    assert.equal(failure.code, error.code);
+    assert.equal(failure.exitCode, typeof error.code === 'number' ? error.code : null);
+    assert.equal(failure.killed, error.killed);
+    assert.equal(failure.signal, error.signal);
+    assert.equal(failure.collectionLimitExceeded, name === 'overflow');
+    assert.equal(failure.stdout.completeness, completeness);
+    assert.equal(failure.stdout.originalBytes, 'unavailable');
+    assert.equal(failure.stdout.decodedUtf8Bytes, Buffer.byteLength(stdout));
+    assert.equal(
+      failure.stdout.decodedTextSha256,
+      createHash('sha256').update(stdout).digest('hex')
+    );
+    assert(failure.stdout.retainedUtf8Bytes <= 384);
+    assert.equal(Buffer.byteLength(failure.stdout.decodedText), failure.stdout.retainedUtf8Bytes);
+    assert.equal(failure.stdout.decodedText, name === 'overflow' ? 'A' + '😀'.repeat(95) : stdout);
+    assert.equal(failure.stderr.decodedText, stderr);
+    assert.equal(failure.stderr.originalBytes, 'unavailable');
+    assert.equal(failure.stderr.completeness, name === 'overflow' ? 'incomplete' : completeness);
+  }
+});
+
+test('invalid JSON and schema retain their complete decoded outputs without a false snapshot', async () => {
+  for (const [stage, stdout] of [
+    ['json-parsing', '{invalid json'],
+    ['schema-validation', '{"connections":null,"process":null}'],
+  ]) {
+    const mock = mockPortInspection(null, null, stdout, 'PowerShell warning');
+    const recorder = positive.createNaturalPortRecorder(mock.inspectPort);
+    await assert.rejects(recorder.inspect());
+    const observation = recorder.observations()[0];
+    assert(observation);
+    assert.equal(observation.inspectionStatus, 'unavailable');
+    assert.equal(observation.connections, null);
+    assert.equal(observation.process, null);
+    const failure = observation.inspectionFailure as {
+      stage: string;
+      stdout: { decodedText: string; completeness: string; originalBytes: string };
+      stderr: { decodedText: string; completeness: string };
+    };
+    assert.equal(failure.stage, stage);
+    assert.equal(failure.stdout.decodedText, stdout);
+    assert.equal(failure.stdout.completeness, 'complete');
+    assert.equal(failure.stdout.originalBytes, 'unavailable');
+    assert.equal(failure.stderr.decodedText, 'PowerShell warning');
+    assert.equal(failure.stderr.completeness, 'complete');
+  }
+});
+
+test('sixteen failed inspections and the existing Chrome stderr tail fit the failure receipt cap', async () => {
+  const error = Object.assign(new Error('stdout exceeded maxBuffer'), {
+    code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+    killed: true,
+  });
+  const mock = mockPortInspection(null, error, '\u0000'.repeat(70_000), '\u0001'.repeat(70_000));
+  const recorder = positive.createNaturalPortRecorder(mock.inspectPort);
+  for (let index = 0; index < 16; index++) {
+    await assert.rejects(recorder.inspect(), (caught: unknown) => caught === error);
+  }
+  const observations = recorder.observations();
+  assert.equal(observations.length, 16);
+  const receipt = JSON.stringify(
+    {
+      schemaVersion: 1,
+      kind: 'natural-chrome-launch',
+      status: 'failed',
+      errorType: 'Error',
+      diagnostic: {
+        stage: 'preconnect',
+        discoveryBrowserVersion: 'Chrome/156.0.8078.80',
+        attachedBrowserVersion: null,
+        childAtFailure: {
+          pid: 4321,
+          exitCode: null,
+          signalCode: null,
+          spawnErrorName: null,
+          spawnErrorMessage: null,
+        },
+        chromeStderr: {
+          totalBytes: 64 * 1024,
+          retainedTailBytes: 64 * 1024,
+          retainedTailSha256: 'a'.repeat(64),
+          retainedTailBase64: Buffer.alloc(64 * 1024).toString('base64'),
+        },
+        portObservations: observations,
+      },
+      cleanup: { processTreeExited: true, errorCount: 0 },
+    },
+    null,
+    2
+  );
+  assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
+});
 
 test('emitted fixed-port query preserves unnamed raw state instead of claiming absence', async () => {
   const row = { ...firstListener(validSnapshot()), state: '', rawState: 0 };
@@ -537,10 +694,15 @@ test('unidentified child cleanup preserves its profile when tree exit is uncerta
 test('actual launcher retains unavailable preflight evidence before creating the task-owned natural Chrome profile or process', async () => {
   const listener = firstListener(validSnapshot());
   const unavailable = new Error('TCP provider unavailable');
+  const overflowing = Object.assign(new Error('stdout exceeded maxBuffer'), {
+    code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+    killed: true,
+  });
   const cases = [
     mockPortInspection({ connections: [{ ...listener, state: '', rawState: 0 }], process: null }),
     mockPortInspection({ connections: [{ ...listener, owningProcess: null }], process: null }),
     mockPortInspection(null, unavailable),
+    mockPortInspection(null, overflowing, '\u0000'.repeat(70_000), '\u0001'.repeat(70_000)),
   ];
   for (const [index, mock] of cases.entries()) {
     const calls: string[] = [];
@@ -595,6 +757,7 @@ test('actual launcher retains unavailable preflight evidence before creating the
     );
     assert(originalError);
     if (index === 2) assert.equal(originalError, unavailable);
+    if (index === 3) assert.equal(originalError, overflowing);
     assert.deepEqual(calls, ['discovery', 'preflight', 'failure-evidence']);
     assert.equal(mock.queries.length, 1);
     assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
@@ -620,7 +783,16 @@ test('actual launcher retains unavailable preflight evidence before creating the
       assert.equal(observations[0].connectionCount, null);
       assert.equal(observations[0].listenerCount, null);
       assert.equal(observations[0].connections, null);
-      assert.equal(observations[0].inspectionError.message, unavailable.message);
+      assert.equal(
+        observations[0].inspectionError.message,
+        index === 2 ? unavailable.message : overflowing.message
+      );
+      if (index === 3) {
+        assert.equal(observations[0].inspectionFailure.stage, 'output-collection');
+        assert.equal(observations[0].inspectionFailure.stdout.completeness, 'truncated');
+        assert.equal(observations[0].inspectionFailure.stderr.completeness, 'truncated');
+        assert.equal(observations[0].inspectionFailure.stdout.originalBytes, 'unavailable');
+      }
     }
   }
 });
@@ -889,8 +1061,17 @@ test('negative preconnect snapshot is retained before CDP and cleanup still runs
 });
 
 test('rejected preconnect inspection retains its bounded error before cleanup', async () => {
-  const inspectionError = new Error('fixed-port CIM inspection timed out ' + 'x'.repeat(10_000));
+  const inspectionError = Object.assign(
+    new Error('fixed-port CIM inspection timed out ' + 'x'.repeat(10_000)),
+    { code: null, signal: 'SIGTERM', killed: true }
+  );
   inspectionError.name = 'PortInspectionTimeout' + 'n'.repeat(1000);
+  const failedInspection = mockPortInspection(
+    null,
+    inspectionError,
+    'partial stdout',
+    'partial stderr'
+  );
   let inspections = 0;
   let connections = 0;
   let cleanups = 0;
@@ -919,7 +1100,7 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
         inspections++;
         if (inspections === 1) return { connections: [], process: null };
         if (inspections === 2) return validSnapshot();
-        throw inspectionError;
+        return failedInspection.inspectPort();
       }),
     discoverInstalledChrome: async () => ({
       executablePath: identity.executablePath,
@@ -979,6 +1160,10 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
   assert.equal(observations[2].process, null);
   assert.equal(observations[2].inspectionError.name.length, 128);
   assert.equal(observations[2].inspectionError.message.length, 1024);
+  assert.equal(observations[2].inspectionFailure.stage, 'timeout');
+  assert.equal(observations[2].inspectionFailure.stdout.decodedText, 'partial stdout');
+  assert.equal(observations[2].inspectionFailure.stderr.decodedText, 'partial stderr');
+  assert.equal(failedInspection.queries.length, 1);
   assert.equal(evidence.errorType.length, 128);
   assert.equal(evidence.cleanup.processTreeExited, true);
 });

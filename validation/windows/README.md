@@ -907,6 +907,13 @@ absence. A complete empty inspection remains distinct from unavailable inspectio
 An initial preflight failure is retained before the task-owned natural Chrome
 profile or process is created, with no child or cleanup proof for that launch.
 A failed query retains its bounded error and has no connection or CIM snapshot.
+The private receipt also records the failure stage, available exit/code/signal
+metadata, and at most 384 UTF-8 bytes of each decoded stdout/stderr stream with
+its decoded-text length and digest. It labels complete, incomplete, and retained-text
+truncation separately; a max-buffer failure does not identify which stream was
+cut off. Node's UTF-8 subprocess decoding does not retain original
+bytes or prove that invalid input was detected; a retained decoded string is not
+an original-byte capture.
 The receipt has a 192 KiB cap. The strict owned IPv4 Listen gate still applies;
 the record does not establish the cause of a TCP-table mismatch.
 

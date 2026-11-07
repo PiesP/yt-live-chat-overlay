@@ -36,6 +36,7 @@ const PORT_INSPECT_TIMEOUT_MS = 3_000;
 const FAILURE_PORT_OBSERVATIONS = 16;
 const FAILURE_CONNECTION_ROWS = 8;
 const FAILURE_RECEIPT_MAX_BYTES = 192 * 1024;
+const INSPECTION_OUTPUT_TEXT_MAX_BYTES = 384;
 type ChildState = { spawnError: Error | null };
 type ChildStatus = {
   exitCode: number | null;
@@ -176,6 +177,92 @@ function boundedEvidenceScalar(value: unknown, limit = 128): string | number | n
   return boundedEvidenceText(value, limit);
 }
 
+type InspectionOutput = {
+  decodedText: string | null;
+  decodedUtf8Bytes: number | null;
+  decodedTextSha256: string | null;
+  retainedUtf8Bytes: number;
+  completeness: 'complete' | 'truncated' | 'incomplete' | 'unavailable';
+  originalBytes: 'unavailable';
+};
+type InspectionFailureEvidence = {
+  stage:
+    | 'subprocess-execution'
+    | 'timeout'
+    | 'output-collection'
+    | 'json-parsing'
+    | 'schema-validation';
+  exitCode: number | null;
+  code: string | number | null;
+  signal: string | null;
+  killed: boolean | null;
+  collectionLimitExceeded: boolean;
+  stdout: InspectionOutput;
+  stderr: InspectionOutput;
+};
+const inspectionFailureEvidence = new WeakMap<Error, InspectionFailureEvidence>();
+
+function inspectionOutput(value: unknown, complete: boolean): InspectionOutput {
+  if (typeof value !== 'string')
+    return {
+      decodedText: null,
+      decodedUtf8Bytes: null,
+      decodedTextSha256: null,
+      retainedUtf8Bytes: 0,
+      completeness: 'unavailable',
+      originalBytes: 'unavailable',
+    };
+  let decodedText = '';
+  let retainedUtf8Bytes = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(character, 'utf8');
+    if (retainedUtf8Bytes + size > INSPECTION_OUTPUT_TEXT_MAX_BYTES) break;
+    decodedText += character;
+    retainedUtf8Bytes += size;
+  }
+  const decodedUtf8Bytes = Buffer.byteLength(value, 'utf8');
+  return {
+    decodedText,
+    decodedUtf8Bytes,
+    decodedTextSha256: createHash('sha256').update(value, 'utf8').digest('hex'),
+    retainedUtf8Bytes,
+    completeness:
+      retainedUtf8Bytes < decodedUtf8Bytes ? 'truncated' : complete ? 'complete' : 'incomplete',
+    originalBytes: 'unavailable',
+  };
+}
+
+function inspectionFailure(
+  error: Error,
+  stdout: unknown,
+  stderr: unknown,
+  stage: InspectionFailureEvidence['stage']
+): void {
+  const childError = error as Error & {
+    code?: unknown;
+    signal?: unknown;
+    killed?: unknown;
+  };
+  const code = childError.code;
+  const signal = childError.signal;
+  const killed = childError.killed;
+  const collectionTruncated = code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+  const complete =
+    stage === 'json-parsing' ||
+    stage === 'schema-validation' ||
+    (typeof code === 'number' && killed !== true && signal == null);
+  inspectionFailureEvidence.set(error, {
+    stage,
+    exitCode: typeof code === 'number' ? code : null,
+    code: boundedEvidenceScalar(code),
+    signal: boundedEvidenceText(signal, 128),
+    killed: typeof killed === 'boolean' ? killed : null,
+    collectionLimitExceeded: collectionTruncated,
+    stdout: inspectionOutput(stdout, complete),
+    stderr: inspectionOutput(stderr, complete),
+  });
+}
+
 /** Retain the existing fixed-port inspections without adding a new OS query. */
 export function createNaturalPortRecorder(
   inspectPort: InspectPort = inspectFixedPort,
@@ -209,6 +296,8 @@ export function createNaturalPortRecorder(
             name: boundedEvidenceText(error instanceof Error ? error.name : typeof error, 128),
             message: boundedEvidenceText(error instanceof Error ? error.message : error, 1024),
           },
+          inspectionFailure:
+            error instanceof Error ? (inspectionFailureEvidence.get(error) ?? null) : null,
         });
         throw error;
       }
@@ -292,13 +381,36 @@ export function inspectFixedPort(
         Buffer.from(script, 'utf16le').toString('base64'),
       ],
       { encoding: 'utf8', maxBuffer: 65_536, timeout: PORT_INSPECT_TIMEOUT_MS, windowsHide: true },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (error) {
+          const childError = error as Error & {
+            code?: unknown;
+            signal?: unknown;
+            killed?: unknown;
+          };
+          const stage =
+            childError.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+              ? 'output-collection'
+              : childError.code === 'ETIMEDOUT' ||
+                  (childError.killed === true &&
+                    childError.signal === 'SIGTERM' &&
+                    childError.code == null)
+                ? 'timeout'
+                : 'subprocess-execution';
+          inspectionFailure(error, stdout, stderr, stage);
           rejectInspection(error);
           return;
         }
+        let parsed: unknown;
         try {
-          const parsed: unknown = JSON.parse(stdout.trim().replace(/^\uFEFF/u, ''));
+          parsed = JSON.parse(stdout.trim().replace(/^\uFEFF/u, ''));
+        } catch (parseError) {
+          if (parseError instanceof Error)
+            inspectionFailure(parseError, stdout, stderr, 'json-parsing');
+          rejectInspection(parseError);
+          return;
+        }
+        try {
           assert(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
           assert('connections' in parsed && Array.isArray(parsed.connections));
           assert(
@@ -307,8 +419,10 @@ export function inspectFixedPort(
                 (typeof parsed.process === 'object' && !Array.isArray(parsed.process)))
           );
           resolveInspection(parsed as PortInspection);
-        } catch (parseError) {
-          rejectInspection(parseError);
+        } catch (schemaError) {
+          if (schemaError instanceof Error)
+            inspectionFailure(schemaError, stdout, stderr, 'schema-validation');
+          rejectInspection(schemaError);
         }
       }
     );
