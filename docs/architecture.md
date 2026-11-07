@@ -16,7 +16,10 @@ visibility and video-pause operations. Live fetch/DOM callbacks borrow only
 message ingress. Replay callbacks and due-message draining belong to the replay
 source and remain guarded by session and seek generations. The source contracts
 in `src/chat/source-contracts.ts` describe these operations without exposing
-the source implementation base.
+session state. Each ordinary live/replay source composes a `ChatSession`, which
+owns bootstrap, cancellation, pause, activity, delivery and deduplication. Private
+live/replay drivers own polling or timeline protocol state and use stable,
+bounded session operations; they do not receive a public mutable state object.
 
 `RuntimeManager` also constructs and destroys the renderer, while
 `StandbyController` borrows only `setStandbyStatus`. The consumed renderer
@@ -29,10 +32,9 @@ Backlog cleanup stays with the owners described by
 The following product implementation-inheritance edges are temporary and have
 separate removal owners:
 
-| Exact edge                                                                    | Why it remains in this stage                                                 | Removal condition                                                                                                                                                                  |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LiveChatSource extends ChatSource` and `ReplayChatSource extends ChatSource` | Session bootstrap, pause, polling and delivery state still live in the base. | [#430](https://github.com/PiesP/yt-live-chat-overlay/issues/430) replaces both with composed session and live/replay drivers, including cancellation and due-only delivery checks. |
-| `CanvasRenderer extends RendererBase`                                         | Shared pause, queue and lifecycle state still lives in the base.             | [#431](https://github.com/PiesP/yt-live-chat-overlay/issues/431) composes renderer state and migrates the shape-bound Windows observer with Main/Worker checks.                    |
+| Exact edge                            | Why it remains in this stage                                     | Removal condition                                                                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CanvasRenderer extends RendererBase` | Shared pause, queue and lifecycle state still lives in the base. | [#431](https://github.com/PiesP/yt-live-chat-overlay/issues/431) composes renderer state and migrates the shape-bound Windows observer with Main/Worker checks. |
 
 The direct native `Error` subclasses `LiveChatProtocolError`,
 `YoutubeInnertubeRequestError`, `ResponseTooLargeError`, `ChatResponseTooLargeError`, and
