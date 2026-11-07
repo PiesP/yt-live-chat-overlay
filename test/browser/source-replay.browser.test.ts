@@ -2,7 +2,7 @@
 
 import type { ChatMessage } from '@app-types';
 import { ReplayBuffer } from '@chat/replay-buffer';
-import { LiveChatProtocolError } from '@chat/source-base';
+import { type ChatSession, LiveChatProtocolError } from '@chat/source-base';
 import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
@@ -15,6 +15,22 @@ vi.mock('@app/bootstrap-resolver', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@app/bootstrap-resolver')>()),
   refreshBootstrap: bootstrapMocks.refreshBootstrap,
 }));
+
+const sessionOf = (source: ReplayChatSource) =>
+  (source as unknown as { session: ChatSession }).session as unknown as {
+    callback: ((messages: ChatMessage[]) => void) | null;
+    bootstrap: ChatBootstrapData | null;
+    getPlaybackSnapshot: () => { offsetMs: number; paused: boolean } | null;
+    requestPayload: (
+      fetchFn: () => Promise<unknown>,
+      continuation: InnertubeContinuationData,
+      ...args: unknown[]
+    ) => Promise<LiveChatPayload | null>;
+    refreshBootstrap: (
+      signal?: AbortSignal,
+      accept?: (data: ChatBootstrapData) => boolean
+    ) => Promise<ChatBootstrapData | null>;
+  };
 
 function makeReplayMessage(id: string, offsetMs: number): ChatMessage {
   return {
@@ -91,7 +107,7 @@ describe('ReplayChatSource', () => {
     vi.spyOn(AbortSignal, 'timeout')
       .mockReturnValueOnce(deadline.signal)
       .mockReturnValue(new AbortController().signal);
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
       replayConsecutiveFailures: number;
       activeReplayRequestController: AbortController | null;
@@ -138,7 +154,7 @@ describe('ReplayChatSource', () => {
 
   it('retires a cancelled replay retry before admitting the queued request', async () => {
     vi.useFakeTimers();
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       activeReplayRequestController: AbortController | null;
       replayConsecutiveFailures: number;
       requestReplayPayload: (
@@ -228,11 +244,11 @@ describe('ReplayChatSource', () => {
   });
 
   it('drains only reached video offsets after visibility recovery', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
       getPlaybackSnapshot: () => { offsetMs: number; paused: boolean } | null;
     };
-    const playback = vi.spyOn(internals, 'getPlaybackSnapshot');
+    const playback = vi.spyOn(sessionOf(source), 'getPlaybackSnapshot');
     internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
     internals.replayBuffer.insert(makeReplayMessage('just-future', 10_001), 10_001);
     internals.replayBuffer.insert(makeReplayMessage('prefetched', 11_500), 11_500);
@@ -258,11 +274,14 @@ describe('ReplayChatSource', () => {
   it('reports late drops from an empty visibility drain without consuming future messages', () => {
     const onLateDrop = vi.fn();
     source.onLateDrop = onLateDrop;
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
       getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
     };
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 10_000, paused: false });
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 10_000,
+      paused: false,
+    });
     internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
     internals.replayBuffer.insert(makeReplayMessage('future', 10_001), 10_001);
 
@@ -278,12 +297,12 @@ describe('ReplayChatSource', () => {
     source.onLateDrop = () => {
       throw new Error('observer failed');
     };
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
       flushReplayBuffer: (playback: { offsetMs: number; paused: boolean }) => void;
     };
-    internals.callback = received;
+    sessionOf(source).callback = received;
     internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
     internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
 
@@ -295,12 +314,12 @@ describe('ReplayChatSource', () => {
     const received = vi.fn();
     const onLateDrop = vi.fn();
     source.onLateDrop = onLateDrop;
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
       flushReplayBuffer: (playback: { offsetMs: number; paused: boolean }) => void;
     };
-    internals.callback = received;
+    sessionOf(source).callback = received;
     internals.replayBuffer.insert(makeReplayMessage('old', 7999), 7999);
 
     internals.flushReplayBuffer({ offsetMs: 10_000, paused: false });
@@ -313,20 +332,20 @@ describe('ReplayChatSource', () => {
     vi.useFakeTimers();
     const received: string[] = [];
     let playback = { offsetMs: 10_000, paused: false };
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       replayBuffer: { insert: (message: ChatMessage, offsetMs: number) => void };
       getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
       startCooperativeLoop: () => void;
     };
-    internals.callback = (messages) => {
+    sessionOf(source).callback = (messages) => {
       received.push(
         ...(Array.isArray(messages) ? messages : [messages]).flatMap((msg) =>
           msg.id ? [msg.id] : []
         )
       );
     };
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockImplementation(() => playback);
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockImplementation(() => playback);
     internals.replayBuffer.insert(makeReplayMessage('due', 10_000), 10_000);
     internals.replayBuffer.insert(makeReplayMessage('just-future', 10_001), 10_001);
     internals.replayBuffer.insert(makeReplayMessage('prefetched', 11_500), 11_500);
@@ -352,7 +371,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('throttles continuation prefetches independently of fast render ticks', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       prefetchContinuation: InnertubeContinuationData | null;
       prefetchPagesFetched: number;
       prefetchBackoffUntil: number;
@@ -369,7 +388,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('uses high and low time watermarks before resuming replay prefetch', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       prefetchContinuation: InnertubeContinuationData | null;
       replayBuffer: {
         clear: () => void;
@@ -396,7 +415,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('bounds replay prefetch by message count and estimated bytes', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       prefetchContinuation: InnertubeContinuationData | null;
       replayBuffer: {
         clear: () => void;
@@ -423,7 +442,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('resumes count-limited prefetch only at the low count with time and bytes also low', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       prefetchContinuation: InnertubeContinuationData | null;
       replayBuffer: ReplayBuffer;
       shouldPrefetch: (
@@ -461,7 +480,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('resumes byte-limited prefetch at the measured low byte boundary', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       prefetchContinuation: InnertubeContinuationData | null;
       replayBuffer: ReplayBuffer;
       shouldPrefetch: (
@@ -493,7 +512,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('keeps mandatory player polling eligible after optional prefetch reaches its page cap', async () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayMode: 'playerSeek' | null;
       prefetchContinuation: InnertubeContinuationData | null;
       prefetchPagesFetched: number;
@@ -505,7 +524,7 @@ describe('ReplayChatSource', () => {
     internals.replayMode = 'playerSeek';
     internals.prefetchContinuation = { continuation: 'next' };
     internals.prefetchPagesFetched = DEFAULT_SETTINGS.replayPrefetchPages;
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
       offsetMs: 5000,
       paused: false,
     });
@@ -519,7 +538,7 @@ describe('ReplayChatSource', () => {
   it('keeps flushing buffered messages while a replay request is delayed', async () => {
     vi.useFakeTimers();
     const received: ChatMessage[] = [];
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
@@ -530,12 +549,12 @@ describe('ReplayChatSource', () => {
       requestReplayPayload: () => Promise<LiveChatPayload>;
       startCooperativeLoop: () => void;
     };
-    internals.callback = (messages) => {
+    sessionOf(source).callback = (messages) => {
       received.push(...(Array.isArray(messages) ? messages : [messages]));
     };
     internals.replayMode = 'playerSeek';
     internals.replayPlayerSeekContinuation = { continuation: 'seek' };
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
       offsetMs: 1000,
       paused: false,
     });
@@ -556,7 +575,7 @@ describe('ReplayChatSource', () => {
   it('idles an empty display loop and wakes it when delayed I/O adds replay data', async () => {
     vi.useFakeTimers();
     const received: ChatMessage[] = [];
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
@@ -568,13 +587,13 @@ describe('ReplayChatSource', () => {
       ) => number;
       startCooperativeLoop: () => void;
     };
-    internals.callback = (messages) => {
+    sessionOf(source).callback = (messages) => {
       received.push(...(Array.isArray(messages) ? messages : [messages]));
     };
     internals.replayMode = 'playerSeek';
     internals.replayPlayerSeekContinuation = { continuation: 'seek' };
     const getPlaybackSnapshot = vi
-      .spyOn(internals, 'getPlaybackSnapshot')
+      .spyOn(sessionOf(source), 'getPlaybackSnapshot')
       .mockReturnValue({ offsetMs: 1000, paused: false });
     vi.spyOn(internals, 'requestReplayPayload').mockReturnValue(new Promise(() => {}));
 
@@ -598,7 +617,7 @@ describe('ReplayChatSource', () => {
     vi.useFakeTimers();
     let resolveRequest!: (payload: LiveChatPayload) => void;
     let playback = { offsetMs: 1000, paused: false };
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: (() => void) | null;
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
@@ -606,10 +625,10 @@ describe('ReplayChatSource', () => {
       requestReplayPayload: () => Promise<LiveChatPayload | null>;
       startCooperativeLoop: () => void;
     };
-    internals.callback = () => {};
+    sessionOf(source).callback = () => {};
     internals.replayMode = 'playerSeek';
     internals.replayPlayerSeekContinuation = { continuation: 'seek' };
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockImplementation(() => playback);
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockImplementation(() => playback);
     const requestReplayPayload = vi
       .spyOn(internals, 'requestReplayPayload')
       .mockImplementationOnce(
@@ -642,7 +661,7 @@ describe('ReplayChatSource', () => {
     let resolveSeekRequest!: (payload: LiveChatPayload) => void;
     let activeRequests = 0;
     let maximumActiveRequests = 0;
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: (() => void) | null;
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
@@ -651,15 +670,15 @@ describe('ReplayChatSource', () => {
       handleSeeked: (offsetMs: number) => void;
       startCooperativeLoop: () => void;
     };
-    internals.callback = () => {};
+    sessionOf(source).callback = () => {};
     internals.replayMode = 'playerSeek';
     internals.replayPlayerSeekContinuation = { continuation: 'seek' };
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
       offsetMs: 1000,
       paused: false,
     });
     const requestPayload = vi
-      .spyOn(internals, 'requestPayload')
+      .spyOn(sessionOf(source), 'requestPayload')
       .mockImplementation((_fetchFn, _continuation, ...fetchArgs) => {
         const signal = fetchArgs.at(-1) as AbortSignal;
         requestSignals.push(signal);
@@ -696,7 +715,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('invalidates in-flight prefetch work when prefetch state resets', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       prefetchGeneration: number;
       stopPrefetch: () => void;
       isPrefetchGenerationCurrent: (generation: number) => boolean;
@@ -711,17 +730,18 @@ describe('ReplayChatSource', () => {
   it('starts a new delivery epoch when playback seeks', () => {
     const received: string[] = [];
     const onSeek = vi.fn();
-    const internals = source as unknown as {
+    const session = (source as unknown as { session: ChatSession }).session;
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: Array<{ id?: string }>) => void) | null;
       handleSeeked: (offsetMs: number) => void;
       onSeek?: () => void;
     };
-    internals.callback = (messages) => {
+    sessionOf(source).callback = (messages) => {
       received.push(...messages.flatMap((message) => (message.id ? [message.id] : [])));
     };
-    internals.onSeek = onSeek;
+    source.onSeek = onSeek;
 
-    source.injectExternalMessages([
+    session.injectExternalMessages([
       {
         id: 'same-message',
         text: 'before seek',
@@ -731,7 +751,7 @@ describe('ReplayChatSource', () => {
         timestamp: 1,
       },
     ]);
-    source.injectExternalMessages([
+    session.injectExternalMessages([
       {
         id: 'same-message',
         text: 'duplicate',
@@ -742,7 +762,7 @@ describe('ReplayChatSource', () => {
       },
     ]);
     internals.handleSeeked(0);
-    source.injectExternalMessages([
+    session.injectExternalMessages([
       {
         id: 'same-message',
         text: 'after seek',
@@ -763,7 +783,7 @@ describe('ReplayChatSource', () => {
       resolvePayload = resolve;
     });
     const continuation = { continuation: 'current' };
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
       lastReplayRequestedOffsetMs: number;
@@ -791,7 +811,7 @@ describe('ReplayChatSource', () => {
       reject: (error: Error) => void;
     }> = [];
     const received: string[] = [];
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
@@ -804,14 +824,17 @@ describe('ReplayChatSource', () => {
       ) => Promise<LiveChatPayload>;
       handleSeeked: (offsetMs: number) => void;
     };
-    internals.callback = (messages) => {
+    sessionOf(source).callback = (messages) => {
       received.push(
         ...(Array.isArray(messages) ? messages : [messages]).flatMap((m) => m.id ?? [])
       );
     };
     internals.replayMode = 'playerSeek';
     internals.replayPlayerSeekContinuation = { continuation: 'seek' };
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 2000, paused: false });
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
+      offsetMs: 2000,
+      paused: false,
+    });
     vi.spyOn(internals, 'requestReplayPayload').mockImplementation(
       (_continuation, signal) =>
         new Promise<LiveChatPayload>((resolve, reject) => {
@@ -844,7 +867,7 @@ describe('ReplayChatSource', () => {
   it('discards a continuation response invalidated by a later seek', async () => {
     const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
     const currentContinuation = { continuation: 'current' };
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: (() => void) | null;
       replayMode: 'continuation' | null;
       replayContinuation: InnertubeContinuationData | null;
@@ -855,7 +878,7 @@ describe('ReplayChatSource', () => {
       requestReplayPayload: () => Promise<LiveChatPayload>;
       handleSeeked: (offsetMs: number) => void;
     };
-    internals.callback = () => {};
+    sessionOf(source).callback = () => {};
     internals.replayMode = 'continuation';
     internals.replayContinuation = currentContinuation;
     internals.replayConsecutiveFailures = 2;
@@ -914,7 +937,7 @@ describe('ReplayChatSource', () => {
     const received: ChatMessage[] = [];
     const initialContinuation = { continuation: 'initial' };
     const progressedContinuation = { continuation: 'at-thirty-minutes' };
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       bootstrap: ChatBootstrapData | null;
       replayMode: 'continuation' | null;
@@ -928,17 +951,17 @@ describe('ReplayChatSource', () => {
       fetchNextReplayFallbackBatch: (minimumOffsetMs: number) => Promise<boolean>;
       handleSeeked: (offsetMs: number) => void;
     };
-    internals.callback = (messages) => {
+    sessionOf(source).callback = (messages) => {
       received.push(...(Array.isArray(messages) ? messages : [messages]));
     };
-    internals.bootstrap = {
+    sessionOf(source).bootstrap = {
       initialContinuation,
       isReplay: true,
     } as ChatBootstrapData;
     internals.replayMode = 'continuation';
     internals.replayContinuation = progressedContinuation;
     internals.replayFallbackLastOffsetMs = 1_800_000;
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
       offsetMs: 300_000,
       paused: false,
     });
@@ -972,7 +995,7 @@ describe('ReplayChatSource', () => {
 
   it('discards an initialization response invalidated by a newer session', async () => {
     const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       bootstrap: ChatBootstrapData | null;
       replayMode: 'continuation' | 'playerSeek' | null;
       replayContinuation: InnertubeContinuationData | null;
@@ -980,7 +1003,7 @@ describe('ReplayChatSource', () => {
       requestReplayPayload: () => Promise<LiveChatPayload>;
       initializeReplaySession: () => Promise<boolean>;
     };
-    internals.bootstrap = {
+    sessionOf(source).bootstrap = {
       initialContinuation: { continuation: 'initial' },
       isReplay: true,
     } as ChatBootstrapData;
@@ -1064,24 +1087,25 @@ describe('ReplayChatSource', () => {
       let resolveOld!: (payload: LiveChatPayload) => void;
       let rejectOld!: (error: Error) => void;
       const requestSignals: AbortSignal[] = [];
-      const internals = source as unknown as {
-        getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
-        requestPayload: (...args: unknown[]) => Promise<LiveChatPayload>;
-      };
-      vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({ offsetMs: 1000, paused: false });
-      const request = vi.spyOn(internals, 'requestPayload').mockImplementation((...args) => {
-        requestSignals.push(args.at(-1) as AbortSignal);
-        if (requestSignals.length === 1) {
-          return new Promise<LiveChatPayload>((resolve, reject) => {
-            resolveOld = resolve;
-            rejectOld = reject;
-          });
-        }
-        return Promise.resolve({
-          actions: [makeReplayAction('current-session', 1000)],
-          continuations: [{ liveChatReplayContinuationData: { continuation: 'current-next' } }],
-        });
+      vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
+        offsetMs: 1000,
+        paused: false,
       });
+      const request = vi
+        .spyOn(sessionOf(source), 'requestPayload')
+        .mockImplementation((...args) => {
+          requestSignals.push(args.at(-1) as AbortSignal);
+          if (requestSignals.length === 1) {
+            return new Promise<LiveChatPayload>((resolve, reject) => {
+              resolveOld = resolve;
+              rejectOld = reject;
+            });
+          }
+          return Promise.resolve({
+            actions: [makeReplayAction('current-session', 1000)],
+            continuations: [{ liveChatReplayContinuationData: { continuation: 'current-next' } }],
+          });
+        });
 
       source.setInitialBootstrap(bootstrap);
       const stoppedStart = source.start(vi.fn());
@@ -1122,17 +1146,17 @@ describe('ReplayChatSource', () => {
   );
 
   it('follows initial continuations until the buffer reaches current playback', async () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       bootstrap: ChatBootstrapData | null;
       getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
       requestReplayPayload: () => Promise<LiveChatPayload>;
       initializeReplaySession: () => Promise<boolean>;
     };
-    internals.bootstrap = {
+    sessionOf(source).bootstrap = {
       initialContinuation: { continuation: 'initial' },
       isReplay: true,
     } as ChatBootstrapData;
-    vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+    vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
       offsetMs: 20_000,
       paused: false,
     });
@@ -1158,7 +1182,7 @@ describe('ReplayChatSource', () => {
       initialContinuation: { continuation: 'initial' },
       isReplay: true,
     } as ChatBootstrapData);
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       requestReplayPayload: () => Promise<LiveChatPayload>;
     };
     const request = vi.spyOn(internals, 'requestReplayPayload').mockResolvedValue({
@@ -1181,15 +1205,8 @@ describe('ReplayChatSource', () => {
         initialContinuation: { continuation: 'initial' },
         isReplay: true,
       } as ChatBootstrapData);
-      const internals = source as unknown as {
-        requestPayload: (
-          fetchFn: () => Promise<unknown>,
-          continuation: InnertubeContinuationData
-        ) => Promise<LiveChatPayload | null>;
-      };
-
       await expect(
-        internals.requestPayload(async () => invalidResponse, { continuation: 'initial' })
+        sessionOf(source).requestPayload(async () => invalidResponse, { continuation: 'initial' })
       ).rejects.toThrow('Live chat response is missing its continuation payload');
       expect(source.getHealthSnapshot().recentlyActive).toBe(false);
 
@@ -1197,7 +1214,7 @@ describe('ReplayChatSource', () => {
         continuationContents: { liveChatContinuation: { actions: [], continuations: [] } },
       };
       await expect(
-        internals.requestPayload(async () => validEmptyPage, { continuation: 'initial' })
+        sessionOf(source).requestPayload(async () => validEmptyPage, { continuation: 'initial' })
       ).resolves.toEqual({ actions: [], continuations: [] });
       expect(source.getHealthSnapshot().recentlyActive).toBe(true);
     }
@@ -1209,7 +1226,7 @@ describe('ReplayChatSource', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
       const current = { continuation: 'current' };
-      const internals = source as unknown as {
+      const internals = (source as unknown as { driver: unknown }).driver as {
         replayMode: 'playerSeek' | 'continuation' | null;
         replayPlayerSeekContinuation: InnertubeContinuationData | null;
         replayContinuation: InnertubeContinuationData | null;
@@ -1276,11 +1293,11 @@ describe('ReplayChatSource', () => {
         initialContinuation: { continuation: 'initial' },
         isReplay: true,
       } as ChatBootstrapData);
-      const internals = source as unknown as {
+      const internals = (source as unknown as { driver: unknown }).driver as {
         getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
         requestReplayPayload: (continuation: InnertubeContinuationData) => Promise<LiveChatPayload>;
       };
-      vi.spyOn(internals, 'getPlaybackSnapshot').mockReturnValue({
+      vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
         offsetMs: 20_000,
         paused: false,
       });
@@ -1306,7 +1323,7 @@ describe('ReplayChatSource', () => {
   );
 
   it('does not refetch an empty player-seek buffer until playback advances', () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayMode: 'playerSeek' | null;
       replayPlayerSeekContinuation: InnertubeContinuationData | null;
       lastReplayRequestedOffsetMs: number;
@@ -1322,7 +1339,7 @@ describe('ReplayChatSource', () => {
   });
 
   it('restarts the cooperative loop after successful replay-session recovery', async () => {
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       pollPlayerSeekReplay: (
         playback: { offsetMs: number; paused: boolean },
         signal?: AbortSignal
@@ -1341,7 +1358,7 @@ describe('ReplayChatSource', () => {
     vi.spyOn(internals, 'shouldFetchReplayAtOffset').mockReturnValue(true);
     vi.spyOn(internals, 'fetchReplayPlayerSeek').mockResolvedValue(false);
     vi.spyOn(internals, 'needsReplaySessionRecovery').mockReturnValue(true);
-    vi.spyOn(internals, 'refreshBootstrap').mockResolvedValue({
+    vi.spyOn(sessionOf(source), 'refreshBootstrap').mockResolvedValue({
       isReplay: true,
     } as ChatBootstrapData);
     vi.spyOn(internals, 'initializeReplaySession').mockResolvedValue(true);
@@ -1361,7 +1378,7 @@ describe('ReplayChatSource', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
 
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayNextAllowedFetchAt: number;
       pollPlayerSeekReplay: (playback: { offsetMs: number; paused: boolean }) => Promise<boolean>;
       shouldFetchReplayAtOffset: (offsetMs: number) => boolean;
@@ -1405,7 +1422,7 @@ describe('ReplayChatSource', () => {
       .mockResolvedValueOnce({ isReplay: false } as ChatBootstrapData)
       .mockResolvedValueOnce(validBootstrap);
 
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
       bootstrap: ChatBootstrapData | null;
       replayMode: 'playerSeek' | 'continuation' | null;
@@ -1415,7 +1432,7 @@ describe('ReplayChatSource', () => {
       pollContinuationReplay: (offsetMs: number) => Promise<boolean>;
       requestReplayPayload: (continuation: InnertubeContinuationData) => Promise<LiveChatPayload>;
     };
-    internals.callback = vi.fn();
+    sessionOf(source).callback = vi.fn();
     internals.replayMode = 'playerSeek';
     internals.replayPlayerSeekContinuation = { continuation: 'old-seek' };
     let requests = 0;
@@ -1449,7 +1466,7 @@ describe('ReplayChatSource', () => {
     }
 
     expect(bootstrapMocks.refreshBootstrap).toHaveBeenCalledOnce();
-    expect(internals.bootstrap).toBe(originalBootstrap);
+    expect(sessionOf(source).bootstrap).toBe(originalBootstrap);
     expect(internals.replayMode).toBe('playerSeek');
     expect(source.getHealthSnapshot().isInBackoff).toBe(true);
 
@@ -1457,7 +1474,7 @@ describe('ReplayChatSource', () => {
     await expect(internals.pollPlayerSeekReplay(playback)).resolves.toBe(true);
     expect(request).toHaveBeenCalledTimes(17);
     expect(bootstrapMocks.refreshBootstrap).toHaveBeenCalledTimes(2);
-    expect(internals.bootstrap).toBe(validBootstrap);
+    expect(sessionOf(source).bootstrap).toBe(validBootstrap);
     expect(internals.replayMode).toBe('continuation');
     expect(internals.replayContinuation).toEqual({ continuation: 'new-sequential' });
     expect(source.getHealthSnapshot().observerAlive).toBe(true);
@@ -1476,7 +1493,7 @@ describe('ReplayChatSource', () => {
   it('does not apply player-seek session refresh to accumulated sequential failures', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       replayMode: 'playerSeek' | 'continuation' | null;
       replayContinuation: InnertubeContinuationData | null;
       pollContinuationReplay: (offsetMs: number) => Promise<boolean>;
@@ -1506,7 +1523,7 @@ describe('ReplayChatSource', () => {
   it('releases seek listener and signal references when the loop stops', () => {
     const cleanup = vi.fn();
     const signal = new AbortController().signal;
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       seekListenerCleanup: (() => void) | null;
       seekSignal: AbortSignal | null;
       stopCooperativeLoop: () => void;
@@ -1525,7 +1542,7 @@ describe('ReplayChatSource', () => {
   it('clears a prior seek listener when no replacement video exists', () => {
     const cleanup = vi.fn();
     const signal = new AbortController().signal;
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       seekListenerCleanup: (() => void) | null;
       seekSignal: AbortSignal | null;
       installSeekListeners: (signal?: AbortSignal) => void;
@@ -1549,14 +1566,14 @@ describe('ReplayChatSource', () => {
     document.body.append(player);
 
     const onSeek = vi.fn();
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       callback: (() => void) | null;
       onSeek?: () => void;
-      launchCurrentPollLoop: (signal?: AbortSignal) => void;
+      launch: (signal?: AbortSignal) => void;
     };
-    internals.callback = () => {};
-    internals.onSeek = onSeek;
-    internals.launchCurrentPollLoop();
+    sessionOf(source).callback = () => {};
+    source.onSeek = onSeek;
+    internals.launch();
 
     const replacementVideo = document.createElement('video');
     initialVideo.replaceWith(replacementVideo);
@@ -1574,7 +1591,7 @@ describe('ReplayChatSource', () => {
     const timeoutController = new AbortController();
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
 
-    const internals = source as unknown as {
+    const internals = (source as unknown as { driver: unknown }).driver as {
       requestReplayPayload: (
         continuation: InnertubeContinuationData,
         signal?: AbortSignal
@@ -1582,7 +1599,7 @@ describe('ReplayChatSource', () => {
       requestPayload: (...args: unknown[]) => Promise<unknown>;
     };
     const requestPayload = vi
-      .spyOn(internals, 'requestPayload')
+      .spyOn(sessionOf(source), 'requestPayload')
       .mockImplementation((_fetchFn, _continuation, ...fetchArgs) => {
         const signal = fetchArgs.at(-1) as AbortSignal;
         return new Promise((_resolve, reject) => {

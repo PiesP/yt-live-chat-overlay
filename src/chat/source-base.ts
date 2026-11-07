@@ -2,10 +2,8 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * ChatSource abstract base — shared bootstrap, parser, settings, health tracking.
- *
- * Extracted from chat-source.ts to break the circular dependency between
- * the base class and its concrete implementations (LiveChatSource, ReplayChatSource).
+ * ChatSession owns shared bootstrap, cancellation, pause and delivery state.
+ * Live and replay drivers receive a stable set of operations, never its mutable state.
  */
 
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
@@ -115,9 +113,57 @@ class PollLoopManager {
   }
 }
 
-export abstract class ChatSource implements Pauseable {
-  protected readonly getSettings: () => Readonly<OverlaySettings>;
-  protected callback: MessageCallback | null = null;
+/** Read and delivery operations borrowed by one protocol driver. */
+export interface ChatDriverContext {
+  readonly getSettings: () => Readonly<OverlaySettings>;
+  readonly bootstrap: () => ChatBootstrapData | null;
+  readonly isPaused: () => boolean;
+  readonly isVisibilityOnlyPause: () => boolean;
+  readonly hasDelivery: () => boolean;
+  readonly getPlaybackSnapshot: () => PlaybackSnapshot | null;
+  readonly markActivity: () => void;
+  readonly pollWhilePaused: (
+    timeoutMs: number,
+    pollIntervalMs?: number,
+    signal?: AbortSignal
+  ) => Promise<void>;
+  readonly refreshBootstrap: (
+    signal?: AbortSignal,
+    accept?: (data: ChatBootstrapData) => boolean
+  ) => Promise<ChatBootstrapData | null>;
+  readonly emitBatch: (
+    messages: ChatMessage[],
+    isInitialSeed: boolean,
+    signal?: AbortSignal
+  ) => void;
+  readonly requestPayload: <TCallArgs extends unknown[]>(
+    fetchFn: (
+      bootstrap: ChatBootstrapData,
+      continuation: InnertubeContinuationData,
+      ...args: TCallArgs
+    ) => Promise<unknown>,
+    continuation: InnertubeContinuationData,
+    ...fetchArgs: TCallArgs
+  ) => Promise<LiveChatPayload | null>;
+  readonly launchPollLoop: (
+    signal: AbortSignal | undefined,
+    runner: (signal: AbortSignal | undefined) => Promise<void>
+  ) => void;
+  readonly resetMessageDeliveryState: () => void;
+  readonly waitWhilePaused: (signal?: AbortSignal) => Promise<void>;
+  readonly isKnownReplacementTarget: (id: string) => boolean;
+}
+
+export interface ChatSessionDriver {
+  reset(): void;
+  seed(signal?: AbortSignal): Promise<boolean>;
+  launch(signal?: AbortSignal): void;
+  isObserverAlive?(): boolean;
+}
+
+export class ChatSession implements Pauseable {
+  private readonly getSettings: () => Readonly<OverlaySettings>;
+  private callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;
   private readonly pollLoopManager = new PollLoopManager();
   /**
@@ -129,21 +175,15 @@ export abstract class ChatSource implements Pauseable {
   private pauseReasons = new Set<string>();
 
   /** Whether any pause reason is currently active. */
-  protected get isPaused(): boolean {
+  private get isPaused(): boolean {
     return this.pauseReasons.size > 0;
   }
   private pauseAbortController: AbortController | null = null;
   private lastActivityTime = 0;
-  protected bootstrap: ChatBootstrapData | null = null;
+  private bootstrap: ChatBootstrapData | null = null;
   private bootstrapPreseeded = false;
   private readonly messageBuffer = new MessageBuffer();
-
-  /**
-   * Optional provider for the current burst EMA rate (msg/s).
-   * When set, LiveChatSource uses it for sub-poll-interval burst reactivity.
-   * Wired by RuntimeSession from the renderer's BurstDetector.
-   */
-  burstRateProvider?: () => number;
+  private deliveryGeneration = 0;
 
   private static readonly SEEN_IDS_MAX = 5000;
 
@@ -152,14 +192,51 @@ export abstract class ChatSource implements Pauseable {
    * and poll-loop messages — both capture the same YouTube API responses).
    * Capped at SEEN_IDS_MAX to prevent unbounded growth during long sessions.
    */
-  private readonly seenMessageIds = createMessageIdRegistry(ChatSource.SEEN_IDS_MAX);
+  private readonly seenMessageIds = createMessageIdRegistry(ChatSession.SEEN_IDS_MAX);
 
   /** Attest replacement targets already accepted by this source session. */
-  protected readonly isKnownReplacementTarget = (id: string): boolean =>
-    this.seenMessageIds.has(id);
+  private readonly isKnownReplacementTarget = (id: string): boolean => this.seenMessageIds.has(id);
 
-  constructor(getSettings: () => Readonly<OverlaySettings>) {
+  private readonly driver: ChatSessionDriver;
+  private readonly context: ChatDriverContext;
+
+  constructor(
+    getSettings: () => Readonly<OverlaySettings>,
+    createDriver: (context: ChatDriverContext) => ChatSessionDriver
+  ) {
     this.getSettings = getSettings;
+    this.context = Object.freeze({
+      getSettings,
+      bootstrap: () => this.bootstrap,
+      isPaused: () => this.isPaused,
+      isVisibilityOnlyPause: () => this.isVisibilityOnlyPause(),
+      hasDelivery: () => this.callback !== null,
+      getPlaybackSnapshot: () => this.getPlaybackSnapshot(),
+      markActivity: () => this.markActivity(),
+      pollWhilePaused: (timeoutMs: number, pollIntervalMs?: number, signal?: AbortSignal) =>
+        this.pollWhilePaused(timeoutMs, pollIntervalMs, signal),
+      refreshBootstrap: (signal?: AbortSignal, accept?: (data: ChatBootstrapData) => boolean) =>
+        this.refreshBootstrap(signal, accept),
+      emitBatch: (messages: ChatMessage[], isInitialSeed: boolean, signal?: AbortSignal) =>
+        this.emitBatch(messages, isInitialSeed, signal),
+      requestPayload: <TCallArgs extends unknown[]>(
+        fetchFn: (
+          bootstrap: ChatBootstrapData,
+          continuation: InnertubeContinuationData,
+          ...args: TCallArgs
+        ) => Promise<unknown>,
+        continuation: InnertubeContinuationData,
+        ...fetchArgs: TCallArgs
+      ) => this.requestPayload(fetchFn, continuation, ...fetchArgs),
+      launchPollLoop: (
+        signal: AbortSignal | undefined,
+        runner: (signal: AbortSignal | undefined) => Promise<void>
+      ) => this.launchPollLoop(signal, runner),
+      resetMessageDeliveryState: () => this.resetMessageDeliveryState(),
+      waitWhilePaused: (signal?: AbortSignal) => this.waitWhilePaused(signal),
+      isKnownReplacementTarget: this.isKnownReplacementTarget,
+    });
+    this.driver = createDriver(this.context);
   }
 
   /**
@@ -173,8 +250,7 @@ export abstract class ChatSource implements Pauseable {
   }
 
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
-    this.pollController?.abort();
-    this.pollLoopManager.stop();
+    this.retire();
 
     const initialBootstrap = this.bootstrapPreseeded ? this.bootstrap : null;
     this.bootstrapPreseeded = false;
@@ -182,9 +258,7 @@ export abstract class ChatSource implements Pauseable {
     this.pollController = pollController;
     this.callback = callback;
     this.resetSessionState();
-    // Concrete resetSessionState() implementations clear transient session
-    // state. Preserve factory-provided bootstrap data across that reset so the
-    // preseed optimization can actually skip the duplicate watch-page fetch.
+    // Factory-provided bootstrap is consumed once, after the old driver retires.
     this.bootstrap = initialBootstrap;
 
     const combinedSignal = signal
@@ -200,14 +274,17 @@ export abstract class ChatSource implements Pauseable {
   }
 
   stop(): void {
+    this.retire();
+    this.resetSessionState();
+    log.debug('chat.source.monitoring-stopped');
+  }
+
+  private retire(): void {
     this.pollController?.abort();
     this.pollController = null;
-
     this.pollLoopManager.stop();
     this.callback = null;
-    this.resetSessionState();
-
-    log.debug('chat.source.monitoring-stopped');
+    this.driver.reset();
   }
 
   isActive(timeoutMs = this.getSettings().activityTimeoutMs): boolean {
@@ -218,7 +295,7 @@ export abstract class ChatSource implements Pauseable {
     const activeTimeoutMs = options.activeTimeoutMs ?? this.getSettings().activityTimeoutMs;
 
     return {
-      observerAlive: this.isObserverAlive(),
+      observerAlive: this.driver.isObserverAlive?.() ?? this.isObserverAlive(),
       recentlyActive: this.isActive(activeTimeoutMs),
       isInBackoff: false,
       consecutiveErrors: 0,
@@ -229,7 +306,7 @@ export abstract class ChatSource implements Pauseable {
     return this.messageBuffer.getLatest(limit);
   }
 
-  protected isObserverAlive(): boolean {
+  private isObserverAlive(): boolean {
     return (
       this.pollLoopManager.isAlive() &&
       this.pollController !== null &&
@@ -238,7 +315,7 @@ export abstract class ChatSource implements Pauseable {
     );
   }
 
-  protected getPlaybackSnapshot(): PlaybackSnapshot | null {
+  private getPlaybackSnapshot(): PlaybackSnapshot | null {
     const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!match) return null;
     const { element: video } = match;
@@ -249,7 +326,7 @@ export abstract class ChatSource implements Pauseable {
     };
   }
 
-  protected markActivity(): void {
+  private markActivity(): void {
     this.lastActivityTime = Date.now();
   }
 
@@ -257,7 +334,7 @@ export abstract class ChatSource implements Pauseable {
    * Poll at short intervals until playback is no longer paused or timeout elapses.
    * Used by the live poll loop to handle brief pauses without restarting the session.
    */
-  protected async pollWhilePaused(
+  private async pollWhilePaused(
     timeoutMs: number,
     pollIntervalMs = 250,
     signal?: AbortSignal
@@ -275,28 +352,20 @@ export abstract class ChatSource implements Pauseable {
    * Re-fetch bootstrap data from the resolver. Updates this.bootstrap on success.
    * Returns the fresh bootstrap or null on failure.
    */
-  protected async refreshBootstrap(
+  private async refreshBootstrap(
     signal?: AbortSignal,
     accept: (data: ChatBootstrapData) => boolean = () => true
   ): Promise<ChatBootstrapData | null> {
+    const generation = this.deliveryGeneration;
     const result = await refreshBootstrap(signal);
-    if (!result || !accept(result)) return null;
+    if (signal?.aborted || generation !== this.deliveryGeneration || !result || !accept(result))
+      return null;
     this.bootstrap = result;
     return result;
   }
 
-  protected emitMessage(message: ChatMessage): void {
-    if (!this.callback) return;
-    const deduped = this.filterNewMessages([message]);
-    if (deduped.length === 0) return;
-    const [msg] = deduped;
-    if (!msg) return;
-    this.messageBuffer.push(msg);
-    this.callback(msg);
-  }
-
-  protected emitBatch(messages: ChatMessage[], isInitialSeed: boolean): void {
-    if (!this.callback || messages.length === 0) return;
+  private emitBatch(messages: ChatMessage[], isInitialSeed: boolean, signal?: AbortSignal): void {
+    if (signal?.aborted || !this.callback || messages.length === 0) return;
     const deduped = this.filterNewMessages(messages);
     if (deduped.length === 0) return;
     for (const message of deduped) {
@@ -305,7 +374,7 @@ export abstract class ChatSource implements Pauseable {
     this.callback(deduped, isInitialSeed);
   }
 
-  protected async requestPayload<TCallArgs extends unknown[]>(
+  private async requestPayload<TCallArgs extends unknown[]>(
     fetchFn: (
       bootstrap: ChatBootstrapData,
       continuation: InnertubeContinuationData,
@@ -315,6 +384,7 @@ export abstract class ChatSource implements Pauseable {
     ...fetchArgs: TCallArgs
   ): Promise<LiveChatPayload | null> {
     if (!this.bootstrap) return null;
+    const generation = this.deliveryGeneration;
 
     // Mark activity BEFORE the fetch so the health watchdog doesn't
     // penalize transient network failures — the source IS actively
@@ -325,6 +395,7 @@ export abstract class ChatSource implements Pauseable {
     this.markActivity();
 
     const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
+    if (generation !== this.deliveryGeneration) return null;
     const payload = getLiveChatPayload(response);
     if (!payload) {
       this.lastActivityTime = previousActivityTime;
@@ -335,21 +406,22 @@ export abstract class ChatSource implements Pauseable {
     return payload;
   }
 
-  protected launchPollLoop(
+  private launchPollLoop(
     signal: AbortSignal | undefined,
     runner: (loopSignal: AbortSignal | undefined) => Promise<void>
   ): void {
     this.pollLoopManager.launch(runner, signal);
   }
 
-  protected resetSessionState(): void {
+  private resetSessionState(): void {
     this.bootstrap = null;
     this.lastActivityTime = 0;
     this.resetMessageDeliveryState();
   }
 
   /** Start a fresh message-delivery epoch without discarding bootstrap state. */
-  protected resetMessageDeliveryState(): void {
+  private resetMessageDeliveryState(): void {
+    this.deliveryGeneration += 1;
     this.messageBuffer.clear();
     this.seenMessageIds.clear();
   }
@@ -382,7 +454,7 @@ export abstract class ChatSource implements Pauseable {
   }
 
   /** Whether visibility is the sole reason this source is currently paused. */
-  protected isVisibilityOnlyPause(): boolean {
+  private isVisibilityOnlyPause(): boolean {
     return this.pauseReasons.size === 1 && this.pauseReasons.has('visibility');
   }
 
@@ -394,7 +466,7 @@ export abstract class ChatSource implements Pauseable {
     this.setPauseReason('general', paused);
   }
 
-  protected async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
+  private async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
     while (this.pauseReasons.size > 0) {
       if (sessionSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const pauseSignal = this.pauseAbortController?.signal;
@@ -493,13 +565,13 @@ export abstract class ChatSource implements Pauseable {
     return `hash:${author}:${ts}:${text.slice(0, 80)}`;
   }
 
-  protected abstract seedCurrentSession(signal?: AbortSignal): Promise<boolean>;
-  protected abstract launchCurrentPollLoop(signal?: AbortSignal): void;
-
   private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
+    const generation = this.deliveryGeneration;
     // Skip resolver when bootstrap was pre-seeded by factory call
     if (!this.bootstrap) {
       const bootstrapResolution = await resolveBootstrap(signal);
+
+      if (signal?.aborted || generation !== this.deliveryGeneration) return 'retryable';
 
       if (bootstrapResolution.status !== 'ready') {
         logBootstrapFailure(bootstrapResolution);
@@ -510,14 +582,16 @@ export abstract class ChatSource implements Pauseable {
       this.bootstrap = bootstrapResolution.data;
     }
 
-    const seeded = await this.seedCurrentSession(signal);
+    if (signal?.aborted || generation !== this.deliveryGeneration) return 'retryable';
+    const seeded = await this.driver.seed(signal);
     if (!seeded) {
       return 'retryable';
     }
 
-    this.launchCurrentPollLoop(signal);
+    if (signal?.aborted || generation !== this.deliveryGeneration) return 'retryable';
+    this.driver.launch(signal);
 
-    log.debug('chat.source.replay-poll-started');
+    log.debug('chat.source.poll-started');
 
     return 'started';
   }
