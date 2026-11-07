@@ -208,6 +208,24 @@ test('sixteen failed inspections and the existing Chrome stderr tail fit the fai
       errorType: 'Error',
       diagnostic: {
         stage: 'preconnect',
+        portObservationStage: 'preconnect',
+        phases: Object.fromEntries(
+          [
+            'fixed-port-preflight',
+            'process-identity',
+            'devtools-endpoint-ownership',
+            'http-request',
+            'http-response-parse',
+            'preconnect-ownership',
+            'cdp-connect',
+            'cdp-pid',
+            'cim-identity',
+            'postconnect-ownership',
+          ].map((name) => [
+            name,
+            { status: 'not-run', startedAtEpochMs: null, finishedAtEpochMs: null },
+          ])
+        ),
         discoveryBrowserVersion: 'Chrome/156.0.8078.80',
         attachedBrowserVersion: null,
         childAtFailure: {
@@ -915,7 +933,8 @@ test('failure recorder bounds all connection rows while counting listeners befor
   for (let index = 0; index < 40; index++) await recorder.inspect(identity.processId);
   const retained = recorder.observations();
   assert.equal(retained.length, 16);
-  assert.equal(retained[0]?.atEpochMs, 24);
+  assert.equal(retained[0]?.atEpochMs, 0);
+  assert.equal(retained[1]?.atEpochMs, 25);
   for (const observation of retained) {
     assert.equal(observation.inspectionStatus, 'unavailable');
     assert.equal(observation.listenerCount, 10);
@@ -945,6 +964,32 @@ test('failure recorder bounds all connection rows while counting listeners befor
     2
   );
   assert(Buffer.byteLength(worstCaseReceipt, 'utf8') <= 192 * 1024);
+});
+
+test('observation ring retains preflight and final owned LISTEN stages after polling', async () => {
+  let query = 0;
+  const recorder = positive.createNaturalPortRecorder(async () => {
+    query++;
+    if (query <= 31) return { connections: [], process: null };
+    return validSnapshot();
+  });
+  await recorder.inspect();
+  recorder.setStage('devtools-endpoint');
+  for (let index = 0; index < 30; index++) await recorder.inspect(identity.processId);
+  await recorder.inspect(identity.processId);
+  recorder.setStage('preconnect');
+  await recorder.inspect(identity.processId);
+  recorder.setStage('postconnect');
+  await recorder.inspect(identity.processId);
+  const retained = recorder.observations();
+  assert.equal(retained.length, 16);
+  assert.equal(retained[0]?.stage, 'fixed-port-preflight');
+  for (const stage of ['devtools-endpoint', 'preconnect', 'postconnect']) {
+    assert(
+      retained.some((observation) => observation.stage === stage && observation.listenerCount === 1)
+    );
+  }
+  assert.equal(retained.at(-1)?.stage, 'postconnect');
 });
 
 test('negative preconnect snapshot is retained before CDP and cleanup still runs', async () => {
@@ -1033,7 +1078,8 @@ test('negative preconnect snapshot is retained before CDP and cleanup still runs
   assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
   const evidence = JSON.parse(receipt);
   assert.equal(evidence.status, 'failed');
-  assert.equal(evidence.diagnostic.stage, 'preconnect');
+  assert.equal(evidence.diagnostic.stage, 'preconnect-ownership');
+  assert.equal(evidence.diagnostic.portObservationStage, 'preconnect');
   assert.equal(evidence.diagnostic.discoveryBrowserVersion, '155.0.8059.85');
   assert.equal(evidence.diagnostic.childAtFailure.pid, identity.processId);
   assert.equal(evidence.diagnostic.childAtFailure.exitCode, null);
@@ -1149,7 +1195,8 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
   assert.equal(cleanups, 1);
   assert(Buffer.byteLength(receipt, 'utf8') <= 192 * 1024);
   const evidence = JSON.parse(receipt);
-  assert.equal(evidence.diagnostic.stage, 'preconnect');
+  assert.equal(evidence.diagnostic.stage, 'preconnect-ownership');
+  assert.equal(evidence.diagnostic.portObservationStage, 'preconnect');
   const observations = evidence.diagnostic.portObservations;
   assert.deepEqual(
     observations.map((observation: { listenerCount: number | null }) => observation.listenerCount),
@@ -1166,4 +1213,221 @@ test('rejected preconnect inspection retains its bounded error before cleanup', 
   assert.equal(failedInspection.queries.length, 1);
   assert.equal(evidence.errorType.length, 128);
   assert.equal(evidence.cleanup.processTreeExited, true);
+});
+
+type LauncherFailure =
+  | 'endpoint-owner'
+  | 'http'
+  | 'preconnect-owner'
+  | 'cdp'
+  | 'pid'
+  | 'cim'
+  | 'postconnect-owner';
+
+function launcherHarness(failAt?: LauncherFailure, cleanupError?: Error) {
+  const calls: string[] = [];
+  const receipts: string[] = [];
+  const listener = firstListener(validSnapshot());
+  const lateListener = () => ({
+    ...validSnapshot(),
+    connections: [
+      ...Array.from({ length: 10 }, () => ({
+        ...listener,
+        state: 'Established',
+        rawState: 5,
+      })),
+      listener,
+    ],
+  });
+  const childProcess = Object.assign(new EventEmitter(), {
+    pid: identity.processId,
+    exitCode: null,
+    signalCode: null,
+    stderr: new EventEmitter(),
+  });
+  const attached = {
+    version: () => '155.0.8059.85',
+    contexts: () => [{ setDefaultTimeout: () => {}, setDefaultNavigationTimeout: () => {} }],
+    newBrowserCDPSession: async () => ({ send: async () => ({}) }),
+    close: async () => {},
+  };
+  const sandbox = {
+    assert,
+    Buffer,
+    createHash,
+    AggregateError,
+    JSON,
+    Error,
+    Reflect,
+    join: path.join,
+    STDERR_LIMIT_BYTES: 65_536,
+    FAILURE_RECEIPT_MAX_BYTES: 192 * 1024,
+    FIXED_DEBUG_PORT: 27_683,
+    boundedEvidenceText: (value: unknown, limit: number) =>
+      typeof value === 'string' ? value.slice(0, limit) : null,
+    createNaturalPortRecorder: () => {
+      let inspection = 0;
+      return positive.createNaturalPortRecorder(async () => {
+        const index = inspection++;
+        calls.push(`inspect:${index}`);
+        if (index === 0) return { connections: [], process: null };
+        if (index === 1 && failAt === 'endpoint-owner') return { ...lateListener(), process: null };
+        if (index === 2 && failAt === 'preconnect-owner')
+          return { ...lateListener(), connections: [] };
+        if (index === 3 && failAt === 'postconnect-owner')
+          return { ...lateListener(), connections: [] };
+        return lateListener();
+      });
+    },
+    discoverInstalledChrome: async () => ({
+      executablePath: identity.executablePath,
+      browserVersion: '155.0.8059.85',
+    }),
+    assertFixedPortUnused: positive.assertFixedPortUnused,
+    mkdtemp: async () => 'C:\\Owned\\profile',
+    spawn: () => childProcess,
+    naturalChromeArguments: positive.naturalChromeArguments,
+    captureSpawnedChromeIdentity: async () => identity,
+    readOwnedFixedPortEndpoint: (
+      ownedChild: typeof childProcess,
+      state: { spawnError: Error | null },
+      ownedIdentity: typeof identity,
+      options: {
+        inspectPort: (pid?: number) => Promise<Snapshot>;
+        onHttpPhase: (event: string) => void;
+      }
+    ) =>
+      positive.readOwnedFixedPortEndpoint(ownedChild, state, ownedIdentity, {
+        ...options,
+        fetchVersion: async () => {
+          calls.push('http');
+          if (failAt === 'http') throw new Error('HTTP failed');
+          return version(endpoint);
+        },
+      }),
+    connectOwnedFixedPort: positive.connectOwnedFixedPort,
+    readOwnedBrowserProcessId: () => {
+      calls.push('cdp-pid');
+      return failAt === 'pid' ? 999 : identity.processId;
+    },
+    captureOwnedChromeProcess: async () => {
+      calls.push('cim');
+      return failAt === 'cim' ? { ...identity, creationDate: '/Date(2000)/' } : identity;
+    },
+    verifyOwnedFixedPort: positive.verifyOwnedFixedPort,
+    cleanupFailedNaturalChrome: async () => {
+      calls.push('cleanup');
+      return {
+        cleanup: { processTreeExited: !cleanupError, profileRemoved: !cleanupError },
+        errors: cleanupError ? [cleanupError] : [],
+      };
+    },
+    writeFile: async (_file: string, contents: string) => receipts.push(contents),
+  };
+  const launch = runInNewContext(`(${positive.launchOwnedNaturalChrome.toString()})`, sandbox);
+  const run = () =>
+    launch({
+      chromium: {
+        connectOverCDP: async () => {
+          calls.push('cdp-connect');
+          if (failAt === 'cdp') throw new Error('CDP connection failed');
+          return attached;
+        },
+      },
+      root: 'C:\\Owned',
+      output: 'C:\\Owned\\out',
+      checkpoint: async (name: string, phase: string) => calls.push(`${name}:${phase}`),
+      requireAutoplayGesture: false,
+    });
+  return { run, calls, receipts };
+}
+
+test('launcher phase evidence distinguishes ownership, HTTP, and actual CDP failures', async () => {
+  const cases: Array<[LauncherFailure, string, string[]]> = [
+    ['endpoint-owner', 'devtools-endpoint-ownership', []],
+    ['http', 'http-request', ['http']],
+    ['preconnect-owner', 'preconnect-ownership', ['http']],
+    ['cdp', 'cdp-connect', ['http', 'cdp-connect']],
+  ];
+  for (const [failure, stage, operations] of cases) {
+    const harness = launcherHarness(failure);
+    await assert.rejects(harness.run());
+    const evidence = JSON.parse(harness.receipts[0] ?? '{}');
+    assert.equal(evidence.status, 'failed');
+    assert.equal(evidence.diagnostic.stage, stage);
+    assert.deepEqual(
+      harness.calls.filter((call) => call === 'http' || call === 'cdp-connect'),
+      operations
+    );
+    const phases = evidence.diagnostic.phases;
+    assert.equal(
+      phases['http-request'].status,
+      operations.includes('http') ? (failure === 'http' ? 'failed' : 'completed') : 'not-run'
+    );
+    assert.equal(phases['cdp-connect'].status, failure === 'cdp' ? 'failed' : 'not-run');
+    assert.equal(harness.calls.includes('natural-launch:connect:before'), failure === 'cdp');
+    assert.equal(evidence.diagnostic.portObservations[0].stage, 'fixed-port-preflight');
+  }
+});
+
+test('connected browser remains failed until CDP PID, CIM identity, and postconnect pass', async () => {
+  for (const [failure, stage] of [
+    ['pid', 'cdp-pid'],
+    ['cim', 'cim-identity'],
+    ['postconnect-owner', 'postconnect-ownership'],
+  ] as const) {
+    const harness = launcherHarness(failure);
+    await assert.rejects(harness.run());
+    const evidence = JSON.parse(harness.receipts[0] ?? '{}');
+    assert.equal(evidence.status, 'failed');
+    assert.equal(evidence.diagnostic.stage, stage);
+    assert.equal(evidence.diagnostic.phases['cdp-connect'].status, 'completed');
+    assert.equal(evidence.diagnostic.phases[stage].status, 'failed');
+    assert(harness.calls.includes('cdp-connect'));
+    assert.equal(harness.calls.at(-1), 'cleanup');
+  }
+});
+
+test('success retains the late qualifying LISTEN row and each lifetime has a fresh preflight', async () => {
+  const harness = launcherHarness();
+  for (let lifetime = 0; lifetime < 2; lifetime++) {
+    const result = await harness.run();
+    assert.equal(result.launchEvidence.phases['postconnect-ownership'].status, 'completed');
+    assert.equal(result.launchEvidence.phases['http-request'].status, 'completed');
+    assert.equal(result.launchEvidence.phases['cdp-connect'].status, 'completed');
+    const observations = result.launchEvidence.portObservations;
+    assert.deepEqual(
+      observations.map((item: { stage: string }) => item.stage),
+      ['fixed-port-preflight', 'devtools-endpoint', 'preconnect', 'postconnect']
+    );
+    assert.equal(observations[0].sequenceIndex, 0);
+    for (const observation of observations.slice(1)) {
+      assert.equal(observation.connections.length, 8);
+      assert.deepEqual(observation.retainedConnectionIndices, [0, 1, 2, 3, 4, 5, 6, 10]);
+      assert.equal(observation.qualifyingListenerOriginalIndex, 10);
+      assert.equal(
+        observation.connectionsSelectionPolicy,
+        'first-seven-plus-qualifying-owned-listen'
+      );
+      assert.equal(observation.connections[7].state, 'Listen');
+      assert.equal(observation.connections[7].owningProcess, identity.processId);
+    }
+  }
+  assert.equal(harness.calls.filter((call) => call === 'inspect:0').length, 2);
+  assert.equal(harness.receipts.length, 0);
+});
+
+test('launcher cleanup error remains an aggregate failure with original error', async () => {
+  const cleanupError = new Error('cleanup failed');
+  const harness = launcherHarness('cdp', cleanupError);
+  await assert.rejects(harness.run(), (error: unknown) => {
+    assert(error instanceof AggregateError);
+    assert.equal(error.errors.length, 2);
+    assert.match(String(error.errors[0]), /CDP connection failed/u);
+    assert.equal(error.errors[1], cleanupError);
+    return true;
+  });
+  const evidence = JSON.parse(harness.receipts[0] ?? '{}');
+  assert.equal(evidence.status, 'failed');
+  assert.equal(evidence.cleanup.errorCount, 1);
 });
