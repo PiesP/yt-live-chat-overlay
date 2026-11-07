@@ -43,6 +43,9 @@ const LIVE_BOOTSTRAP_REFRESH_MAX = 50;
 const LIVE_POLL_TIMEOUT_MS = 20_000;
 
 export class LiveChatSource extends ChatSource {
+  get mode(): 'live' {
+    return 'live';
+  }
   private liveContinuation: InnertubeContinuationData | null = null;
   protected consecutiveErrors = 0;
   /** Fixed-size circular buffer for moving-window density tracking. */

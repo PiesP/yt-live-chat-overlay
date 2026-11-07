@@ -217,6 +217,9 @@ checks from reuse or previously reported evidence that has not been rechecked.
 
 ## Project constraints
 
+Use the [product composition and consumer contracts](docs/architecture.md) for
+construction, capability and owner-only lifecycle boundaries.
+
 - Bundle runtime dependencies; do not add remotely loaded runtime code.
 - Preserve the single-file, readable userscript required by userscript hosts.
 - Keep userscript and extension differences behind `src/platform/` adapters.
@@ -231,6 +234,9 @@ checks from reuse or previously reported evidence that has not been rechecked.
   cleanup-safe. Canvas2D is the implemented rendering path.
 
 ## Code style
+
+Keep implementation inheritance exceptions scoped to their owners in
+[the architecture contract](docs/architecture.md#product-composition-and-consumer-contracts).
 
 `vite.config.ts` owns Oxlint and Oxfmt coverage and exceptions. Keep two-space
 indentation, 100 columns, LF, single quotes, semicolons, ES5 trailing commas and
