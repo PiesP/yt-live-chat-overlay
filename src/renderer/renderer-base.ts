@@ -23,12 +23,13 @@ import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { getMessagePriority } from '@renderer/message-priority';
+import type { ConnectionStatus } from '@renderer/renderer-contracts';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@renderer/text-measure';
 import { rendererLayout } from '@util/design-tokens';
 import { createLogger } from '@util/logging';
 import { ObservabilityReporter } from '@util/observability';
 
-export type ConnectionStatus = 'connected' | 'connecting' | 'degraded' | 'disconnected' | 'standby';
+export type { ConnectionStatus } from '@renderer/renderer-contracts';
 
 const log = createLogger('RendererBase');
 

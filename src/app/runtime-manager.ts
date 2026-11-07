@@ -19,7 +19,13 @@ import { VideoPauseController } from '@app/video-pause-controller';
 import { type DomWatcherUnsubscribe, installDomChatWatcher } from '@chat/dom-watcher';
 import { type InterceptorUnsubscribe, installFetchInterceptor } from '@chat/fetch-interceptor';
 import { ChatPanelObserver, type ChatPanelState } from '@chat/panel-observer';
-import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@chat/source-base';
+import type { ChatHealthSnapshot, ChatSourceStartStatus } from '@chat/source-base';
+import type {
+  ChatPanelSource,
+  ChatSourceOperations,
+  LiveChatIngress,
+  RuntimeChatSource,
+} from '@chat/source-contracts';
 import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
 import { bootstrapChatSession, type ChatBootstrapResult } from '@chat/youtube/api';
@@ -27,7 +33,7 @@ import { isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { clearSafeInterval, clearSafeTimeout } from '@piesp/browser-core/async';
 import { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
-import type { ConnectionStatus, RendererBase } from '@renderer/renderer-base';
+import type { ConnectionStatus, RuntimeRenderer } from '@renderer/renderer-contracts';
 import { shouldResetRendererForSettingsChange } from '@settings/schema';
 import type { TranslationRuntimeStatus } from '@translation/service';
 import { BacklogInjectionController } from '@util/backlog-controller';
@@ -67,7 +73,7 @@ const LONG_HIDDEN_FULL_REFRESH_MS = 60_000;
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
   signal?: AbortSignal
-): Promise<{ chatSource: ChatSource; bootstrapResult: ChatBootstrapResult }> {
+): Promise<{ chatSource: RuntimeChatSource; bootstrapResult: ChatBootstrapResult }> {
   const result = await bootstrapChatSession(signal);
   const chatSource =
     result.status === 'ready' && result.data?.isReplay
@@ -77,7 +83,7 @@ async function createChatSource(
   return { chatSource, bootstrapResult: result };
 }
 
-function seedBootstrapIfReady(chatSource: ChatSource, result: ChatBootstrapResult): void {
+function seedBootstrapIfReady(chatSource: ChatSourceOperations, result: ChatBootstrapResult): void {
   if (result.status === 'ready') {
     chatSource.setInitialBootstrap(result.data);
   }
@@ -186,8 +192,8 @@ export class RuntimeManager {
   private targetUrl: string | null = null;
   private abortController = new AbortController();
   private overlay: Overlay | null = null;
-  private renderer: RendererBase | null = null;
-  private chatSource: ChatSource | null = null;
+  private renderer: RuntimeRenderer | null = null;
+  private chatSource: RuntimeChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private foregroundVisibilityHandler: (() => void) | null = null;
   private videoPauseController = new VideoPauseController();
@@ -654,7 +660,7 @@ export class RuntimeManager {
     //     performOverlayRefresh was only re-injecting getLatestMessages(20)
     //     from the messageBuffer — ReplayBuffer messages accumulated during
     //     the hidden period were silently lost for long-hidden (≥30s) tabs.
-    if (this.renderer && this.chatSource instanceof ReplayChatSource) {
+    if (this.renderer && this.chatSource?.mode === 'replay') {
       const pending = this.chatSource.drainPendingMessages();
       if (pending.length > 0) {
         this.ensureBacklogController(this.renderer);
@@ -1009,7 +1015,7 @@ export class RuntimeManager {
     // Notify renderer of replay mode so it disables burst-driven speed
     // adaptation, author rate limiting, and anti-block throttling —
     // all of which distort exact videoOffsetMs-based replay timing.
-    if (chatSource instanceof ReplayChatSource && this.renderer) {
+    if (chatSource.mode === 'replay' && this.renderer) {
       this.renderer.setReplayMode(true);
       chatSource.onSeek = () => this.handleReplaySeek();
       const generation = this.sessionGeneration;
@@ -1045,7 +1051,7 @@ export class RuntimeManager {
     // Disabled for replay — ReplayChatSource handles its own fetching via the
     // background fetch interval and the interceptor would inject duplicate
     // messages, flooding the queue.
-    if (!(chatSource instanceof ReplayChatSource)) {
+    if (chatSource.mode === 'live') {
       this.installFetchInterceptor(chatSource);
     }
 
@@ -1053,7 +1059,7 @@ export class RuntimeManager {
     // sub-poll-interval burst reactivity in adaptive delay calculation.
     // Without this, the poll loop needs >=2 samples (2 poll intervals) before
     // it can detect a burst and shorten its poll delay.
-    if (this.renderer) {
+    if (chatSource.mode === 'live' && this.renderer) {
       chatSource.burstRateProvider = () => this.renderer?.getBurstEmaRate() ?? 0;
     }
 
@@ -1145,7 +1151,7 @@ export class RuntimeManager {
     //
     // Live chat initial seed batches (> 50 messages) still go through the
     // backlog controller for burst protection.
-    if (this.chatSource instanceof ReplayChatSource) {
+    if (this.chatSource?.mode === 'replay') {
       for (const msg of msgs) {
         if (!this.acceptForRenderer(msg)) continue;
         renderer.addMessage(msg);
@@ -1207,13 +1213,13 @@ export class RuntimeManager {
    *   DOM is wasted when the panel is closed since the target elements
    *   don't exist
    */
-  private startChatPanelMonitor(chatSource: ChatSource): void {
+  private startChatPanelMonitor(chatSource: ChatPanelSource): void {
     this.chatPanelObserver.start((state: ChatPanelState) => {
       this.renderer?.setChatPanelOpen(state.isOpen);
 
       // Replay messages must come from the video-timestamped API path. DOM
       // messages only carry wall-clock timestamps and would render immediately.
-      if (chatSource instanceof ReplayChatSource) {
+      if (chatSource.mode === 'replay') {
         this.domWatcherUnsubscribe?.();
         this.domWatcherUnsubscribe = null;
         this.domWatcherPanelElement = null;
@@ -1259,7 +1265,7 @@ export class RuntimeManager {
     });
   }
 
-  private installFetchInterceptor(chatSource: ChatSource): void {
+  private installFetchInterceptor(chatSource: LiveChatIngress): void {
     try {
       this.fetchInterceptorUnsubscribe = installFetchInterceptor(
         __USERSCRIPT__ ? unsafeWindow : window,
@@ -1289,7 +1295,7 @@ export class RuntimeManager {
     }
   }
 
-  private ensureBacklogController(renderer: RendererBase): void {
+  private ensureBacklogController(renderer: RuntimeRenderer): void {
     if (this.backlogController) return;
 
     const settings = this.settings as OverlaySettings;
@@ -1603,7 +1609,7 @@ export class RuntimeManager {
       this.chatSource?.setPauseReason('visibility', false);
 
       // Replay source: drain accumulated buffer messages through backlog.
-      if (this.renderer && this.chatSource instanceof ReplayChatSource) {
+      if (this.renderer && this.chatSource?.mode === 'replay') {
         const messages = this.chatSource.drainPendingMessages();
         if (messages.length > 0) {
           this.ensureBacklogController(this.renderer);
@@ -1886,7 +1892,10 @@ export class RuntimeManager {
     this.chatWatchdogTimer = clearSafeInterval(this.chatWatchdogTimer);
   }
 
-  private replayLatestMessages(renderer: RendererBase, limit = RECENT_MESSAGE_REPLAY_LIMIT): void {
+  private replayLatestMessages(
+    renderer: RuntimeRenderer,
+    limit = RECENT_MESSAGE_REPLAY_LIMIT
+  ): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
       // When the video is paused, skip replay without marking the message
@@ -2129,7 +2138,7 @@ export class RuntimeManager {
   /**
    * Create the Canvas2D renderer.
    */
-  private createRenderer(overlay: Overlay, settings: OverlaySettings): RendererBase {
+  private createRenderer(overlay: Overlay, settings: OverlaySettings): RuntimeRenderer {
     log.info('runtime.renderer.selected', { mode: 'canvas2d' });
     const generation = this.sessionGeneration;
     return new CanvasRenderer(overlay, settings, (status) => {

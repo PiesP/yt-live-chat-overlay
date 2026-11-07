@@ -27,7 +27,7 @@ import {
 } from '@renderer/layout/card-layout';
 import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
 import { getRegularContentBounds } from '@renderer/layout/row-geometry';
-import { RendererBase } from '@renderer/renderer-base';
+import { getMessagePriority } from '@renderer/message-priority';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@util/design-tokens';
@@ -702,14 +702,14 @@ export function enqueueWithOverflow(
 ): 'enqueued' | 'dropped' | 'replaced' {
   if (queue.size >= maxSize) {
     const lowest = queue.peekLowest();
-    const lowestPriority = lowest ? RendererBase.getMessagePriority(lowest) : undefined;
+    const lowestPriority = lowest ? getMessagePriority(lowest) : undefined;
     // Keep one already-admitted priority-zero ordinary message through a paid
     // burst. Equal-priority overflow favors a newer source-eligible message,
     // including due replay; backlog stays FIFO.
     const replaceOrdinary = priority === 0 && lowestPriority === 0;
     const soleOrdinary =
       lowestPriority === 0 &&
-      queue.toArray().filter((entry) => RendererBase.getMessagePriority(entry) === 0).length === 1;
+      queue.toArray().filter((entry) => getMessagePriority(entry) === 0).length === 1;
     if (
       lowestPriority === undefined ||
       (!replaceOrdinary && (priority <= lowestPriority || (soleOrdinary && priority > 0)))

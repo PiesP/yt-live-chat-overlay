@@ -50,6 +50,9 @@ const REPLAY_FETCH_TIMEOUT_MS = 20_000;
 type ReplayMode = 'playerSeek' | 'continuation';
 
 export class ReplayChatSource extends ChatSource {
+  get mode(): 'replay' {
+    return 'replay';
+  }
   // replayBatchLimit — read from this.getSettings()
 
   /** Notifies the runtime that all display state belongs to an old timeline. */

@@ -14,7 +14,7 @@
 import { bootstrapChatSession } from '@chat/youtube/api';
 import { clearSafeTimeout } from '@piesp/browser-core/async';
 import { isAbortError } from '@piesp/browser-core/error';
-import type { RendererBase } from '@renderer/renderer-base';
+import type { StandbyStatusSink } from '@renderer/renderer-contracts';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('Standby');
@@ -33,7 +33,7 @@ export class StandbyController {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private paused = false;
   private pollController: AbortController | null = null;
-  private renderer: RendererBase | null = null;
+  private renderer: StandbyStatusSink | null = null;
   /** Generation counter to guard against stale poll callbacks after exit(). */
   private pollGeneration = 0;
 
@@ -44,7 +44,7 @@ export class StandbyController {
   ) {}
 
   /** Attach the renderer for standby status UI feedback. */
-  setRenderer(renderer: RendererBase | null): void {
+  setRenderer(renderer: StandbyStatusSink | null): void {
     this.renderer = renderer;
   }
 

@@ -2,8 +2,8 @@
 
 import type { OverlaySettings } from '@app-types';
 import { RuntimeManager } from '@app/runtime-manager';
+import type { ChatPanelSource, RuntimeChatSource } from '@chat/source-contracts';
 import { LiveChatSource } from '@chat/source-live';
-import { ReplayChatSource } from '@chat/source-replay';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
@@ -143,7 +143,7 @@ describe('RuntimeManager (extended)', () => {
     acceptForRenderer: (msg: { id?: string; actionType?: 'add' | 'replace' }) => boolean;
     routeMessages: (msgs: Array<Record<string, unknown>>) => void;
     handleReplaySeek: () => void;
-    startChatPanelMonitor: (chatSource: LiveChatSource | ReplayChatSource) => void;
+    startChatPanelMonitor: (chatSource: ChatPanelSource) => void;
     startForegroundListeners: () => void;
     applyCurrentVisibilityState: () => void;
     stopForegroundListeners: () => void;
@@ -159,7 +159,7 @@ describe('RuntimeManager (extended)', () => {
     };
     domWatcherUnsubscribe: (() => void) | null;
     renderer: Record<string, unknown> | null;
-    chatSource: LiveChatSource | ReplayChatSource | null;
+    chatSource: RuntimeChatSource | null;
     backlogController: {
       destroy(): void;
       drainPending(): Array<Record<string, unknown>>;
@@ -282,7 +282,7 @@ describe('RuntimeManager (extended)', () => {
   });
 
   describe('chat panel monitoring', () => {
-    it('does not install a DOM fallback watcher for replay chat', () => {
+    it('does not install a DOM fallback watcher for a replay-mode source', () => {
       const rm = new RuntimeManager(createOpts());
       const internals = internalsOf(rm);
       const unsubscribe = vi.fn();
@@ -301,7 +301,8 @@ describe('RuntimeManager (extended)', () => {
         stop: vi.fn(),
       };
 
-      internals.startChatPanelMonitor(new ReplayChatSource(() => makeDefaults()));
+      // A source with replay semantics needs no concrete source prototype here.
+      internals.startChatPanelMonitor({ mode: 'replay' });
       const renderer = document.createElement('yt-live-chat-item-list-renderer');
       const items = document.createElement('div');
       items.id = 'items';
@@ -330,7 +331,7 @@ describe('RuntimeManager (extended)', () => {
       internals.chatSource = {
         setPauseReason,
         stop: vi.fn(),
-      } as unknown as LiveChatSource;
+      } as unknown as RuntimeChatSource;
       internals.renderer = {
         pause: pauseRenderer,
         trimBackgroundQueue: vi.fn(),
@@ -532,13 +533,28 @@ describe('RuntimeManager (extended)', () => {
       rm.destroy();
     });
 
-    it('keeps actual ReplayChatSource delivery on the direct timing path', () => {
+    it('keeps replay-mode delivery on the direct timing path without a concrete source', () => {
       const settings = makeDefaults({ backlogMode: 'none' });
       const rm = new RuntimeManager(createOpts({ settings }));
       const internals = internalsOf(rm);
       const addMessage = vi.fn();
       internals.settings = settings;
-      internals.chatSource = new ReplayChatSource(() => settings);
+      internals.chatSource = {
+        mode: 'replay',
+        setInitialBootstrap: vi.fn(),
+        start: vi.fn(async () => 'started' as const),
+        stop: vi.fn(),
+        setPaused: vi.fn(),
+        setPauseReason: vi.fn(),
+        getLatestMessages: vi.fn(() => []),
+        getHealthSnapshot: vi.fn(() => ({
+          observerAlive: true,
+          recentlyActive: true,
+          isInBackoff: false,
+          consecutiveErrors: 0,
+        })),
+        drainPendingMessages: vi.fn(() => []),
+      } satisfies RuntimeChatSource;
       internals.renderer = {
         addMessage,
         setStandbyStatus: vi.fn(),
