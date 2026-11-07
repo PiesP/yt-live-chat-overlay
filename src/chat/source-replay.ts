@@ -11,8 +11,8 @@ import { type ChatEvent, extractChatEvents } from '@chat/message-parser';
 import { ReplayBuffer } from '@chat/replay-buffer';
 import {
   ChatSession,
-  type ChatDriverContext,
-  type ChatSessionDriver,
+  type ReplayChatSessionOperations,
+  type ScheduledChatSessionDriver,
   type ChatHealthSnapshot,
   type ChatSourceStartStatus,
   type PlaybackSnapshot,
@@ -51,17 +51,18 @@ const REPLAY_PREFETCH_MAX_BYTES = 6 * 1024 * 1024;
 const REPLAY_PREFETCH_RESUME_BYTES = 3 * 1024 * 1024;
 /** Maximum replay request duration before the cooperative loop can recover. */
 const REPLAY_FETCH_TIMEOUT_MS = 20_000;
-// replayPrefetchPages — read from this.context.getSettings()
+// replayPrefetchPages — read from this.session.getSettings()
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
-class ReplayChatDriver implements ChatSessionDriver {
+class ReplayChatDriver implements ScheduledChatSessionDriver {
+  readonly scheduling = 'independent' as const;
   constructor(
-    private readonly context: ChatDriverContext,
+    private readonly session: ReplayChatSessionOperations,
     private readonly getOnSeek: () => (() => void) | undefined,
     private readonly getOnLateDrop: () => ((count: number) => void) | undefined
   ) {}
-  // replayBatchLimit — read from this.context.getSettings()
+  // replayBatchLimit — read from this.session.getSettings()
 
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
@@ -94,11 +95,11 @@ class ReplayChatDriver implements ChatSessionDriver {
   private prefetchBudgetSuspended = false;
   /** Drain reached replay messages for the runtime's visibility backlog. */
   drainPendingMessages(): ChatMessage[] {
-    const playback = this.context.getPlaybackSnapshot();
+    const playback = this.session.getPlaybackSnapshot();
     if (
       !playback ||
       playback.paused ||
-      (this.context.isPaused() && !this.context.isVisibilityOnlyPause())
+      (this.session.paused && !this.session.isVisibilityOnlyPause())
     ) {
       return [];
     }
@@ -120,7 +121,7 @@ class ReplayChatDriver implements ChatSessionDriver {
   }
 
   isObserverAlive(): boolean {
-    return this.cooperativeLoopRunning && this.context.hasDelivery();
+    return this.cooperativeLoopRunning && this.session.canDeliver;
   }
 
   isInBackoff(): boolean {
@@ -154,21 +155,21 @@ class ReplayChatDriver implements ChatSessionDriver {
         return;
       }
 
-      if (this.context.isPaused()) {
-        this.context.markActivity();
+      if (this.session.paused) {
+        this.session.markActivity();
       }
 
-      const playback = this.context.getPlaybackSnapshot();
+      const playback = this.session.getPlaybackSnapshot();
       const isPlaying = playback && !playback.paused;
-      if (!this.context.isPaused() && isPlaying) {
-        this.context.markActivity();
+      if (!this.session.paused && isPlaying) {
+        this.session.markActivity();
         this.flushReplayBuffer(playback);
       }
 
       const hasPendingFlushes = !this.replayBuffer.isEmpty;
       const videoPaused = playback?.paused ?? true;
       const adaptiveDelay =
-        hasPendingFlushes && !this.context.isPaused() && !videoPaused
+        hasPendingFlushes && !this.session.paused && !videoPaused
           ? 16
           : BACKGROUND_FETCH_INTERVAL_MS;
 
@@ -203,9 +204,9 @@ class ReplayChatDriver implements ChatSessionDriver {
       }
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
-        const playback = this.context.getPlaybackSnapshot();
+        const playback = this.session.getPlaybackSnapshot();
         const delay = this.canFetchForPlayback(playback)
-          ? this.context.isVisibilityOnlyPause()
+          ? this.session.isVisibilityOnlyPause()
             ? BACKGROUND_FETCH_INTERVAL_MS
             : REPLAY_PREFETCH_MIN_INTERVAL_MS
           : BACKGROUND_FETCH_INTERVAL_MS;
@@ -218,7 +219,7 @@ class ReplayChatDriver implements ChatSessionDriver {
   }
 
   private async runNetworkCycle(gen: number, signal?: AbortSignal): Promise<void> {
-    const playback = this.context.getPlaybackSnapshot();
+    const playback = this.session.getPlaybackSnapshot();
     if (!this.canFetchForPlayback(playback) || !this.hasReplayFetchDemand(signal, playback)) {
       return;
     }
@@ -234,7 +235,7 @@ class ReplayChatDriver implements ChatSessionDriver {
 
     // A pause or large playback jump may occur while the request is in flight.
     // Re-read playback and resource demand before starting another request.
-    const currentPlayback = this.context.getPlaybackSnapshot();
+    const currentPlayback = this.session.getPlaybackSnapshot();
     if (
       !this.canFetchForPlayback(currentPlayback) ||
       !this.hasReplayFetchDemand(signal, currentPlayback)
@@ -263,19 +264,19 @@ class ReplayChatDriver implements ChatSessionDriver {
         return;
       }
 
-      const latestPlayback = this.context.getPlaybackSnapshot();
+      const latestPlayback = this.session.getPlaybackSnapshot();
       const minimumOffsetMs = Math.max(
         0,
         (latestPlayback?.offsetMs ?? currentPlayback.offsetMs) - REPLAY_PREFETCH_WINDOW_MS
       );
       const events = extractChatEvents(
         payload.actions,
-        this.context.getSettings,
+        this.session.getSettings,
         undefined,
-        this.context.isKnownReplacementTarget
+        this.session.isKnownReplacementTarget
       );
       this.appendReplayEvents(events, minimumOffsetMs);
-      this.context.markActivity();
+      this.session.markActivity();
       this.prefetchContinuation = extractPlayerSeekContinuation(payload.continuations);
       this.prefetchPagesFetched += 1;
     } catch (error: unknown) {
@@ -291,21 +292,19 @@ class ReplayChatDriver implements ChatSessionDriver {
 
   private canFetchForPlayback(playback: PlaybackSnapshot | null): playback is PlaybackSnapshot {
     return Boolean(
-      playback &&
-      !playback.paused &&
-      (!this.context.isPaused() || this.context.isVisibilityOnlyPause())
+      playback && !playback.paused && (!this.session.paused || this.session.isVisibilityOnlyPause())
     );
   }
 
   private shouldPrefetch(
     now: number,
     signal?: AbortSignal,
-    playback = this.context.getPlaybackSnapshot()
+    playback = this.session.getPlaybackSnapshot()
   ): boolean {
     if (!this.prefetchContinuation) return false;
     if (
       !this.hasReplayFetchDemand(signal, playback) ||
-      this.prefetchPagesFetched >= this.context.getSettings().replayPrefetchPages ||
+      this.prefetchPagesFetched >= this.session.getSettings().replayPrefetchPages ||
       now < this.prefetchBackoffUntil ||
       now < this.prefetchNextAllowedAt
     ) {
@@ -317,12 +316,12 @@ class ReplayChatDriver implements ChatSessionDriver {
 
   private hasReplayFetchDemand(
     signal?: AbortSignal,
-    playback = this.context.getPlaybackSnapshot()
+    playback = this.session.getPlaybackSnapshot()
   ): boolean {
     if (
       signal?.aborted ||
       playback?.paused ||
-      (this.context.isPaused() && !this.context.isVisibilityOnlyPause())
+      (this.session.paused && !this.session.isVisibilityOnlyPause())
     ) {
       return false;
     }
@@ -425,7 +424,7 @@ class ReplayChatDriver implements ChatSessionDriver {
     // If the session was already stopped, callback is null and all downstream
     // operations (flushReplayBuffer, startPrefetch, pollContinuationReplay)
     // will no-op. Bail out early to avoid unnecessary async work.
-    if (!this.context.hasDelivery()) return;
+    if (!this.session.canDeliver) return;
 
     const shouldRestartContinuation =
       this.replayMode === 'continuation' && offsetMs < this.replayFallbackLastOffsetMs;
@@ -449,7 +448,7 @@ class ReplayChatDriver implements ChatSessionDriver {
       : this.seekAbortController.signal;
 
     this.replayBuffer.clear();
-    this.context.resetMessageDeliveryState();
+    this.session.requestReplaySeek();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
     this.replayTotalFailuresSinceSuccess = 0;
@@ -522,7 +521,7 @@ class ReplayChatDriver implements ChatSessionDriver {
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
-    const bootstrap = this.context.bootstrap();
+    const bootstrap = this.session.getBootstrap();
     if (!bootstrap) {
       return false;
     }
@@ -544,7 +543,7 @@ class ReplayChatDriver implements ChatSessionDriver {
         this.replayMode = 'playerSeek';
         this.replayPlayerSeekContinuation = playerSeekContinuation;
 
-        const currentOffsetMs = this.context.getPlaybackSnapshot()?.offsetMs ?? 0;
+        const currentOffsetMs = this.session.getPlaybackSnapshot()?.offsetMs ?? 0;
         const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal, generation);
         if (generation !== this.seekGeneration) {
           return false;
@@ -562,14 +561,14 @@ class ReplayChatDriver implements ChatSessionDriver {
       this.replayMode = 'continuation';
       this.replayContinuation = replayContinuation;
 
-      const currentOffsetMs = this.context.getPlaybackSnapshot()?.offsetMs ?? 0;
+      const currentOffsetMs = this.session.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
       this.replayFallbackLastOffsetMs = this.appendReplayEvents(
         extractChatEvents(
           initialPayload.actions,
-          this.context.getSettings,
+          this.session.getSettings,
           undefined,
-          this.context.isKnownReplacementTarget
+          this.session.isKnownReplacementTarget
         ),
         minimumOffsetMs
       );
@@ -577,7 +576,7 @@ class ReplayChatDriver implements ChatSessionDriver {
       while (
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < this.context.getSettings().replayBatchLimit &&
+        batchesFetched < this.session.getSettings().replayBatchLimit &&
         this.hasReplayFetchDemand(signal, {
           offsetMs: currentOffsetMs,
           paused: false,
@@ -644,7 +643,7 @@ class ReplayChatDriver implements ChatSessionDriver {
           : [timeoutSignal, requestController.signal]
       );
       try {
-        const payload = await this.context.requestPayload(
+        const payload = await this.session.requestPayload(
           fetchReplayChat,
           continuation,
           playerOffsetMs,
@@ -677,7 +676,7 @@ class ReplayChatDriver implements ChatSessionDriver {
     signal?: AbortSignal,
     generation = this.seekGeneration
   ): Promise<boolean> {
-    const initialContinuation = this.context.bootstrap()?.initialContinuation;
+    const initialContinuation = this.session.getBootstrap()?.initialContinuation;
     if (!initialContinuation) return false;
 
     const initialPayload = await this.requestReplayPayload(initialContinuation, signal);
@@ -688,9 +687,9 @@ class ReplayChatDriver implements ChatSessionDriver {
     this.replayFallbackLastOffsetMs = this.appendReplayEvents(
       extractChatEvents(
         initialPayload.actions,
-        this.context.getSettings,
+        this.session.getSettings,
         undefined,
-        this.context.isKnownReplacementTarget
+        this.session.isKnownReplacementTarget
       ),
       minimumOffsetMs
     );
@@ -702,7 +701,7 @@ class ReplayChatDriver implements ChatSessionDriver {
     while (
       this.replayContinuation &&
       this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batchesFetched < this.context.getSettings().replayBatchLimit
+      batchesFetched < this.session.getSettings().replayBatchLimit
     ) {
       throwIfAborted(signal);
       const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
@@ -722,8 +721,8 @@ class ReplayChatDriver implements ChatSessionDriver {
    * visual clumping — same-timestamp messages spread naturally across
    * multiple frames (~16ms each) for a smooth stream.
    */
-  private flushReplayBuffer(playback = this.context.getPlaybackSnapshot()): void {
-    if (!this.context.hasDelivery() || this.context.isPaused()) return;
+  private flushReplayBuffer(playback = this.session.getPlaybackSnapshot()): void {
+    if (!this.session.canDeliver || this.session.paused) return;
     // Async callers re-read video time after fetches and seeks. The display
     // loop passes its current snapshot to avoid a second DOM lookup per tick.
     if (!playback || playback.paused) return;
@@ -732,7 +731,7 @@ class ReplayChatDriver implements ChatSessionDriver {
     this.reportLateDrops();
 
     if (batch.length === 0) return;
-    this.context.emitBatch(batch, false);
+    this.session.emitBatch(batch, false);
   }
 
   private reportLateDrops(): void {
@@ -778,9 +777,9 @@ class ReplayChatDriver implements ChatSessionDriver {
       this.appendReplayEvents(
         extractChatEvents(
           payload.actions,
-          this.context.getSettings,
+          this.session.getSettings,
           undefined,
-          this.context.isKnownReplacementTarget
+          this.session.isKnownReplacementTarget
         ),
         Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS)
       );
@@ -826,9 +825,9 @@ class ReplayChatDriver implements ChatSessionDriver {
 
       const events = extractChatEvents(
         payload.actions,
-        this.context.getSettings,
+        this.session.getSettings,
         undefined,
-        this.context.isKnownReplacementTarget
+        this.session.isKnownReplacementTarget
       );
       const pageLastOffsetMs = this.appendReplayEvents(events, minimumOffsetMs);
       this.replayFallbackLastOffsetMs = Math.max(this.replayFallbackLastOffsetMs, pageLastOffsetMs);
@@ -903,7 +902,7 @@ class ReplayChatDriver implements ChatSessionDriver {
         're-initializing replay session'
     );
 
-    const bootstrap = await this.context.refreshBootstrap(
+    const bootstrap = await this.session.refreshBootstrap(
       signal,
       (candidate) => candidate.isReplay
     );
@@ -956,9 +955,9 @@ export class ReplayChatSource implements ReplayChatPort {
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     let driver: ReplayChatDriver | undefined;
-    this.session = new ChatSession(getSettings, (context) => {
+    this.session = new ChatSession(getSettings, (session) => {
       driver = new ReplayChatDriver(
-        context,
+        session,
         () => this.onSeek,
         () => this.onLateDrop
       );

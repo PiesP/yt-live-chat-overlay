@@ -15,8 +15,8 @@ import {
 import { extractChatEvents } from '@chat/message-parser';
 import {
   ChatSession,
-  type ChatDriverContext,
-  type ChatSessionDriver,
+  type LiveChatSessionOperations,
+  type PollingChatSessionDriver,
   type ChatHealthSnapshot,
   type ChatSourceStartStatus,
   LiveChatProtocolError,
@@ -38,9 +38,9 @@ import { createLogger } from '@util/logging';
 
 const log = createLogger('LiveChatSource');
 
-// livePollFallbackMs — read from this.context.getSettings()
+// livePollFallbackMs — read from this.session.getSettings()
 const LIVE_SEED_CUTOFF_MS = 60_000;
-// livePollFailureLimit — read from this.context.getSettings()
+// livePollFailureLimit — read from this.session.getSettings()
 /** Base interval for periodic bootstrap refresh during sustained errors. */
 const LIVE_BOOTSTRAP_REFRESH_BASE = 5;
 /** Maximum multiplier for bootstrap refresh interval. */
@@ -50,9 +50,10 @@ const LIVE_BOOTSTRAP_REFRESH_MAX = 50;
  *  stalling the live-chat poll loop indefinitely. */
 const LIVE_POLL_TIMEOUT_MS = 20_000;
 
-class LiveChatDriver implements ChatSessionDriver {
+class LiveChatDriver implements PollingChatSessionDriver {
+  readonly scheduling = 'poll-loop' as const;
   constructor(
-    private readonly context: ChatDriverContext,
+    private readonly session: LiveChatSessionOperations,
     private readonly getBurstRate: () => number | undefined
   ) {}
   private liveContinuation: InnertubeContinuationData | null = null;
@@ -68,8 +69,8 @@ class LiveChatDriver implements ChatSessionDriver {
     return this.initializeLiveSession(signal);
   }
 
-  launch(signal?: AbortSignal): void {
-    this.context.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
+  run(signal?: AbortSignal): Promise<void> {
+    return this.runLiveLoop(signal);
   }
 
   getConsecutiveErrors(): number {
@@ -86,7 +87,7 @@ class LiveChatDriver implements ChatSessionDriver {
   }
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
-    const bootstrap = this.context.bootstrap();
+    const bootstrap = this.session.getBootstrap();
     if (!bootstrap) {
       return false;
     }
@@ -121,12 +122,12 @@ class LiveChatDriver implements ChatSessionDriver {
   }
 
   private getLimits(): { minPollIntervalMs: number; maxPollIntervalMs: number } {
-    const s = this.context.getSettings();
+    const s = this.session.getSettings();
     return { minPollIntervalMs: s.minPollIntervalMs, maxPollIntervalMs: s.maxPollIntervalMs };
   }
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
-    const settings = this.context.getSettings();
+    const settings = this.session.getSettings();
     const useActivitySignals = this.lastSuccessfulPayloadHadEvents;
     return calculateAdaptiveDelay(
       timeoutMs,
@@ -143,12 +144,12 @@ class LiveChatDriver implements ChatSessionDriver {
     while (!signal?.aborted) {
       throwIfAborted(signal);
 
-      await this.context.waitWhilePaused(signal);
+      await this.session.waitWhilePaused(signal);
 
-      const playback = this.context.getPlaybackSnapshot();
+      const playback = this.session.getPlaybackSnapshot();
       if (playback?.paused) {
-        await this.context.pollWhilePaused(
-          this.context.getSettings().livePollFallbackMs,
+        await this.session.pollWhilePaused(
+          this.session.getSettings().livePollFallbackMs,
           250,
           signal
         );
@@ -156,7 +157,7 @@ class LiveChatDriver implements ChatSessionDriver {
       }
 
       const timeoutMs =
-        this.liveContinuation?.timeoutMs ?? this.context.getSettings().livePollFallbackMs;
+        this.liveContinuation?.timeoutMs ?? this.session.getSettings().livePollFallbackMs;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
 
       // Even sustained bursts yield for the configured minimum interval.
@@ -167,7 +168,7 @@ class LiveChatDriver implements ChatSessionDriver {
       // Re-check pause state after sleep — the tab may have been hidden
       // during the delay. Without this guard, the next fetch+emitBatch
       // would deliver messages while the renderer is paused.
-      await this.context.waitWhilePaused(signal);
+      await this.session.waitWhilePaused(signal);
 
       const continuation = this.liveContinuation;
       if (!continuation) {
@@ -193,13 +194,13 @@ class LiveChatDriver implements ChatSessionDriver {
         // ── Circuit breaker: stop the poll loop after consecutive failures ──
         // The watchdog (RuntimeManager) will detect the stopped loop via
         // observerAlive/recentlyActive and trigger a managed restart.
-        if (this.consecutiveErrors >= this.context.getSettings().livePollFailureLimit) {
+        if (this.consecutiveErrors >= this.session.getSettings().livePollFailureLimit) {
           log.error(
             `Live poll failed ${this.consecutiveErrors} times consecutively; ` +
               'circuit breaker tripped — stopping poll loop for watchdog restart'
           );
           throw new Error(
-            `Live poll consecutive failure limit (${this.context.getSettings().livePollFailureLimit}) reached`
+            `Live poll consecutive failure limit (${this.session.getSettings().livePollFailureLimit}) reached`
           );
         }
 
@@ -264,7 +265,7 @@ class LiveChatDriver implements ChatSessionDriver {
     const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
     try {
-      const payload = await this.context.requestPayload(fetchLiveChat, continuation, mergedSignal);
+      const payload = await this.session.requestPayload(fetchLiveChat, continuation, mergedSignal);
       mergedSignal.throwIfAborted();
       return payload;
     } catch (error: unknown) {
@@ -287,16 +288,16 @@ class LiveChatDriver implements ChatSessionDriver {
     if (signal?.aborted) return;
     const events = extractChatEvents(
       payload.actions,
-      this.context.getSettings,
+      this.session.getSettings,
       undefined,
-      this.context.isKnownReplacementTarget
+      this.session.isKnownReplacementTarget
     );
 
     if (events.length > 0) {
       let messages: ChatMessage[];
 
       if (isInitialSeed) {
-        const playback = this.context.getPlaybackSnapshot();
+        const playback = this.session.getPlaybackSnapshot();
         const offsetMs = playback?.offsetMs ?? 0;
         const cutoffMs = Math.max(0, offsetMs - LIVE_SEED_CUTOFF_MS);
 
@@ -319,7 +320,7 @@ class LiveChatDriver implements ChatSessionDriver {
       }
 
       if (messages.length > 0) {
-        this.context.emitBatch(messages, isInitialSeed, signal);
+        this.session.emitBatch(messages, isInitialSeed, signal);
         if (signal?.aborted) return;
         this.recordMessageCount(messages.length);
       }
@@ -341,7 +342,7 @@ class LiveChatDriver implements ChatSessionDriver {
   }
 
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
-    const bootstrap = await this.context.refreshBootstrap(signal);
+    const bootstrap = await this.session.refreshBootstrap(signal);
     if (bootstrap) {
       this.liveContinuation = bootstrap.initialContinuation ?? null;
     }
@@ -357,8 +358,8 @@ export class LiveChatSource implements LiveChatPort {
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     let driver: LiveChatDriver | undefined;
-    this.session = new ChatSession(getSettings, (context) => {
-      driver = new LiveChatDriver(context, () => this.burstRateProvider?.());
+    this.session = new ChatSession(getSettings, (session) => {
+      driver = new LiveChatDriver(session, () => this.burstRateProvider?.());
       return driver;
     });
     if (!driver) throw new Error('Live chat driver was not created');

@@ -17,15 +17,21 @@ vi.mock('@app/bootstrap-resolver', () => ({
   resolveBootstrap: mocks.resolveBootstrap,
 }));
 
-import { ChatSession, type ChatDriverContext } from '@chat/source-base';
+import { ChatSession, type ChatProtocolOperations } from '@chat/source-base';
 
-function createSession(): { session: ChatSession; context: ChatDriverContext } {
-  let context: ChatDriverContext | undefined;
+function createSession(): { session: ChatSession; context: ChatProtocolOperations } {
+  let context: ChatProtocolOperations | undefined;
   const session = new ChatSession(
     () => DEFAULT_SETTINGS as OverlaySettings,
     (operations) => {
       context = operations;
-      return { reset: () => {}, seed: async () => true, launch: () => {} };
+      return {
+        scheduling: 'independent',
+        reset: () => {},
+        seed: async () => true,
+        launch: () => {},
+        isObserverAlive: () => false,
+      };
     }
   );
   if (!context) throw new Error('Session context was not created');
@@ -43,7 +49,7 @@ describe('ChatSession bootstrap refresh', () => {
     await expect(
       context.refreshBootstrap(undefined, (candidate) => candidate.isReplay)
     ).resolves.toBeNull();
-    expect(context.bootstrap()).toBe(original);
+    expect(context.getBootstrap()).toBe(original);
   });
 
   it('rejects a late resolver result after a replacement start consumes its preseed', async () => {
@@ -62,7 +68,7 @@ describe('ChatSession bootstrap refresh', () => {
     await expect(session.start(() => {})).resolves.toBe('started');
     resolveOld?.({ status: 'ready', data: { isReplay: true } as ChatBootstrapData });
     await expect(oldStart).resolves.toBe('retryable');
-    expect(context.bootstrap()).toBe(replacement);
+    expect(context.getBootstrap()).toBe(replacement);
     session.stop();
   });
 });

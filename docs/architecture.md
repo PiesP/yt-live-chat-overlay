@@ -18,8 +18,12 @@ source and remain guarded by session and seek generations. The source contracts
 in `src/chat/source-contracts.ts` describe these operations without exposing
 session state. Each ordinary live/replay source composes a `ChatSession`, which
 owns bootstrap, cancellation, pause, activity, delivery and deduplication. Private
-live/replay drivers own polling or timeline protocol state and use stable,
-bounded session operations; they do not receive a public mutable state object.
+live/replay drivers own polling or timeline protocol state. They borrow the
+role-specific `LiveChatSessionOperations` or `ReplayChatSessionOperations`
+interface from the session collaborator, without a mutable context or callback
+table. The session owns managed poll-loop launch and raw delivery invalidation;
+replay can request only the semantic seek transition. Independent replay network
+and display scheduling stays with the replay driver.
 
 `RuntimeManager` also constructs and destroys the renderer, while
 `StandbyController` borrows only `setStandbyStatus`. The consumed renderer

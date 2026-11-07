@@ -113,30 +113,17 @@ class PollLoopManager {
   }
 }
 
-/** Read and delivery operations borrowed by one protocol driver. */
-export interface ChatDriverContext {
+/** Shared request/delivery operations borrowed by the actual protocol drivers. */
+export interface ChatProtocolOperations {
   readonly getSettings: () => Readonly<OverlaySettings>;
-  readonly bootstrap: () => ChatBootstrapData | null;
-  readonly isPaused: () => boolean;
-  readonly isVisibilityOnlyPause: () => boolean;
-  readonly hasDelivery: () => boolean;
-  readonly getPlaybackSnapshot: () => PlaybackSnapshot | null;
-  readonly markActivity: () => void;
-  readonly pollWhilePaused: (
-    timeoutMs: number,
-    pollIntervalMs?: number,
-    signal?: AbortSignal
-  ) => Promise<void>;
-  readonly refreshBootstrap: (
+  getBootstrap(): ChatBootstrapData | null;
+  getPlaybackSnapshot(): PlaybackSnapshot | null;
+  refreshBootstrap(
     signal?: AbortSignal,
     accept?: (data: ChatBootstrapData) => boolean
-  ) => Promise<ChatBootstrapData | null>;
-  readonly emitBatch: (
-    messages: ChatMessage[],
-    isInitialSeed: boolean,
-    signal?: AbortSignal
-  ) => void;
-  readonly requestPayload: <TCallArgs extends unknown[]>(
+  ): Promise<ChatBootstrapData | null>;
+  emitBatch(messages: ChatMessage[], isInitialSeed: boolean, signal?: AbortSignal): void;
+  requestPayload<TCallArgs extends unknown[]>(
     fetchFn: (
       bootstrap: ChatBootstrapData,
       continuation: InnertubeContinuationData,
@@ -144,25 +131,43 @@ export interface ChatDriverContext {
     ) => Promise<unknown>,
     continuation: InnertubeContinuationData,
     ...fetchArgs: TCallArgs
-  ) => Promise<LiveChatPayload | null>;
-  readonly launchPollLoop: (
-    signal: AbortSignal | undefined,
-    runner: (signal: AbortSignal | undefined) => Promise<void>
-  ) => void;
-  readonly resetMessageDeliveryState: () => void;
-  readonly waitWhilePaused: (signal?: AbortSignal) => Promise<void>;
+  ): Promise<LiveChatPayload | null>;
   readonly isKnownReplacementTarget: (id: string) => boolean;
 }
 
-export interface ChatSessionDriver {
-  reset(): void;
-  seed(signal?: AbortSignal): Promise<boolean>;
-  launch(signal?: AbortSignal): void;
-  isObserverAlive?(): boolean;
+export interface LiveChatSessionOperations extends ChatProtocolOperations {
+  pollWhilePaused(timeoutMs: number, pollIntervalMs?: number, signal?: AbortSignal): Promise<void>;
+  waitWhilePaused(signal?: AbortSignal): Promise<void>;
 }
 
+export interface ReplayChatSessionOperations extends ChatProtocolOperations {
+  readonly paused: boolean;
+  readonly canDeliver: boolean;
+  isVisibilityOnlyPause(): boolean;
+  markActivity(): void;
+  requestReplaySeek(): void;
+}
+
+interface ChatDriverLifecycle {
+  reset(): void;
+  seed(signal?: AbortSignal): Promise<boolean>;
+}
+
+export interface PollingChatSessionDriver extends ChatDriverLifecycle {
+  readonly scheduling: 'poll-loop';
+  run(signal?: AbortSignal): Promise<void>;
+}
+
+export interface ScheduledChatSessionDriver extends ChatDriverLifecycle {
+  readonly scheduling: 'independent';
+  launch(signal?: AbortSignal): void;
+  isObserverAlive(): boolean;
+}
+
+export type ChatSessionDriver = PollingChatSessionDriver | ScheduledChatSessionDriver;
+
 export class ChatSession implements Pauseable {
-  private readonly getSettings: () => Readonly<OverlaySettings>;
+  readonly getSettings: () => Readonly<OverlaySettings>;
   private callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;
   private readonly pollLoopManager = new PollLoopManager();
@@ -175,7 +180,7 @@ export class ChatSession implements Pauseable {
   private pauseReasons = new Set<string>();
 
   /** Whether any pause reason is currently active. */
-  private get isPaused(): boolean {
+  get paused(): boolean {
     return this.pauseReasons.size > 0;
   }
   private pauseAbortController: AbortController | null = null;
@@ -195,48 +200,28 @@ export class ChatSession implements Pauseable {
   private readonly seenMessageIds = createMessageIdRegistry(ChatSession.SEEN_IDS_MAX);
 
   /** Attest replacement targets already accepted by this source session. */
-  private readonly isKnownReplacementTarget = (id: string): boolean => this.seenMessageIds.has(id);
+  readonly isKnownReplacementTarget = (id: string): boolean => this.seenMessageIds.has(id);
 
   private readonly driver: ChatSessionDriver;
-  private readonly context: ChatDriverContext;
-
   constructor(
     getSettings: () => Readonly<OverlaySettings>,
-    createDriver: (context: ChatDriverContext) => ChatSessionDriver
+    createDriver: (session: ChatSession) => ChatSessionDriver
   ) {
     this.getSettings = getSettings;
-    this.context = Object.freeze({
-      getSettings,
-      bootstrap: () => this.bootstrap,
-      isPaused: () => this.isPaused,
-      isVisibilityOnlyPause: () => this.isVisibilityOnlyPause(),
-      hasDelivery: () => this.callback !== null,
-      getPlaybackSnapshot: () => this.getPlaybackSnapshot(),
-      markActivity: () => this.markActivity(),
-      pollWhilePaused: (timeoutMs: number, pollIntervalMs?: number, signal?: AbortSignal) =>
-        this.pollWhilePaused(timeoutMs, pollIntervalMs, signal),
-      refreshBootstrap: (signal?: AbortSignal, accept?: (data: ChatBootstrapData) => boolean) =>
-        this.refreshBootstrap(signal, accept),
-      emitBatch: (messages: ChatMessage[], isInitialSeed: boolean, signal?: AbortSignal) =>
-        this.emitBatch(messages, isInitialSeed, signal),
-      requestPayload: <TCallArgs extends unknown[]>(
-        fetchFn: (
-          bootstrap: ChatBootstrapData,
-          continuation: InnertubeContinuationData,
-          ...args: TCallArgs
-        ) => Promise<unknown>,
-        continuation: InnertubeContinuationData,
-        ...fetchArgs: TCallArgs
-      ) => this.requestPayload(fetchFn, continuation, ...fetchArgs),
-      launchPollLoop: (
-        signal: AbortSignal | undefined,
-        runner: (signal: AbortSignal | undefined) => Promise<void>
-      ) => this.launchPollLoop(signal, runner),
-      resetMessageDeliveryState: () => this.resetMessageDeliveryState(),
-      waitWhilePaused: (signal?: AbortSignal) => this.waitWhilePaused(signal),
-      isKnownReplacementTarget: this.isKnownReplacementTarget,
-    });
-    this.driver = createDriver(this.context);
+    this.driver = createDriver(this);
+  }
+
+  getBootstrap(): ChatBootstrapData | null {
+    return this.bootstrap;
+  }
+
+  get canDeliver(): boolean {
+    return this.callback !== null;
+  }
+
+  /** The session owns delivery invalidation; replay can request only a seek transition. */
+  requestReplaySeek(): void {
+    this.resetMessageDeliveryState();
   }
 
   /**
@@ -295,7 +280,10 @@ export class ChatSession implements Pauseable {
     const activeTimeoutMs = options.activeTimeoutMs ?? this.getSettings().activityTimeoutMs;
 
     return {
-      observerAlive: this.driver.isObserverAlive?.() ?? this.isObserverAlive(),
+      observerAlive:
+        this.driver.scheduling === 'independent'
+          ? this.driver.isObserverAlive()
+          : this.isObserverAlive(),
       recentlyActive: this.isActive(activeTimeoutMs),
       isInBackoff: false,
       consecutiveErrors: 0,
@@ -315,7 +303,7 @@ export class ChatSession implements Pauseable {
     );
   }
 
-  private getPlaybackSnapshot(): PlaybackSnapshot | null {
+  getPlaybackSnapshot(): PlaybackSnapshot | null {
     const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!match) return null;
     const { element: video } = match;
@@ -326,7 +314,7 @@ export class ChatSession implements Pauseable {
     };
   }
 
-  private markActivity(): void {
+  markActivity(): void {
     this.lastActivityTime = Date.now();
   }
 
@@ -334,7 +322,7 @@ export class ChatSession implements Pauseable {
    * Poll at short intervals until playback is no longer paused or timeout elapses.
    * Used by the live poll loop to handle brief pauses without restarting the session.
    */
-  private async pollWhilePaused(
+  async pollWhilePaused(
     timeoutMs: number,
     pollIntervalMs = 250,
     signal?: AbortSignal
@@ -352,7 +340,7 @@ export class ChatSession implements Pauseable {
    * Re-fetch bootstrap data from the resolver. Updates this.bootstrap on success.
    * Returns the fresh bootstrap or null on failure.
    */
-  private async refreshBootstrap(
+  async refreshBootstrap(
     signal?: AbortSignal,
     accept: (data: ChatBootstrapData) => boolean = () => true
   ): Promise<ChatBootstrapData | null> {
@@ -364,7 +352,7 @@ export class ChatSession implements Pauseable {
     return result;
   }
 
-  private emitBatch(messages: ChatMessage[], isInitialSeed: boolean, signal?: AbortSignal): void {
+  emitBatch(messages: ChatMessage[], isInitialSeed: boolean, signal?: AbortSignal): void {
     if (signal?.aborted || !this.callback || messages.length === 0) return;
     const deduped = this.filterNewMessages(messages);
     if (deduped.length === 0) return;
@@ -374,7 +362,7 @@ export class ChatSession implements Pauseable {
     this.callback(deduped, isInitialSeed);
   }
 
-  private async requestPayload<TCallArgs extends unknown[]>(
+  async requestPayload<TCallArgs extends unknown[]>(
     fetchFn: (
       bootstrap: ChatBootstrapData,
       continuation: InnertubeContinuationData,
@@ -404,13 +392,6 @@ export class ChatSession implements Pauseable {
     }
 
     return payload;
-  }
-
-  private launchPollLoop(
-    signal: AbortSignal | undefined,
-    runner: (loopSignal: AbortSignal | undefined) => Promise<void>
-  ): void {
-    this.pollLoopManager.launch(runner, signal);
   }
 
   private resetSessionState(): void {
@@ -454,7 +435,7 @@ export class ChatSession implements Pauseable {
   }
 
   /** Whether visibility is the sole reason this source is currently paused. */
-  private isVisibilityOnlyPause(): boolean {
+  isVisibilityOnlyPause(): boolean {
     return this.pauseReasons.size === 1 && this.pauseReasons.has('visibility');
   }
 
@@ -466,7 +447,7 @@ export class ChatSession implements Pauseable {
     this.setPauseReason('general', paused);
   }
 
-  private async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
+  async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
     while (this.pauseReasons.size > 0) {
       if (sessionSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const pauseSignal = this.pauseAbortController?.signal;
@@ -589,7 +570,12 @@ export class ChatSession implements Pauseable {
     }
 
     if (signal?.aborted || generation !== this.deliveryGeneration) return 'retryable';
-    this.driver.launch(signal);
+    const driver = this.driver;
+    if (driver.scheduling === 'poll-loop') {
+      this.pollLoopManager.launch((loopSignal) => driver.run(loopSignal), signal);
+    } else {
+      driver.launch(signal);
+    }
 
     log.debug('chat.source.poll-started');
 

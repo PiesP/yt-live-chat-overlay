@@ -1,5 +1,5 @@
 import type { OverlaySettings } from '@app-types';
-import { ChatSession, type ChatDriverContext } from '@chat/source-base';
+import { ChatSession } from '@chat/source-base';
 import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { describe, expect, it, vi } from 'vite-plus/test';
@@ -7,14 +7,16 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 // A fake protocol driver keeps session behavior independent of live/replay I/O.
 function createSource(getSettings: () => Readonly<OverlaySettings>): {
   source: ChatSession;
-  context: ChatDriverContext;
+  context: ChatSession;
   launched: { signal: AbortSignal | undefined };
 } {
-  let context: ChatDriverContext | undefined;
+  let context: ChatSession | undefined;
   const launched: { signal: AbortSignal | undefined } = { signal: undefined };
   const source = new ChatSession(getSettings, (operations) => {
     context = operations;
     return {
+      scheduling: 'independent',
+      isObserverAlive: () => false,
       reset: () => {},
       seed: async () => true,
       launch: (signal) => {
