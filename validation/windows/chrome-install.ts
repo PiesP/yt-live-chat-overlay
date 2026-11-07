@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
-import { lstat, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import type {
@@ -122,6 +122,24 @@ export async function readCompositionRuntimeSelector(root: string): Promise<bool
     throw error;
   }
   assert.deepEqual(JSON.parse(source), { scenario: 'composition-runtime' });
+  const selectors = (await readdir(join(root, 'validation/windows/inputs')))
+    .filter((name) => name.endsWith('.json'))
+    .sort();
+  assert.deepEqual(
+    selectors,
+    ['composition-runtime.json'],
+    'Composition runtime cannot combine selectors'
+  );
+  for (const name of ['input.json', 'extension-input.json']) {
+    const present = await lstat(join(root, 'validation/windows/release-upgrade', name)).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      }
+    );
+    assert.equal(present, false, 'Composition runtime cannot use upgrade inputs');
+  }
   return true;
 }
 type ExpectedResource = { maxBytes: number; bytes: number; sha256: string };
