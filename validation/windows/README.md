@@ -702,8 +702,11 @@ resize reflow and pause/resume observations. An observed Worker error
 event exercises the application's recovery into Canvas; public YouTube traffic
 is never altered. A private source-bound probe is inserted into the packaged
 `page-script.js` closure before its ordinary `main()` call to observe Canvas
-internals. The original app source executes intact; a changed closure/class
-shape fails the scenario. Worker instrumentation uses the existing Blob
+internals. The admitted candidate has one `var CanvasRenderer = class CanvasRenderer {`
+declaration, one `getRegularCardInsets` declaration and one app entry. The
+observer also requires the Canvas enqueue, placement and frame methods at
+runtime. Missing, repeated or inherited class shapes fail; the original app
+source executes intact. Worker instrumentation uses the existing Blob
 prefix/suffix guard. These additive probes can affect timings, so the recorded
 frame work is diagnostic rather than a general performance claim.
 

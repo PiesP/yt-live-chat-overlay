@@ -1,84 +1,29 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import type { Overlay } from '@app/overlay';
+import { Overlay } from '@app/overlay';
+import { CanvasRenderer } from '@renderer/canvas-renderer';
 import { SPEED_TIER } from '@renderer/constants';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
-import { type ConnectionStatus, RendererBase } from '@renderer/renderer-base';
+import type { ConnectionStatus } from '@renderer/renderer-contracts';
+import { RenderWorkerManager } from '@renderer/worker/manager';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
-// ── Test subclass ─────────────────────────────────────────────────────────
-
-class TestRenderer extends RendererBase {
-  pauseCalled = false;
-  resumeCalled = false;
-  systemResumeWhileUserPausedCalled = false;
-  pausedDuration = 0;
-  pausedDurations: number[] = [];
-  preserveElapsedFlags: boolean[] = [];
-  stateReset = false;
-  destroyed = false;
-  messages: ChatMessage[] = [];
-
-  addMessage(message: ChatMessage): void {
-    this.messages.push(message);
-  }
-
-  receiveMessage(message: ChatMessage): void {
-    if (this.isMessageAllowed(message)) {
-      this.messages.push(message);
-    }
-  }
-
-  get laneCount(): number {
-    return this.laneAllocator.getLaneCount();
-  }
-
-  get placementAllocator(): LaneAllocator {
-    return this.laneAllocator;
-  }
-
-  get effectiveFontSize(): number {
-    return this.getEffectiveFontSize();
-  }
-
-  getQueueLength(): number {
-    return this.messages.length;
-  }
-
-  getActiveMessageCount(): number {
-    return this.messages.length;
-  }
-
-  protected onPause(): void {
-    this.pauseCalled = true;
-  }
-
-  protected onResume(): void {
-    this.resumeCalled = true;
-  }
-
-  protected override onSystemResumeWhileUserPaused(): void {
-    this.systemResumeWhileUserPausedCalled = true;
-  }
-
-  protected applyPausedDuration(pausedMs: number, preserveElapsed = false): void {
-    this.pausedDuration = pausedMs;
-    this.pausedDurations.push(pausedMs);
-    this.preserveElapsedFlags.push(preserveElapsed);
-  }
-
-  protected resetState(): void {
-    this.stateReset = true;
-  }
-
-  protected onDestroy(): void {
-    this.destroyed = true;
-  }
-
-  protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
-    this.messages.push(...messages);
-  }
-}
+// The fixture observes concrete CanvasRenderer effects while using its real
+// composed pause owner, allocator, and admission path.
+type TestRenderer = CanvasRenderer & {
+  pauseCalled: boolean;
+  resumeCalled: boolean;
+  systemResumeWhileUserPausedCalled: boolean;
+  pausedDuration: number;
+  pausedDurations: number[];
+  preserveElapsedFlags: boolean[];
+  stateReset: boolean;
+  readonly destroyed: boolean;
+  messages: ChatMessage[];
+  readonly placementAllocator: LaneAllocator;
+  readonly effectiveFontSize: number;
+  receiveMessage(message: ChatMessage): void;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -111,9 +56,9 @@ const defaultSettings: OverlaySettings = {
 };
 
 function makeOverlayMock(): Overlay {
-  return {
-    getDimensions: () => ({ width: 1920, height: 1080 }),
-  } as unknown as Overlay;
+  const overlay = new Overlay();
+  vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 1920, height: 1080 });
+  return overlay;
 }
 
 function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -139,6 +84,10 @@ beforeEach(() => {
     value: 'visible',
     configurable: true,
   });
+  vi.spyOn(RenderWorkerManager.prototype, 'init').mockReturnValue({
+    started: false,
+    canvasTransferred: false,
+  });
   overlay = makeOverlayMock();
 });
 
@@ -151,16 +100,76 @@ afterEach(() => {
 });
 
 function createRenderer(settings = defaultSettings): TestRenderer {
-  const renderer = new TestRenderer(overlay, settings);
+  const renderer = new CanvasRenderer(overlay, settings) as TestRenderer;
+  const effects = renderer as unknown as {
+    pauseEffects(): void;
+    resumeEffects(): void;
+    systemResumeWhileUserPausedEffects(): void;
+    applyPausedDuration(durationMs: number, preserveElapsed?: boolean): void;
+    resetState(): void;
+    flushVideoMessages(messages: ChatMessage[]): void;
+    isMessageAllowed(message: ChatMessage): boolean;
+    laneAllocator: LaneAllocator;
+    getEffectiveFontSize(): number;
+    _destroyed: boolean;
+  };
+  renderer.pauseCalled = false;
+  renderer.resumeCalled = false;
+  renderer.systemResumeWhileUserPausedCalled = false;
+  renderer.pausedDuration = 0;
+  renderer.pausedDurations = [];
+  renderer.preserveElapsedFlags = [];
+  renderer.stateReset = false;
+  renderer.messages = [];
+  Object.defineProperties(renderer, {
+    destroyed: { get: () => effects._destroyed },
+    placementAllocator: { get: () => effects.laneAllocator },
+    effectiveFontSize: { get: () => effects.getEffectiveFontSize() },
+  });
+  renderer.receiveMessage = (message) => {
+    if (effects.isMessageAllowed(message)) renderer.messages.push(message);
+  };
+  const pauseEffects = effects.pauseEffects.bind(renderer);
+  vi.spyOn(effects, 'pauseEffects').mockImplementation(() => {
+    renderer.pauseCalled = true;
+    pauseEffects();
+  });
+  const resumeEffects = effects.resumeEffects.bind(renderer);
+  vi.spyOn(effects, 'resumeEffects').mockImplementation(() => {
+    renderer.resumeCalled = true;
+    resumeEffects();
+  });
+  const systemResumeEffects = effects.systemResumeWhileUserPausedEffects.bind(renderer);
+  vi.spyOn(effects, 'systemResumeWhileUserPausedEffects').mockImplementation(() => {
+    renderer.systemResumeWhileUserPausedCalled = true;
+    systemResumeEffects();
+  });
+  const applyDuration = effects.applyPausedDuration.bind(renderer);
+  vi.spyOn(effects, 'applyPausedDuration').mockImplementation((durationMs, preserveElapsed) => {
+    renderer.pausedDuration = durationMs;
+    renderer.pausedDurations.push(durationMs);
+    renderer.preserveElapsedFlags.push(preserveElapsed ?? false);
+    applyDuration(durationMs, preserveElapsed);
+  });
+  const resetState = effects.resetState.bind(renderer);
+  vi.spyOn(effects, 'resetState').mockImplementation(() => {
+    renderer.stateReset = true;
+    resetState();
+  });
+  const flushVideoMessages = effects.flushVideoMessages.bind(renderer);
+  vi.spyOn(effects, 'flushVideoMessages').mockImplementation((messages) => {
+    renderer.messages.push(...messages);
+    flushVideoMessages(messages);
+  });
   renderers.add(renderer);
   return renderer;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// RendererBase Tests
+// Composed CanvasRenderer Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('RendererBase', () => {
+describe('CanvasRenderer shared owners', () => {
   it.each([
     { before: 30_000, after: 5_000, expectedWait: null },
     { before: 5_000, after: 30_000, expectedWait: 9_200 },
@@ -196,7 +205,11 @@ describe('RendererBase', () => {
       allocator.commitPlacement(first, 0, 8_000, undefined, undefined, SPEED_TIER.MID);
       const occupiedLanes = allocator.snapshot().heap;
 
-      renderer.updateSettings({ ...initial, scrollDurationMaxMs: after });
+      // Inspect the shared allocator policy before CanvasRenderer's concrete
+      // motion reflow rebuilds active reservations.
+      (
+        renderer as unknown as { updateSharedSettings(settings: OverlaySettings): void }
+      ).updateSharedSettings({ ...initial, scrollDurationMaxMs: after });
 
       expect(allocator.snapshot().heap).toEqual(occupiedLanes);
       expect(
@@ -228,7 +241,9 @@ describe('RendererBase', () => {
     allocator.commitPlacement(first, 0, 10_000, 200, dimensions.width, SPEED_TIER.MID);
     const priorReservation = allocator.snapshot().heap;
 
-    renderer.updateSettings({ ...initial, ...updates });
+    (
+      renderer as unknown as { updateSharedSettings(settings: OverlaySettings): void }
+    ).updateSharedSettings({ ...initial, ...updates });
 
     expect(allocator.snapshot().heap).toEqual(priorReservation);
     const next = allocator.findPlacement(
@@ -576,32 +591,32 @@ describe('RendererBase', () => {
     it('returns higher priority for superchat than text', () => {
       const superchat = makeMessage({ kind: 'superchat' });
       const text = makeMessage({ kind: 'text' });
-      const superPriority = RendererBase.getMessagePriority(superchat);
-      const textPriority = RendererBase.getMessagePriority(text);
+      const superPriority = CanvasRenderer.getMessagePriority(superchat);
+      const textPriority = CanvasRenderer.getMessagePriority(text);
       expect(superPriority).toBeGreaterThan(textPriority);
     });
 
     it('returns higher priority for membership than text', () => {
       const membership = makeMessage({ kind: 'membership' });
       const text = makeMessage({ kind: 'text' });
-      const memPriority = RendererBase.getMessagePriority(membership);
-      const textPriority = RendererBase.getMessagePriority(text);
+      const memPriority = CanvasRenderer.getMessagePriority(membership);
+      const textPriority = CanvasRenderer.getMessagePriority(text);
       expect(memPriority).toBeGreaterThan(textPriority);
     });
 
     it('reduces priority for backlog messages', () => {
       const normal = makeMessage({ kind: 'text' });
       const backlog = makeMessage({ kind: 'text', isBacklog: true });
-      const normalPriority = RendererBase.getMessagePriority(normal);
-      const backlogPriority = RendererBase.getMessagePriority(backlog);
+      const normalPriority = CanvasRenderer.getMessagePriority(normal);
+      const backlogPriority = CanvasRenderer.getMessagePriority(backlog);
       expect(backlogPriority).toBeLessThan(normalPriority);
     });
 
     it('superchat backlog is still higher than normal text', () => {
       const superchatBacklog = makeMessage({ kind: 'superchat', isBacklog: true });
       const normalText = makeMessage({ kind: 'text' });
-      const scPriority = RendererBase.getMessagePriority(superchatBacklog);
-      const textPriority = RendererBase.getMessagePriority(normalText);
+      const scPriority = CanvasRenderer.getMessagePriority(superchatBacklog);
+      const textPriority = CanvasRenderer.getMessagePriority(normalText);
       expect(scPriority).toBeGreaterThan(textPriority);
     });
   });
@@ -635,7 +650,7 @@ describe('RendererBase', () => {
   // ── setChatPanelOpen ─────────────────────────────────────────────────
 
   describe('setChatPanelOpen', () => {
-    it('does not throw (default no-op)', () => {
+    it('does not throw for panel changes', () => {
       const r = createRenderer();
       expect(() => r.setChatPanelOpen(true)).not.toThrow();
       expect(() => r.setChatPanelOpen(false)).not.toThrow();
@@ -709,7 +724,7 @@ describe('RendererBase', () => {
   // ── isWorkerAlive ────────────────────────────────────────────────────
 
   describe('isWorkerAlive', () => {
-    it('returns true by default (no worker)', () => {
+    it('reports main-thread liveness when no worker starts', () => {
       const r = createRenderer();
       expect(r.isWorkerAlive()).toBe(true);
     });
