@@ -162,6 +162,9 @@ async function verifyNativeSettings(page: Page) {
 
   const gear = page.locator('#yt-chat-overlay-settings-button');
   await gear.waitFor({ state: 'visible', timeout: 5_000 });
+  // The fixture keeps video below the controls; enter the player so its real
+  // hover rule makes the button pointer-active before exercising native hints.
+  await page.locator('#movie_player').hover({ position: { x: 64, y: 24 } });
   const help = await gear.evaluate((button) => ({
     title: button.getAttribute('title'),
     interestfor: button.getAttribute('interestfor'),
@@ -485,7 +488,18 @@ export async function runVideoPiPFixture({
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
   const instrumentedSource = instrumentPageScript(source, nativeBrowserApis);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
-  const html = buildVisibleWatchHtml(preview, 'Native PiP fixture video')
+  const videoTag =
+    '<video aria-label="Native PiP fixture video" style="width:100%;height:100%"></video>';
+  const visibleHtml = buildVisibleWatchHtml(preview, 'Native PiP fixture video');
+  assert(visibleHtml.includes(videoTag), 'Native PiP video fixture markup changed');
+  const html = visibleHtml
+    // Reserve a top strip for the real settings and reload controls. The video
+    // remains pointer-active below it for native media and PiP checks.
+    .replace(
+      videoTag,
+      '<video aria-label="Native PiP fixture video" ' +
+        'style="position:absolute;top:72px;left:0;width:100%;height:calc(100% - 72px)"></video>'
+    )
     // Match the production panel observer as well as the DOM item selector.
     .replace(
       '<div id="chat">',
@@ -558,6 +572,7 @@ export async function runVideoPiPFixture({
   let result: Record<string, unknown> | undefined;
   let currentState: PiPSnapshot | null = null;
   let nativeSettings: Awaited<ReturnType<typeof verifyNativeSettings>> | null = null;
+  const failureDiagnostics: Record<string, unknown> = {};
   const cleanupReceipt: Record<string, unknown> = {};
   try {
     await page.route('**/*', routeFixture);
@@ -887,6 +902,43 @@ export async function runVideoPiPFixture({
     primaryError = error;
     scenarioError = error;
     try {
+      failureDiagnostics.geometry = await page.evaluate(() => {
+        const geometry = (selector: string) => {
+          const element = document.querySelector(selector);
+          if (!element) return null;
+          const rect = element.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        };
+        const gear = document.querySelector('#yt-chat-overlay-settings-button');
+        const rect = gear?.getBoundingClientRect();
+        const hit = rect
+          ? document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+          : null;
+        const style = gear ? getComputedStyle(gear) : null;
+        return {
+          player: geometry('#movie_player'),
+          video: geometry('#movie_player video'),
+          gear: geometry('#yt-chat-overlay-settings-button'),
+          pipControls: geometry('#pip-controls'),
+          gearOpacity: style?.opacity ?? null,
+          gearPointerEvents: style?.pointerEvents ?? null,
+          hitAtGearCenter: hit ? { tag: hit.tagName, id: hit.id } : null,
+        };
+      });
+    } catch (diagnosticError) {
+      failureDiagnostics.geometryError = errorText(diagnosticError).slice(0, 200);
+    }
+    try {
+      await page.screenshot({
+        path: join(output, `${artifactPrefix}-failure.png`),
+        animations: 'disabled',
+        timeout: 5_000,
+      });
+      failureDiagnostics.screenshot = `${artifactPrefix}-failure.png`;
+    } catch (diagnosticError) {
+      failureDiagnostics.screenshotError = errorText(diagnosticError).slice(0, 200);
+    }
+    try {
       currentState = await snapshot(page);
     } catch {
       // The page may have failed before the video/fixture existed.
@@ -980,6 +1032,7 @@ export async function runVideoPiPFixture({
             chatRequests,
             states,
             currentState,
+            failureDiagnostics,
             pageErrors,
             pageErrorOverflow,
             consoleErrors,
