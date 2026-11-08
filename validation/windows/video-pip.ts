@@ -173,6 +173,28 @@ async function verifyNativeSettings(page: Page) {
   assert.equal(help.title, nativeHint ? null : 'Chat overlay settings');
   assert.equal(help.commandfor, null, 'Declarative open bypassed settings preparation');
 
+  const helpDisplay = {
+    nativeHover: false,
+    nativeFocus: false,
+    titleVisualObservation: 'not-run',
+  };
+  if (nativeHint) {
+    const tooltip = page.locator('#yt-chat-overlay-settings-tooltip');
+    await gear.hover();
+    await tooltip.waitFor({ state: 'visible', timeout: 5_000 });
+    assert(await tooltip.evaluate((element) => element.matches(':popover-open')));
+    helpDisplay.nativeHover = true;
+    await page.mouse.move(0, 0);
+    await gear.evaluate((element) => (element as HTMLElement).blur());
+    await tooltip.waitFor({ state: 'hidden', timeout: 5_000 });
+    await gear.focus();
+    await tooltip.waitFor({ state: 'visible', timeout: 5_000 });
+    assert(await tooltip.evaluate((element) => element.matches(':popover-open')));
+    helpDisplay.nativeFocus = true;
+    await page.keyboard.press('Escape');
+    await tooltip.waitFor({ state: 'hidden', timeout: 5_000 });
+  }
+
   const baselineFontSize = await page.evaluate(
     () => window.__ytChatOverlay?.getSettings().fontSize
   );
@@ -209,6 +231,7 @@ async function verifyNativeSettings(page: Page) {
   return {
     capabilities,
     help,
+    helpDisplay,
     baselineFontSize,
     initialFocus,
     tabStayedInModal: true,
