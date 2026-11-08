@@ -77,20 +77,25 @@ YouTube 페이지의 채팅 요청을 관찰하기 위해 `unsafeWindow` 권한�
 
 | 배포 방식 | 지원 범위 |
 | --- | --- |
-| 사용자 스크립트 | Tampermonkey 또는 Violentmonkey가 지원하는 최신 데스크톱 브라우저 |
-| Chromium 확장 프로그램 | Chrome/Chromium 116+ 개발자 모드 |
-| Firefox 확장 프로그램 | 내장 데이터 동의를 지원하는 Firefox 140+, 임시 개발자 설치 |
+| 사용자 스크립트 | Tampermonkey 또는 Violentmonkey가 지원하는 최신 안정판 데스크톱 Chrome, Edge, Firefox, Safari |
+| Chromium 확장 프로그램 | 최신 안정판 Chrome과 Edge의 개발자 모드, 호환되는 최신 Chromium 브라우저(예: Brave) |
+| Firefox 확장 프로그램 | 내장 데이터 동의를 지원하는 최신 안정판 Firefox, 임시 개발자 설치 |
 
-번역 지원 여부는 실행 중에 감지되며 위 브라우저 최소 버전과는 별개입니다.
+매니페스트의 최소 버전은 설치 제한이며 이전 버전의 지원 약속은 아닙니다.
+Chromium 설치 최소 버전은 필요한 API를 사용할 수 있는 수준으로 유지하고,
+실제 지원 대상은 최신 안정판 브라우저입니다.
+
+번역 지원 여부는 실행 중에 감지되며 위 브라우저 지원 정책과는 별개입니다.
 번역하려면 브라우저에 내장된 Translator API가 있고 선택한 언어 쌍을 지원해야
 합니다. 자동 원문 언어 감지는 Language Detector API를 사용할 수 있으면 이를
 사용하고, 없으면 브라우저 안에서 유니코드 기반 추정 방식으로 전환합니다.
 브라우저가 필요한 언어 모델이나 언어 팩을 다운로드할 수 있습니다. Translator를
 사용할 수 없어도 오버레이는 번역 없이 계속 작동합니다.
 
-Firefox 확장 프로그램은 Firefox 140부터 제공되는 내장 데이터 동의 기능을 사용합니다.
+Firefox 확장 프로그램은 내비게이션 관찰 API 때문에 Firefox 147 이상이 필요합니다.
+내장 데이터 동의 기능은 Firefox 140부터 제공됩니다.
 선언된 데이터 유형은 [개인정보 보호](./PRIVACY.md#firefox-data-consent)를 참고하세요.
-일반 사용과 릴리스 검증에는 현재 지원되는 Firefox 릴리스를 사용하세요.
+일반 사용과 릴리스 검증에는 최신 안정판 Firefox를 사용하세요.
 
 ## 개인정보 보호 및 보안
 

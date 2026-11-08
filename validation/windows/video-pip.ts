@@ -71,19 +71,28 @@ type PiPSnapshot = {
   actionErrors: string[];
 };
 
+type NativeBrowserProbe = { notifications: number };
+
 declare global {
   interface Window {
     __ytVideoPiPProbe: PiPProbe;
     __ytVideoPiPFixture: PiPFixture;
+    __ytNativeBrowserProbe?: NativeBrowserProbe;
+    __ytNativeHistory?: {
+      pushState: typeof history.pushState;
+      replaceState: typeof history.replaceState;
+    };
   }
 }
 
-function instrumentPageScript(source: string): string {
+function instrumentPageScript(source: string, nativeBrowserApis: boolean): string {
   assert.equal(source.split(ENTRY_MARKER).length, 2, 'Packaged page entry shape changed');
   assert(
     source.includes('var VideoPauseController = class {'),
     'Packaged VideoPauseController shape changed'
   );
+  if (nativeBrowserApis)
+    assert(source.includes('var PageWatcher = class {'), 'Packaged PageWatcher shape changed');
   // Forward the real callback into the real controller. Its event listeners,
   // PiP classification and downstream pause handling remain production code.
   const insertion = `
@@ -116,11 +125,135 @@ function instrumentPageScript(source: string): string {
 \t\t\t},
 \t\t}]);
 \t};`;
-  return source.replace(ENTRY_MARKER, `${insertion}${ENTRY_MARKER}`);
+  const nativeProbeInsertion = nativeBrowserApis
+    ? `\n\tconst nativeBrowserProbe = { notifications: 0 };\n\twindow.__ytNativeBrowserProbe = nativeBrowserProbe;\n\tconst originalPageNotify = PageWatcher.prototype.notifyCallbacks;\n\tPageWatcher.prototype.notifyCallbacks = function() {\n\t\tnativeBrowserProbe.notifications++;\n\t\treturn Reflect.apply(originalPageNotify, this, []);\n\t};`
+    : '';
+  return source.replace(ENTRY_MARKER, `${insertion}${nativeProbeInsertion}${ENTRY_MARKER}`);
 }
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function verifyNativeSettings(page: Page) {
+  const capabilities = await page.evaluate(() => {
+    const hint = document.createElement('div');
+    hint.popover = 'hint';
+    return {
+      navigation: typeof window.navigation?.addEventListener === 'function',
+      roundRect: typeof CanvasRenderingContext2D.prototype.roundRect === 'function',
+      offscreenRoundRect:
+        typeof OffscreenCanvas !== 'undefined' &&
+        typeof OffscreenCanvasRenderingContext2D.prototype.roundRect === 'function',
+      segmenter: typeof Intl.Segmenter === 'function',
+      basePopover: 'popover' in HTMLElement.prototype,
+      hintPopover: hint.popover === 'hint',
+      interestInvoker: 'interestForElement' in HTMLButtonElement.prototype,
+      dialogLightDismiss: 'closedBy' in HTMLDialogElement.prototype,
+    };
+  });
+  assert.equal(
+    capabilities.navigation,
+    true,
+    'Installed browser lacks Navigation.currententrychange'
+  );
+  assert.equal(capabilities.roundRect, true, 'Installed browser lacks Canvas roundRect');
+  assert.equal(capabilities.segmenter, true, 'Installed browser lacks Intl.Segmenter');
+
+  const gear = page.locator('#yt-chat-overlay-settings-button');
+  await gear.waitFor({ state: 'visible', timeout: 5_000 });
+  const help = await gear.evaluate((button) => ({
+    title: button.getAttribute('title'),
+    interestfor: button.getAttribute('interestfor'),
+    commandfor: button.getAttribute('commandfor'),
+  }));
+  const nativeHint =
+    capabilities.basePopover && capabilities.hintPopover && capabilities.interestInvoker;
+  assert.equal(help.interestfor, nativeHint ? 'yt-chat-overlay-settings-tooltip' : null);
+  assert.equal(help.title, nativeHint ? null : 'Chat overlay settings');
+  assert.equal(help.commandfor, null, 'Declarative open bypassed settings preparation');
+
+  const baselineFontSize = await page.evaluate(
+    () => window.__ytChatOverlay?.getSettings().fontSize
+  );
+  await gear.click();
+  const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+  await modal.waitFor({ state: 'visible' });
+  assert.equal(
+    await modal.locator('input[name="fontSize"]').inputValue(),
+    String(baselineFontSize)
+  );
+  assert.equal(await modal.evaluate((element) => (element as HTMLDialogElement).open), true);
+  const initialFocus = await page.evaluate(() =>
+    document.activeElement?.classList.contains('yt-chat-overlay-settings-tab')
+  );
+  assert.equal(initialFocus, true, 'Settings did not focus its active tab');
+  await page.keyboard.press('Tab');
+  assert.equal(
+    await page.evaluate(() =>
+      document.querySelector('#yt-chat-overlay-settings-backdrop')?.contains(document.activeElement)
+    ),
+    true,
+    'Native Tab left the modal dialog'
+  );
+  await page.keyboard.press('Escape');
+  await modal.waitFor({ state: 'hidden' });
+  await gear.click();
+  await modal.waitFor({ state: 'visible' });
+  assert.equal(
+    await modal.locator('input[name="fontSize"]').inputValue(),
+    String(baselineFontSize)
+  );
+  await page.mouse.click(0, 0);
+  await modal.waitFor({ state: 'hidden' });
+  return {
+    capabilities,
+    help,
+    baselineFontSize,
+    initialFocus,
+    tabStayedInModal: true,
+    escapeClosed: true,
+    backdropClosed: true,
+  };
+}
+
+async function verifyNativeNavigation(page: Page) {
+  const before = await page.evaluate(() => {
+    const historyBaseline = window.__ytNativeHistory;
+    const probe = window.__ytNativeBrowserProbe;
+    if (!historyBaseline || !probe) throw new Error('Native navigation probe is missing');
+    return {
+      historyUnchanged:
+        history.pushState === historyBaseline.pushState &&
+        history.replaceState === historyBaseline.replaceState,
+      notifications: probe.notifications,
+    };
+  });
+  assert.equal(before.historyUnchanged, true, 'PageWatcher replaced a History method');
+  await page.evaluate(() => history.pushState({}, '', '/watch?v=windowsNativeSecond'));
+  await page.waitForFunction(
+    (count) => window.__ytNativeBrowserProbe?.notifications === count + 1,
+    before.notifications
+  );
+  await page.evaluate(() => history.replaceState({}, '', '/live/windowsNativeThird'));
+  await page.waitForFunction(
+    (count) => window.__ytNativeBrowserProbe?.notifications === count + 2,
+    before.notifications
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('yt-navigate-finish')));
+  await page.waitForFunction(
+    (count) => window.__ytNativeBrowserProbe?.notifications === count + 3,
+    before.notifications
+  );
+  const after = await page.evaluate(() => ({
+    url: location.href,
+    notifications: window.__ytNativeBrowserProbe?.notifications ?? -1,
+    historyUnchanged:
+      history.pushState === window.__ytNativeHistory?.pushState &&
+      history.replaceState === window.__ytNativeHistory?.replaceState,
+  }));
+  assert.equal(after.historyUnchanged, true, 'Navigation observation changed History methods');
+  return { ...before, ...after, sameUrlReadyNotification: true };
 }
 
 async function snapshot(page: Page): Promise<PiPSnapshot> {
@@ -315,6 +448,7 @@ export async function runVideoPiPFixture({
   output,
   extensionId,
   nativeTabVisibility = false,
+  nativeBrowserApis = false,
   artifactPrefix = 'video-pip',
 }: {
   context: BrowserContext;
@@ -322,10 +456,11 @@ export async function runVideoPiPFixture({
   output: string;
   extensionId: string;
   nativeTabVisibility?: boolean;
+  nativeBrowserApis?: boolean;
   artifactPrefix?: 'video-pip' | 'native-tab-chrome';
 }) {
   const source = await readFile(join(root, 'dist-extension/page-script.js'), 'utf8');
-  const instrumentedSource = instrumentPageScript(source);
+  const instrumentedSource = instrumentPageScript(source, nativeBrowserApis);
   const preview = await readFile(join(root, 'test/visual/preview.html'), 'utf8');
   const html = buildVisibleWatchHtml(preview, 'Native PiP fixture video')
     // Match the production panel observer as well as the DOM item selector.
@@ -399,11 +534,18 @@ export async function runVideoPiPFixture({
   let scenarioError: unknown;
   let result: Record<string, unknown> | undefined;
   let currentState: PiPSnapshot | null = null;
+  let nativeSettings: Awaited<ReturnType<typeof verifyNativeSettings>> | null = null;
   const cleanupReceipt: Record<string, unknown> = {};
   try {
     await page.route('**/*', routeFixture);
     routeRegistered = true;
-    await page.addInitScript(() => {
+    await page.addInitScript((captureNativeApis) => {
+      if (captureNativeApis) {
+        window.__ytNativeHistory = {
+          pushState: history.pushState,
+          replaceState: history.replaceState,
+        };
+      }
       window.ytcfg = {
         data_: {
           INNERTUBE_API_KEY: 'windows-acceptance-key',
@@ -432,7 +574,7 @@ export async function runVideoPiPFixture({
           },
         },
       };
-    });
+    }, nativeBrowserApis);
     nativeProbe = await installNativePageScriptProbe({
       context,
       root,
@@ -452,6 +594,7 @@ export async function runVideoPiPFixture({
     });
     await nativeProbe.restore();
     nativeProbe = undefined;
+    if (nativeBrowserApis) nativeSettings = await verifyNativeSettings(page);
 
     await page.evaluate(async (eventLimit) => {
       const video = document.querySelector<HTMLVideoElement>('#movie_player video');
@@ -689,6 +832,7 @@ export async function runVideoPiPFixture({
     assert.deepEqual(consoleErrors, []);
     assert.equal(consoleErrorOverflow, 0);
     const domFallbackLifetime = await verifyDomFallbackLifetime(page, output);
+    const nativeNavigation = nativeBrowserApis ? await verifyNativeNavigation(page) : null;
     const nativeTabLifetime = nativeTabVisibility
       ? await verifyNativeTabLifetime({ context, page, output })
       : { status: 'not-requested', reason: 'requires a context attached with noDefaults' };
@@ -705,6 +849,9 @@ export async function runVideoPiPFixture({
       chatRequests,
       states,
       domFallbackLifetime,
+      nativeBrowserApis: nativeBrowserApis
+        ? { settings: nativeSettings, navigation: nativeNavigation }
+        : null,
       nativeTabLifetime,
       pageErrors,
       pageErrorOverflow,

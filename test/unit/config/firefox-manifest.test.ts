@@ -12,12 +12,12 @@ function manifest() {
     browser_specific_settings: {
       gecko: {
         id: 'yt-live-chat-overlay@piesp.github.io',
-        strict_min_version: '140.0',
+        strict_min_version: '147.0',
         data_collection_permissions: {
           required: ['authenticationInfo', 'browsingActivity', 'websiteContent', 'websiteActivity'],
         },
       },
-      gecko_android: { strict_min_version: '142.0' },
+      gecko_android: { strict_min_version: '147.0' },
     },
   };
 }
@@ -33,7 +33,7 @@ describe('Firefox data consent contract', () => {
 
   it('accepts a newer consent-capable floor and unordered required permissions', () => {
     const source = manifest();
-    source.browser_specific_settings.gecko.strict_min_version = '141.0';
+    source.browser_specific_settings.gecko.strict_min_version = '148.0';
     source.browser_specific_settings.gecko.data_collection_permissions.required.reverse();
     expect(() => assertFirefoxDataConsent(source, 'manifest')).not.toThrow();
   });
@@ -54,6 +54,12 @@ describe('Firefox data consent contract', () => {
     }
   );
 
+  it('rejects a consent-capable Firefox without currententrychange', () => {
+    const source = manifest();
+    source.browser_specific_settings.gecko.strict_min_version = '146.0';
+    expect(() => assertFirefoxDataConsent(source, 'fixture')).toThrow('Firefox 147+');
+  });
+
   it.each([undefined, null, '141.99', '142.*', 'not-a-version'])(
     'rejects a missing or unsupported Android consent floor: %j',
     (minimum) => {
@@ -67,6 +73,12 @@ describe('Firefox data consent contract', () => {
       );
     }
   );
+
+  it('rejects an Android installation floor below the required navigation API', () => {
+    const source = manifest();
+    source.browser_specific_settings.gecko_android.strict_min_version = '146.0';
+    expect(() => assertFirefoxDataConsent(source, 'fixture')).toThrow('Android 147+');
+  });
 
   it.each([
     undefined,

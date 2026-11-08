@@ -51,9 +51,11 @@ installed userscript managers have their own privacy policies.
 
 ## Firefox data consent
 
-The Firefox extension requires Firefox 140 or later so installation can use
+The Firefox extension requires Firefox 147 or later; built-in data consent
+was introduced in Firefox 140 so installation can use
 [Firefox's built-in data consent](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/).
-The manifest also sets the Android consent API floor to Firefox for Android 142.
+The Android consent API began in Firefox for Android 142; the manifest requires
+147 for the navigation API. Android acceptance remains outside this desktop scope.
 The project's browser acceptance checks cover desktop installations.
 Its [manifest](./extension/manifest.firefox.json) declares the data used in functional
 requests to YouTube and Google media hosts:

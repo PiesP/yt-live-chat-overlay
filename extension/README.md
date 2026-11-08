@@ -59,7 +59,7 @@ all-target CI build also validates expected files through `check:artifacts`.
 
 The Firefox installation is removed when the browser restarts.
 
-See [Browser support](../README.md#browser-support) for compatibility floors.
+See [Browser support](../README.md#browser-support) for the latest-stable support policy.
 Development and release checks should use a currently supported Firefox release.
 
 ## Browser validation

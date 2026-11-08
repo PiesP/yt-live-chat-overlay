@@ -74,13 +74,17 @@ export class VideoPauseController {
       }
     };
 
+    let videoListeners: AbortController | null = null;
     const attachListeners = (video: HTMLVideoElement): void => {
-      video.addEventListener('pause', handlePause);
-      video.addEventListener('play', handlePlay);
-      video.addEventListener('waiting', handleWaiting);
-      video.addEventListener('playing', handlePlay);
-      video.addEventListener('enterpictureinpicture', handleEnterPiP);
-      video.addEventListener('leavepictureinpicture', handleLeavePiP);
+      videoListeners?.abort();
+      videoListeners = new AbortController();
+      const { signal } = videoListeners;
+      video.addEventListener('pause', handlePause, { signal });
+      video.addEventListener('play', handlePlay, { signal });
+      video.addEventListener('waiting', handleWaiting, { signal });
+      video.addEventListener('playing', handlePlay, { signal });
+      video.addEventListener('enterpictureinpicture', handleEnterPiP, { signal });
+      video.addEventListener('leavepictureinpicture', handleLeavePiP, { signal });
 
       // A video can already be paused before the controller binds (initial
       // page load, SPA video replacement, or an autoplay-blocked player).
@@ -90,14 +94,9 @@ export class VideoPauseController {
       else handlePlay();
     };
 
-    const detachListeners = (video: HTMLVideoElement | undefined): void => {
-      if (!video) return;
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('play', handlePlay);
-      video.removeEventListener('waiting', handleWaiting);
-      video.removeEventListener('playing', handlePlay);
-      video.removeEventListener('enterpictureinpicture', handleEnterPiP);
-      video.removeEventListener('leavepictureinpicture', handleLeavePiP);
+    const detachListeners = (): void => {
+      videoListeners?.abort();
+      videoListeners = null;
     };
 
     const scheduleRebind = (): void => {
@@ -122,7 +121,7 @@ export class VideoPauseController {
     const rebindVideo = (): void => {
       const nextVideo = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS)?.element;
       if (nextVideo && nextVideo !== currentVideo) {
-        detachListeners(currentVideo);
+        detachListeners();
         currentVideo = nextVideo;
         attachListeners(currentVideo);
         log.debug('app.video.rebound-listeners');
@@ -143,13 +142,13 @@ export class VideoPauseController {
 
       this.videoPauseCleanup = () => {
         this.rebindTimer = clearSafeTimeout(this.rebindTimer);
-        detachListeners(currentVideo);
+        detachListeners();
         observer.disconnect();
         this.videoPauseCleanup = null;
       };
     } else {
       this.videoPauseCleanup = () => {
-        detachListeners(currentVideo);
+        detachListeners();
         this.videoPauseCleanup = null;
       };
     }

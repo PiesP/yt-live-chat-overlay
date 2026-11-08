@@ -35,7 +35,7 @@ import {
   type RenderResourceViolation,
 } from '@chat/render-resource-limits';
 import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@chat/youtube/request';
-import { splitGraphemesForTruncation } from '@renderer/text-segmentation';
+import { splitGraphemeClusters } from '@renderer/text-segmentation';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('ChatMessageParser');
@@ -741,7 +741,7 @@ function truncateRegularContent(
     if (remaining <= 0) break;
 
     if (segment.type === 'text') {
-      const clusters = splitGraphemesForTruncation(segment.content) ?? [segment.content];
+      const clusters = splitGraphemeClusters(segment.content);
       let retained = '';
       let retainedLength = 0;
       for (const cluster of clusters) {

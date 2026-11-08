@@ -151,6 +151,25 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('admits only the exact native browser selector before an installed Edge launch', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    const selector = join(inputDir, 'native-browser-apis.json');
+    expect(await chromeInstallModule.readNativeBrowserApisSelector(paths.root)).toBe(false);
+    await writeFile(selector, JSON.stringify({ scenario: 'native-browser-apis', extra: true }));
+    await expect(chromeInstallModule.readNativeBrowserApisSelector(paths.root)).rejects.toThrow();
+    await writeFile(selector, JSON.stringify({ scenario: 'native-browser-apis' }));
+    expect(await chromeInstallModule.readNativeBrowserApisSelector(paths.root)).toBe(true);
+    await writeFile(
+      join(inputDir, 'composition-runtime.json'),
+      '{"scenario":"composition-runtime"}'
+    );
+    await expect(chromeInstallModule.readNativeBrowserApisSelector(paths.root)).rejects.toThrow(
+      'must be exclusive'
+    );
+  });
+
   it('admits only the exact composition selector and uses the ordinary installed Edge profile', async () => {
     const paths = await fixture();
     const inputDir = join(paths.root, 'validation/windows/inputs');
