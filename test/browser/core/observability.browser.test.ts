@@ -9,6 +9,7 @@ describe('ObservabilityReporter', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -184,6 +185,7 @@ describe('ObservabilityReporter', () => {
   it('tick updates overlay content when visible', () => {
     reporter.setShowDebug(true);
     reporter.onMessageReceived();
+    vi.spyOn(performance, 'now').mockReturnValue(300);
     reporter.tick();
 
     const el = document.getElementById('yt-chat-overlay-debug');
@@ -195,6 +197,7 @@ describe('ObservabilityReporter', () => {
   it('labels frame timings unavailable when rendering is Worker-owned', () => {
     reporter.setShowDebug(true);
     reporter.setFrameTimingAvailable(false);
+    vi.spyOn(performance, 'now').mockReturnValue(300);
     reporter.tick();
 
     const el = document.getElementById('yt-chat-overlay-debug');
