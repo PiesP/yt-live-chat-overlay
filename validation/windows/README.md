@@ -1220,8 +1220,9 @@ replay retirement.
 
 Place exactly `{"scenario":"native-browser-apis"}` in the ignored
 `validation/windows/inputs/native-browser-apis.json` before bundling a clean,
-committed candidate. Run the headed installed Edge extension profile with
-`--browser msedge --mode desktop --installation extension`, without public URLs
+committed candidate. Run the headed installed Edge or Chrome extension profile with
+`--browser msedge --mode desktop --installation extension` or
+`--browser chrome --mode desktop --installation extension`, without public URLs
 or a duration option. The selector is exclusive with other focused and upgrade
 inputs. It runs the maintained native PiP and DOM fallback fixture, plus actual
 settings Tab/Escape/backdrop input, tooltip capability observations, and

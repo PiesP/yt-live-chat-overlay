@@ -2625,9 +2625,8 @@ export async function runChromeInstallation({
   if (nativeBrowserApisSelected) {
     assert.equal(focusedScenario, null, 'Native browser APIs cannot combine selectors');
     assert.equal(liveObservation, null, 'Native browser APIs cannot use duration observation');
-    assert.equal(browserName, 'msedge', 'Native browser APIs require installed Edge');
     assert.equal(installation, 'extension', 'Native browser APIs require the extension');
-    assert.equal(headless, false, 'Native browser APIs require headed Edge');
+    assert.equal(headless, false, 'Native browser APIs require headed Chrome or Edge');
     assert.deepEqual(liveUrls, [], 'Native browser APIs cannot use public live URLs');
   }
   if (translatorNativeSelected) {
@@ -2848,7 +2847,11 @@ export async function runChromeInstallation({
         extensionId,
         nativeBrowserApis: true,
       });
-      assert.equal(result.videoPiP.status, 'passed', 'Installed Edge native API fixture failed');
+      assert.equal(
+        result.videoPiP.status,
+        'passed',
+        'Installed Chromium native API fixture failed'
+      );
       return result;
     }
     if (translatorNativeSelected) {
