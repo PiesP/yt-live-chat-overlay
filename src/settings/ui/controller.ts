@@ -44,9 +44,22 @@ const RELOAD_FEEDBACK_DURATION_MS = 2500;
 type ReloadFeedbackState = 'idle' | 'pending' | 'waiting' | 'requested' | 'recovering' | 'failed';
 
 export class SettingsUi {
-  /** Popover API feature detection — checked once at construction. */
-  private static readonly supportsHints: boolean =
+  /** These are separate platform features; base Popover does not imply hint or interest support. */
+  private static readonly supportsPopover =
     typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype;
+  private static readonly supportsHintPopovers =
+    SettingsUi.supportsPopover &&
+    (() => {
+      const tooltip = document.createElement('div');
+      tooltip.popover = 'hint';
+      return tooltip.popover === 'hint';
+    })();
+  private static readonly supportsInterestInvokers =
+    typeof HTMLButtonElement !== 'undefined' && 'interestForElement' in HTMLButtonElement.prototype;
+  private static readonly supportsHints =
+    SettingsUi.supportsHintPopovers && SettingsUi.supportsInterestInvokers;
+  private static readonly supportsDialogLightDismiss =
+    typeof HTMLDialogElement !== 'undefined' && 'closedBy' in HTMLDialogElement.prototype;
 
   private static readonly SETTINGS_TOOLTIP_ID = 'yt-chat-overlay-settings-tooltip';
   private static readonly RELOAD_TOOLTIP_ID = 'yt-chat-overlay-reload-tooltip';
@@ -367,21 +380,15 @@ export class SettingsUi {
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '\u2699';
       this.button.setAttribute('aria-label', t('app.settings'));
-      // Native Popover API tooltip with interestfor (Chrome 133+).
-      // Falls back to traditional title attribute on unsupported browsers.
+      // Interest-driven hint popovers require both subfeatures. Title remains
+      // the hover/focus help path when either is absent.
       if (SettingsUi.supportsHints) {
         this.button.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
       } else {
         this.button.title = t('app.settings');
       }
       this.button.addEventListener('click', () => this.open());
-      // commandfor Invoker Commands (Chrome 134+) as progressive enhancement.
-      // When supported, lets the settings button open the native dialog declaratively
-      // without JavaScript. Falls back to the click handler above.
-      if ('commandFor' in HTMLElement.prototype) {
-        this.button.setAttribute('commandfor', BACKDROP_ID);
-        this.button.setAttribute('command', 'show-modal');
-      }
+      // Opening always goes through open() to prepare the current form and focus.
     } else if (this.button.parentElement) {
       this.button.remove();
     }
@@ -395,8 +402,7 @@ export class SettingsUi {
       this.reloadButton.className = 'yt-chat-overlay-reload-button';
       this.reloadButton.textContent = '\u21BB';
       this.reloadButton.setAttribute('aria-label', t('app.reload'));
-      // Native Popover API tooltip with interestfor (Chrome 133+).
-      // Falls back to traditional title attribute on unsupported browsers.
+      // Match the settings button's single active help path.
       if (SettingsUi.supportsHints) {
         this.reloadButton.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
       } else {
@@ -679,9 +685,9 @@ export class SettingsUi {
     // autocomplete="off" prevents password managers (Bitwarden, 1Password, etc.)
     // from scanning the settings form inputs as credential fields.
     this.modal.setAttribute('autocomplete', 'off');
-    // closedby="any" enables light dismiss via backdrop click (Chrome 133+)
-    // and ESC, both handled natively by the dialog element.
-    this.modal.setAttribute('closedby', 'any');
+    // Current engines differ on closedBy. Safari's modal keeps its own
+    // backdrop-click adapter below; Escape is handled by native cancel.
+    if (SettingsUi.supportsDialogLightDismiss) this.modal.setAttribute('closedby', 'any');
     this.modal.setAttribute('aria-labelledby', 'yt-chat-overlay-settings-title');
     this.modal.setAttribute('aria-modal', 'true');
     this.modal.append(...this.form.createModalContent());
@@ -698,10 +704,24 @@ export class SettingsUi {
       this.close();
     });
 
-    // Handle native dialog close from backdrop click (closedby="any").
-    // The browser fires 'close' (not 'cancel') for light dismiss.
-    // At this point modal.open is already false, so we bypass the guard
-    // in close() and persist directly.
+    if (!SettingsUi.supportsDialogLightDismiss) {
+      const dialog = this.modal;
+      dialog.addEventListener('click', (event) => {
+        if (event.target !== dialog) return;
+        const rect = dialog.getBoundingClientRect();
+        if (
+          event.clientX < rect.left ||
+          event.clientX >= rect.right ||
+          event.clientY < rect.top ||
+          event.clientY >= rect.bottom
+        ) {
+          this.close();
+        }
+      });
+    }
+
+    // Handle a native close that did not pass through close(), including a
+    // light dismiss. The browser has already cleared open at this point.
     this.modal.addEventListener('close', () => {
       if (this.suppressNextNativeClose) {
         this.suppressNextNativeClose = false;
@@ -725,7 +745,7 @@ export class SettingsUi {
   }
 
   private open(): void {
-    if (!this.modal) return;
+    if (!this.modal || this.modal.open) return;
     if (!this.modal.open && this.formBaseline !== null) {
       // A previous native close has not delivered its queued event yet.
       this.persistCurrentForm();
@@ -744,8 +764,8 @@ export class SettingsUi {
     this.formBaseline = cloneSettings(this.getSettings());
     this.form.populateForm(this.formBaseline);
     this.switchTab(this.activeTab);
-    // showModal() opens the dialog in the top layer with native backdrop,
-    // automatic focus trap, scroll lock, and inert handling.
+    // showModal() opens the dialog in the top layer with a native backdrop,
+    // modal focus behavior, and background inertness.
     this.modal.showModal();
     this.focusInitialElement();
     this.updateDocumentLangDir();
