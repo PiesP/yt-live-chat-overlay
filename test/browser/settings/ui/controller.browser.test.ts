@@ -132,9 +132,10 @@ function expectTooltipAnchor(
 ): void {
   const id = `yt-chat-overlay-${name}-tooltip`;
   const label = name === 'settings' ? 'Chat overlay settings' : 'Reload overlay';
-  expect(button?.getAttribute('interestfor')).toBe(enabled ? id : null);
-  expect(button?.getAttribute('title')).toBeNull();
-  expect(document.getElementById(id)?.textContent).toBe(label);
+  const nativeHints = (SettingsUi as unknown as { supportsHints: boolean }).supportsHints;
+  expect(button?.getAttribute('interestfor')).toBe(enabled && nativeHints ? id : null);
+  expect(button?.getAttribute('title')).toBe(enabled && !nativeHints ? label : null);
+  expect(document.getElementById(id)?.textContent).toBe(nativeHints ? label : undefined);
 }
 
 describe('SettingsUi', () => {
@@ -197,6 +198,85 @@ describe('SettingsUi', () => {
 
   it('constructs without throwing', () => {
     expect(() => makeController()).not.toThrow();
+  });
+
+  it('keeps title help and a single prepared open path when interest hints are absent', async () => {
+    const capabilities = SettingsUi as unknown as { supportsHints: boolean };
+    const original = capabilities.supportsHints;
+    capabilities.supportsHints = false;
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const onPersist = vi.fn(async () => 'saved' as const);
+    const controller = makeController({ getSettings: () => DEFAULT_SETTINGS, onPersist });
+    try {
+      await controller.attach();
+      const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+      expectTooltipAnchor(button, 'settings', true);
+      expect(button?.hasAttribute('commandfor')).toBe(false);
+      button?.click();
+      const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+      expect(modal?.open).toBe(true);
+      expect(document.activeElement).toBe(
+        modal?.querySelector('.yt-chat-overlay-settings-tab.active')
+      );
+      controller.close();
+      expect(onPersist).toHaveBeenCalledTimes(1);
+      button?.click();
+      expect(modal?.open).toBe(true);
+      controller.close();
+      expect(onPersist).toHaveBeenCalledTimes(2);
+    } finally {
+      controller.destroy();
+      capabilities.supportsHints = original;
+    }
+  });
+
+  it('dismisses unsupported closedBy backdrops without treating dialog padding as a backdrop', async () => {
+    const capabilities = SettingsUi as unknown as { supportsDialogLightDismiss: boolean };
+    const original = capabilities.supportsDialogLightDismiss;
+    capabilities.supportsDialogLightDismiss = false;
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const onPersist = vi.fn(async () => 'saved' as const);
+    const controller = makeController({ getSettings: () => DEFAULT_SETTINGS, onPersist });
+    try {
+      await controller.attach();
+      const modal = document.querySelector<HTMLDialogElement>('#yt-chat-overlay-settings-backdrop');
+      const button = player.querySelector<HTMLButtonElement>('#yt-chat-overlay-settings-button');
+      expect(modal?.hasAttribute('closedby')).toBe(false);
+      button?.click();
+      vi.spyOn(modal!, 'getBoundingClientRect').mockReturnValue({
+        left: 100,
+        right: 300,
+        top: 100,
+        bottom: 300,
+      } as DOMRect);
+      modal?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 150, clientY: 150 })
+      );
+      modal?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 150, clientY: 150 }));
+      expect(modal?.open).toBe(true);
+      modal?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 150, clientY: 150 })
+      );
+      modal?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 50, clientY: 150 }));
+      expect(modal?.open).toBe(true);
+      modal?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 150 })
+      );
+      modal?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 50, clientY: 150 }));
+      expect(modal?.open).toBe(false);
+      expect(onPersist).toHaveBeenCalledTimes(1);
+      button?.click();
+      expect(modal?.open).toBe(true);
+    } finally {
+      controller.destroy();
+      capabilities.supportsDialogLightDismiss = original;
+    }
   });
 
   it('restores scalar and nested previews when the form returns to its opening values', async () => {
