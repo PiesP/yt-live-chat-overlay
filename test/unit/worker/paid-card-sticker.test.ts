@@ -64,6 +64,7 @@ function paint(image?: ImageBitmap) {
     moveTo: vi.fn(),
     lineTo: vi.fn(),
     arcTo: vi.fn(),
+    roundRect: vi.fn(),
     fill: vi.fn(),
     stroke: vi.fn(),
     strokeText: vi.fn(),

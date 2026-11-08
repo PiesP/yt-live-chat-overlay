@@ -39,6 +39,7 @@ function makeContext() {
     lineTo: vi.fn(),
     arc: vi.fn(),
     arcTo: vi.fn(),
+    roundRect: vi.fn(),
     fill: vi.fn(),
     stroke: vi.fn(),
     clip: vi.fn(),

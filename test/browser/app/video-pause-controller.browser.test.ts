@@ -159,4 +159,37 @@ describe('VideoPauseController', () => {
     expect(setPaused).toHaveBeenCalledWith(false);
     controller.stop();
   });
+
+  it('retires old video events on replacement and every binding on stop or restart', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    const firstVideo = createVideo(false);
+    const nextVideo = createVideo(true);
+    player.append(firstVideo);
+    document.body.append(player);
+    const firstPause = vi.fn();
+    const secondPause = vi.fn();
+    const controller = new VideoPauseController();
+    controller.start({ pauseable: { setPaused: firstPause }, isDisposed: () => false });
+    firstVideo.replaceWith(nextVideo);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(firstPause).toHaveBeenLastCalledWith(true);
+    firstPause.mockClear();
+    firstVideo.dispatchEvent(new Event('play'));
+    firstVideo.dispatchEvent(new Event('enterpictureinpicture'));
+    expect(firstPause).not.toHaveBeenCalled();
+    nextVideo.dispatchEvent(new Event('waiting'));
+    expect(firstPause).toHaveBeenCalledWith(true);
+    controller.start({ pauseable: { setPaused: secondPause }, isDisposed: () => false });
+    firstPause.mockClear();
+    nextVideo.dispatchEvent(new Event('playing'));
+    expect(firstPause).not.toHaveBeenCalled();
+    expect(secondPause).toHaveBeenCalledWith(false);
+    controller.stop();
+    secondPause.mockClear();
+    nextVideo.dispatchEvent(new Event('pause'));
+    expect(secondPause).not.toHaveBeenCalled();
+  });
 });

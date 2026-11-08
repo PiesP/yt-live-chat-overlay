@@ -63,8 +63,8 @@ describe('PageWatcher.isValidPage', () => {
   });
 });
 
-describe('PageWatcher history patching', () => {
-  it('preserves history navigation and notifies for patched methods', () => {
+describe('PageWatcher native navigation observation', () => {
+  it('observes push and replace without changing History methods', async () => {
     const originalUrl = location.href;
     const originalState = history.state;
     const originalPushState = history.pushState;
@@ -72,6 +72,8 @@ describe('PageWatcher history patching', () => {
     const watcher = new PageWatcher();
     const onChange = vi.fn();
     watcher.onChange(onChange);
+    expect(history.pushState).toBe(originalPushState);
+    expect(history.replaceState).toBe(originalReplaceState);
 
     try {
       history.pushState({ navigation: 'push' }, '', '/watch?v=first');
@@ -79,14 +81,19 @@ describe('PageWatcher history patching', () => {
       expect(location.pathname).toBe('/watch');
       expect(location.search).toBe('?v=first');
       expect(history.state).toEqual({ navigation: 'push' });
-      expect(onChange).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
 
       history.replaceState({ navigation: 'replace' }, '', '/live/second');
 
       expect(location.pathname).toBe('/live/second');
       expect(location.search).toBe('');
       expect(history.state).toEqual({ navigation: 'replace' });
+      await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
+      history.replaceState({ navigation: 'same-url' }, '', '/live/second');
+      await Promise.resolve();
       expect(onChange).toHaveBeenCalledTimes(2);
+      window.dispatchEvent(new Event('yt-navigate-finish'));
+      expect(onChange).toHaveBeenCalledTimes(3);
     } finally {
       watcher.destroy();
       originalReplaceState.call(history, originalState, '', originalUrl);
@@ -96,13 +103,13 @@ describe('PageWatcher history patching', () => {
     expect(history.replaceState).toBe(originalReplaceState);
   });
 
-  it('restores both history methods after destroy', () => {
+  it('keeps History unchanged across repeated creation and disposal', () => {
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
     const watcher = new PageWatcher();
 
-    expect(history.pushState).not.toBe(originalPushState);
-    expect(history.replaceState).not.toBe(originalReplaceState);
+    expect(history.pushState).toBe(originalPushState);
+    expect(history.replaceState).toBe(originalReplaceState);
 
     watcher.destroy();
 
@@ -110,26 +117,72 @@ describe('PageWatcher history patching', () => {
     expect(history.replaceState).toBe(originalReplaceState);
   });
 
-  it('does not let an older nested watcher overwrite a newer wrapper', () => {
+  it('isolates callbacks when an older watcher is disposed before a newer one', async () => {
+    const originalUrl = location.href;
+    const originalState = history.state;
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
     const firstWatcher = new PageWatcher();
-    const firstPushState = history.pushState;
-    const firstReplaceState = history.replaceState;
     const secondWatcher = new PageWatcher();
-    const secondPushState = history.pushState;
-    const secondReplaceState = history.replaceState;
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    firstWatcher.onChange(firstCallback);
+    secondWatcher.onChange(secondCallback);
 
-    firstWatcher.destroy();
-
-    expect(history.pushState).toBe(secondPushState);
-    expect(history.replaceState).toBe(secondReplaceState);
-
-    secondWatcher.destroy();
+    try {
+      history.pushState({}, '', '/watch?v=first');
+      await vi.waitFor(() => {
+        expect(firstCallback).toHaveBeenCalledTimes(1);
+        expect(secondCallback).toHaveBeenCalledTimes(1);
+      });
+      firstWatcher.destroy();
+      history.pushState({}, '', '/live/second');
+      await vi.waitFor(() => expect(secondCallback).toHaveBeenCalledTimes(2));
+      expect(firstCallback).toHaveBeenCalledTimes(1);
+      window.dispatchEvent(new Event('yt-navigate-finish'));
+      expect(secondCallback).toHaveBeenCalledTimes(3);
+      expect(firstCallback).toHaveBeenCalledTimes(1);
+    } finally {
+      firstWatcher.destroy();
+      secondWatcher.destroy();
+      originalReplaceState.call(history, originalState, '', originalUrl);
+    }
 
     expect(history.pushState).toBe(originalPushState);
     expect(history.replaceState).toBe(originalReplaceState);
-    expect(firstPushState).not.toBe(originalPushState);
-    expect(firstReplaceState).not.toBe(originalReplaceState);
+  });
+
+  it('isolates an exception in one callback before notifying the next', () => {
+    const watcher = new PageWatcher();
+    const next = vi.fn();
+    watcher.onChange(() => {
+      throw new Error('controlled callback failure');
+    });
+    watcher.onChange(next);
+    window.dispatchEvent(new Event('yt-navigate-finish'));
+    expect(next).toHaveBeenCalledOnce();
+    watcher.destroy();
+  });
+
+  it('observes back and forward entries without an extra popstate listener', async () => {
+    const originalUrl = location.href;
+    const originalState = history.state;
+    const watcher = new PageWatcher();
+    const onChange = vi.fn();
+    watcher.onChange(onChange);
+    try {
+      history.pushState({}, '', '/watch?v=back');
+      history.pushState({}, '', '/live/forward');
+      await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
+      history.back();
+      await vi.waitFor(() => expect(location.search).toBe('?v=back'));
+      expect(onChange).toHaveBeenCalledTimes(3);
+      history.forward();
+      await vi.waitFor(() => expect(location.pathname).toBe('/live/forward'));
+      expect(onChange).toHaveBeenCalledTimes(4);
+    } finally {
+      watcher.destroy();
+      history.replaceState(originalState, '', originalUrl);
+    }
   });
 });

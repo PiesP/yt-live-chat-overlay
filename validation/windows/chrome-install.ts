@@ -142,6 +142,26 @@ export async function readCompositionRuntimeSelector(root: string): Promise<bool
   }
   return true;
 }
+
+/** Select only the source-bound native browser API fixture. */
+export async function readNativeBrowserApisSelector(root: string): Promise<boolean> {
+  const directory = join(root, 'validation/windows/inputs');
+  let source: string;
+  try {
+    source = await readFile(join(directory, 'native-browser-apis.json'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  assert.deepEqual(JSON.parse(source), { scenario: 'native-browser-apis' });
+  const selectors = (await readdir(directory)).filter((name) => name.endsWith('.json')).sort();
+  assert.deepEqual(
+    selectors,
+    ['native-browser-apis.json'],
+    'Native browser selector must be exclusive'
+  );
+  return true;
+}
 type ExpectedResource = { maxBytes: number; bytes: number; sha256: string };
 type ResourceEntry = {
   path: string;
@@ -2523,6 +2543,7 @@ export async function runChromeInstallation({
   const backlogResetSelected = await readBacklogResetSelector(root);
   const farColorSelected = await readFarColorSelector(root);
   const compositionRuntimeSelected = await readCompositionRuntimeSelector(root);
+  const nativeBrowserApisSelected = await readNativeBrowserApisSelector(root);
   assert(
     Number(opacitySelected) +
       Number(requestDeadlineSelected) +
@@ -2532,7 +2553,8 @@ export async function runChromeInstallation({
       Number(managerFifoSelected) +
       Number(backlogResetSelected) +
       Number(farColorSelected) +
-      Number(compositionRuntimeSelected) <=
+      Number(compositionRuntimeSelected) +
+      Number(nativeBrowserApisSelected) <=
       1,
     'Focused installation selectors cannot be combined'
   );
@@ -2599,6 +2621,13 @@ export async function runChromeInstallation({
     assert.equal(installation, 'extension', 'Composition runtime requires the extension');
     assert.equal(headless, false, 'Composition runtime requires headed Edge');
     assert.deepEqual(liveUrls, [], 'Composition runtime cannot use public live URLs');
+  }
+  if (nativeBrowserApisSelected) {
+    assert.equal(focusedScenario, null, 'Native browser APIs cannot combine selectors');
+    assert.equal(liveObservation, null, 'Native browser APIs cannot use duration observation');
+    assert.equal(installation, 'extension', 'Native browser APIs require the extension');
+    assert.equal(headless, false, 'Native browser APIs require headed Chrome or Edge');
+    assert.deepEqual(liveUrls, [], 'Native browser APIs cannot use public live URLs');
   }
   if (translatorNativeSelected) {
     assert.equal(
@@ -2679,7 +2708,8 @@ export async function runChromeInstallation({
       translationWorkerSelected ||
       managerFifoSelected ||
       farColorSelected ||
-      compositionRuntimeSelected
+      compositionRuntimeSelected ||
+      nativeBrowserApisSelected
     ) {
       assert.equal(
         extensionUpgradeInput,
@@ -2807,6 +2837,22 @@ export async function runChromeInstallation({
         result.userscriptManager = await installUserscript(context, extensionId, root, output);
         result.installationMethod = 'real-manager-ui-import';
       }
+    }
+    if (nativeBrowserApisSelected) {
+      assert(extensionId, 'Native browser APIs require an installed extension ID');
+      result.videoPiP = await runVideoPiPFixture({
+        context,
+        root,
+        output,
+        extensionId,
+        nativeBrowserApis: true,
+      });
+      assert.equal(
+        result.videoPiP.status,
+        'passed',
+        'Installed Chromium native API fixture failed'
+      );
+      return result;
     }
     if (translatorNativeSelected) {
       assert(extensionId, 'Native Translator probe requires an installed extension ID');

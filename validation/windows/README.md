@@ -1216,6 +1216,22 @@ and the central bundle/result/collection/transport receipts together; Browser
 Mode regressions cover pre-abort, fetch/body, all retry waits, reason races and
 replay retirement.
 
+## Native browser API installation check (#435, #436)
+
+Place exactly `{"scenario":"native-browser-apis"}` in the ignored
+`validation/windows/inputs/native-browser-apis.json` before bundling a clean,
+committed candidate. Run the headed installed Edge or Chrome extension profile with
+`--browser msedge --mode desktop --installation extension` or
+`--browser chrome --mode desktop --installation extension`, without public URLs
+or a duration option. The selector is exclusive with other focused and upgrade
+inputs. It runs the maintained native PiP and DOM fallback fixture, plus actual
+settings Tab/Escape/backdrop input, tooltip capability observations, and
+Navigation API push/replace/same-URL readiness with History identity checks.
+The result does not establish installed Safari, live YouTube, or unavailable
+native PiP behavior. Preserve `installation-result.json` and the central
+bundle, collection, transport, and browser-version receipts; remove only the
+task-owned selector after the run.
+
 ## Composition runtime installation check (#431)
 
 Place exactly `{"scenario":"composition-runtime"}` in the ignored

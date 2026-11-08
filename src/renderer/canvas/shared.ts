@@ -217,9 +217,8 @@ export function getDisplayText(segments: readonly TextSegmentLike[]): string {
 /**
  * Split a string into grapheme clusters for safe per-character processing.
  *
- * Uses Intl.Segmenter when available so that ZWJ sequences, flag emoji,
- * and skin-tone modifiers stay intact.  Falls back to Array.from (code-point
- * iteration) on runtimes without Intl.Segmenter support.
+ * Uses Intl.Segmenter so ZWJ sequences, flags, modifiers, and combining
+ * marks retain their grapheme boundaries.
  */
 export function splitGraphemeClusters(text: string): string[] {
   return splitGraphemeClustersInternal(text);
@@ -267,9 +266,8 @@ export function measureEmojiAdvanceWidth(
 /**
  * Split a word that exceeds maxWidth into grapheme-cluster segments.
  *
- * Uses Intl.Segmenter (grapheme granularity) when available so that
- * multi-code-point sequences (ZWJ emoji, flags, skin tones) stay
- * together.  Falls back to code-point iteration on older runtimes.
+ * Uses Intl.Segmenter (grapheme granularity) so multi-code-point sequences
+ * (ZWJ emoji, flags, skin tones) stay together.
  * Used as a fallback when a single word is wider than the available width.
  */
 function wrapCharSegments(
@@ -719,27 +717,7 @@ export function strokeTextOutline(
 
 // ── Round rectangle ─────────────────────────────────────────────────────────
 
-/**
- * Feature-detect whether the context supports the native `roundRect()` API
- * (Canvas2D spec, Chrome 99+, Firefox 112+, Safari 16+).
- *
- * Checked once per unique context instance via WeakSet so that mixed
- * main-thread / worker paths each get correct detection without global state.
- */
-const _roundRectCapable = new WeakSet<object>();
-
-function hasRoundRect(ctx: AnyCanvasContext): boolean {
-  if (_roundRectCapable.has(ctx)) return true;
-  if (typeof (ctx as unknown as Record<string, unknown>).roundRect === 'function') {
-    _roundRectCapable.add(ctx);
-    return true;
-  }
-  return false;
-}
-
-/** Draw a rounded rectangle path (no fill/stroke — path only).
- *  Uses the native `roundRect()` when available, falls back to `arcTo`
- *  path construction on older browsers. */
+/** Draw a rounded rectangle path (no fill/stroke — path only). */
 export function drawRoundRect(
   ctx: AnyCanvasContext,
   x: number,
@@ -749,29 +727,7 @@ export function drawRoundRect(
   r: number
 ): void {
   ctx.beginPath();
-  if (hasRoundRect(ctx)) {
-    // Native path — single call replaces the 9 arcTo operations.
-    // roundRect() does NOT call beginPath() internally, so the caller
-    // (or this function) must do so — this is handled above.
-    (ctx as CanvasRenderingContext2D).roundRect(x, y, w, h, r);
-    // With native roundRect, the path is open by default and does NOT
-    // need closePath() for fill/stroke to work.  The arcTo path below
-    // calls closePath() explicitly for visual parity; for roundRect the
-    // implicit closure when filling/stroking is sufficient.
-    return;
-  }
-
-  // Legacy arcTo fallback (9 path operations)
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
+  ctx.roundRect(x, y, w, h, r);
 }
 
 /** Draw an identifiable sticker placeholder while its bitmap is pending or unavailable. */

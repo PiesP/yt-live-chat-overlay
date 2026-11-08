@@ -1088,7 +1088,7 @@ describe('renderRegularMessage mixed content layout', () => {
 
 describe('drawRoundRect', () => {
   it('calls beginPath + roundRect on native path', () => {
-    // Our mock has roundRect as a function — hasRoundRect returns true
+    // The supported Canvas path uses the native roundRect operation.
     const { ctx, state } = createMockContext();
     drawRoundRect(ctx, 10, 20, 100, 50, 8);
     expect(state.beginPathCalled).toBe(true);
@@ -1100,28 +1100,6 @@ describe('drawRoundRect', () => {
     const { ctx, state } = createMockContext();
     drawRoundRect(ctx, 10, 20, 100, 50, 8);
     expect(state.closePathCalled).toBe(false);
-  });
-
-  it('calls arcTo fallback when roundRect is not available', () => {
-    // Create a context WITHOUT roundRect to test arcTo fallback
-    const { ctx: ctxNoRoundRect, state } = createMockContext();
-    // Override roundRect to undefined to trigger arcTo fallback
-    delete (ctxNoRoundRect as unknown as Record<string, unknown>).roundRect;
-    drawRoundRect(ctxNoRoundRect, 10, 20, 100, 50, 8);
-    expect(state.beginPathCalled).toBe(true);
-    expect(state.arcToCalled).toBe(true);
-    expect(state.moveToCalled).toBe(true);
-    expect(state.lineToCalled).toBe(true);
-    expect(state.closePathCalled).toBe(true);
-    expect(ctxNoRoundRect.moveTo).toHaveBeenCalledWith(18, 20);
-    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(1, 102, 20);
-    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(1, 110, 20, 110, 28, 8);
-    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(2, 110, 62);
-    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(2, 110, 70, 102, 70, 8);
-    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(3, 18, 70);
-    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(3, 10, 70, 10, 62, 8);
-    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(4, 10, 28);
-    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(4, 10, 20, 18, 20, 8);
   });
 });
 

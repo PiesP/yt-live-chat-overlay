@@ -29,9 +29,8 @@ import { rendererLayout } from '@util/design-tokens';
 
 /**
  * Draw a path with only the LEFT corners rounded; RIGHT corners are sharp.
- * Follows the same beginPath/arcTo pattern as drawRoundRect but omits
- * right-side curves. Useful for accent bars and similar left-edge-only
- * decorative elements.
+ * Builds a path with arcTo for the left curves and straight right edges.
+ * Useful for accent bars and similar left-edge-only decorative elements.
  */
 export function drawLeftRoundedRect(
   ctx: CanvasRenderingContext2D,

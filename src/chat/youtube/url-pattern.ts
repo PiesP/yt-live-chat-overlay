@@ -1,44 +1,21 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-/**
- * YouTube URL pattern matching with URLPattern API and regex fallback.
- *
- * URLPattern is available in Chrome 120+, Firefox 132+, Safari 18.4+.
- * For older browsers (userscript environments), falls back to URL parsing.
- */
-
-declare const URLPattern: {
-  prototype: { test(url: string): boolean };
-  new (options: { hostname?: string; pathname?: string }): { test(url: string): boolean };
-};
-
-const hasURLPattern = typeof URLPattern !== 'undefined';
-
-const watchPattern = hasURLPattern
-  ? new URLPattern({ hostname: 'www.youtube.com', pathname: '/watch' })
-  : null;
-
-const livePattern = hasURLPattern
-  ? new URLPattern({ hostname: 'www.youtube.com', pathname: '/live/*' })
-  : null;
-
-export function isYouTubeWatch(url: string): boolean {
-  if (watchPattern) return watchPattern.test(url);
+/** Match complete YouTube URLs in browsers and supported Node toolchains. */
+function youtubePath(url: string): string | null {
   try {
-    const u = new URL(url);
-    return u.hostname === 'www.youtube.com' && u.pathname === '/watch';
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'www.youtube.com') return null;
+    return parsed.pathname;
   } catch {
-    return false;
+    return null;
   }
 }
 
+export function isYouTubeWatch(url: string): boolean {
+  return youtubePath(url) === '/watch';
+}
+
 export function isYouTubeLive(url: string): boolean {
-  if (livePattern) return livePattern.test(url);
-  try {
-    const u = new URL(url);
-    return u.hostname === 'www.youtube.com' && u.pathname.startsWith('/live/');
-  } catch {
-    return false;
-  }
+  return youtubePath(url)?.startsWith('/live/') === true;
 }

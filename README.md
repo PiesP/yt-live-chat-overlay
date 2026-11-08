@@ -76,21 +76,26 @@ spacing rules.
 
 | Distribution | Support |
 | --- | --- |
-| Userscript | Current desktop browsers supported by Tampermonkey or Violentmonkey |
-| Chromium extension | Chrome/Chromium 116+ developer mode |
-| Firefox extension | Firefox 140+ with built-in data consent; temporary developer installation |
+| Userscript | Latest stable desktop Chrome, Edge, Firefox, and Safari where Tampermonkey or Violentmonkey supports the browser |
+| Chromium extension | Latest stable Chrome and Edge, developer mode; current compatible Chromium browsers such as Brave |
+| Firefox extension | Latest stable Firefox with built-in data consent; temporary developer installation |
 
-Translation support is detected at runtime and is independent of these browser
-floors. Translation requires the browser's built-in Translator API and support
+Manifest minimum versions are installation guards, not a promise to support
+older releases. The Chromium minimum remains the API-compatible installation
+floor; current-stable browsers are the supported runtime target.
+
+Translation support is detected at runtime and is independent of this browser
+policy. Translation requires the browser's built-in Translator API and support
 for the selected language pair. Automatic source-language detection uses the
 Language Detector API when available and otherwise falls back to in-browser
 Unicode heuristics. The browser may download a required language model or
 language pack. Without Translator, the overlay continues to work without
 translation.
 
-The Firefox extension requires the browser's built-in data consent introduced in
-Firefox 140. See [Privacy](./PRIVACY.md#firefox-data-consent) for the declared data types.
-Use a currently supported Firefox release for normal use and release validation.
+The Firefox extension requires Firefox 147 or later for native navigation
+observation. Its built-in data consent was introduced in Firefox 140; see
+[Privacy](./PRIVACY.md#firefox-data-consent) for the declared data types.
+Use the latest stable Firefox release for normal use and release validation.
 
 ## Privacy and security
 

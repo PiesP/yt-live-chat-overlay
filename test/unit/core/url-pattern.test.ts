@@ -12,6 +12,9 @@ describe('isYouTubeWatch', () => {
 
   it('returns true for youtube.com/watch with query params', () => {
     expect(isYouTubeWatch('https://www.youtube.com/watch?v=abc&t=10s')).toBe(true);
+    expect(isYouTubeWatch('https://www.youtube.com/watch?v=abc#chat')).toBe(true);
+    expect(isYouTubeWatch('http://www.youtube.com:8080/watch?v=abc')).toBe(true);
+    expect(isYouTubeWatch('ftp://www.youtube.com/watch')).toBe(true);
   });
 
   it('returns false for youtube.com/live', () => {
@@ -21,6 +24,8 @@ describe('isYouTubeWatch', () => {
 
   it('returns false for other domains', () => {
     expect(isYouTubeWatch('https://example.com/watch?v=abc')).toBe(false);
+    expect(isYouTubeWatch('https://www.youtube.com.evil.example/watch')).toBe(false);
+    expect(isYouTubeWatch('https://youtube.com/watch')).toBe(false);
   });
 
   it('returns false for youtube.com other paths', () => {
@@ -31,6 +36,8 @@ describe('isYouTubeWatch', () => {
   it('returns false for invalid URLs', () => {
     expect(isYouTubeWatch('not a url')).toBe(false);
     expect(isYouTubeWatch('')).toBe(false);
+    expect(isYouTubeWatch('/watch?v=abc')).toBe(false);
+    expect(isYouTubeWatch('//www.youtube.com/watch?v=abc')).toBe(false);
   });
 
   it('returns false for www.youtube.com with no path', () => {
@@ -45,13 +52,16 @@ describe('isYouTubeLive', () => {
 
   it('returns true for youtube.com/live with trailing segments', () => {
     expect(isYouTubeLive('https://www.youtube.com/live/channel-name/test')).toBe(true);
+    expect(isYouTubeLive('https://www.youtube.com/live/channel-name?feature=share#chat')).toBe(
+      true
+    );
   });
 
   it('returns false for youtube.com/watch', () => {
     expect(isYouTubeLive('https://www.youtube.com/watch?v=abc')).toBe(false);
   });
 
-  it('returns false for youtube.com/live with no channel', () => {
+  it('accepts the /live/ prefix even without a following segment', () => {
     expect(isYouTubeLive('https://www.youtube.com/live/')).toBe(true);
   });
 
@@ -65,5 +75,7 @@ describe('isYouTubeLive', () => {
 
   it('returns false for invalid URLs', () => {
     expect(isYouTubeLive('not a url')).toBe(false);
+    expect(isYouTubeLive('/live/channel')).toBe(false);
+    expect(isYouTubeLive('//www.youtube.com/live/channel')).toBe(false);
   });
 });

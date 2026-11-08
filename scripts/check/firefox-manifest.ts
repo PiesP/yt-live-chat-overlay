@@ -34,8 +34,16 @@ export function assertFirefoxDataConsent(manifest: unknown, artifact: string): v
       `${artifact} must declare its Gecko identity and Firefox 140+ built-in consent.`
     );
   }
+  if (!minimumAtLeast(gecko.strict_min_version, 147)) {
+    throw new Error(`${artifact} must require Firefox 147+ for Navigation.currententrychange.`);
+  }
   if (!minimumAtLeast(record(settings?.gecko_android)?.strict_min_version, 142)) {
     throw new Error(`${artifact} must require Firefox for Android 142+ built-in consent.`);
+  }
+  if (!minimumAtLeast(record(settings?.gecko_android)?.strict_min_version, 147)) {
+    throw new Error(
+      `${artifact} must require Firefox for Android 147+ for Navigation.currententrychange.`
+    );
   }
 
   const permissions = record(gecko.data_collection_permissions);

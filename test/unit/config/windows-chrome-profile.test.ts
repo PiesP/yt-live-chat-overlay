@@ -151,6 +151,53 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('admits only the exact native browser selector before an installed Chromium launch', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    const selector = join(inputDir, 'native-browser-apis.json');
+    expect(await chromeInstallModule.readNativeBrowserApisSelector(paths.root)).toBe(false);
+    await writeFile(selector, JSON.stringify({ scenario: 'native-browser-apis', extra: true }));
+    await expect(chromeInstallModule.readNativeBrowserApisSelector(paths.root)).rejects.toThrow();
+    await writeFile(selector, JSON.stringify({ scenario: 'native-browser-apis' }));
+    expect(await chromeInstallModule.readNativeBrowserApisSelector(paths.root)).toBe(true);
+    await writeFile(
+      join(inputDir, 'composition-runtime.json'),
+      '{"scenario":"composition-runtime"}'
+    );
+    await expect(chromeInstallModule.readNativeBrowserApisSelector(paths.root)).rejects.toThrow(
+      'must be exclusive'
+    );
+  });
+
+  it('runs the native browser API selector through headed installed Chrome and Edge', async () => {
+    const paths = await fixture();
+    const inputDir = join(paths.root, 'validation/windows/inputs');
+    await mkdir(inputDir, { recursive: true });
+    await writeFile(
+      join(inputDir, 'native-browser-apis.json'),
+      '{"scenario":"native-browser-apis"}'
+    );
+
+    const launchError = new Error('installed browser launch reached');
+    const launchPersistentContext = vi.fn().mockRejectedValue(launchError);
+    for (const browserName of ['chrome', 'msedge'] as const) {
+      await expect(
+        installProfileModule.run({
+          chromium: { launchPersistentContext } as unknown as BrowserType,
+          root: paths.root,
+          output: paths.output,
+          browserName,
+          installation: 'extension',
+        })
+      ).rejects.toBe(launchError);
+      expect(launchPersistentContext).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.objectContaining({ channel: browserName, headless: false })
+      );
+    }
+  });
+
   it('admits only the exact composition selector and uses the ordinary installed Edge profile', async () => {
     const paths = await fixture();
     const inputDir = join(paths.root, 'validation/windows/inputs');
