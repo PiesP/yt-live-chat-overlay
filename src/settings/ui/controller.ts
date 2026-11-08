@@ -248,8 +248,8 @@ export class SettingsUi {
   close(): void {
     if (!this.modal) return;
 
-    // Guard against re-entry from the native dialog's 'close' event
-    // (fires synchronously inside this.modal.close()).
+    // Guard against re-entry while our close path is active. The native
+    // close event can arrive later, and suppressNextNativeClose owns it.
     if (this.closing) return;
     this.closing = true;
 
@@ -706,17 +706,26 @@ export class SettingsUi {
 
     if (!SettingsUi.supportsDialogLightDismiss) {
       const dialog = this.modal;
-      dialog.addEventListener('click', (event) => {
-        if (event.target !== dialog) return;
+      const isOutsideDialog = (event: MouseEvent | PointerEvent): boolean => {
         const rect = dialog.getBoundingClientRect();
-        if (
+        return (
           event.clientX < rect.left ||
           event.clientX >= rect.right ||
           event.clientY < rect.top ||
           event.clientY >= rect.bottom
-        ) {
-          this.close();
-        }
+        );
+      };
+      let backdropPointerDown = false;
+      dialog.addEventListener('pointerdown', (event) => {
+        backdropPointerDown = event.target === dialog && isOutsideDialog(event);
+      });
+      dialog.addEventListener('pointercancel', () => {
+        backdropPointerDown = false;
+      });
+      dialog.addEventListener('click', (event) => {
+        const dismiss = backdropPointerDown && event.target === dialog && isOutsideDialog(event);
+        backdropPointerDown = false;
+        if (dismiss) this.close();
       });
     }
 

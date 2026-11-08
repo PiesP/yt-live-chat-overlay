@@ -255,8 +255,19 @@ describe('SettingsUi', () => {
         top: 100,
         bottom: 300,
       } as DOMRect);
+      modal?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 150, clientY: 150 })
+      );
       modal?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 150, clientY: 150 }));
       expect(modal?.open).toBe(true);
+      modal?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 150, clientY: 150 })
+      );
+      modal?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 50, clientY: 150 }));
+      expect(modal?.open).toBe(true);
+      modal?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 150 })
+      );
       modal?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 50, clientY: 150 }));
       expect(modal?.open).toBe(false);
       expect(onPersist).toHaveBeenCalledTimes(1);
