@@ -16,6 +16,7 @@ import {
   motionPlansCollide,
 } from '@renderer/layout/message-schedule';
 import { getRowSlotCount } from '@renderer/layout/row-geometry';
+import { clearTextMeasurementCaches, measureTextWidth } from '@renderer/text-measure';
 import { RenderWorkerManager, type WorkerRecoveryMessage } from '@renderer/worker/manager';
 import type { WorkerStatsMessage } from '@renderer/worker/types';
 import {
@@ -23,6 +24,7 @@ import {
   normalizeStoredSettings,
   shouldResetRendererForSettingsChange,
 } from '@settings/schema';
+import { SettingsUiForm } from '@settings/ui/form';
 import { LanguageDetectorService } from '@translation/language-detector';
 import type { MessageActivator } from '@util/message-activator';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -1035,6 +1037,65 @@ describe('CanvasRenderer', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
     expect(() => renderer.destroy()).not.toThrow();
+  });
+
+  it('stops reporting measurements after destroy while preserving a replacement renderer', () => {
+    const first = new CanvasRenderer(overlay, makeSettings());
+    const firstReport = vi.spyOn(first.observability, 'recordTextMeasure');
+    const second = new CanvasRenderer(overlay, makeSettings());
+    const secondReport = vi.spyOn(second.observability, 'recordTextMeasure');
+    const settings = makeSettings();
+    const form = new SettingsUiForm(() => settings);
+    const modal = document.createElement('dialog');
+
+    try {
+      clearTextMeasurementCaches();
+      measureTextWidth('live replacement preview', '16px sans-serif');
+      expect(firstReport).not.toHaveBeenCalled();
+      expect(secondReport).toHaveBeenCalledOnce();
+
+      first.destroy();
+      clearTextMeasurementCaches();
+      measureTextWidth('preview after old renderer destroy', '16px sans-serif');
+      expect(firstReport).not.toHaveBeenCalled();
+      expect(secondReport).toHaveBeenCalledTimes(2);
+
+      second.destroy();
+      second.destroy();
+      clearTextMeasurementCaches();
+      modal.append(...form.createModalContent());
+      document.body.appendChild(modal);
+      form.setModal(modal);
+      form.populateForm(settings);
+      expect(modal.querySelector('.yt-chat-overlay-settings-font-preview canvas')).not.toBeNull();
+      expect(firstReport).not.toHaveBeenCalled();
+      expect(secondReport).toHaveBeenCalledTimes(2);
+    } finally {
+      form.destroy();
+      modal.remove();
+      second.destroy();
+      first.destroy();
+      clearTextMeasurementCaches();
+    }
+  });
+
+  it('keeps the live observer when replacement construction fails', () => {
+    const live = new CanvasRenderer(overlay, makeSettings());
+    const liveReport = vi.spyOn(live.observability, 'recordTextMeasure');
+    const getDimensions = vi.spyOn(overlay, 'getDimensions');
+    getDimensions.mockImplementationOnce(() => {
+      throw new Error('dimensions unavailable');
+    });
+
+    try {
+      expect(() => new CanvasRenderer(overlay, makeSettings())).toThrow('dimensions unavailable');
+      clearTextMeasurementCaches();
+      measureTextWidth('preview after failed replacement', '16px sans-serif');
+      expect(liveReport).toHaveBeenCalledOnce();
+    } finally {
+      live.destroy();
+      clearTextMeasurementCaches();
+    }
   });
 
   it('addMessage is a function', () => {

@@ -41,6 +41,10 @@ releases it at destruction. CanvasRenderer directly orders concrete rendering,
 settings, Worker recovery and resource teardown; its collaborators do not
 receive a mutable renderer context or replacement hook table. Worker DTOs and
 transfer ownership remain separate from these main-realm collaborators.
+The main-realm text-measurement timing observer is registered after renderer
+construction and released on renderer destruction; an older renderer's disposer
+cannot clear a newer renderer's registration. Settings preview shares the
+measurement function but does not own this timing observer.
 The Windows observer admits the exact emitted composed class and required own
 methods, rejecting missing, ambiguous or unsupported output.
 

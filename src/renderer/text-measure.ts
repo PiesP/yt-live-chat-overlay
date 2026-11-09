@@ -22,11 +22,16 @@ let measureCtx: CanvasRenderingContext2D | null | false = null;
 let textMeasureCallback: ((ms: number) => void) | null = null;
 
 /**
- * Install a callback to receive text-measurement timing data.
- * Used by the observability layer to track text measurement cost per frame.
+ * Register a callback to receive text-measurement timing data.
+ * The disposer clears only this registration, even if another renderer
+ * registered the same callback afterward.
  */
-export function setTextMeasureCallback(cb: ((ms: number) => void) | null): void {
-  textMeasureCallback = cb;
+export function registerTextMeasureCallback(cb: (ms: number) => void): () => void {
+  const registration = (ms: number): void => cb(ms);
+  textMeasureCallback = registration;
+  return () => {
+    if (textMeasureCallback === registration) textMeasureCallback = null;
+  };
 }
 
 /** Two-level LRU cache for measureTextWidth. Outer key: font, inner key: direction + text. */
@@ -174,7 +179,7 @@ export function clearTextMeasurementCaches(): void {
  * Reserves both glyph overshoot (common with italic and CJK fonts) and the
  * typographic advance needed before an adjacent segment starts.
  *
- * Results are cached in an LRU cache (max 500 entries) for performance
+ * Results are cached in an LRU cache (max 1000 entries) for performance
  * in hot paths like the Canvas2D render loop.
  */
 /** Width of the space character ' ' for each font and Canvas direction (cached). */
