@@ -44,6 +44,7 @@ import {
   prepareManagerFifoBackground,
   readManagerIngressFifoSelector,
   planPaidCaptureWait,
+  planVacancyLateServiceObservation,
   planRoleVisibilityWait,
   planVisibleItemWait,
   presentationItem,
@@ -615,6 +616,18 @@ describe('Windows comment display matrix contract', () => {
     expect(exhausted.budgetLimited).toBe(true);
   });
 
+  it('budgets a future ordinary draw within the overload backend deadline', () => {
+    const reservedFuture = planRoleVisibilityWait(
+      1794263124310.7,
+      1794263123847.3,
+      58_000,
+      120_000
+    );
+    expect(reservedFuture.plannedDelayMs).toBeCloseTo(463.4, 1);
+    expect(reservedFuture.timeoutMs).toBe(5464);
+    expect(reservedFuture.budgetLimited).toBe(false);
+  });
+
   it('refreshes capped Worker samples while waiting for actual renderer ingress', async () => {
     const id = 'WINDOWS380_LOAD_OVERFLOW_NEW_3';
     let now = 0;
@@ -1076,6 +1089,28 @@ describe('Windows comment display matrix contract', () => {
     expect(
       classifyVacancySeedOrdinary({ ...evidence, firstEntry: { [id]: Number.NaN } }, id, true)
     ).toBeNull();
+  });
+
+  it('keeps a future reserved late ordinary under observation until its actual draw', () => {
+    const id = 'WINDOWS380_LOAD_VACANCY_LATE_ORDINARY';
+    const before = {
+      firstEntry: {} as Record<string, number>,
+      activeNow: [{ id, startAtEpochMs: 1794263124310.7 }],
+      frame: { startedAtEpochMs: 1794263123847.3 },
+    };
+    const pending = planVacancyLateServiceObservation(before, id, 58_000);
+    expect(pending.alreadyVisible).toBe(false);
+    expect(pending.wait?.timeoutMs).toBe(5464);
+    expect(
+      planVacancyLateServiceObservation(
+        { ...before, firstEntry: { [id]: 1794263124330.7 } },
+        id,
+        58_500
+      )
+    ).toEqual({ alreadyVisible: true, wait: null });
+    expect(
+      planVacancyLateServiceObservation({ ...before, activeNow: [] }, id, 119_000).wait?.timeoutMs
+    ).toBe(0);
   });
 
   it('compares measured paid row budgets, border alpha, and actual draw without promoting reservations', () => {
