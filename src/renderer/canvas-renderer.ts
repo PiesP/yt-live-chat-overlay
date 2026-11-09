@@ -536,10 +536,8 @@ export class CanvasRenderer implements RuntimeRenderer {
       this.statusActionButton = statusActionButton;
     }
 
-    // Note: ImageFetchManager cleanup is handled by destroyResources(), which is
-    // called by RuntimeManager.disposeSession() before a new renderer is
-    // created.  The old guard here never fired because the field is only
-    // assigned later in this constructor (line 311).
+    // This renderer retires ImageFetchManager through destroyResources(),
+    // called by its destroy() path.
 
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.

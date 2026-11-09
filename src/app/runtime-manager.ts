@@ -727,8 +727,9 @@ export class RuntimeManager {
 
   /**
    * Retire the chat source and backlog before reconciliation starts a new
-   * session. Overlay and renderer references survive only until startSession
-   * destroys and replaces them; drained backlog is re-injected there.
+   * session. Normal reconciliation replaces the remaining overlay and renderer
+   * in startSession; full session disposal can retire them sooner. Drained
+   * backlog is retained for the replacement session.
    */
   private restartChatSourceSoft(): void {
     this.sessionGeneration += 1;
