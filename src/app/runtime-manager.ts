@@ -758,6 +758,7 @@ export class RuntimeManager {
 
   private async startSession(): Promise<ChatSourceStartStatus> {
     const signal = this.abortController.signal;
+    const generation = this.sessionGeneration;
     const settings = this.settings as OverlaySettings;
 
     try {
@@ -832,7 +833,10 @@ export class RuntimeManager {
       return 'started';
     } catch (error: unknown) {
       // Ensure watchdog is stopped if startup failed after startChatWatchdog()
-      this.stopChatWatchdog();
+      // A retired start cannot stop the watchdog of its replacement session.
+      if (this.sessionGeneration === generation && this.abortController.signal === signal) {
+        this.stopChatWatchdog();
+      }
       if (isAbortError(error)) {
         return 'retryable';
       }
@@ -988,10 +992,22 @@ export class RuntimeManager {
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
+    const generation = this.sessionGeneration;
     const { chatSource, bootstrapResult } = await createChatSource(
       () => this.getSessionSettings(),
       signal
     );
+    // Bootstrap may have settled while this session was live, then its await
+    // continuation can run after destroy, navigation, or a chat-only restart.
+    // The new source has not started yet, so no retirement is needed here.
+    throwIfAborted(signal);
+    if (
+      this.abortController.signal !== signal ||
+      this.sessionGeneration !== generation ||
+      this.isTerminalState
+    ) {
+      return 'retryable';
+    }
     this.chatSource = chatSource;
 
     // Notify renderer of replay mode so it disables burst-driven speed
@@ -1047,13 +1063,22 @@ export class RuntimeManager {
 
     // ── Message bus: decouples ChatSource (producer) from Renderer (consumer) ──
     this.messageBus?.destroy();
-    this.messageBus = new BatchMessageBus<ChatMessage>();
-    this.messageBus.subscribe((msgs) => this.routeMessages(msgs));
+    const messageBus = new BatchMessageBus<ChatMessage>();
+    this.messageBus = messageBus;
+    messageBus.subscribe((msgs) => this.routeMessages(msgs));
 
     return chatSource.start((messages, _isInitialSeed) => {
+      if (
+        signal.aborted ||
+        this.sessionGeneration !== generation ||
+        this.chatSource !== chatSource ||
+        this.messageBus !== messageBus
+      ) {
+        return;
+      }
       const msgs = Array.isArray(messages) ? messages : [messages];
-      if (this.messageBus) this.messageBus.publish(msgs);
-    });
+      messageBus.publish(msgs);
+    }, signal);
   }
 
   /**
