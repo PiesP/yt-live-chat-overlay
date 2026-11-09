@@ -306,9 +306,11 @@ export function planPaidCaptureWait(
 export function planRoleVisibilityWait(
   plannedStartAtEpochMs: number | null,
   observedFrameAtEpochMs: number | null,
-  elapsedBackendMs: number
+  elapsedBackendMs: number,
+  maxBackendMs = MAX_RUN_MS
 ): RoleWaitBudget {
   assert(Number.isFinite(elapsedBackendMs) && elapsedBackendMs >= 0);
+  assert(Number.isFinite(maxBackendMs) && maxBackendMs > 0);
   const plannedDelayMs =
     plannedStartAtEpochMs !== null &&
     observedFrameAtEpochMs !== null &&
@@ -317,7 +319,7 @@ export function planRoleVisibilityWait(
       ? Math.max(0, plannedStartAtEpochMs - observedFrameAtEpochMs)
       : 0;
   const requestedMs = ROLE_BASE_WAIT_MS + Math.ceil(plannedDelayMs);
-  const remainingMs = Math.max(0, MAX_RUN_MS - elapsedBackendMs - MATRIX_CLEANUP_RESERVE_MS);
+  const remainingMs = Math.max(0, maxBackendMs - elapsedBackendMs - MATRIX_CLEANUP_RESERVE_MS);
   return {
     plannedStartAtEpochMs,
     observedFrameAtEpochMs,
@@ -1902,6 +1904,28 @@ export function classifyVacancySeedOrdinary(
     endAt > startAt
     ? 'ordinary-reserved-future'
     : null;
+}
+
+/** A future reservation is not late ordinary service until the probe records a draw. */
+export function planVacancyLateServiceObservation(
+  snapshot: {
+    firstEntry: Record<string, number>;
+    activeNow: Array<{ id: string; startAtEpochMs?: number | null }>;
+    frame: { startedAtEpochMs: number } | null;
+  },
+  id: string,
+  elapsedBackendMs: number
+): { alreadyVisible: boolean; wait: RoleWaitBudget | null } {
+  if (Number.isFinite(snapshot.firstEntry[id])) return { alreadyVisible: true, wait: null };
+  return {
+    alreadyVisible: false,
+    wait: planRoleVisibilityWait(
+      snapshot.activeNow.find((entry) => entry.id === id)?.startAtEpochMs ?? null,
+      snapshot.frame?.startedAtEpochMs ?? null,
+      elapsedBackendMs,
+      MAX_OVERLOAD_MS
+    ),
+  };
 }
 
 async function waitForVisible(
@@ -4276,10 +4300,29 @@ async function runOverloadBackend(options: {
         await waitForIngress(page, backend, lateId);
         await page.waitForTimeout(550);
         const afterA = await observe('late-ordinary-after-paid');
+        const afterATrace = snapshots.at(-1)?.trace;
         await send('vacancyMoreB');
         await page.waitForTimeout(3000);
-        const end = await observe('recurring-vacancy');
-        const afterATrace = snapshots.at(-2)?.trace;
+        let end = await observe('recurring-vacancy');
+        const servicePlan = planVacancyLateServiceObservation(end, lateId, Date.now() - startedAt);
+        let lateWait: RoleWaitObservation | null = null;
+        if (servicePlan.wait) {
+          lateWait = {
+            ...servicePlan.wait,
+            startedAtEpochMs: Date.now(),
+            outcome: servicePlan.wait.timeoutMs > 0 ? 'failed' : 'budget-exhausted',
+          };
+          currentVacancyService = { seedOutcome, lateWait };
+          failureStage = `${name}:late-ordinary-visible`;
+          assert(lateWait.timeoutMs > 0, 'No overload budget remains for late ordinary visibility');
+          await waitForVisible(page, backend, lateId, undefined, lateWait.timeoutMs);
+          end = await observe('late-ordinary-first-visible');
+          assert(
+            Number.isFinite(end.firstEntry[lateId]),
+            'Late ordinary has no source-recorded first visible draw after the wait'
+          );
+          lateWait.outcome = 'visible';
+        }
         const endTrace = snapshots.at(-1)?.trace;
         const lateAfterA = afterATrace?.records.find((record) => record.id === lateId);
         const lateEnd = endTrace?.records.find((record) => record.id === lateId);
@@ -4303,6 +4346,7 @@ async function runOverloadBackend(options: {
           lateEnd: lateEnd ?? null,
           paidReservations: paidReservations ?? [],
           paidService: paidService ?? [],
+          lateWait,
           afterAFrameId: afterA.frame?.frameId ?? null,
           endFrameId: end.frame?.frameId ?? null,
         };

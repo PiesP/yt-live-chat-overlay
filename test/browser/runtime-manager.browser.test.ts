@@ -3,6 +3,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { Overlay } from '@app/overlay';
 import { RuntimeManager } from '@app/runtime-manager';
+import { LiveChatSource } from '@chat/source-live';
 import { ReplayChatSource } from '@chat/source-replay';
 import * as youtubeApi from '@chat/youtube/api';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
@@ -132,6 +133,33 @@ describe('RuntimeManager', () => {
     getSettings: () => overrides.settings ?? makeDefaults(),
     isValidPage: () => overrides.valid ?? true,
   });
+
+  const readyBootstrap = (isReplay: boolean) => ({
+    status: 'ready' as const,
+    data: {
+      videoId: 'video',
+      isReplay,
+      clientContext: {},
+      clientNameHeader: 'WEB',
+      ytcfg: {},
+      initialContinuation: { continuation: 'initial' },
+    },
+  });
+
+  const installPlayer = (): HTMLElement => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    player.style.width = '640px';
+    player.style.height = '360px';
+    Object.defineProperty(player, 'offsetWidth', { configurable: true, value: 640 });
+    Object.defineProperty(player, 'offsetHeight', { configurable: true, value: 360 });
+    document.body.append(player);
+    vi.spyOn(RenderWorkerManager.prototype, 'init').mockReturnValue({
+      started: false,
+      canvasTransferred: false,
+    });
+    return player;
+  };
 
   it('constructs without throwing', () => {
     expect(() => new RuntimeManager(createOpts())).not.toThrow();
@@ -382,10 +410,11 @@ describe('RuntimeManager', () => {
       } | null;
       chatSource: ReplayChatSource | null;
       sessionGeneration: number;
+      abortController: AbortController;
       startChatSource: (signal: AbortSignal) => Promise<string>;
     };
     internals.renderer = { setReplayMode: vi.fn(), observability };
-    const controller = new AbortController();
+    const controller = internals.abortController;
     expect(await internals.startChatSource(controller.signal)).toBe('started');
     const source = internals.chatSource;
     expect(source).toBeInstanceOf(ReplayChatSource);
@@ -421,6 +450,250 @@ describe('RuntimeManager', () => {
       totalDropped: 2,
       dropRate: 0.5,
     });
+  });
+
+  it('does not adopt a source after bootstrap completes and the runtime is destroyed', async () => {
+    vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+    const bootstrap = readyBootstrap(false);
+    const player = installPlayer();
+    const sourceStart = vi.spyOn(LiveChatSource.prototype, 'start');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            continuationContents: {
+              liveChatContinuation: { actions: [], continuations: [] },
+            },
+          })
+        )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const rm = new RuntimeManager(createOpts());
+    vi.mocked(youtubeApi.bootstrapChatSession).mockImplementationOnce((signal) => {
+      expect(signal?.aborted).toBe(false);
+      return Promise.resolve(bootstrap).then((result) => {
+        // Bootstrap legitimately settled while the signal was live. Retirement
+        // occurs before createChatSource's await continuation can publish it.
+        expect(signal?.aborted).toBe(false);
+        queueMicrotask(() => rm.destroy());
+        return result;
+      });
+    });
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      chatSource: LiveChatSource | null;
+      messageBus: { destroy(): void } | null;
+      fetchInterceptorUnsubscribe: (() => void) | null;
+      domWatcherUnsubscribe: (() => void) | null;
+    };
+    try {
+      await rm.start();
+      rm.destroy();
+
+      expect(internals.state).toBe('destroyed');
+      expect(internals.targetUrl).toBeNull();
+      expect(internals.chatSource).toBeNull();
+      expect(internals.messageBus).toBeNull();
+      expect(internals.fetchInterceptorUnsubscribe).toBeNull();
+      expect(internals.domWatcherUnsubscribe).toBeNull();
+      expect(sourceStart).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(document.querySelector('#yt-live-chat-overlay')).toBeNull();
+    } finally {
+      // Retire baseline late owners too, so a failing regression cannot affect
+      // subsequent tests while demonstrating the original leak.
+      internals.chatSource?.stop();
+      internals.messageBus?.destroy();
+      internals.fetchInterceptorUnsubscribe?.();
+      internals.domWatcherUnsubscribe?.();
+      rm.destroy();
+      player.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the replacement session after a stale bootstrap completes during manual restart', async () => {
+    vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+    const bootstrap = readyBootstrap(true);
+    const player = installPlayer();
+    const sourceStart = vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
+    const rm = new RuntimeManager(createOpts());
+    let restartPromise: Promise<void> | undefined;
+    vi.mocked(youtubeApi.bootstrapChatSession)
+      .mockImplementationOnce((signal) =>
+        Promise.resolve(bootstrap).then((result) => {
+          expect(signal?.aborted).toBe(false);
+          queueMicrotask(() => {
+            restartPromise = rm.restartSession();
+          });
+          return result;
+        })
+      )
+      .mockResolvedValueOnce(bootstrap);
+    const internals = rm as unknown as {
+      state: string;
+      chatSource: ReplayChatSource | null;
+      messageBus: object | null;
+    };
+    try {
+      await rm.start();
+      expect(restartPromise).toBeDefined();
+      await restartPromise;
+
+      expect(internals.state).toBe('active');
+      expect(internals.chatSource).toBeInstanceOf(ReplayChatSource);
+      expect(internals.messageBus).not.toBeNull();
+      expect(sourceStart).toHaveBeenCalledTimes(1);
+      expect(youtubeApi.bootstrapChatSession).toHaveBeenCalledTimes(2);
+      expect(document.querySelector('#yt-live-chat-overlay')).not.toBeNull();
+    } finally {
+      rm.destroy();
+      player.remove();
+    }
+  });
+
+  it('aborts the live seed through the runtime signal during source start', async () => {
+    vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+    const bootstrap = readyBootstrap(false);
+    const player = installPlayer();
+    const sourceStart = vi.spyOn(LiveChatSource.prototype, 'start');
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          );
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce(bootstrap);
+    const rm = new RuntimeManager(createOpts());
+    try {
+      const start = rm.start();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const runtimeSignal = vi.mocked(youtubeApi.bootstrapChatSession).mock.calls.at(-1)?.[0];
+      expect(sourceStart.mock.calls.at(-1)?.[1]).toBe(runtimeSignal);
+      expect(runtimeSignal?.aborted).toBe(false);
+
+      rm.destroy();
+      await start;
+      expect(runtimeSignal?.aborted).toBe(true);
+      expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      rm.destroy();
+      player.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['late success', 'late rejection'] as const)(
+    'does not let a retired chat-only bootstrap %s change a newer session',
+    async (lateResult) => {
+      vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+      const bootstrap = readyBootstrap(true);
+      const player = installPlayer();
+      const sourceStart = vi
+        .spyOn(ReplayChatSource.prototype, 'start')
+        .mockResolvedValue('started');
+      const sourceStop = vi.spyOn(ReplayChatSource.prototype, 'stop');
+      const rm = new RuntimeManager(createOpts());
+      let resolveOld!: (value: typeof bootstrap) => void;
+      let rejectOld!: (reason: unknown) => void;
+      let oldSignal: AbortSignal | undefined;
+      vi.mocked(youtubeApi.bootstrapChatSession)
+        .mockResolvedValueOnce(bootstrap)
+        .mockImplementationOnce((signal) => {
+          oldSignal = signal;
+          return new Promise<typeof bootstrap>((resolve, reject) => {
+            resolveOld = resolve;
+            rejectOld = reject;
+          });
+        })
+        .mockResolvedValueOnce(bootstrap);
+      const internals = rm as unknown as {
+        state: string;
+        chatSource: ReplayChatSource | null;
+        messageBus: object | null;
+        renderer: CanvasRenderer | null;
+        chatWatchdogTimer: ReturnType<typeof setInterval> | null;
+        chatRestartPromise: Promise<unknown> | null;
+        requestManagedRestart: (reason: 'watchdog') => void;
+      };
+      try {
+        await rm.start();
+        const original = internals.chatSource;
+        const renderer = internals.renderer;
+        if (!renderer || !original) throw new Error('Expected started runtime');
+        vi.spyOn(renderer, 'isWorkerAlive').mockReturnValue(true);
+        vi.spyOn(renderer, 'getQueueLength').mockReturnValue(0);
+
+        vi.useFakeTimers();
+        internals.requestManagedRestart('watchdog');
+        await vi.advanceTimersByTimeAsync(5_000);
+        const oldRestart = internals.chatRestartPromise;
+        expect(oldRestart).not.toBeNull();
+        expect(oldSignal?.aborted).toBe(false);
+
+        await rm.restartSession();
+        expect(internals.state).toBe('active');
+        const replacement = internals.chatSource;
+        const replacementBus = internals.messageBus;
+        const replacementWatchdog = internals.chatWatchdogTimer;
+        expect(replacement).toBeInstanceOf(ReplayChatSource);
+        expect(replacement).not.toBe(original);
+        expect(replacementBus).not.toBeNull();
+        expect(replacementWatchdog).not.toBeNull();
+        expect(oldSignal?.aborted).toBe(true);
+
+        if (lateResult === 'late success') resolveOld(bootstrap);
+        else rejectOld(new TypeError('old provider failed'));
+        if (lateResult === 'late success') {
+          await expect(oldRestart).rejects.toMatchObject({ name: 'AbortError' });
+        } else {
+          await expect(oldRestart).rejects.toBeInstanceOf(TypeError);
+        }
+        expect(internals.state).toBe('active');
+        expect(internals.chatSource).toBe(replacement);
+        expect(internals.messageBus).toBe(replacementBus);
+        expect(internals.chatWatchdogTimer).toBe(replacementWatchdog);
+        expect(sourceStart).toHaveBeenCalledTimes(2);
+        expect(sourceStop).toHaveBeenCalledTimes(1);
+        expect(youtubeApi.bootstrapChatSession).toHaveBeenCalledTimes(3);
+        expect(document.querySelector('#yt-live-chat-overlay')).not.toBeNull();
+      } finally {
+        rm.destroy();
+        player.remove();
+      }
+    }
+  );
+
+  it('does not publish a source when bootstrap rejects', async () => {
+    vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+    const player = installPlayer();
+    const sourceStart = vi.spyOn(LiveChatSource.prototype, 'start');
+    vi.mocked(youtubeApi.bootstrapChatSession).mockRejectedValueOnce(
+      new TypeError('provider failed')
+    );
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      chatSource: LiveChatSource | null;
+      messageBus: object | null;
+      fetchInterceptorUnsubscribe: (() => void) | null;
+    };
+    try {
+      await rm.start();
+      expect(internals.chatSource).toBeNull();
+      expect(internals.messageBus).toBeNull();
+      expect(internals.fetchInterceptorUnsubscribe).toBeNull();
+      expect(sourceStart).not.toHaveBeenCalled();
+    } finally {
+      rm.destroy();
+      player.remove();
+    }
   });
 
   it('accepts custom settings callback', () => {
