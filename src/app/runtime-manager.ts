@@ -356,7 +356,7 @@ export class RuntimeManager {
     this.clearScheduledReconcile();
     this.stopChatPreflightRecovery();
     this.disposeActiveSession();
-    // Set state AFTER cleanup so disposeSession()'s isDisposedState guard
+    // Set state AFTER cleanup so disposeSession()'s isTerminalState guard
     // doesn't short-circuit out of renderer / chat source / observer disposal.
     this.state = 'destroyed';
   }
@@ -389,6 +389,7 @@ export class RuntimeManager {
     const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
 
     if (!desired.shouldRun) {
+      this.forceNewSession = false;
       // Retire an in-flight restart or any remaining owners before returning.
       if (
         this.targetUrl !== null ||

@@ -990,4 +990,70 @@ describe('RuntimeManager', () => {
       }
     }
   );
+
+  it('keeps the reenabled renderer after a disabled same-URL page change', async () => {
+    let enabled = true;
+    const bootstrap = {
+      status: 'ready' as const,
+      data: {
+        videoId: 'video',
+        isReplay: true,
+        clientContext: {},
+        clientNameHeader: 'WEB',
+        ytcfg: {},
+        initialContinuation: { continuation: 'initial' },
+      },
+    };
+    vi.mocked(youtubeApi.bootstrapChatSession)
+      .mockResolvedValueOnce(bootstrap)
+      .mockResolvedValueOnce(bootstrap);
+    vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
+    vi.spyOn(RenderWorkerManager.prototype, 'init').mockReturnValue({
+      started: false,
+      canvasTransferred: false,
+    });
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    player.style.width = '640px';
+    player.style.height = '360px';
+    Object.defineProperty(player, 'offsetWidth', { configurable: true, value: 640 });
+    Object.defineProperty(player, 'offsetHeight', { configurable: true, value: 360 });
+    document.body.append(player);
+    const rm = new RuntimeManager({
+      getCurrentUrl: () => 'https://www.youtube.com/watch?v=video',
+      getSettings: () => makeDefaults({ enabled }),
+      isValidPage: () => true,
+    });
+    const internals = rm as unknown as {
+      overlay: Overlay | null;
+      renderer: CanvasRenderer | null;
+      forceNewSession: boolean;
+    };
+    try {
+      await rm.start();
+      const original = internals.renderer;
+      expect(original).toBeInstanceOf(CanvasRenderer);
+      vi.useFakeTimers();
+      enabled = false;
+      await rm.reconcileNow('page-change');
+      expect(internals.renderer).toBeNull();
+      expect(internals.overlay).toBeNull();
+
+      enabled = true;
+      await rm.reconcileNow('settings-change');
+      vi.setSystemTime(Date.now() + 2_000);
+      await rm.reconcileNow('retry');
+      const reenabled = internals.renderer;
+      expect(reenabled).toBeInstanceOf(CanvasRenderer);
+      expect(reenabled).not.toBe(original);
+      const bootstrapCalls = vi.mocked(youtubeApi.bootstrapChatSession).mock.calls.length;
+
+      await rm.reconcileNow('settings-change');
+      expect(internals.renderer).toBe(reenabled);
+      expect(youtubeApi.bootstrapChatSession).toHaveBeenCalledTimes(bootstrapCalls);
+    } finally {
+      rm.destroy();
+      player.remove();
+    }
+  });
 });
