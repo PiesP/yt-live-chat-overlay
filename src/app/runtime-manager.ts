@@ -303,6 +303,7 @@ export class RuntimeManager {
     if (reason === 'page-change') {
       this.clearRecoveryStatus();
       this.stopChatPreflightRecovery();
+      this._pendingBacklogMessages = [];
       this.lastPageChangeAt = Date.now();
       this.chatPreflight.reset();
       this.resetStartFailures();
@@ -387,6 +388,25 @@ export class RuntimeManager {
     const desired = this.getDesiredState();
     const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
 
+    if (!desired.shouldRun) {
+      // Retire an in-flight restart or any remaining owners before returning.
+      if (
+        this.targetUrl !== null ||
+        this.overlay !== null ||
+        this.renderer !== null ||
+        this.chatSource !== null ||
+        this.messageBus !== null ||
+        this.backlogController !== null ||
+        this._pendingBacklogMessages.length > 0
+      ) {
+        this.disposeActiveSession();
+      }
+      this.clearRecoveryStatus();
+      this.stopChatPreflightRecovery();
+      this.resetStartFailures();
+      return;
+    }
+
     // A deferred watchdog restart or a lightweight chat-only restart owns the
     // current session transition. Settings/page notifications are coalesced
     // and handled after that transition instead of starting a second source
@@ -399,19 +419,9 @@ export class RuntimeManager {
       return;
     }
 
-    if (
-      hasActiveSession &&
-      (!desired.shouldRun || !this.matchesSessionUrl(desired.url) || this.forceNewSession)
-    ) {
+    if (hasActiveSession && (!this.matchesSessionUrl(desired.url) || this.forceNewSession)) {
       this.forceNewSession = false;
       this.disposeActiveSession();
-    }
-
-    if (!desired.shouldRun) {
-      this.clearRecoveryStatus();
-      this.stopChatPreflightRecovery();
-      this.resetStartFailures();
-      return;
     }
 
     const remainingSettleDelay = this.getRemainingSettleDelay();
@@ -726,45 +736,18 @@ export class RuntimeManager {
   }
 
   /**
-   * Retire the chat source and backlog before reconciliation starts a new
-   * session. Normal reconciliation replaces the remaining overlay and renderer
-   * in startSession; full session disposal can retire them sooner. Drained
-   * backlog is retained for the replacement session.
+   * Retire the current session before reconciliation starts a replacement.
+   * Drain backlog first so a continuing restart can re-inject it later.
    */
   private restartChatSourceSoft(): void {
-    this.sessionGeneration += 1;
-
-    this.stopForegroundListeners();
-    this.stopVideoPauseListeners();
-    this.stopChatWatchdog();
-
-    this.fetchInterceptorUnsubscribe?.();
-    this.fetchInterceptorUnsubscribe = null;
-
-    this.domWatcherUnsubscribe?.();
-    this.domWatcherUnsubscribe = null;
-
-    // C-4: Drain undelivered backlog messages before destroying the controller.
-    // Store them for re-injection after the new renderer is created.
     const pendingBacklog = this.backlogController?.drainPending() ?? [];
-    this.backlogController?.destroy();
-    this.backlogController = null;
-
-    // Abort the controller BEFORE stopping the chat source so in-flight
-    // async operations (e.g. seek handlers) get the abort signal.
-    this.abortController?.abort();
-    this.chatSource?.stop();
-    this.chatSource = null;
-
-    // Reset session dedup in case restarting on the same page.
-    this.sessionDedup.clear();
-
-    // Clear targetUrl so reconcileOnce knows to call startSession()
-    // to rebuild the session and replace the old overlay/renderer.
+    this.sessionGeneration += 1;
+    // Clear identity before disposal so re-entrant notifications cannot
+    // match a retiring session.
     this.targetUrl = null;
+    this.settings = null;
+    this.disposeSession();
     this.abortController = new AbortController();
-
-    // Store for re-injection in startSession
     this._pendingBacklogMessages = pendingBacklog;
   }
 
@@ -777,10 +760,7 @@ export class RuntimeManager {
     const settings = this.settings as OverlaySettings;
 
     try {
-      // Dispose previous overlay/renderer before creating new ones.
-      // restartChatSourceSoft preserves old references but startSession
-      // creates fresh instances — the old ones must be cleaned up to
-      // prevent Worker, rAF, ResizeObserver, and fullscreen listener leaks.
+      // Dispose any previous overlay/renderer before creating new ones.
       this.detachUserPause();
       this.overlay?.destroy();
       this.overlay = null;
@@ -2056,16 +2036,14 @@ export class RuntimeManager {
   }
 
   private disposeActiveSession(preserveRecovery = false): void {
-    // Capture targetUrl before nulling — the act of reading + nulling is the
-    // re-entrant guard. If disposeSession re-enters disposeActiveSession,
-    // targetUrl is already null and the second call becomes a no-op.
-    const _url = this.targetUrl;
+    // Invalidate the session identity before cleanup so delayed callbacks
+    // cannot match the retiring session.
     this.clearRestartTimer();
     if (!preserveRecovery) this.clearRecoveryStatus();
     this.sessionGeneration += 1;
     this.targetUrl = null;
     this.settings = null;
-    void _url;
+    this._pendingBacklogMessages = [];
     this.disposeSession();
     this.abortController = new AbortController();
   }

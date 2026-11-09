@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-import type { OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { Overlay } from '@app/overlay';
 import { RuntimeManager } from '@app/runtime-manager';
 import { ReplayChatSource } from '@chat/source-replay';
 import * as youtubeApi from '@chat/youtube/api';
+import { CanvasRenderer } from '@renderer/canvas-renderer';
+import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ObservabilityReporter } from '@util/observability';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
@@ -806,4 +808,186 @@ describe('RuntimeManager', () => {
     expect(startSpy).not.toHaveBeenCalled();
     clearTimeout(internals.restartTimer);
   });
+
+  it.each(['disabled', 'invalid-page'] as const)(
+    'retires a soft-restarting runtime after %s prevents a new session',
+    async (stoppedBy) => {
+      let enabled = true;
+      let valid = true;
+      let url = 'https://www.youtube.com/watch?v=video';
+      vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+      vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce({
+        status: 'ready',
+        data: {
+          videoId: 'video',
+          isReplay: true,
+          clientContext: {},
+          clientNameHeader: 'WEB',
+          ytcfg: {},
+          initialContinuation: { continuation: 'initial' },
+        },
+      });
+      vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
+      vi.spyOn(RenderWorkerManager.prototype, 'init').mockReturnValue({
+        started: false,
+        canvasTransferred: false,
+      });
+      const player = document.createElement('div');
+      player.id = 'movie_player';
+      player.style.width = '640px';
+      player.style.height = '360px';
+      Object.defineProperty(player, 'offsetWidth', { configurable: true, value: 640 });
+      Object.defineProperty(player, 'offsetHeight', { configurable: true, value: 360 });
+      document.body.append(player);
+
+      const rm = new RuntimeManager({
+        getCurrentUrl: () => url,
+        getSettings: () => makeDefaults({ enabled }),
+        isValidPage: () => valid,
+      });
+      const internals = rm as unknown as {
+        overlay: Overlay | null;
+        renderer: CanvasRenderer | null;
+        targetUrl: string | null;
+        messageBus: object | null;
+        getRuntimeHealthSnapshot: () => { isRendererStuck: boolean };
+        requestManagedRestart: (reason: 'watchdog') => void;
+      };
+      try {
+        await rm.start();
+        const bootstrapCountAfterStart = vi.mocked(youtubeApi.bootstrapChatSession).mock.calls
+          .length;
+        const overlay = internals.overlay;
+        const renderer = internals.renderer;
+        expect(overlay).toBeInstanceOf(Overlay);
+        expect(renderer).toBeInstanceOf(CanvasRenderer);
+        if (!overlay || !renderer) throw new Error('Expected started runtime');
+        const container = overlay.getContainer();
+        expect(container?.isConnected).toBe(true);
+        vi.spyOn(renderer, 'isWorkerAlive').mockReturnValue(true);
+        vi.spyOn(renderer, 'getQueueLength').mockReturnValue(1);
+        vi.spyOn(renderer, 'getActiveMessageCount').mockReturnValue(0);
+        vi.spyOn(renderer, 'getMsSinceLastRenderActivity').mockReturnValue(10_000);
+        expect(internals.getRuntimeHealthSnapshot().isRendererStuck).toBe(true);
+
+        vi.useFakeTimers();
+        if (stoppedBy === 'disabled') {
+          enabled = false;
+        } else {
+          valid = false;
+          url = 'https://www.youtube.com/';
+        }
+        internals.requestManagedRestart('watchdog');
+        await vi.advanceTimersByTimeAsync(5_000);
+        await rm.reconcileNow(stoppedBy === 'disabled' ? 'settings-change' : 'page-change');
+
+        expect(internals.targetUrl).toBeNull();
+        expect(internals.renderer).toBeNull();
+        expect(internals.overlay).toBeNull();
+        expect(internals.messageBus).toBeNull();
+        expect(container?.isConnected).toBe(false);
+        await rm.reconcileNow('retry');
+        expect(internals.renderer).toBeNull();
+        expect(youtubeApi.bootstrapChatSession).toHaveBeenCalledTimes(bootstrapCountAfterStart);
+      } finally {
+        rm.destroy();
+        player.remove();
+      }
+    }
+  );
+
+  it.each(['continue', 'page-change'] as const)(
+    'retire and %s after a soft restart with pending backlog',
+    async (nextStep) => {
+      const bootstrap = {
+        status: 'ready' as const,
+        data: {
+          videoId: 'video',
+          isReplay: true,
+          clientContext: {},
+          clientNameHeader: 'WEB',
+          ytcfg: {},
+          initialContinuation: { continuation: 'initial' },
+        },
+      };
+      vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
+      vi.mocked(youtubeApi.bootstrapChatSession)
+        .mockResolvedValueOnce(bootstrap)
+        .mockResolvedValueOnce(bootstrap);
+      vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
+      vi.spyOn(RenderWorkerManager.prototype, 'init').mockReturnValue({
+        started: false,
+        canvasTransferred: false,
+      });
+      const player = document.createElement('div');
+      player.id = 'movie_player';
+      player.style.width = '640px';
+      player.style.height = '360px';
+      Object.defineProperty(player, 'offsetWidth', { configurable: true, value: 640 });
+      Object.defineProperty(player, 'offsetHeight', { configurable: true, value: 360 });
+      document.body.append(player);
+      const settings = makeDefaults({ backlogMode: 'full', backlogMaxRate: 0 });
+      let url = 'https://www.youtube.com/watch?v=video';
+      const rm = new RuntimeManager({
+        getCurrentUrl: () => url,
+        getSettings: () => settings,
+        isValidPage: () => true,
+      });
+      const internals = rm as unknown as {
+        overlay: Overlay | null;
+        renderer: CanvasRenderer | null;
+        backlogController: {
+          startBacklogInjection(messages: ChatMessage[]): void;
+          drainPending(): ChatMessage[];
+        } | null;
+        _pendingBacklogMessages: ChatMessage[];
+        ensureBacklogController(renderer: CanvasRenderer): void;
+        restartChatSourceSoft(): void;
+      };
+      try {
+        await rm.start();
+        const bootstrapCountAfterStart = vi.mocked(youtubeApi.bootstrapChatSession).mock.calls
+          .length;
+        const firstOverlay = internals.overlay;
+        const firstRenderer = internals.renderer;
+        if (!firstOverlay || !firstRenderer) throw new Error('Expected started runtime');
+        const firstContainer = firstOverlay.getContainer();
+        internals.ensureBacklogController(firstRenderer);
+        const pending: ChatMessage = {
+          id: 'pending-restart',
+          text: 'pending',
+          content: [{ type: 'text', content: 'pending' }],
+          kind: 'text',
+          timestamp: Date.now(),
+          authorType: 'normal',
+        };
+        internals.backlogController?.startBacklogInjection([pending]);
+        expect(internals.backlogController?.drainPending()).toEqual([pending]);
+
+        internals.restartChatSourceSoft();
+        expect(firstContainer?.isConnected).toBe(false);
+        expect(internals.renderer).toBeNull();
+        expect(internals._pendingBacklogMessages).toEqual([pending]);
+        if (nextStep === 'page-change') {
+          url = 'https://www.youtube.com/watch?v=other';
+          await rm.reconcileNow('page-change');
+          expect(internals.renderer).toBeNull();
+          expect(internals.overlay).toBeNull();
+          expect(internals._pendingBacklogMessages).toEqual([]);
+          expect(youtubeApi.bootstrapChatSession).toHaveBeenCalledTimes(bootstrapCountAfterStart);
+          return;
+        }
+        await rm.reconcileNow('session-restart');
+
+        expect(internals.renderer).toBeInstanceOf(CanvasRenderer);
+        expect(internals.renderer).not.toBe(firstRenderer);
+        expect(internals.overlay).not.toBe(firstOverlay);
+        expect(internals.backlogController?.drainPending()).toEqual([pending]);
+        expect(internals._pendingBacklogMessages).toEqual([]);
+      } finally {
+        rm.destroy();
+        player.remove();
+      }
+    }
+  );
 });
