@@ -120,7 +120,7 @@ import {
 } from '@renderer/shared';
 import {
   clearTextMeasurementCaches,
-  setTextMeasureCallback,
+  registerTextMeasureCallback,
   getFontString,
   measureTextHeight,
   measureTextWidth,
@@ -160,6 +160,7 @@ interface FallbackIngressEntry {
 
 export class CanvasRenderer implements RuntimeRenderer {
   readonly observability: ObservabilityReporter;
+  private releaseTextMeasureCallback: (() => void) | null = null;
   onStatusBarClick: (() => void) | null = null;
   private readonly pauseState = new RenderPauseState();
   private readonly backlog = new BacklogHysteresis();
@@ -426,7 +427,6 @@ export class CanvasRenderer implements RuntimeRenderer {
       (canvas) => canvas.width * canvas.height * 4
     );
     this.observability = new ObservabilityReporter(settings.showDebugOverlay);
-    setTextMeasureCallback((ms) => this.observability.recordTextMeasure(ms));
     this.laneAllocator = new LaneAllocator({
       safeTop: settings.safeTop,
       safeBottom: settings.safeBottom,
@@ -536,10 +536,8 @@ export class CanvasRenderer implements RuntimeRenderer {
       this.statusActionButton = statusActionButton;
     }
 
-    // Note: ImageFetchManager cleanup is handled by destroyResources(), which is
-    // called by RuntimeManager.disposeSession() before a new renderer is
-    // created.  The old guard here never fired because the field is only
-    // assigned later in this constructor (line 311).
+    // This renderer retires ImageFetchManager through destroyResources(),
+    // called by its destroy() path.
 
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.
@@ -694,6 +692,12 @@ export class CanvasRenderer implements RuntimeRenderer {
       }
     };
     this.reducedMotionQuery.addEventListener('change', this.reducedMotionListener);
+
+    // Register only after construction succeeds; a partially built renderer
+    // cannot own the main-realm measurement observer.
+    this.releaseTextMeasureCallback = registerTextMeasureCallback((ms) =>
+      this.observability.recordTextMeasure(ms)
+    );
 
     log.info('renderer.created', {
       mode: 'canvas2d',
@@ -3394,6 +3398,8 @@ export class CanvasRenderer implements RuntimeRenderer {
     this.backlog.update(this.getQueueLength(), this.settings);
   }
   destroy(): void {
+    this.releaseTextMeasureCallback?.();
+    this.releaseTextMeasureCallback = null;
     this.pauseState.destroy();
     this.burstDetector.destroy();
     this.authorRateLimiter.destroy();

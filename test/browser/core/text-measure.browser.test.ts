@@ -10,6 +10,7 @@ import {
   getFontString,
   measureBoundingBoxWidth,
   measureTextWidth,
+  registerTextMeasureCallback,
 } from '@renderer/text-measure';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 import { describe, expect, it, vi } from 'vite-plus/test';
@@ -162,6 +163,58 @@ describe('measureBoundingBoxWidth', () => {
 });
 
 describe('text measurement caches', () => {
+  it('releases only the currently registered timing observer', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const releaseFirst = registerTextMeasureCallback(first);
+    const releaseSecond = registerTextMeasureCallback(second);
+
+    try {
+      clearTextMeasurementCaches();
+      measureTextWidth('replacement observer', '16px sans-serif');
+      expect(first).not.toHaveBeenCalled();
+      expect(second).toHaveBeenCalledOnce();
+
+      releaseFirst();
+      clearTextMeasurementCaches();
+      measureTextWidth('old owner disposed', '16px sans-serif');
+      expect(second).toHaveBeenCalledTimes(2);
+
+      releaseSecond();
+      releaseSecond();
+      releaseFirst();
+      clearTextMeasurementCaches();
+      measureTextWidth('all owners disposed', '16px sans-serif');
+      expect(first).not.toHaveBeenCalled();
+      expect(second).toHaveBeenCalledTimes(2);
+    } finally {
+      releaseSecond();
+      releaseFirst();
+      clearTextMeasurementCaches();
+    }
+  });
+
+  it('treats repeated registration of one callback as distinct ownership', () => {
+    const observer = vi.fn();
+    const releaseFirst = registerTextMeasureCallback(observer);
+    const releaseSecond = registerTextMeasureCallback(observer);
+    try {
+      releaseFirst();
+      clearTextMeasurementCaches();
+      measureTextWidth('same observer new owner', '16px sans-serif');
+      expect(observer).toHaveBeenCalledOnce();
+
+      releaseSecond();
+      clearTextMeasurementCaches();
+      measureTextWidth('same observer retired', '16px sans-serif');
+      expect(observer).toHaveBeenCalledOnce();
+    } finally {
+      releaseSecond();
+      releaseFirst();
+      clearTextMeasurementCaches();
+    }
+  });
+
   it('keeps direction-sensitive ink measurements in separate cache entries', () => {
     const measureText = vi
       .spyOn(CanvasRenderingContext2D.prototype, 'measureText')

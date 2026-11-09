@@ -726,9 +726,10 @@ export class RuntimeManager {
   }
 
   /**
-   * Restart only the chat source while preserving Overlay, CanvasRenderer,
-   * and BacklogController. A full disposeActiveSession is reserved for
-   * page changes or explicit shutdown.
+   * Retire the chat source and backlog before reconciliation starts a new
+   * session. Normal reconciliation replaces the remaining overlay and renderer
+   * in startSession; full session disposal can retire them sooner. Drained
+   * backlog is retained for the replacement session.
    */
   private restartChatSourceSoft(): void {
     this.sessionGeneration += 1;
@@ -759,7 +760,7 @@ export class RuntimeManager {
     this.sessionDedup.clear();
 
     // Clear targetUrl so reconcileOnce knows to call startSession()
-    // to rebuild the chat source chain. Keep overlay/renderer alive.
+    // to rebuild the session and replace the old overlay/renderer.
     this.targetUrl = null;
     this.abortController = new AbortController();
 

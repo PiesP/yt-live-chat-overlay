@@ -17,7 +17,7 @@ vi.mock('@renderer/text-measure', () => ({
   clearTextMeasurementCaches: vi.fn(),
   getTextMeasurementGeneration: () => 0,
   measureBoundingBoxWidth: vi.fn((m: { width: number }) => m.width),
-  setTextMeasureCallback: vi.fn(),
+  registerTextMeasureCallback: vi.fn(() => () => {}),
 }));
 
 import type { ChatMessage } from '@app-types';
