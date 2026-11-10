@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
 
 const root = resolve(import.meta.dirname, '../../..');
-const reviewedConsumerSha = '6b7980cf59f194dc82b1bf63e11a6543beb511fa';
+const reviewedConsumerSha = 'b509153586dd5fe17bd92691efc7437778ab10aa';
 const reviewedProviderSha = '4ab0442d8d2e3cf640767b499b6444c92f6479b5';
 const action = `uses: PiesP/browser-core/automation/actions/prepare-scanner-pins@${reviewedProviderSha}`;
 const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
