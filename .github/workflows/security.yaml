@@ -185,7 +185,7 @@ jobs:
         run: echo "Pinned-tool inputs are unchanged; the freshness job succeeds without network checks."
 
   osv-scan-pr:
-    name: pr-gate/osv / osv-scan
+    name: OSV PR diff scan
     needs: [changes, pin-metadata]
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-24.04
@@ -280,7 +280,7 @@ jobs:
         run: echo "Dependency inputs are unchanged; the required OSV check succeeds without scanning."
 
   osv-scan-dispatch:
-    name: pr-gate/osv / osv-scan
+    name: OSV full scan
     needs: [changes, pin-metadata]
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || github.event_name == 'schedule') }}
     runs-on: ubuntu-24.04
@@ -550,7 +550,7 @@ jobs:
     name: Security scan summary
     if: ${{ always() }}
     needs:
-      [pinned-tools, osv-scan-pr, osv-scan-dispatch, codeql, semgrep]
+      [changes, pin-metadata, pinned-tools, osv-scan-pr, osv-scan-dispatch, codeql, semgrep]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -559,11 +559,18 @@ jobs:
       - name: Summarize and validate event-specific scans
         env:
           EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          PIN_METADATA_RESULT: ${{ needs.pin-metadata.result }}
           PINNED_TOOLS_RESULT: ${{ needs.pinned-tools.result }}
           OSV_PR_RESULT: ${{ needs.osv-scan-pr.result }}
           OSV_FULL_RESULT: ${{ needs.osv-scan-dispatch.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
           SEMGREP_RESULT: ${{ needs.semgrep.result }}
+          OSV_SCOPE: ${{ needs.changes.outputs.osv }}
+          SEMGREP_SCOPE: ${{ needs.changes.outputs.semgrep }}
+          CODEQL_ACTIONS_SCOPE: ${{ needs.changes.outputs.codeql_actions }}
+          CODEQL_JAVASCRIPT_SCOPE: ${{ needs.changes.outputs.codeql_javascript }}
+          PINNED_TOOLS_SCOPE: ${{ needs.changes.outputs.pinned_tools }}
         run: |
           set -euo pipefail
 
@@ -572,6 +579,8 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "| --- | --- |"
+            echo "| Change classification | $CHANGES_RESULT |"
+            echo "| Reviewed scanner images | $PIN_METADATA_RESULT |"
             echo "| Pinned tool freshness | $PINNED_TOOLS_RESULT |"
             echo "| OSV PR diff | $OSV_PR_RESULT |"
             echo "| OSV full | $OSV_FULL_RESULT |"
@@ -591,20 +600,45 @@ jobs:
 
           expect_success "CodeQL" "$CODEQL_RESULT"
           expect_success "Semgrep" "$SEMGREP_RESULT"
+          expect_success "change classification" "$CHANGES_RESULT"
+          expect_success "reviewed scanner images" "$PIN_METADATA_RESULT"
+          for scope in OSV_SCOPE SEMGREP_SCOPE CODEQL_ACTIONS_SCOPE CODEQL_JAVASCRIPT_SCOPE PINNED_TOOLS_SCOPE; do
+            value="${!scope}"
+            if [[ "$value" != true && "$value" != false ]]; then
+              echo "Missing or invalid $scope classification: $value" >&2
+              failed=1
+            fi
+          done
           case "$EVENT_NAME" in
             pull_request)
               expect_success "OSV PR diff" "$OSV_PR_RESULT"
+              if [[ "$OSV_FULL_RESULT" != skipped || "$PINNED_TOOLS_RESULT" != skipped ]]; then
+                echo "Unexpected full OSV or freshness result for PR" >&2
+                failed=1
+              fi
               ;;
             merge_group)
               expect_success "OSV full" "$OSV_FULL_RESULT"
+              if [[ "$OSV_PR_RESULT" != skipped || "$PINNED_TOOLS_RESULT" != skipped ]]; then
+                echo "Unexpected PR OSV or freshness result for merge group" >&2
+                failed=1
+              fi
               ;;
             push|schedule)
               expect_success "pinned tool freshness" "$PINNED_TOOLS_RESULT"
               expect_success "OSV full" "$OSV_FULL_RESULT"
+              if [[ "$OSV_PR_RESULT" != skipped ]]; then
+                echo "Unexpected PR OSV result for $EVENT_NAME" >&2
+                failed=1
+              fi
               ;;
             workflow_dispatch)
               expect_success "pinned tool freshness" "$PINNED_TOOLS_RESULT"
               expect_success "OSV full" "$OSV_FULL_RESULT"
+              if [[ "$OSV_PR_RESULT" != skipped ]]; then
+                echo "Unexpected PR OSV result for manual run" >&2
+                failed=1
+              fi
               ;;
             *)
               echo "Unsupported security workflow event: $EVENT_NAME" >&2
@@ -613,3 +647,37 @@ jobs:
           esac
 
           exit "$failed"
+
+  osv-required:
+    name: pr-gate/osv / osv-scan
+    if: ${{ always() }}
+    needs: [changes, pin-metadata, osv-scan-pr, osv-scan-dispatch]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Validate event-selected OSV result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          PIN_METADATA_RESULT: ${{ needs.pin-metadata.result }}
+          OSV_SCOPE: ${{ needs.changes.outputs.osv }}
+          OSV_PR_RESULT: ${{ needs.osv-scan-pr.result }}
+          OSV_FULL_RESULT: ${{ needs.osv-scan-dispatch.result }}
+        run: |
+          set -euo pipefail
+          [[ "$CHANGES_RESULT" == success && "$PIN_METADATA_RESULT" == success ]]
+          [[ "$OSV_SCOPE" == true || "$OSV_SCOPE" == false ]]
+          case "$EVENT_NAME" in
+            pull_request)
+              [[ "$OSV_PR_RESULT" == success && "$OSV_FULL_RESULT" == skipped ]]
+              ;;
+            push|schedule|workflow_dispatch|merge_group)
+              [[ "$OSV_FULL_RESULT" == success && "$OSV_PR_RESULT" == skipped ]]
+              ;;
+            *)
+              echo "Unsupported OSV workflow event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac

@@ -7,6 +7,17 @@ its fixed TypeScript helper closure to a private runner directory. The
 provide the security workflow helper. The scanner image is resolved independently
 from the reviewed tool-metadata source by the `pin-metadata` job; failed metadata
 preparation fails both OSV jobs even when the changed-path scan would be skipped.
+The PR diff and full scan jobs have distinct check names. The sole producer of
+the legacy required `pr-gate/osv / osv-scan` name checks the selected scan, its
+alternate skip, change classification, and scanner-image preparation. A valid
+unaffected-path result is an explicit no-op, not a fresh OSV scan.
+
+`Security scan summary` is the required overall security decision. It rejects
+failed, cancelled, unexpectedly skipped, or missing selected work and invalid
+classification outputs; CodeQL success means analysis completed, not that its
+alert inventory is empty. GitHub Actions publishes both required names from
+App ID 15368. Enable the summary in live protection only after its PR producer
+has been observed; the checked-in settings file is a declaration.
 
 For pull requests, the workflow checks out the target history, switches to the
 trusted PR base, initializes that base's submodule, sets up Node without a

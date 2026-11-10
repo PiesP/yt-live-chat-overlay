@@ -25,7 +25,6 @@ const nodeScripts = [
   'scripts/check/artifacts.ts',
   'scripts/check/i18n.ts',
   'scripts/ci/classify-workflow-changes.ts',
-  'scripts/ci/dependabot-apply.ts',
   'scripts/ci/update-browser-core.ts',
   'scripts/release/prepare.ts',
   'scripts/release/footprint.ts',

@@ -45,11 +45,13 @@ describe('shared overlay OSV workflow composition', () => {
 
   it('retains the required event contexts and fail-closed scan selection', () => {
     expect(pr).toContain("github.event_name == 'pull_request'");
+    expect(pr).toContain('name: OSV PR diff scan');
+    expect(full).toContain('name: OSV full scan');
+    expect(job('osv-required')).toContain('name: pr-gate/osv / osv-scan');
     for (const event of ['push', 'workflow_dispatch', 'merge_group', 'schedule']) {
       expect(full).toContain(`github.event_name == '${event}'`);
     }
     for (const body of [pr, full]) {
-      expect(body).toContain('name: pr-gate/osv / osv-scan');
       expect(step(body, 'No relevant changes')).toContain(`if: ${inactive}`);
       expect(step(body, '📊 Upload OSV SARIF to GitHub Security')).toContain(`if: ${upload}`);
       expect(step(body, '📊 Upload OSV SARIF to GitHub Security')).toContain(
