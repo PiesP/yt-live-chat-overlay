@@ -52,6 +52,14 @@ updates:
           - "version-update:semver-patch"
 
     groups:
+      playwright:
+        patterns:
+          - "@playwright/test"
+          - "playwright"
+        update-types:
+          - "minor"
+          - "patch"
+
       vite-plus:
         patterns:
           - "vite-plus"

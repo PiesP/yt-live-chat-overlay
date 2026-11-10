@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vite-plus/test';
@@ -26,6 +27,19 @@ function topLevelBlock(workflow: string, key: string): string {
 }
 
 describe('project setup actions', () => {
+  it('uses one Playwright runtime across the test API, browser provider and accessibility driver', () => {
+    const installedManifest = (name: string) =>
+      resolve(realpathSync(resolve(root, 'node_modules', name)), 'package.json');
+    const dependency = (owner: string, name: string) =>
+      realpathSync(createRequire(installedManifest(owner)).resolve(`${name}/package.json`));
+    const playwright = realpathSync(installedManifest('playwright'));
+    expect(dependency('@playwright/test', 'playwright')).toBe(playwright);
+    expect(dependency('@vitest/browser-playwright', 'playwright')).toBe(playwright);
+    expect(dependency('@axe-core/playwright', 'playwright-core')).toBe(
+      dependency('playwright', 'playwright-core')
+    );
+  });
+
   it('uses the reviewed scanner source runtime pin through shared setup', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
     for (const job of ['pin-metadata', 'pinned-tools']) {

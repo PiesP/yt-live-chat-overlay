@@ -67,7 +67,12 @@ export default defineConfig((env) => ({
       'core-verify': {
         // A nested vp run is inlined into this consumer graph; pnpm executes the core script in its own project.
         cwd: 'packages/core',
-        command: ['vp install --frozen-lockfile -- --no-runtime', 'pnpm run verify'],
+        command: [
+          'vp install --frozen-lockfile -- --no-runtime',
+          // The pinned core can require a different browser revision from this consumer.
+          'pnpm exec playwright install chromium',
+          'pnpm run verify',
+        ],
       },
       'e2e-prepare': [
         'vp run build:dev',
