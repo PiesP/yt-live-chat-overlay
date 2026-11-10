@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 
@@ -38,6 +38,8 @@ function runSecuritySummary(event: string, results: Record<string, string> = {})
       ...process.env,
       GITHUB_STEP_SUMMARY: '/dev/null',
       EVENT_NAME: event,
+      CHANGES_RESULT: 'success',
+      PIN_METADATA_RESULT: 'success',
       PINNED_TOOLS_RESULT: ['push', 'schedule', 'workflow_dispatch'].includes(event)
         ? 'success'
         : 'skipped',
@@ -45,6 +47,31 @@ function runSecuritySummary(event: string, results: Record<string, string> = {})
       OSV_FULL_RESULT: event === 'pull_request' ? 'skipped' : 'success',
       CODEQL_RESULT: 'success',
       SEMGREP_RESULT: 'success',
+      OSV_SCOPE: 'true',
+      SEMGREP_SCOPE: 'true',
+      CODEQL_ACTIONS_SCOPE: 'true',
+      CODEQL_JAVASCRIPT_SCOPE: 'true',
+      PINNED_TOOLS_SCOPE: 'true',
+      ...results,
+    },
+  });
+}
+
+function runOsVRequired(event: string, results: Record<string, string> = {}) {
+  const workflow = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
+  const script = jobSection(workflow, 'osv-required').split('        run: |\n')[1];
+  if (!script) throw new Error('Required OSV decision script not found');
+
+  return spawnSync('bash', ['-c', script.replace(/^ {10}/gm, '')], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      EVENT_NAME: event,
+      CHANGES_RESULT: 'success',
+      PIN_METADATA_RESULT: 'success',
+      OSV_SCOPE: 'true',
+      OSV_PR_RESULT: event === 'pull_request' ? 'success' : 'skipped',
+      OSV_FULL_RESULT: event === 'pull_request' ? 'skipped' : 'success',
       ...results,
     },
   });
@@ -297,6 +324,8 @@ describe('workflow scope integration', () => {
       const result = runSecuritySummary(event);
       expect(result.status, result.stderr).toBe(0);
       const required = [
+        'CHANGES_RESULT',
+        'PIN_METADATA_RESULT',
         'CODEQL_RESULT',
         'SEMGREP_RESULT',
         event === 'pull_request' ? 'OSV_PR_RESULT' : 'OSV_FULL_RESULT',
@@ -305,15 +334,57 @@ describe('workflow scope integration', () => {
         required.push('PINNED_TOOLS_RESULT');
       }
       for (const check of required) {
-        for (const outcome of ['failure', 'cancelled', 'skipped']) {
+        for (const outcome of ['failure', 'cancelled', 'skipped', '']) {
           expect(runSecuritySummary(event, { [check]: outcome }).status, check).toBe(1);
         }
       }
+      for (const scope of [
+        'OSV_SCOPE',
+        'SEMGREP_SCOPE',
+        'CODEQL_ACTIONS_SCOPE',
+        'CODEQL_JAVASCRIPT_SCOPE',
+        'PINNED_TOOLS_SCOPE',
+      ]) {
+        expect(runSecuritySummary(event, { [scope]: '' }).status, scope).toBe(1);
+        expect(runSecuritySummary(event, { [scope]: 'unknown' }).status, scope).toBe(1);
+      }
+      const alternate = event === 'pull_request' ? 'OSV_FULL_RESULT' : 'OSV_PR_RESULT';
+      expect(runSecuritySummary(event, { [alternate]: 'success' }).status).toBe(1);
+    }
+  );
+
+  it.each(['pull_request', 'merge_group', 'push', 'schedule', 'workflow_dispatch'])(
+    'keeps the legacy OSV context event-selected for %s',
+    (event) => {
+      expect(runOsVRequired(event).status).toBe(0);
+      for (const input of [
+        'CHANGES_RESULT',
+        'PIN_METADATA_RESULT',
+        'OSV_SCOPE',
+        event === 'pull_request' ? 'OSV_PR_RESULT' : 'OSV_FULL_RESULT',
+      ]) {
+        expect(runOsVRequired(event, { [input]: '' }).status, input).toBe(1);
+      }
+      const alternate = event === 'pull_request' ? 'OSV_FULL_RESULT' : 'OSV_PR_RESULT';
+      expect(runOsVRequired(event, { [alternate]: 'success' }).status).toBe(1);
     }
   );
 
   it('rejects unsupported security events', () => {
     expect(runSecuritySummary('unknown').status).toBe(1);
+    expect(runOsVRequired('unknown').status).toBe(1);
+  });
+
+  it('preserves an explicitly classified unaffected-path no-op', () => {
+    expect(
+      runSecuritySummary('pull_request', {
+        OSV_SCOPE: 'false',
+        SEMGREP_SCOPE: 'false',
+        CODEQL_ACTIONS_SCOPE: 'false',
+        CODEQL_JAVASCRIPT_SCOPE: 'false',
+      }).status
+    ).toBe(0);
+    expect(runOsVRequired('pull_request', { OSV_SCOPE: 'false' }).status).toBe(0);
   });
 
   it('keeps every required check name and explicit no-op path in CI and Security', () => {
@@ -327,6 +398,7 @@ describe('workflow scope integration', () => {
       'pr-gate/e2e',
       'pr-gate/osv / osv-scan',
       'pr-gate/semgrep',
+      'Security scan summary',
     ];
 
     for (const check of requiredChecks) {
@@ -335,6 +407,19 @@ describe('workflow scope integration', () => {
     }
     expect(ci.match(/name: No relevant changes/g)).toHaveLength(4);
     expect(security.match(/name: No relevant changes/g)).toHaveLength(5);
+    expect(security.match(/^    name: pr-gate\/osv \/ osv-scan$/gm)).toHaveLength(1);
+  });
+
+  it('requires maintainer admission for dependency changes without a bot merge workflow', () => {
+    const directory = resolve(root, '.github/workflows');
+    const workflows = readdirSync(directory).filter((path) => /\.ya?ml$/u.test(path));
+    const contents = workflows.map((path) => readFileSync(resolve(directory, path), 'utf8'));
+    expect(workflows.some((path) => path.includes('dependabot-auto-merge'))).toBe(false);
+    expect(contents.every((workflow) => !workflow.includes('pull_request_target:'))).toBe(true);
+    expect(contents.every((workflow) => !workflow.includes('gh pr review --approve'))).toBe(true);
+    expect(readFileSync(resolve(root, '.github/settings.yml'), 'utf8')).toContain(
+      'allow_auto_merge: true'
+    );
   });
 
   it('does not add workflow-level path filters to required workflows', () => {
