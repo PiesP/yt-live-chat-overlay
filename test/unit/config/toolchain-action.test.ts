@@ -14,7 +14,7 @@ const centralWorkflowJobs = {
 const releaseJobs = ['quality', 'unit', 'e2e', 'build'];
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
-const reviewedScannerSource = 'e61b85b0c31bc0dc1d526f43eb5ee158a512c3be';
+const reviewedScannerSource = '6b7980cf59f194dc82b1bf63e11a6543beb511fa';
 
 function topLevelBlock(workflow: string, key: string): string {
   const marker = `${key}:\n`;

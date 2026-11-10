@@ -35,6 +35,12 @@ const PUBLIC_RELEASES = {
     baseline: 'validation/windows/release-upgrade/public-v0.45.9-chrome/unpacked',
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay-chrome.zip',
   },
+  '0.46.0': {
+    candidateVersions: ['0.47.0'],
+    archive: 'validation/windows/release-upgrade/public-v0.46.0-chrome/artifact.zip',
+    baseline: 'validation/windows/release-upgrade/public-v0.46.0-chrome/unpacked',
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.46.0/yt-live-chat-overlay-chrome.zip',
+  },
 } as const;
 type PublicVersion = keyof typeof PUBLIC_RELEASES;
 type PublicRelease = (typeof PUBLIC_RELEASES)[PublicVersion];
@@ -80,7 +86,7 @@ const DIRECTORIES = ['icons', 'workers'] as const;
 type ExtensionInput = {
   schemaVersion: 1;
   previousVersion: PublicVersion;
-  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0';
+  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0' | '0.47.0';
   publicAssetUrl: PublicRelease['url'];
   publicArchive: { path: PublicRelease['archive']; sha256: string };
   previousExtension: { path: PublicRelease['baseline']; inventorySha256: string };
@@ -124,7 +130,8 @@ export function validateExtensionUpgradeInput(value: unknown): ExtensionInput {
   assert(
     input.previousVersion === '0.45.7' ||
       input.previousVersion === '0.45.8' ||
-      input.previousVersion === '0.45.9'
+      input.previousVersion === '0.45.9' ||
+      input.previousVersion === '0.46.0'
   );
   const release = PUBLIC_RELEASES[input.previousVersion];
   assert(
@@ -985,7 +992,10 @@ export async function runExtensionUpgrade({
       'Fresh candidate page did not show retained preference'
     );
     let candidateSettingsError: unknown;
-    if (verified.input.candidateVersion === '0.46.0') {
+    if (
+      verified.input.candidateVersion === '0.46.0' ||
+      verified.input.candidateVersion === '0.47.0'
+    ) {
       receipt.activeStage = 'verify-candidate-settings-controls';
       receipt.candidateSettings = { status: 'incomplete', stage: 'start' };
       const settingsStoragePage = candidateExtensionPage;

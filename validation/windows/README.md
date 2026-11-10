@@ -1073,6 +1073,15 @@ ignored `validation/windows/release-upgrade/input.json` beside it with exactly:
 Recheck the digest against the downloaded bytes before use. Bind the selected
 candidate's source and produced bytes separately. Historical upgrade receipts
 retain their original executed sources and do not qualify a later build.
+For the v0.47.0 candidate, use the public v0.46.0 userscript from
+`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.46.0/yt-live-chat-overlay.user.js`
+at the fixed ignored path
+`validation/windows/release-upgrade/public-v0.46.0.user.js`. Its published
+SHA-256 is `c58b4a2e5ef9b1a7a8bd94c25d522f07a5fe64fe12e26e69550892ceb7bf7a47`;
+verify the downloaded bytes and public `checksums.txt` before using that value
+as `baselineSha256` in `input.json`. Set `candidateVersion` to `0.47.0` and
+`publishedAssetUrl` to the version-specific URL above. This describes the
+input contract; it does not claim the upgrade campaign ran.
 Remove or replace an ignored selector for an older pair before packaging a new
 attempt; an invalid supplied selector fails preflight rather than selecting a
 fresh install. Supported historical transitions retain their original fixed
@@ -1089,7 +1098,7 @@ opacity and safe-top through the installed script's settings UI; observes the
 manager's update confirmation, dismisses it once to verify that the prior
 version and settings remain active, then approves a second import. It checks one
 displayed installation, version, editor source bytes and retained settings.
-For the v0.46.0 candidate, the separate `candidateSettings` receipt then checks
+For the v0.46.0 and v0.47.0 candidates, the separate `candidateSettings` receipt then checks
 that the upgraded layout defaults to `stacked` and that text and outline opacity
 controls expose their respective 50–100% and 0–100% domains. It selects `wide`
 and both domain boundaries through the settings UI, waits for the full settings
@@ -1135,6 +1144,15 @@ Place the checksum-verified public ZIP at
 unpacked files under the adjacent `unpacked` directory. The exact schema and
 fixed paths are defined by `validateExtensionUpgradeInput` in
 [release-upgrade/extension.ts](release-upgrade/extension.ts).
+For v0.47.0, set `previousVersion` to `0.46.0` and `candidateVersion` to
+`0.47.0`. Use the public
+`https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.46.0/yt-live-chat-overlay-chrome.zip`
+at `validation/windows/release-upgrade/public-v0.46.0-chrome/artifact.zip`
+and unpack it into the adjacent `unpacked` directory. The published ZIP SHA-256
+is `a1b3cf64724f6220b31f3d907dfbb3e63b2356f89ac5eb8a75651811dba13748`;
+verify the downloaded ZIP and `checksums.txt`, then compute both inventory
+digests from the exact public and production candidate bytes. This is input
+preparation, not a completed extension upgrade observation.
 Use `extensionInventory` from the same module to compute the baseline and
 production `dist-extension` inventory digests for the input.
 
@@ -1144,7 +1162,7 @@ checks real extension storage. It replaces the same unpacked directory with the
 candidate and calls the installed extension's runtime reload. The check requires
 the same extension ID, the candidate runtime version, retained storage and a
 fresh page showing the saved preference, then restores the original setting.
-For v0.46.0, the same `candidateSettings` check runs after candidate runtime
+For v0.46.0 and v0.47.0, the same `candidateSettings` check runs after candidate runtime
 identity and font retention are verified. It reads the full stored record from
 the installed extension's `chrome.storage.local` and restores the selected
 baseline settings before the existing font-size fixture cleanup.

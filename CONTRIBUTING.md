@@ -57,7 +57,7 @@ here as a reviewed gitlink update.
 ### Runtime and task ownership
 
 The immutable shared `automation/actions/setup-project` revision configures
-Vite+ 1.5.0 from the exact workspace catalog, Node from `.node-version`, and
+Vite+ 1.5.1 from the exact workspace catalog, Node from `.node-version`, and
 pnpm from `packageManager`; `vp install --frozen-lockfile -- --no-runtime`
 keeps the reviewed pnpm patch and supply-chain policy. The independent
 `prepare-node-trust` Action still runs first. Shared Action revisions are

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-11
+
+### Fixed
+
+- **Comment colors** — Preserve authored FAR colors and RGBA transparency through settings imports, saved preferences, Main rendering and Worker rendering. Existing color values remain readable.
+- **Overlay lifetime** — Retire renderer measurement callbacks, soft-restart owners and asynchronous chat-source or overlay work when their session ends. Late work cannot replace a newer session's resources.
+- **Settings** — Keep prepared settings and focus across dialog transitions, and show browser-supported help without requiring unsupported popover-interest behavior. Saved settings need no reset or migration.
+- **Navigation** — Observe native URL changes while retaining YouTube's same-URL data-ready signal for live and replay transitions.
+
+### Changed
+
+- **Firefox extension support** — Require Firefox 147 or later because navigation observation now uses the Navigation API directly. Use the latest stable desktop Firefox for normal use. The Chromium manifest still declares a 116 installation minimum; that declaration and the build target alone do not establish full runtime coverage on older browsers. Mobile and Safari behavior remain unverified.
+- **Upgrade and distribution** — Existing saved settings remain compatible. Userscript installations carrying a versioned download URL require one manual install from the new public release after publication; unpacked Chromium extensions require manual replacement, and temporary Firefox add-ons must be loaded again after restart. Automatic updates and store distribution remain unverified.
+
 ## [0.46.0] - 2026-11-03
 
 ### Added
