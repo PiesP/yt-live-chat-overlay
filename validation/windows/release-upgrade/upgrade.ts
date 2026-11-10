@@ -118,6 +118,11 @@ const PUBLIC_RELEASES = {
     file: `${DIRECTORY}/public-v0.45.9.user.js`,
     url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.45.9/yt-live-chat-overlay.user.js',
   },
+  '0.47.0': {
+    baselineVersion: '0.46.0',
+    file: `${DIRECTORY}/public-v0.46.0.user.js`,
+    url: 'https://github.com/PiesP/yt-live-chat-overlay/releases/download/v0.46.0/yt-live-chat-overlay.user.js',
+  },
 } as const;
 const UPDATE_URL =
   'https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.meta.js';
@@ -127,7 +132,10 @@ const MAX_SCRIPT_BYTES = 16 * 1024 * 1024;
 
 function publicRelease(candidateVersion: string) {
   assert(
-    candidateVersion === '0.45.8' || candidateVersion === '0.45.9' || candidateVersion === '0.46.0',
+    candidateVersion === '0.45.8' ||
+      candidateVersion === '0.45.9' ||
+      candidateVersion === '0.46.0' ||
+      candidateVersion === '0.47.0',
     'Unexpected candidate version'
   );
   return PUBLIC_RELEASES[candidateVersion];
@@ -932,7 +940,7 @@ export async function runManagerUpgrade(
     result.settingsAfter = await observeSettings(fixture);
     requireRetainedSettings(result.settingsBefore, result.settingsAfter);
     let candidateSettingsError: unknown;
-    if (inputs.candidate.version === '0.46.0') {
+    if (inputs.candidate.version === '0.46.0' || inputs.candidate.version === '0.47.0') {
       result.activeStage = 'verify-candidate-settings-controls';
       result.candidateSettings = { status: 'incomplete', stage: 'start' };
       try {

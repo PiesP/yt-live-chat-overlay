@@ -33,7 +33,7 @@ async function fixture(
     baseline?: string;
     candidate?: string;
     input?: Record<string, unknown>;
-    candidateVersion?: '0.45.8' | '0.45.9' | '0.46.0';
+    candidateVersion?: '0.45.8' | '0.45.9' | '0.46.0' | '0.47.0';
   } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'yt-upgrade-input-test-'));
@@ -43,7 +43,13 @@ async function fixture(
   await mkdir(join(root, 'dist'));
   const nextVersion = overrides.candidateVersion ?? candidateVersion;
   const previousVersion =
-    nextVersion === '0.46.0' ? '0.45.9' : nextVersion === '0.45.9' ? '0.45.8' : baselineVersion;
+    nextVersion === '0.47.0'
+      ? '0.46.0'
+      : nextVersion === '0.46.0'
+        ? '0.45.9'
+        : nextVersion === '0.45.9'
+          ? '0.45.8'
+          : baselineVersion;
   const baseline = overrides.baseline ?? metadata(previousVersion, true, candidateDownloadUrl);
   const candidate = overrides.candidate ?? metadata(nextVersion, true, candidateDownloadUrl);
   const input = overrides.input ?? {
@@ -167,6 +173,37 @@ describe('installed manager upgrade inputs', () => {
     });
     await expect(upgrade.loadUpgradeInputs(crossed.root)).rejects.toThrow(
       'baseline script version changed'
+    );
+  });
+
+  it('loads public 0.46.0 only for candidate 0.47.0 and rejects crossed inputs', async () => {
+    const { root } = await fixture({ candidateVersion: '0.47.0' });
+    const input = await upgrade.loadUpgradeInputs(root);
+    expect(input?.baseline.version).toBe('0.46.0');
+    expect(input?.candidate.version).toBe('0.47.0');
+    expect(input?.baselinePath).toBe(
+      join(root, 'validation/windows/release-upgrade/public-v0.46.0.user.js')
+    );
+    expect(input?.publishedAssetUrl).toBe(assetUrl.replace('v0.45.7/', 'v0.46.0/'));
+    for (const previous of ['0.45.8', '0.45.9']) {
+      expect(() =>
+        upgrade.validateUpgradeInput({
+          schemaVersion: 1,
+          baselineSha256: 'a'.repeat(64),
+          candidateVersion: '0.47.0',
+          publishedAssetUrl: assetUrl.replace('v0.45.7/', `v${previous}/`),
+        })
+      ).toThrow('Unexpected public asset URL');
+    }
+    const crossed = await fixture({
+      candidateVersion: '0.47.0',
+      baseline: metadata('0.45.9', true, candidateDownloadUrl),
+    });
+    await expect(upgrade.loadUpgradeInputs(crossed.root)).rejects.toThrow(
+      'baseline script version changed'
+    );
+    expect(await readFile('.gitignore', 'utf8')).toContain(
+      '/validation/windows/release-upgrade/public-v0.46.0.user.js'
     );
   });
 

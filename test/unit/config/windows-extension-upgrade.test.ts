@@ -127,8 +127,8 @@ function archive(files: Record<string, Buffer>, replacement?: { name: string; by
 }
 
 async function makeFixture(
-  previousVersion: '0.45.7' | '0.45.8' | '0.45.9' = '0.45.7',
-  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0' = '0.45.8'
+  previousVersion: '0.45.7' | '0.45.8' | '0.45.9' | '0.46.0' = '0.45.7',
+  candidateVersion: '0.45.8' | '0.45.9' | '0.46.0' | '0.47.0' = '0.45.8'
 ) {
   const root = await mkdtemp(join(tmpdir(), 'yt-extension-upgrade-'));
   roots.push(root);
@@ -468,6 +468,36 @@ describe('optional public Chrome extension update inputs', () => {
       })
     );
     await expect(readExtensionUpgradeInput(fixture.root)).rejects.toThrow();
+  });
+
+  it('admits public 0.46.0 to candidate 0.47.0 and rejects crossed identities', async () => {
+    const fixture = await makeFixture('0.46.0', '0.47.0');
+    const checked = await readExtensionUpgradeInput(fixture.root);
+    expect(checked && extensionUpgradeTransition(checked.input)).toBe(
+      'public-0.46.0-to-candidate-0.47.0'
+    );
+    expect(checked?.input.publicArchive.path).toBe(
+      'validation/windows/release-upgrade/public-v0.46.0-chrome/artifact.zip'
+    );
+    expect(checked?.baseline.files['manifest.json']).not.toBe(
+      checked?.candidate.files['manifest.json']
+    );
+    for (const overrides of [
+      { candidateVersion: '0.46.0' },
+      { previousVersion: '0.45.9' },
+      { publicAssetUrl: SAME_VERSION_URL },
+      {
+        publicArchive: {
+          ...fixture.input.publicArchive,
+          path: `${SAME_VERSION_PUBLIC}/artifact.zip`,
+        },
+      },
+    ]) {
+      expect(() => validateExtensionUpgradeInput({ ...fixture.input, ...overrides })).toThrow();
+    }
+    expect(await readFile('.gitignore', 'utf8')).toContain(
+      '/validation/windows/release-upgrade/public-v0.46.0-chrome/'
+    );
   });
 
   it('rejects a same-version update when the actual inventories are identical', async () => {
