@@ -760,6 +760,7 @@ export class RuntimeManager {
     const signal = this.abortController.signal;
     const generation = this.sessionGeneration;
     const settings = this.settings as OverlaySettings;
+    let unadoptedOverlay: Overlay | null = null;
 
     try {
       // Dispose any previous overlay/renderer before creating new ones.
@@ -773,16 +774,21 @@ export class RuntimeManager {
       this.removeLeftoverOverlays();
 
       const overlay = new Overlay();
+      unadoptedOverlay = overlay;
       const overlayCreated = await overlay.create(settings, signal);
-
-      if (!overlayCreated) {
-        overlay.destroy();
+      throwIfAborted(signal);
+      if (
+        !overlayCreated ||
+        this.abortController.signal !== signal ||
+        this.sessionGeneration !== generation ||
+        this.isTerminalState
+      ) {
         return 'retryable';
       }
 
-      // Assign overlay BEFORE throwIfAborted so the DOM is cleaned up
-      // by disposeActiveSession() if a subsequent check throws.
+      // The creating attempt owns its resources until this session admits it.
       this.overlay = overlay;
+      unadoptedOverlay = null;
       this.bindUserPause(overlay);
       throwIfAborted(signal);
       this.renderer = this.createRenderer(overlay, settings);
@@ -843,6 +849,9 @@ export class RuntimeManager {
 
       log.info('runtime.start-failed', { error: String(error) });
       return 'retryable';
+    } finally {
+      // Retire only this attempt; a replacement may already own the runtime.
+      unadoptedOverlay?.destroy();
     }
   }
 
