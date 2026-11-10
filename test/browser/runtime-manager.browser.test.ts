@@ -513,6 +513,296 @@ describe('RuntimeManager', () => {
     }
   });
 
+  it('retires a real overlay when destroy runs between create and adoption', async () => {
+    const player = installPlayer();
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      overlay: Overlay | null;
+      userPauseUnsubscribe: (() => void) | null;
+    };
+    const actualCreate = Overlay.prototype.create;
+    const actualDestroy = Overlay.prototype.destroy;
+    const attempts: Overlay[] = [];
+    let createdWithLiveSignal = false;
+    const destroyOverlay = vi.spyOn(Overlay.prototype, 'destroy');
+    const removeListener = vi.spyOn(document, 'removeEventListener');
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    vi.spyOn(Overlay.prototype, 'create').mockImplementation(async function (
+      this: Overlay,
+      settings,
+      signal
+    ) {
+      attempts.push(this);
+      const created = await actualCreate.call(this, settings, signal);
+      createdWithLiveSignal = created && signal?.aborted === false;
+      if (created) queueMicrotask(() => rm.destroy());
+      return created;
+    });
+    try {
+      await rm.start();
+      rm.destroy();
+      expect(createdWithLiveSignal).toBe(true);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.getContainer()).toBeNull();
+      expect(internals.overlay).toBeNull();
+      expect(internals.userPauseUnsubscribe).toBeNull();
+      expect(document.querySelector('#yt-live-chat-overlay')).toBeNull();
+      expect(destroyOverlay).toHaveBeenCalledWith();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(removeListener.mock.calls.some(([type]) => type === 'fullscreenchange')).toBe(true);
+      expect(removeListener.mock.calls.some(([type]) => type === 'keydown')).toBe(true);
+
+      const reachedWindow = vi.fn();
+      window.addEventListener('keydown', reachedWindow);
+      try {
+        for (const ctrlKey of [true, false]) {
+          const event = new KeyboardEvent('keydown', {
+            key: ' ',
+            code: 'Space',
+            ctrlKey,
+            bubbles: true,
+            cancelable: true,
+          });
+          player.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(false);
+        }
+        expect(reachedWindow).toHaveBeenCalledTimes(2);
+      } finally {
+        window.removeEventListener('keydown', reachedWindow);
+      }
+    } finally {
+      // The baseline leak is intentionally retired after assertions fail.
+      for (const attempt of attempts) actualDestroy.call(attempt);
+      rm.destroy();
+      player.remove();
+    }
+  });
+
+  it('keeps a real overlay owned during waiting startup and retires it on destroy', async () => {
+    const player = installPlayer();
+    const sourceStart = vi.spyOn(LiveChatSource.prototype, 'start').mockResolvedValue('started');
+    vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce({
+      status: 'waiting',
+      reason: 'not-live',
+    });
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    const removed = vi.spyOn(document, 'removeEventListener');
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      overlay: Overlay | null;
+      userPauseUnsubscribe: (() => void) | null;
+      standbyController: { isStandby(): boolean };
+    };
+    try {
+      await rm.start();
+      const container = internals.overlay?.getContainer();
+      expect(container?.isConnected).toBe(true);
+      expect(document.querySelector('#yt-live-chat-overlay')).toBe(container);
+      expect(internals.userPauseUnsubscribe).not.toBeNull();
+      expect(internals.standbyController.isStandby()).toBe(true);
+      expect(sourceStart).not.toHaveBeenCalled();
+
+      rm.destroy();
+      expect(internals.overlay).toBeNull();
+      expect(internals.userPauseUnsubscribe).toBeNull();
+      expect(internals.standbyController.isStandby()).toBe(false);
+      expect(container?.isConnected).toBe(false);
+      expect(document.querySelector('#yt-live-chat-overlay')).toBeNull();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(removed.mock.calls.some(([type]) => type === 'keydown')).toBe(true);
+
+      const key = new KeyboardEvent('keydown', {
+        key: ' ',
+        code: 'Space',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      player.dispatchEvent(key);
+      expect(key.defaultPrevented).toBe(false);
+    } finally {
+      rm.destroy();
+      player.remove();
+    }
+  });
+
+  it('retires a partially allocated overlay when creation rejects', async () => {
+    const player = installPlayer();
+    const rm = new RuntimeManager(createOpts());
+    const actualCreate = Overlay.prototype.create;
+    const actualDestroy = Overlay.prototype.destroy;
+    const attempts: Overlay[] = [];
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    const removeListener = vi.spyOn(document, 'removeEventListener');
+    const addListener = document.addEventListener.bind(document);
+    vi.spyOn(document, 'addEventListener').mockImplementation((type, listener, options) => {
+      if (type === 'keydown' && document.querySelector('#yt-live-chat-overlay')?.isConnected) {
+        throw new Error('keyboard listener port failed after allocation');
+      }
+      addListener(type, listener, options);
+    });
+    vi.spyOn(Overlay.prototype, 'create').mockImplementation(async function (
+      this: Overlay,
+      settings,
+      signal
+    ) {
+      attempts.push(this);
+      return actualCreate.call(this, settings, signal);
+    });
+    try {
+      await rm.start();
+      rm.destroy();
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.getContainer()).toBeNull();
+      expect(document.querySelector('#yt-live-chat-overlay')).toBeNull();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(removeListener.mock.calls.some(([type]) => type === 'fullscreenchange')).toBe(true);
+    } finally {
+      for (const attempt of attempts) actualDestroy.call(attempt);
+      rm.destroy();
+      player.remove();
+    }
+  });
+
+  it.each(['public restart', 'page change'] as const)(
+    'retires the stale overlay without touching a valid %s replacement',
+    async (transition) => {
+      const player = installPlayer();
+      const actualCreate = Overlay.prototype.create;
+      const actualDestroy = Overlay.prototype.destroy;
+      const attempts: Overlay[] = [];
+      let url = 'https://www.youtube.com/watch?v=first';
+      const rm = new RuntimeManager({
+        ...createOpts(),
+        getCurrentUrl: () => url,
+      });
+      let restartPromise: Promise<void> | undefined;
+      vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce(readyBootstrap(true));
+      const sourceStart = vi
+        .spyOn(ReplayChatSource.prototype, 'start')
+        .mockResolvedValue('started');
+      vi.spyOn(Overlay.prototype, 'create').mockImplementation(async function (
+        this: Overlay,
+        settings,
+        signal
+      ) {
+        attempts.push(this);
+        const created = await actualCreate.call(this, settings, signal);
+        if (created && attempts.length === 1) {
+          expect(signal?.aborted).toBe(false);
+          queueMicrotask(() => {
+            if (transition === 'public restart') {
+              restartPromise = rm.restartSession();
+            } else {
+              url = 'https://www.youtube.com/watch?v=second';
+              rm.requestReconcile('page-change');
+            }
+          });
+        }
+        return created;
+      });
+      try {
+        await rm.start();
+        if (transition === 'public restart') await restartPromise;
+        await vi.waitFor(() => expect(attempts).toHaveLength(2), { timeout: 5000 });
+        await vi.waitFor(() => expect(sourceStart).toHaveBeenCalledTimes(1));
+        expect(attempts[0]?.getContainer()).toBeNull();
+        expect(attempts[1]?.getContainer()?.isConnected).toBe(true);
+        expect(document.querySelector('#yt-live-chat-overlay')).toBe(attempts[1]?.getContainer());
+        expect(sourceStart).toHaveBeenCalledTimes(1);
+
+        const key = new KeyboardEvent('keydown', {
+          key: ' ',
+          code: 'Space',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        player.dispatchEvent(key);
+        expect(key.defaultPrevented).toBe(true);
+      } finally {
+        rm.destroy();
+        for (const attempt of attempts) actualDestroy.call(attempt);
+        player.remove();
+      }
+    }
+  );
+
+  it('late old attempt cleanup leaves an already running replacement owner intact', async () => {
+    const player = installPlayer();
+    const actualCreate = Overlay.prototype.create;
+    const actualDestroy = Overlay.prototype.destroy;
+    const old = new RuntimeManager(createOpts());
+    const next = new RuntimeManager(createOpts());
+    const nextInternals = next as unknown as {
+      overlay: Overlay | null;
+      userPauseUnsubscribe: (() => void) | null;
+    };
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldAllocated!: (overlay: Overlay) => void;
+    const oldReady = new Promise<Overlay>((resolve) => {
+      oldAllocated = resolve;
+    });
+    const attempts: Overlay[] = [];
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce(readyBootstrap(true));
+    vi.spyOn(ReplayChatSource.prototype, 'start').mockResolvedValue('started');
+    vi.spyOn(Overlay.prototype, 'create').mockImplementation(async function (
+      this: Overlay,
+      settings,
+      signal
+    ) {
+      const created = await actualCreate.call(this, settings, signal);
+      attempts.push(this);
+      if (attempts.length === 1) {
+        expect(created).toBe(true);
+        expect(signal?.aborted).toBe(false);
+        oldAllocated(this);
+        await oldGate;
+      }
+      return created;
+    });
+    const oldStart = old.start();
+    try {
+      const allocated = await oldReady;
+      expect(allocated.getContainer()?.isConnected).toBe(true);
+      old.destroy();
+      await next.start();
+      const validOverlay = nextInternals.overlay;
+      expect(validOverlay?.getContainer()?.isConnected).toBe(true);
+      expect(nextInternals.userPauseUnsubscribe).not.toBeNull();
+      const validContainer = validOverlay?.getContainer();
+
+      releaseOld();
+      await oldStart;
+      expect(allocated.getContainer()).toBeNull();
+      expect(document.querySelector('#yt-live-chat-overlay')).toBe(validContainer);
+      expect(validContainer?.isConnected).toBe(true);
+      expect(nextInternals.overlay).toBe(validOverlay);
+      expect(nextInternals.userPauseUnsubscribe).not.toBeNull();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      const key = new KeyboardEvent('keydown', {
+        key: ' ',
+        code: 'Space',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      player.dispatchEvent(key);
+      expect(key.defaultPrevented).toBe(true);
+    } finally {
+      releaseOld();
+      await oldStart;
+      old.destroy();
+      next.destroy();
+      for (const attempt of attempts) actualDestroy.call(attempt);
+      player.remove();
+    }
+  });
+
   it('keeps the replacement session after a stale bootstrap completes during manual restart', async () => {
     vi.mocked(youtubeApi.bootstrapChatSession).mockClear();
     const bootstrap = readyBootstrap(true);
