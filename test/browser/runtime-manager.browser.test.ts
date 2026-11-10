@@ -578,6 +578,54 @@ describe('RuntimeManager', () => {
     }
   });
 
+  it('keeps a real overlay owned during waiting startup and retires it on destroy', async () => {
+    const player = installPlayer();
+    const sourceStart = vi.spyOn(LiveChatSource.prototype, 'start').mockResolvedValue('started');
+    vi.mocked(youtubeApi.bootstrapChatSession).mockResolvedValueOnce({
+      status: 'waiting',
+      reason: 'not-live',
+    });
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    const removed = vi.spyOn(document, 'removeEventListener');
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      overlay: Overlay | null;
+      userPauseUnsubscribe: (() => void) | null;
+      standbyController: { isStandby(): boolean };
+    };
+    try {
+      await rm.start();
+      const container = internals.overlay?.getContainer();
+      expect(container?.isConnected).toBe(true);
+      expect(document.querySelector('#yt-live-chat-overlay')).toBe(container);
+      expect(internals.userPauseUnsubscribe).not.toBeNull();
+      expect(internals.standbyController.isStandby()).toBe(true);
+      expect(sourceStart).not.toHaveBeenCalled();
+
+      rm.destroy();
+      expect(internals.overlay).toBeNull();
+      expect(internals.userPauseUnsubscribe).toBeNull();
+      expect(internals.standbyController.isStandby()).toBe(false);
+      expect(container?.isConnected).toBe(false);
+      expect(document.querySelector('#yt-live-chat-overlay')).toBeNull();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(removed.mock.calls.some(([type]) => type === 'keydown')).toBe(true);
+
+      const key = new KeyboardEvent('keydown', {
+        key: ' ',
+        code: 'Space',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      player.dispatchEvent(key);
+      expect(key.defaultPrevented).toBe(false);
+    } finally {
+      rm.destroy();
+      player.remove();
+    }
+  });
+
   it('retires a partially allocated overlay when creation rejects', async () => {
     const player = installPlayer();
     const rm = new RuntimeManager(createOpts());
