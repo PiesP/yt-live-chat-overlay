@@ -91,7 +91,11 @@ describe('Vite+ verification ownership', () => {
     expect(scripts['test:core']).toBe('vp run core-verify');
     expect(tasks?.['core-verify']).toEqual({
       cwd: 'packages/core',
-      command: ['vp install --frozen-lockfile -- --no-runtime', 'pnpm run verify'],
+      command: [
+        'vp install --frozen-lockfile -- --no-runtime',
+        'pnpm exec playwright install chromium',
+        'pnpm run verify',
+      ],
     });
     expect(scripts['pretest:e2e']).toBe('vp run e2e-prepare');
     expect(commands('e2e-prepare')).toEqual([
