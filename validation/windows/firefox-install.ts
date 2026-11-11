@@ -10,7 +10,7 @@ import type { FirefoxBidiTimeoutProbe, FirefoxLog } from './firefox-bidi.ts';
 import { beginFirefoxConsoleObservation } from './firefox-console.ts';
 import {
   countUnexpectedLiveErrors,
-  isYouTubeHostError,
+  countYouTubeHostErrors,
   isYouTubeReportOnlyImagePolicy,
   readPublicPageBrowserState,
   redactDiagnosticText,
@@ -1254,7 +1254,7 @@ async function runLivePhase(
               failureCategory: `${failedStage[0]}-${failedStage[1].reason ?? 'state-not-observed'}`,
             }
           : {}),
-        hostErrorCount: session.pageLogs.filter(isYouTubeHostError).length,
+        hostErrorCount: countYouTubeHostErrors(session.pageLogs),
         hostPolicyImageReportCount: session.pageLogs.filter(isYouTubeReportOnlyImagePolicy).length,
         unexpectedErrorCount: 0,
         errorCategories: categorizeErrors(session.pageLogs),

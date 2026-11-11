@@ -1280,6 +1280,14 @@ describe('installed Chrome acceptance outcomes', () => {
       text: `${prefix}https://rr1.googlevideo.com/videoplayback?sig=private`,
     };
     expect(isYouTubeHostError(host)).toBe(true);
+    expect(isYouTubeHostError({ ...host, type: 'console' })).toBe(false);
+    expect(isYouTubeHostError({ ...host, scriptOrigin: 'moz-extension://candidate' })).toBe(false);
+    expect(isYouTubeHostError({ ...host, scriptOrigin: 'chrome-extension://candidate' })).toBe(
+      false
+    );
+    expect(isYouTubeHostError({ ...host, url: 'moz-extension://candidate/background.js' })).toBe(
+      false
+    );
     expect(
       isYouTubeHostError({
         type: 'error',
@@ -1326,7 +1334,8 @@ describe('installed Chrome acceptance outcomes', () => {
   });
 
   it('recognizes only the observed native Firefox Google ad redirect diagnostics', () => {
-    const { isYouTubeHostError, countUnexpectedLiveErrors } = liveRenderingModule;
+    const { isYouTubeHostError, countUnexpectedLiveErrors, countYouTubeHostErrors } =
+      liveRenderingModule;
     const prefix =
       'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
     const target = 'https://www.google.com/pagead/1p-user-list/962985656/';
@@ -1334,14 +1343,20 @@ describe('installed Chrome acceptance outcomes', () => {
       level: 'error',
       type: 'javascript',
       text: `${prefix}${target} (Reason: CORS header ‘Access-Control-Allow-Origin’ missing). Status code: 302.`,
+      timestamp: 1000,
+      source: { realm: 'page-realm', context: 'watch-page' },
     };
     const requestFailed = {
       ...missingHeader,
       text: `${prefix}${target} (Reason: CORS request did not succeed). Status code: (null).`,
+      timestamp: 1002,
     };
     expect(isYouTubeHostError(missingHeader)).toBe(true);
-    expect(isYouTubeHostError(requestFailed)).toBe(true);
+    expect(isYouTubeHostError(requestFailed)).toBe(false);
     expect(countUnexpectedLiveErrors([missingHeader, requestFailed], false)).toBe(0);
+    expect(countYouTubeHostErrors([missingHeader, requestFailed])).toBe(2);
+    expect(countUnexpectedLiveErrors([requestFailed], false)).toBe(1);
+    expect(countYouTubeHostErrors([requestFailed])).toBe(0);
 
     const unexpected = [
       { ...missingHeader, type: 'console' },
@@ -1371,6 +1386,40 @@ describe('installed Chrome acceptance outcomes', () => {
     ];
     for (const entry of unexpected) expect(isYouTubeHostError(entry)).toBe(false);
     expect(countUnexpectedLiveErrors(unexpected, false)).toBe(unexpected.length - 1);
+
+    const unpaired = [
+      {
+        level: 'error',
+        type: 'javascript',
+        text: requestFailed.text,
+        source: requestFailed.source,
+      },
+      { level: 'error', type: 'javascript', text: requestFailed.text, timestamp: 1002 },
+      { ...requestFailed, source: { realm: 'page-realm' } },
+      { ...requestFailed, source: { realm: 'different-realm', context: 'watch-page' } },
+      { ...requestFailed, source: { realm: 'page-realm', context: 'different-page' } },
+      { ...requestFailed, timestamp: 1101 },
+      { ...requestFailed, timestamp: 999 },
+      { ...requestFailed, text: requestFailed.text.replace('/962985656/', '/962985657/') },
+    ];
+    for (const entry of unpaired) {
+      expect(countUnexpectedLiveErrors([missingHeader, entry], false)).toBe(1);
+      expect(countYouTubeHostErrors([missingHeader, entry])).toBe(1);
+    }
+    expect(
+      countUnexpectedLiveErrors(
+        [
+          {
+            level: 'error',
+            type: 'javascript',
+            text: missingHeader.text,
+            source: missingHeader.source,
+          },
+          requestFailed,
+        ],
+        false
+      )
+    ).toBe(1);
   });
 
   it('separates only browser-generated report-only YouTube inline-image policy messages', () => {
