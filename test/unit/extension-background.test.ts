@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 type InstalledListener = (details: { reason: string }) => void;
 type MenuClickListener = (info: { menuItemId: string | number }, tab?: { id?: number }) => void;
 
-describe('extension background menu commands', () => {
+describe.each(['contextMenus', 'menus'])('extension background menu commands via %s', (menuApi) => {
   let installedListener: InstalledListener;
   let menuClickListener: MenuClickListener;
   const create = vi.fn();
@@ -21,7 +21,7 @@ describe('extension background menu commands', () => {
 
     Object.assign(globalThis, {
       chrome: {
-        contextMenus: {
+        [menuApi]: {
           create,
           removeAll,
           onClicked: {

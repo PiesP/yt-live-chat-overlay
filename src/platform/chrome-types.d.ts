@@ -128,7 +128,8 @@ interface ChromeScriptingNamespace {
 interface ChromeNamespace {
   storage: ChromeStorageNamespace;
   runtime: ChromeRuntimeNamespace;
-  contextMenus: ChromeContextMenusNamespace;
+  contextMenus?: ChromeContextMenusNamespace;
+  menus?: ChromeContextMenusNamespace;
   tabs: ChromeTabsNamespace;
   i18n: ChromeI18nNamespace;
   scripting?: ChromeScriptingNamespace;
