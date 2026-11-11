@@ -875,6 +875,40 @@ browser. The extension is explicitly uninstalled before browser/profile cleanup.
 Firefox uses the installed system executable and native WebDriver BiDi temporary
 installation; it does not require Playwright's patched Firefox executable.
 
+The Firefox installation profile opens the Browser Console with `-jsconsole`
+and requires its Multiprocess mode independently of page BiDi events. A separate,
+permission-free temporary diagnostic add-on must emit both a source-attributed
+error and exception before the candidate is installed; it is then uninstalled
+and its fixture removed. The candidate's actual ID, active UUID, packaged
+manifest and background-script hashes bind subsequent captures. Candidate
+errors fail acceptance. The existing native Trusted Types Worker-block report
+is recorded separately only when paired one-to-one with page BiDi evidence
+and the validated Main-renderer fallback. The source link must resolve
+to the packaged Worker constructor; background errors and unmatched policy rows
+still fail. [The Worker constructor contract](https://developer.mozilla.org/en-US/docs/Web/API/Worker/Worker)
+documents the enforced Trusted Types rejection.
+`firefox-console-observation.json` retains the observation window and control/candidate distinction;
+`firefox-page-console.json` retains bounded, redacted page events with their
+available timestamps, realms, contexts and script origins. Missing observation
+or retention overflow fails the run; an empty page error list alone is insufficient.
+
+A narrowly recognized Firefox native Google advertising redirect report is
+based on a candidate-free Windows trace, not on an assumption that all CORS
+errors are harmless. The missing-ACAO 302 diagnostic is limited to the numeric
+`https://www.google.com/pagead/1p-user-list/<id>/` endpoint. Its null-status
+companion is recognized only for the same full destination URL (including its
+query), page cohort, realm and context within 100 ms after that 302 diagnostic.
+The classifier parses the URL before redaction; stored text removes query values.
+When those views disagree, retain nonsecret URL structure and the raw classifier
+outcome in a separate diagnostic before changing a rule. Standalone null-status failures, including
+possible DNS/TLS failures, application console lookalikes and other destinations
+remain unexpected. Classified entries remain in the bounded, redacted run
+evidence; the separate private candidate-free trace preserves its original
+projected events. Firefox's
+[CORS error documentation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS/Errors)
+explains these failed cross-origin reads; this classification neither changes
+browser CORS/TLS enforcement nor resolves older, differently bound failures.
+
 The optional duration observation is a separate, exact contract: headed Chrome,
 the unpacked extension, one existing public `https://www.youtube.com/watch?v=...`
 or `https://www.youtube.com/live/VIDEO_ID` URL admitted by the controller, and

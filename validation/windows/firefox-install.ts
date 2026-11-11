@@ -7,9 +7,10 @@ import { isAbsolute, join, win32 } from 'node:path';
 
 import { FirefoxBidiCommandTimeout, launchFirefoxBidi } from './firefox-bidi.ts';
 import type { FirefoxBidiTimeoutProbe, FirefoxLog } from './firefox-bidi.ts';
+import { beginFirefoxConsoleObservation } from './firefox-console.ts';
 import {
   countUnexpectedLiveErrors,
-  isYouTubeHostError,
+  countYouTubeHostErrors,
   isYouTubeReportOnlyImagePolicy,
   readPublicPageBrowserState,
   redactDiagnosticText,
@@ -27,6 +28,8 @@ type FirefoxSession = {
   context: string;
   pageErrors: FirefoxLog[];
   pageLogs: FirefoxLog[];
+  observedLogs?: FirefoxLog[];
+  omittedLogCount?: number;
   captureScreenshot: () => Promise<Buffer>;
   clearPageLogs: () => void;
   abandonAfterAdmissionTimeout?: () => void;
@@ -840,7 +843,12 @@ async function readPublicContentState(
   );
 }
 
-async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], output: string) {
+async function runLivePhase(
+  session: FirefoxSession,
+  liveEntries: LiveEntry[],
+  output: string,
+  captureConsole: (workerPolicyFallback: boolean) => Promise<void>
+) {
   const observations: PublicObservation[] = [];
   let firstTimeout: FirefoxBidiCommandTimeout | undefined;
   let timeoutProbe: FirefoxBidiTimeoutProbe | undefined;
@@ -1220,6 +1228,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
       previousUrl = entry.url;
       const screenshot = `firefox-live-${String(index + 1).padStart(2, '0')}.png`;
       await writeFile(join(output, screenshot), await session.captureScreenshot());
+      await captureConsole(rendererResult.workerPolicyFallback);
       assert.equal(
         countUnexpectedLiveErrors(session.pageLogs, rendererResult.workerPolicyFallback),
         0,
@@ -1245,7 +1254,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
               failureCategory: `${failedStage[0]}-${failedStage[1].reason ?? 'state-not-observed'}`,
             }
           : {}),
-        hostErrorCount: session.pageLogs.filter(isYouTubeHostError).length,
+        hostErrorCount: countYouTubeHostErrors(session.pageLogs),
         hostPolicyImageReportCount: session.pageLogs.filter(isYouTubeReportOnlyImagePolicy).length,
         unexpectedErrorCount: 0,
         errorCategories: categorizeErrors(session.pageLogs),
@@ -1371,12 +1380,15 @@ export async function runFirefoxInstallation(
   },
   {
     launch = launchFirefoxBidi,
+    observeConsole = beginFirefoxConsoleObservation,
   }: {
     launch?: (options: {
       root: string;
       executablePath: string;
       headless: boolean;
+      browserConsole: boolean;
     }) => Promise<FirefoxSession>;
+    observeConsole?: typeof beginFirefoxConsoleObservation;
   } = {}
 ) {
   assert.equal(typeof root, 'string', 'root must be the extracted bundle directory');
@@ -1419,10 +1431,18 @@ export async function runFirefoxInstallation(
   let deterministic: Awaited<ReturnType<typeof runDeterministicPhase>> | undefined;
   let live: PublicObservation[] = [];
   let channelUnresponsive = false;
+  let consoleObservation: Awaited<ReturnType<typeof beginFirefoxConsoleObservation>> | undefined;
 
   try {
-    session = await launch({ root, executablePath: resolvedExecutable, headless });
+    session = await launch({
+      root,
+      executablePath: resolvedExecutable,
+      headless,
+      browserConsole: true,
+    });
     checks.nativeBidi = true;
+    const activeConsoleObservation = await observeConsole(session, root, output);
+    consoleObservation = activeConsoleObservation;
     stopMock = await session.startMockYouTube({
       chatResponseJson: CHAT_RESPONSE_JSON,
       nonWatchHtml: NON_WATCH_HTML,
@@ -1432,12 +1452,20 @@ export async function runFirefoxInstallation(
     checks.extensionInstalled = true;
     assert.equal(extensionId, EXTENSION_ID, 'Firefox installed an unexpected extension id');
     checks.extensionIdMatched = true;
+    await consoleObservation.bindCandidate(extensionId);
     deterministic = await runDeterministicPhase(session, checks, diagnostics);
     checks.deterministicErrorsAbsent = true;
+    await consoleObservation.capture('after-deterministic');
 
     await stopMock();
     stopMock = undefined;
-    const liveResult = await runLivePhase(session, liveEntries, output);
+    const activeSession = session;
+    const liveResult = await runLivePhase(session, liveEntries, output, (workerPolicyFallback) =>
+      activeConsoleObservation.capture('public-capture', {
+        workerPolicyFallback,
+        pageLogs: [...activeSession.pageLogs],
+      })
+    );
     live = liveResult.observations;
     if (liveResult.admissionUnresponsive) {
       channelUnresponsive = true;
@@ -1502,6 +1530,41 @@ export async function runFirefoxInstallation(
       diagnostics.failureScreenshot = { status: 'not-run', reason: 'bidi-unresponsive' };
     }
   } finally {
+    if (consoleObservation) {
+      if (!channelUnresponsive) {
+        try {
+          await consoleObservation.capture('before-uninstall');
+        } catch (error) {
+          cleanupErrors.push(new Error(`Firefox console capture failed: ${errorMessage(error)}`));
+        }
+      }
+      try {
+        diagnostics.consoleObservation = await consoleObservation.finish();
+      } catch (error) {
+        cleanupErrors.push(new Error(`Firefox console observation failed: ${errorMessage(error)}`));
+      }
+    }
+    if (session?.observedLogs) {
+      const pageLogEvidence = {
+        entries: session.observedLogs.map((entry) => ({
+          ...entry,
+          text: redactDiagnosticText(entry.text),
+        })),
+        omitted: session.omittedLogCount ?? 0,
+      };
+      try {
+        await writeFile(
+          join(output, 'firefox-page-console.json'),
+          `${JSON.stringify(pageLogEvidence, null, 2)}\n`
+        );
+      } catch (error) {
+        cleanupErrors.push(
+          new Error(`Failed to retain Firefox page console evidence: ${errorMessage(error)}`)
+        );
+      }
+      if (pageLogEvidence.omitted > 0)
+        cleanupErrors.push(new Error('Firefox page console evidence overflowed'));
+    }
     if (stopMock && channelUnresponsive) {
       diagnostics.fixtureInterceptRemoval = { status: 'not-run', reason: 'bidi-unresponsive' };
     } else if (stopMock) {

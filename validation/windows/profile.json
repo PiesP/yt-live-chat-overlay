@@ -58,6 +58,7 @@
       "validation/windows/firefox-bidi.ts",
       "validation/windows/native-ad-skip.ts",
       "validation/windows/firefox-install.ts",
+      "validation/windows/firefox-console.ts",
       "dist-extension",
       "dist-extension-firefox",
       "validation/windows/acquisition-boundaries.ts",

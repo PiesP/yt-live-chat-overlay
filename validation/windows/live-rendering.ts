@@ -8,6 +8,9 @@ export interface LiveDiagnosticEntry {
   type?: string;
   text: string;
   url?: string;
+  scriptOrigin?: string;
+  timestamp?: number;
+  source?: { realm: string; context?: string };
 }
 
 export type PublicCanvasFrame = {
@@ -429,11 +432,21 @@ export function countUnexpectedLiveErrors(
   entries: LiveDiagnosticEntry[],
   workerPolicyFallback: boolean
 ): number {
+  const redirectHeaders = firefoxGoogleAdRedirectHeaders(entries);
   return entries.filter(
     (entry) =>
       (entry.level ?? entry.type) === 'error' &&
       !(workerPolicyFallback && isTrustedTypesWorkerBlock(entry)) &&
-      !isYouTubeHostError(entry)
+      !isYouTubeHostError(entry) &&
+      !isPairedFirefoxGoogleAdRedirectFailure(entry, redirectHeaders)
+  ).length;
+}
+
+export function countYouTubeHostErrors(entries: LiveDiagnosticEntry[]): number {
+  const redirectHeaders = firefoxGoogleAdRedirectHeaders(entries);
+  return entries.filter(
+    (entry) =>
+      isYouTubeHostError(entry) || isPairedFirefoxGoogleAdRedirectFailure(entry, redirectHeaders)
   ).length;
 }
 
@@ -448,10 +461,98 @@ export function isYouTubeReportOnlyImagePolicy(entry: LiveDiagnosticEntry): bool
   );
 }
 
+/** The candidate-free Firefox trace tied this exact native diagnostic to a Google ad redirect. */
+function matchFirefoxGoogleAdRedirectError(
+  entry: LiveDiagnosticEntry
+): { kind: 'missing-header' | 'request-failed'; destinationUrl: string } | null {
+  if (
+    entry.level !== 'error' ||
+    entry.type !== 'javascript' ||
+    entry.url !== undefined ||
+    entry.scriptOrigin !== undefined
+  )
+    return null;
+  const header =
+    /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at (\S+) \(Reason: CORS header ‘Access-Control-Allow-Origin’ missing\)\. Status code: 302\.$/u.exec(
+      entry.text
+    );
+  const failed =
+    /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at (\S+) \(Reason: CORS request did not succeed\)\. Status code: \(null\)\.$/u.exec(
+      entry.text
+    );
+  const target = header?.[1] ?? failed?.[1];
+  const targetPath = target?.split('?', 1)[0];
+  if (
+    !target ||
+    !targetPath ||
+    !/^https:\/\/www\.google\.com\/pagead\/1p-user-list\/[0-9]+\/$/u.test(targetPath) ||
+    target.includes('#')
+  )
+    return null;
+  try {
+    const url = new URL(target);
+    if (
+      url.origin !== 'https://www.google.com' ||
+      url.username ||
+      url.password ||
+      !/^\/pagead\/1p-user-list\/[0-9]+\/$/u.test(url.pathname)
+    )
+      return null;
+    return { kind: header ? 'missing-header' : 'request-failed', destinationUrl: url.href };
+  } catch {
+    return null;
+  }
+}
+
+function firefoxGoogleAdRedirectHeaders(
+  entries: LiveDiagnosticEntry[]
+): { entry: LiveDiagnosticEntry; destinationUrl: string }[] {
+  return entries.flatMap((entry) => {
+    const match = matchFirefoxGoogleAdRedirectError(entry);
+    return match?.kind === 'missing-header'
+      ? [{ entry, destinationUrl: match.destinationUrl }]
+      : [];
+  });
+}
+
+function isPairedFirefoxGoogleAdRedirectFailure(
+  entry: LiveDiagnosticEntry,
+  headers: { entry: LiveDiagnosticEntry; destinationUrl: string }[]
+): boolean {
+  const match = matchFirefoxGoogleAdRedirectError(entry);
+  const source = entry.source;
+  const timestamp = entry.timestamp;
+  if (
+    match?.kind !== 'request-failed' ||
+    !source?.realm ||
+    !source.context ||
+    typeof timestamp !== 'number' ||
+    !Number.isFinite(timestamp)
+  )
+    return false;
+  return headers.some(({ entry: header, destinationUrl }) => {
+    const delta = timestamp - (header.timestamp ?? NaN);
+    return (
+      destinationUrl === match.destinationUrl &&
+      header.source?.realm === source.realm &&
+      header.source.context === source.context &&
+      delta > 0 &&
+      delta <= 100
+    );
+  });
+}
+
 /** These native YouTube policy reports, media, ad, and site-module requests are outside the overlay. */
 export function isYouTubeHostError(entry: LiveDiagnosticEntry): boolean {
   if ((entry.level ?? entry.type) !== 'error') return false;
+  if (
+    entry.type === 'console' ||
+    /^(?:moz|chrome)-extension:\/\//iu.test(entry.scriptOrigin ?? '') ||
+    /^(?:moz|chrome)-extension:\/\//iu.test(entry.url ?? '')
+  )
+    return false;
   if (isYouTubeReportOnlyImagePolicy(entry)) return true;
+  if (matchFirefoxGoogleAdRedirectError(entry)?.kind === 'missing-header') return true;
   const text = entry.text;
   if (
     /^Failed to load .https:\/\/www\.youtube\.com\/s\/_\/ytmainappweb\/_\/js\//.test(text) &&

@@ -18,10 +18,20 @@ const {
   normalizeLiveUrls,
   requireFirefoxPublicCoverage,
   resolveSystemFirefoxExecutable,
-  runFirefoxInstallation,
+  runFirefoxInstallation: runFirefoxInstallationWithConsole,
   publicTranslationProbeExpression,
   selectPublicSeekTarget,
 } = firefoxInstallModule;
+
+const runFirefoxInstallation: typeof runFirefoxInstallationWithConsole = (options, dependencies) =>
+  runFirefoxInstallationWithConsole(options, {
+    observeConsole: async () => ({
+      bindCandidate: async () => {},
+      capture: async () => {},
+      finish: async () => ({ status: 'passed' }),
+    }),
+    ...dependencies,
+  });
 const {
   FirefoxBidiCommandTimeout,
   FirefoxBidiSession,
@@ -312,6 +322,39 @@ it('forwards a bounded page-evaluation timeout to the BiDi command', async () =>
   );
 });
 
+it('retains bounded attributed page evidence across per-page log resets', async () => {
+  const { session, respond } = createBidiSession(() => undefined);
+  vi.spyOn(session, 'command').mockResolvedValue({});
+  await session.subscribeLogs();
+  respond({
+    method: 'log.entryAdded',
+    params: {
+      level: 'error',
+      type: 'javascript',
+      text: 'application failed',
+      timestamp: 123,
+      source: { realm: 'page-realm', context: 'page-context' },
+    },
+  });
+  await Promise.resolve();
+  for (let i = 0; i < 501; i++)
+    respond({ method: 'log.entryAdded', params: { level: 'info', text: 'entry' } });
+  await Promise.resolve();
+  expect(liveRenderingModule.countUnexpectedLiveErrors(session.pageLogs, false)).toBe(1);
+  session.clearPageLogs();
+  expect(session.pageLogs).toEqual([]);
+  expect(session.observedLogs[0]).toMatchObject({
+    timestamp: 123,
+    text: 'application failed',
+    source: { realm: 'page-realm', context: 'page-context' },
+  });
+  for (let i = 0; i < 2000; i++)
+    respond({ method: 'log.entryAdded', params: { level: 'info', text: 'entry' } });
+  await Promise.resolve();
+  expect(session.observedLogs).toHaveLength(2000);
+  expect(session.omittedLogCount).toBe(502);
+});
+
 function createBidiSession(onSend: (message: { id: number; method: string }) => void) {
   const listeners = new Map<string, (event: { data: string }) => void>();
   const socket = {
@@ -350,6 +393,7 @@ async function createBundle(): Promise<{ output: string; root: string }> {
 function createSession(
   options: {
     failStartup?: boolean;
+    publicPolicyFallback?: boolean;
     liveState?: Record<string, unknown>;
     seekRangeUnavailable?: boolean;
     secondChatMode?: 'live' | 'replay' | 'unknown';
@@ -375,6 +419,19 @@ function createSession(
   let evaluateIndex = 0;
   let publicPage = -1;
   let contentReads = 0;
+  const appendPublicPolicy = () => {
+    if (!options.publicPolicyFallback || publicPage < 0) return;
+    pageLogs.push({
+      level: 'debug',
+      type: 'console',
+      text: '[RenderWorkerManager] renderer.worker.creation-failed Object(1)',
+    });
+    pageLogs.push({
+      level: 'error',
+      type: 'javascript',
+      text: 'Content-Security-Policy: The page’s settings blocked assigning to an injection sink because it violates the following directive: “require-trusted-types-for ’script’“',
+    });
+  };
   const session = {
     context: 'owned-context',
     abandonAfterAdmissionTimeout: vi.fn(),
@@ -578,6 +635,7 @@ function createSession(
         if (options.timeoutOnFirstLive && publicPage === 0)
           throw new FirefoxBidiCommandTimeout('browsingContext.navigate', 41, 45_001);
         contentReads = 0;
+        appendPublicPolicy();
         pageLogs.push({
           level: 'info',
           text: '[RenderWorkerManager] renderer.worker.started',
@@ -587,6 +645,7 @@ function createSession(
     }),
     reload: vi.fn(async () => {
       calls.push('reload');
+      appendPublicPolicy();
       pageLogs.push({
         level: 'info',
         text: '[RenderWorkerManager] renderer.worker.started',
@@ -1103,11 +1162,13 @@ describe('Windows Firefox installation profile', () => {
     expect(
       buildFirefoxLaunchArguments({
         headless: true,
+        browserConsole: true,
         platform: 'linux',
         profileDir: '/tmp/.firefox-install-profile-c',
       })
     ).toEqual([
       '--headless',
+      '-jsconsole',
       '--new-instance',
       '--no-remote',
       '--profile',
@@ -1219,6 +1280,7 @@ describe('Windows Firefox installation profile', () => {
     );
 
     expect(launch).toHaveBeenCalledWith({
+      browserConsole: true,
       executablePath: '/test/firefox.exe',
       headless: false,
       root,
@@ -2040,6 +2102,86 @@ describe('Windows Firefox installation profile', () => {
       freshDocumentCanvasIsolation: 'passed',
       spaRetirement: { status: 'unverified', reason: 'full-document-navigation' },
     });
+  });
+
+  it('passes only validated public fallback evidence to the independent console observer', async () => {
+    const { output, root } = await createBundle();
+    const { session } = createSession({
+      publicPolicyFallback: true,
+      liveState: {
+        renderer: 'main',
+        videoPaused: false,
+        videoReadyState: 4,
+        canvasCount: 1,
+        overlayCount: 1,
+        pageScriptCount: 1,
+        renderedMessageCount: 1,
+        settingsButtonCount: 1,
+        workerBridgeReady: true,
+        workerReady: false,
+      },
+    });
+    const capture = vi.fn(async (_label: string, _evidence?: unknown) => {});
+    await runFirefoxInstallation(
+      {
+        executablePath: '/test/firefox.exe',
+        output,
+        root,
+        liveUrls: [
+          'https://www.youtube.com/watch?v=live',
+          'https://www.youtube.com/watch?v=replay',
+        ],
+      },
+      {
+        launch: async () => session,
+        observeConsole: async () => ({
+          bindCandidate: async () => {},
+          capture,
+          finish: async () => ({}),
+        }),
+      }
+    );
+    const publicCalls = capture.mock.calls.filter(([label]) => label === 'public-capture');
+    expect(publicCalls).toHaveLength(2);
+    for (const [, evidence] of publicCalls)
+      expect(evidence).toMatchObject({
+        workerPolicyFallback: true,
+        pageLogs: expect.arrayContaining([
+          expect.objectContaining({ level: 'error', type: 'javascript' }),
+        ]),
+      });
+    expect(capture).toHaveBeenCalledWith('after-deterministic');
+    expect(capture).toHaveBeenCalledWith('before-uninstall');
+  });
+
+  it('finishes failed console observation and preserves owned cleanup', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({ failStartup: true });
+    const finish = vi.fn(async () => ({ endedUtc: 'closed-failure-window' }));
+    await expect(
+      runFirefoxInstallation(
+        { executablePath: '/test/firefox.exe', output, root },
+        {
+          launch: async () => session,
+          observeConsole: async () => ({
+            bindCandidate: async () => {},
+            capture: async () => {
+              throw new Error('candidate console error');
+            },
+            finish,
+          }),
+        }
+      )
+    ).rejects.toThrow();
+    expect(finish).toHaveBeenCalledOnce();
+    const result = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(result.status).toBe('failed');
+    expect(result.observations.diagnostics.consoleObservation.endedUtc).toBe(
+      'closed-failure-window'
+    );
+    expect(calls.slice(-3)).toEqual(['stop-mock', 'uninstall', 'close']);
   });
 
   it('retains a flat failure screenshot and still uninstalls and closes', async () => {
