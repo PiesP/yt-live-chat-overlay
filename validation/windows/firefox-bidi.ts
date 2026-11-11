@@ -8,6 +8,54 @@ import { lstat, mkdir, mkdtemp, open, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
 
+export type FirefoxLog = {
+  level: string;
+  text: string;
+  type: string;
+  source?: { realm: string; context?: string };
+  scriptOrigin?: string;
+};
+
+function readLogSource(source: unknown): FirefoxLog['source'] {
+  if (typeof source !== 'object' || source === null || !('realm' in source)) return undefined;
+  if (typeof source.realm !== 'string' || !source.realm || source.realm.length > 128)
+    return undefined;
+  const context = 'context' in source ? source.context : undefined;
+  return {
+    realm: source.realm,
+    ...(typeof context === 'string' && context && context.length <= 128 ? { context } : {}),
+  };
+}
+
+function readScriptOrigin(stackTrace: unknown): string | undefined {
+  if (typeof stackTrace !== 'object' || stackTrace === null || !('callFrames' in stackTrace))
+    return undefined;
+  const frame: unknown = Array.isArray(stackTrace.callFrames) ? stackTrace.callFrames[0] : null;
+  if (typeof frame !== 'object' || frame === null || !('url' in frame)) return undefined;
+  if (typeof frame.url !== 'string') return undefined;
+  let url: URL;
+  try {
+    url = new URL(frame.url);
+  } catch {
+    return undefined;
+  }
+  return url.host && ['http:', 'https:', 'moz-extension:'].includes(url.protocol)
+    ? `${url.protocol}//${url.host}`
+    : undefined;
+}
+
+export function readFirefoxLog(params: Record<string, unknown>): FirefoxLog {
+  const source = readLogSource(params.source);
+  const scriptOrigin = readScriptOrigin(params.stackTrace);
+  return {
+    level: String(params.level ?? 'unknown'),
+    text: String(params.text ?? ''),
+    type: String(params.type ?? 'unknown'),
+    ...(source ? { source } : {}),
+    ...(scriptOrigin ? { scriptOrigin } : {}),
+  };
+}
+
 type FirefoxProcess = {
   pid: number;
   parentPid: number;
@@ -839,8 +887,8 @@ function connectWebSocket(endpoint: string) {
 }
 
 export class FirefoxBidiSession {
-  pageErrors: { level: string; text: string; type: string }[] = [];
-  pageLogs: { level: string; text: string; type: string }[] = [];
+  pageErrors: FirefoxLog[] = [];
+  pageLogs: FirefoxLog[] = [];
   browserName = 'Firefox';
   browserVersion = 'unknown';
   platformName = 'unknown';
@@ -1118,11 +1166,7 @@ export class FirefoxBidiSession {
     if (this.#logSubscribed) return;
     this.#on('log.entryAdded', (params) => {
       if (this.pageLogs.length >= 500) this.pageLogs.shift();
-      const entry = {
-        level: String(params.level ?? 'unknown'),
-        text: String(params.text ?? ''),
-        type: String(params.type ?? 'unknown'),
-      };
+      const entry = readFirefoxLog(params);
       this.pageLogs.push(entry);
       if (entry.level === 'error') this.pageErrors.push(entry);
     });

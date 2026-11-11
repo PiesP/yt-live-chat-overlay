@@ -33,6 +33,7 @@ const {
   extensionUninstallParameters,
   launchFirefoxBidi,
   parseFirefoxProfileEndpoint,
+  readFirefoxLog,
   readOwnedFirefoxEndpoint,
   removeOwnedProfile,
   selectOwnedFirefoxListener,
@@ -41,6 +42,37 @@ const {
   terminateOwnedProcessTree,
   waitForWindowsEndpoint,
 } = firefoxBidiModule;
+
+it('keeps Firefox log attribution without storing stack URLs or accepting unrelated errors', () => {
+  const log = readFirefoxLog({
+    level: 'error',
+    type: 'console',
+    text: 'unexpected background error',
+    source: { realm: 'extension-realm', userContext: 'omitted' },
+    stackTrace: { callFrames: [{ url: 'moz-extension://diagnostic/background.js?token=private' }] },
+    args: [{ value: 'omitted' }],
+  });
+  expect(log).toEqual({
+    level: 'error',
+    type: 'console',
+    text: 'unexpected background error',
+    source: { realm: 'extension-realm' },
+    scriptOrigin: 'moz-extension://diagnostic',
+  });
+  const cors = readFirefoxLog({
+    level: 'error',
+    type: 'javascript',
+    text: 'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://googleads.g.doubleclick.net/pagead/id. (Reason: CORS request did not succeed). Status code: (null).',
+    source: { realm: 'page-realm', context: 'page-context' },
+    stackTrace: { callFrames: [] },
+  });
+  expect(cors.source).toEqual({ realm: 'page-realm', context: 'page-context' });
+  expect(cors.scriptOrigin).toBeUndefined();
+  expect(liveRenderingModule.countUnexpectedLiveErrors([log, cors], true)).toBe(2);
+  expect(
+    readFirefoxLog({ level: 'error', stackTrace: { callFrames: [{ url: 'data:,private' }] } })
+  ).toEqual({ level: 'error', text: '', type: 'unknown' });
+});
 
 const temporaryDirectories: string[] = [];
 
