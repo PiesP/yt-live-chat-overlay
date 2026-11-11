@@ -15,10 +15,8 @@
  * Validate required APIs once because the shared declaration also describes
  * page contexts where extension APIs are unavailable.
  *
- * Firefox compatibility note: The manifest.firefox.json declares the
- * `menus` permission (Firefox's equivalent of `contextMenus`). Firefox MV3
- * provides a `chrome` namespace compatibility layer, so `chrome.contextMenus`
- * works in both Chrome and Firefox extension service workers.
+ * Firefox grants `chrome.menus` through its `menus` permission. Chromium
+ * grants `chrome.contextMenus` through the matching Chromium permission.
  */
 
 import { claimNativePageBootstrap } from './native-bootstrap';
@@ -27,7 +25,7 @@ import { loadPackagedWorkerSource } from './worker-source-loader';
 declare const __CHROME_NATIVE_BOOTSTRAP__: boolean;
 
 // Fail startup if the extension context lacks a required API.
-const contextMenus = chrome?.contextMenus;
+const contextMenus = chrome?.menus ?? chrome?.contextMenus;
 const runtime = chrome?.runtime;
 const tabs = chrome?.tabs;
 if (!contextMenus || !runtime || !tabs) throw new Error('Required extension APIs are unavailable');
