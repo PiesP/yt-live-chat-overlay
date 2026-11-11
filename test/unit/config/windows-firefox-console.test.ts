@@ -16,14 +16,18 @@ const candidateId = 'yt-live-chat-overlay@piesp.github.io';
 const candidateUuid = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const diagnosticUuid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const candidateSource = `moz-extension://${candidateUuid}/background.js`;
+const pageSource = `moz-extension://${candidateUuid}/page-script.js`;
+const policyText =
+  'Content-Security-Policy: The page’s settings blocked assigning to an injection sink because it violates the following directive: “require-trusted-types-for ’script’“';
 
-type Row = { source: string; text: string; className: string };
+type Row = { source: string; text: string; className: string; observerId?: number };
 
 function fakeSession(candidateRows: Row[] = [], overflow = false) {
   let diagnosticId = '';
   let diagnosticBackground = '';
   let diagnosticInstalled = false;
   let activeCandidateUuid = candidateUuid;
+  let currentRows = candidateRows;
   const activated: string[] = [];
   const uninstalled: string[] = [];
   const command = async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
@@ -82,7 +86,7 @@ function fakeSession(candidateRows: Row[] = [], overflow = false) {
                 className: 'message error',
               },
             ]
-          : candidateRows;
+          : currentRows;
         return {
           type: 'success',
           result: {
@@ -130,6 +134,9 @@ function fakeSession(candidateRows: Row[] = [], overflow = false) {
     setCandidateUuid: (uuid: string) => {
       activeCandidateUuid = uuid;
     },
+    setCandidateRows: (rows: Row[]) => {
+      currentRows = rows;
+    },
     activated,
     uninstalled,
   };
@@ -154,6 +161,10 @@ async function outputRoot(): Promise<string> {
     })
   );
   await writeFile(join(packaged, 'background.js'), 'console.log("candidate");\n');
+  await writeFile(
+    join(packaged, 'page-script.js'),
+    '// bundled candidate\nnew Worker("worker.js");\n'
+  );
   return root;
 }
 
@@ -182,6 +193,7 @@ describe('Firefox Browser Console observer', () => {
       {
         label: 'startup',
         overflow: false,
+        allowedPolicyRows: [],
         rows: [{ source: candidateSource, text: 'candidate startup', className: 'message log' }],
       },
     ]);
@@ -200,7 +212,7 @@ describe('Firefox Browser Console observer', () => {
     ]);
     const observer = await beginFirefoxConsoleObservation(fake.session, root, root);
     await observer.bindCandidate(candidateId);
-    await expect(observer.capture('live')).rejects.toThrow('candidate background error');
+    await expect(observer.capture('live')).rejects.toThrow('candidate extension error');
     const retained = JSON.parse(
       await readFile(join(root, 'firefox-console-observation.json'), 'utf8')
     ) as {
@@ -209,9 +221,9 @@ describe('Firefox Browser Console observer', () => {
     };
     expect(retained.captures[0]?.rows[0]?.source).toBe(candidateSource);
     expect(retained.failures).toContain(
-      'Firefox Browser Console candidate background error observed'
+      'Firefox Browser Console candidate extension error observed'
     );
-    await expect(observer.finish()).rejects.toThrow('candidate background error');
+    await expect(observer.finish()).rejects.toThrow('candidate extension error');
   });
 
   it('rejects overflow and errors from every candidate script while excluding other UUIDs', async () => {
@@ -282,5 +294,178 @@ describe('Firefox Browser Console observer', () => {
     expect(retained.failures).toContain(
       'Firefox Browser Console candidate UUID or background source changed'
     );
+  });
+
+  it('matches the native page policy event to the packaged worker creation site and carries that row forward', async () => {
+    const root = await outputRoot();
+    const policyRow: Row = {
+      source: pageSource,
+      text: `${policyText} page-script.js:2:1`,
+      className: 'message javascript log error',
+      observerId: 7,
+    };
+    const fake = fakeSession([policyRow]);
+    const observer = await beginFirefoxConsoleObservation(fake.session, root, root);
+    await observer.bindCandidate(candidateId);
+    await observer.capture('public-capture', {
+      workerPolicyFallback: true,
+      pageLogs: [
+        {
+          level: 'error',
+          type: 'javascript',
+          text: policyText,
+          timestamp: 100,
+          source: { realm: 'page-realm', context: 'content-context' },
+        },
+      ],
+    });
+    await observer.capture('before-uninstall');
+    const record = await observer.finish();
+    expect(record.candidate).toMatchObject({ workerCreationLocations: ['2:1'] });
+    expect(record.captures).toMatchObject([
+      {
+        allowedPolicyRows: [
+          {
+            row: policyRow,
+            pageEvent: { timestamp: 100, realm: 'page-realm', context: 'content-context' },
+            reused: false,
+          },
+        ],
+      },
+      { allowedPolicyRows: [{ row: policyRow, reused: true }] },
+    ]);
+  });
+
+  it('rejects an extra identical console row beyond the native page event count', async () => {
+    const root = await outputRoot();
+    const row: Row = {
+      source: pageSource,
+      text: `${policyText} page-script.js:2:1`,
+      className: 'message javascript log error',
+      observerId: 7,
+    };
+    const fake = fakeSession([row, { ...row, observerId: 8 }]);
+    const observer = await beginFirefoxConsoleObservation(fake.session, root, root);
+    await observer.bindCandidate(candidateId);
+    await expect(
+      observer.capture('public-capture', {
+        workerPolicyFallback: true,
+        pageLogs: [
+          {
+            level: 'error',
+            type: 'javascript',
+            text: policyText,
+            timestamp: 100,
+            source: { realm: 'page-realm', context: 'content-context' },
+          },
+        ],
+      })
+    ).rejects.toThrow('candidate extension error');
+    const retained = JSON.parse(
+      await readFile(join(root, 'firefox-console-observation.json'), 'utf8')
+    ) as {
+      captures: { rows: Row[]; allowedPolicyRows: Row[] }[];
+    };
+    expect(retained.captures[0]?.rows).toHaveLength(2);
+    expect(retained.captures[0]?.allowedPolicyRows).toHaveLength(1);
+  });
+
+  it('does not grant a new policy allowance during final cleanup capture', async () => {
+    const root = await outputRoot();
+    const row: Row = {
+      source: pageSource,
+      text: `${policyText} page-script.js:2:1`,
+      className: 'message javascript log error',
+      observerId: 7,
+    };
+    const fake = fakeSession([row]);
+    const observer = await beginFirefoxConsoleObservation(fake.session, root, root);
+    await observer.bindCandidate(candidateId);
+    await observer.capture('public-capture', {
+      workerPolicyFallback: true,
+      pageLogs: [
+        {
+          level: 'error',
+          type: 'javascript',
+          text: policyText,
+          timestamp: 100,
+          source: { realm: 'page-realm', context: 'content-context' },
+        },
+      ],
+    });
+    fake.setCandidateRows([row, { ...row, observerId: 8 }]);
+    await expect(observer.capture('before-uninstall')).rejects.toThrow('candidate extension error');
+    const retained = JSON.parse(
+      await readFile(join(root, 'firefox-console-observation.json'), 'utf8')
+    ) as {
+      captures: { allowedPolicyRows: { reused: boolean }[] }[];
+    };
+    expect(retained.captures[1]?.allowedPolicyRows).toEqual([
+      expect.objectContaining({ reused: true }),
+    ]);
+  });
+
+  it('rejects missing or mismatched policy evidence and candidate error sources', async () => {
+    const pageLog = {
+      level: 'error',
+      type: 'javascript',
+      text: policyText,
+      timestamp: 100,
+      source: { realm: 'page-realm', context: 'content-context' },
+    };
+    const row: Row = {
+      source: pageSource,
+      text: `${policyText} page-script.js:2:1`,
+      className: 'message javascript log error',
+      observerId: 7,
+    };
+    const cases = [
+      { row, evidence: undefined },
+      { row, evidence: { workerPolicyFallback: false, pageLogs: [pageLog] } },
+      { row, evidence: { workerPolicyFallback: true, pageLogs: [] } },
+      {
+        row,
+        evidence: { workerPolicyFallback: true, pageLogs: [{ ...pageLog, type: 'console' }] },
+      },
+      {
+        row,
+        evidence: {
+          workerPolicyFallback: true,
+          pageLogs: [{ ...pageLog, source: { realm: 'page-realm', context: 'different-context' } }],
+        },
+      },
+      {
+        row: { ...row, className: 'message console-api javascript log error' },
+        evidence: { workerPolicyFallback: true, pageLogs: [pageLog] },
+      },
+      {
+        row: { ...row, source: candidateSource },
+        evidence: { workerPolicyFallback: true, pageLogs: [pageLog] },
+      },
+      {
+        row: { ...row, text: `${policyText} page-script.js:3:1` },
+        evidence: { workerPolicyFallback: true, pageLogs: [pageLog] },
+      },
+      {
+        row: { ...row, text: policyText },
+        evidence: { workerPolicyFallback: true, pageLogs: [pageLog] },
+      },
+      {
+        row: { ...row, text: `${policyText} extra page-script.js:2:1` },
+        evidence: { workerPolicyFallback: true, pageLogs: [pageLog] },
+      },
+    ];
+    for (const item of cases) {
+      const root = await outputRoot();
+      const observer = await beginFirefoxConsoleObservation(
+        fakeSession([item.row]).session,
+        root,
+        root
+      );
+      await observer.bindCandidate(candidateId);
+      await expect(observer.capture('public-capture', item.evidence)).rejects.toThrow(
+        'candidate extension error'
+      );
+    }
   });
 });

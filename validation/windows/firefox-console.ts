@@ -5,7 +5,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
-import { redactDiagnosticText } from './live-rendering.ts';
+import type { FirefoxLog } from './firefox-bidi.ts';
+import { isTrustedTypesWorkerBlock, redactDiagnosticText } from './live-rendering.ts';
 
 type ConsoleSession = {
   context: string;
@@ -18,14 +19,28 @@ type ConsoleSession = {
   uninstallExtension: (id: string) => Promise<void>;
 };
 
-type ConsoleRow = { text: string; source: string; className: string };
-type Capture = { label: string; capturedUtc: string; rows: ConsoleRow[]; overflow: boolean };
+type ConsoleRow = { text: string; source: string; className: string; observerId?: number };
+type PolicyPageEvent = { timestamp: number; realm: string; context: string };
+type AllowedPolicyRow = { row: ConsoleRow; pageEvent: PolicyPageEvent; reused: boolean };
+type Capture = {
+  label: string;
+  capturedUtc: string;
+  rows: ConsoleRow[];
+  allowedPolicyRows: AllowedPolicyRow[];
+  overflow: boolean;
+};
+export type FirefoxConsolePolicyEvidence = {
+  workerPolicyFallback: boolean;
+  pageLogs: FirefoxLog[];
+};
 type ExtensionIdentity = { id: string; activeUuid: string; backgroundSources: string[] };
 type CandidateIdentity = ExtensionIdentity & {
   boundUtc: string;
   manifestSha256: string;
   version: string;
   backgroundSha256: Record<string, string>;
+  pageScriptSha256: string;
+  workerCreationLocations: string[];
 };
 
 export type FirefoxConsoleObservationRecord = {
@@ -54,13 +69,15 @@ export type FirefoxConsoleObservationRecord = {
 
 export type FirefoxConsoleObserver = {
   bindCandidate: (id: string) => Promise<void>;
-  capture: (label: string) => Promise<void>;
+  capture: (label: string, policyEvidence?: FirefoxConsolePolicyEvidence) => Promise<void>;
   finish: () => Promise<Record<string, unknown>>;
 };
 
 const MAX_ROWS = 500;
 const BROWSER_CONSOLE_URL = 'chrome://devtools/content/webconsole/index.html';
 const OUTPUT_FILE = 'firefox-console-observation.json';
+const TRUSTED_TYPES_POLICY_TEXT =
+  'Content-Security-Policy: The page’s settings blocked assigning to an injection sink because it violates the following directive: “require-trusted-types-for ’script’“';
 
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -166,7 +183,7 @@ const START_OBSERVER = `(() => {
       const source = anchor.getAttribute('href') || '';
       if (!source) continue;
       const prior = state.seen.get(element);
-      const row = { source, text: (element.textContent || '').slice(0, 1200), className: String(element.className) };
+      const row = { source, text: (element.textContent || '').slice(0, 1200), className: String(element.className), observerId: prior ?? state.rows.length };
       if (prior !== undefined) { state.rows[prior] = row; continue; }
       if (state.rows.length >= ${MAX_ROWS}) { state.overflow = true; continue; }
       state.seen.set(element, state.rows.length);
@@ -209,6 +226,11 @@ function parseSnapshot(value: unknown): { rows: ConsoleRow[]; overflow: boolean 
       source: string(row.source) ?? '',
       text: redactDiagnosticText(string(row.text) ?? ''),
       className: string(row.className) ?? '',
+      ...(typeof row.observerId === 'number' &&
+      Number.isSafeInteger(row.observerId) &&
+      row.observerId >= 0
+        ? { observerId: row.observerId }
+        : {}),
     }));
   return { rows, overflow: result.overflow === true || rows.length > MAX_ROWS };
 }
@@ -231,6 +253,62 @@ export function classifyFirefoxConsoleRows(
   };
 }
 
+function workerCreationLocations(pageScript: string): string[] {
+  return pageScript.split(/\r?\n/u).flatMap((line, index) => {
+    const column = line.indexOf('new Worker(');
+    const prefix = line.slice(0, column);
+    return column >= 0 && /^\s*(?:[A-Za-z_$][\w$]*\s*=\s*)?$/u.test(prefix)
+      ? [`${index + 1}:${column + 1}`]
+      : [];
+  });
+}
+
+function policyRowMatches(row: ConsoleRow, candidate: CandidateIdentity): boolean {
+  if (
+    row.className !== 'message javascript log error' ||
+    row.source !== `moz-extension://${candidate.activeUuid}/page-script.js` ||
+    row.observerId === undefined
+  )
+    return false;
+  const suffix = row.text.slice(TRUSTED_TYPES_POLICY_TEXT.length);
+  const location = /^ page-script\.js:([0-9]+):([0-9]+)$/u.exec(suffix);
+  return (
+    row.text.startsWith(TRUSTED_TYPES_POLICY_TEXT) &&
+    location !== null &&
+    candidate.workerCreationLocations.includes(`${location[1]}:${location[2]}`)
+  );
+}
+
+function matchingPageEvents(
+  evidence: FirefoxConsolePolicyEvidence | undefined,
+  contentContext: string
+): PolicyPageEvent[] {
+  if (evidence?.workerPolicyFallback !== true) return [];
+  return evidence.pageLogs.flatMap((entry) => {
+    if (
+      entry.level !== 'error' ||
+      entry.type !== 'javascript' ||
+      entry.text !== TRUSTED_TYPES_POLICY_TEXT ||
+      !isTrustedTypesWorkerBlock(entry) ||
+      entry.scriptOrigin !== undefined ||
+      !entry.source?.realm ||
+      entry.source.context !== contentContext ||
+      typeof entry.timestamp !== 'number' ||
+      !Number.isFinite(entry.timestamp)
+    )
+      return [];
+    return [{ timestamp: entry.timestamp, realm: entry.source.realm, context: contentContext }];
+  });
+}
+
+function policyRowKey(row: ConsoleRow): string {
+  return `${row.source}\n${row.className}\n${row.text}`;
+}
+
+function policyEventKey(event: PolicyPageEvent): string {
+  return `${event.timestamp}\n${event.realm}\n${event.context}`;
+}
+
 export async function beginFirefoxConsoleObservation(
   session: ConsoleSession,
   root: string,
@@ -250,6 +328,8 @@ export async function beginFirefoxConsoleObservation(
   };
   const save = async () =>
     writeFile(join(output, OUTPUT_FILE), `${JSON.stringify(record, null, 2)}\n`);
+  const acceptedPolicyRows = new Map<number, { rowKey: string; pageEvent: PolicyPageEvent }>();
+  const consumedPageEvents = new Set<string>();
   let context: string;
   try {
     context = await browserConsoleContext(session);
@@ -376,12 +456,18 @@ export async function beginFirefoxConsoleObservation(
         if (scripts.length === 0 || scripts.length !== identity.backgroundSources.length) {
           throw new Error('Firefox Browser Console packaged background source count differs');
         }
+        const pageScript = await readFile(join(packaged, 'page-script.js'), 'utf8');
+        const creationLocations = workerCreationLocations(pageScript);
+        if (creationLocations.length === 0)
+          throw new Error('Firefox Browser Console packaged worker creation site is unavailable');
         record.candidate = {
           ...identity,
           boundUtc: new Date().toISOString(),
           manifestSha256: createHash('sha256').update(manifestText).digest('hex'),
           version: requireString(manifest?.version, 'packaged candidate version'),
           backgroundSha256,
+          pageScriptSha256: createHash('sha256').update(pageScript).digest('hex'),
+          workerCreationLocations: creationLocations,
         };
         await save();
       } catch (error) {
@@ -390,7 +476,7 @@ export async function beginFirefoxConsoleObservation(
         throw error;
       }
     },
-    async capture(label: string): Promise<void> {
+    async capture(label: string, policyEvidence?: FirefoxConsolePolicyEvidence): Promise<void> {
       try {
         if (!record.candidate)
           throw new Error('Firefox Browser Console candidate identity was not bound');
@@ -410,15 +496,44 @@ export async function beginFirefoxConsoleObservation(
           )
         );
         const own = classifyFirefoxConsoleRows(snapshot.rows, record.candidate, snapshot.overflow);
+        const pageEvents = matchingPageEvents(policyEvidence, session.context);
+        const allowedPolicyRows: AllowedPolicyRow[] = [];
+        const unexpectedErrors: ConsoleRow[] = [];
+        for (const row of own.errors) {
+          const prior =
+            row.observerId === undefined ? undefined : acceptedPolicyRows.get(row.observerId);
+          if (prior && prior.rowKey === policyRowKey(row)) {
+            allowedPolicyRows.push({ row, pageEvent: prior.pageEvent, reused: true });
+            continue;
+          }
+          if (prior || label === 'before-uninstall' || !policyRowMatches(row, record.candidate)) {
+            unexpectedErrors.push(row);
+            continue;
+          }
+          const pageEvent = pageEvents.find(
+            (event) => !consumedPageEvents.has(policyEventKey(event))
+          );
+          if (!pageEvent || row.observerId === undefined) {
+            unexpectedErrors.push(row);
+            continue;
+          }
+          acceptedPolicyRows.set(row.observerId, {
+            rowKey: policyRowKey(row),
+            pageEvent,
+          });
+          consumedPageEvents.add(policyEventKey(pageEvent));
+          allowedPolicyRows.push({ row, pageEvent, reused: false });
+        }
         record.captures.push({
           label,
           capturedUtc: new Date().toISOString(),
           rows: own.rows,
+          allowedPolicyRows,
           overflow: own.overflow,
         });
         if (own.overflow) throw new Error('Firefox Browser Console candidate observation overflow');
-        if (own.errors.length > 0)
-          throw new Error('Firefox Browser Console candidate background error observed');
+        if (unexpectedErrors.length > 0)
+          throw new Error('Firefox Browser Console candidate extension error observed');
       } catch (error) {
         record.failures.push(error instanceof Error ? error.message : String(error));
         await save();

@@ -880,9 +880,14 @@ and requires its Multiprocess mode independently of page BiDi events. A separate
 permission-free temporary diagnostic add-on must emit both a source-attributed
 error and exception before the candidate is installed; it is then uninstalled
 and its fixture removed. The candidate's actual ID, active UUID, packaged
-manifest and background-script hashes bind subsequent captures. Any error from
-that candidate UUID fails acceptance. `firefox-console-observation.json` retains
-the observation window and control/candidate distinction;
+manifest and background-script hashes bind subsequent captures. Candidate
+errors fail acceptance. The existing native Trusted Types Worker-block report
+is recorded separately only when paired one-to-one with page BiDi evidence
+and the validated Main-renderer fallback. The source link must resolve
+to the packaged Worker constructor; background errors and unmatched policy rows
+still fail. [The Worker constructor contract](https://developer.mozilla.org/en-US/docs/Web/API/Worker/Worker)
+documents the enforced Trusted Types rejection.
+`firefox-console-observation.json` retains the observation window and control/candidate distinction;
 `firefox-page-console.json` retains bounded, redacted page events with their
 available timestamps, realms, contexts and script origins. Missing observation
 or retention overflow fails the run; an empty page error list alone is insufficient.

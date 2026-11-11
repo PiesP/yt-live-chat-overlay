@@ -847,7 +847,7 @@ async function runLivePhase(
   session: FirefoxSession,
   liveEntries: LiveEntry[],
   output: string,
-  captureConsole: () => Promise<void>
+  captureConsole: (workerPolicyFallback: boolean) => Promise<void>
 ) {
   const observations: PublicObservation[] = [];
   let firstTimeout: FirefoxBidiCommandTimeout | undefined;
@@ -1228,7 +1228,7 @@ async function runLivePhase(
       previousUrl = entry.url;
       const screenshot = `firefox-live-${String(index + 1).padStart(2, '0')}.png`;
       await writeFile(join(output, screenshot), await session.captureScreenshot());
-      await captureConsole();
+      await captureConsole(rendererResult.workerPolicyFallback);
       assert.equal(
         countUnexpectedLiveErrors(session.pageLogs, rendererResult.workerPolicyFallback),
         0,
@@ -1459,8 +1459,12 @@ export async function runFirefoxInstallation(
 
     await stopMock();
     stopMock = undefined;
-    const liveResult = await runLivePhase(session, liveEntries, output, () =>
-      activeConsoleObservation.capture('public-capture')
+    const activeSession = session;
+    const liveResult = await runLivePhase(session, liveEntries, output, (workerPolicyFallback) =>
+      activeConsoleObservation.capture('public-capture', {
+        workerPolicyFallback,
+        pageLogs: [...activeSession.pageLogs],
+      })
     );
     live = liveResult.observations;
     if (liveResult.admissionUnresponsive) {
