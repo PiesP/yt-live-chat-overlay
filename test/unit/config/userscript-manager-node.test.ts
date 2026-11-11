@@ -207,9 +207,7 @@ describe('pinned Node userscript manager preparation', () => {
     expect(() => assertQualifiedRuntime('26.9.0')).toThrow('pinned Node 26.13.1');
     expect(() => assertQualifiedRuntime('26.12.1')).toThrow('pinned Node 26.13.1');
     expect(() => assertQualifiedRuntime('26.13.0', '26.13.1\n')).toThrow('pinned Node 26.13.1');
-    expect(() => assertQualifiedRuntime('26.13.1', '26.13.0\n')).toThrow(
-      'pinned Node 26.13.1'
-    );
+    expect(() => assertQualifiedRuntime('26.13.1', '26.13.0\n')).toThrow('pinned Node 26.13.1');
     assertQualifiedRuntime('26.13.1', '26.13.1\n');
     assertQualifiedRuntime();
   });
