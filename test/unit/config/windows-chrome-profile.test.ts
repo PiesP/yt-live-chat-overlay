@@ -1325,6 +1325,54 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(redactDiagnosticText(host.text)).not.toContain('sig=');
   });
 
+  it('recognizes only the observed native Firefox Google ad redirect diagnostics', () => {
+    const { isYouTubeHostError, countUnexpectedLiveErrors } = liveRenderingModule;
+    const prefix =
+      'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
+    const target = 'https://www.google.com/pagead/1p-user-list/962985656/';
+    const missingHeader = {
+      level: 'error',
+      type: 'javascript',
+      text: `${prefix}${target} (Reason: CORS header ‘Access-Control-Allow-Origin’ missing). Status code: 302.`,
+    };
+    const requestFailed = {
+      ...missingHeader,
+      text: `${prefix}${target} (Reason: CORS request did not succeed). Status code: (null).`,
+    };
+    expect(isYouTubeHostError(missingHeader)).toBe(true);
+    expect(isYouTubeHostError(requestFailed)).toBe(true);
+    expect(countUnexpectedLiveErrors([missingHeader, requestFailed], false)).toBe(0);
+
+    const unexpected = [
+      { ...missingHeader, type: 'console' },
+      { ...missingHeader, level: 'warn' },
+      { ...missingHeader, scriptOrigin: 'moz-extension://candidate' },
+      { ...missingHeader, url: 'moz-extension://candidate/background.js' },
+      { ...missingHeader, text: missingHeader.text.replace('302.', '200.') },
+      { ...requestFailed, text: requestFailed.text.replace('(null).', '302.') },
+      { ...missingHeader, text: missingHeader.text.replace('/962985656/', '/not-numeric/') },
+      { ...missingHeader, text: missingHeader.text.replace('/962985656/', '/962985656/extra/') },
+      {
+        ...missingHeader,
+        text: missingHeader.text.replace('www.google.com', 'www.google.com.attacker.test'),
+      },
+      { ...missingHeader, text: missingHeader.text.replace('https://', 'http://') },
+      {
+        ...missingHeader,
+        text: missingHeader.text.replace(
+          'CORS header ‘Access-Control-Allow-Origin’ missing',
+          'CORS request did not succeed'
+        ),
+      },
+      {
+        ...missingHeader,
+        text: `${prefix}https://www.google.com/unrelated (Reason: CORS request did not succeed). Status code: (null).`,
+      },
+    ];
+    for (const entry of unexpected) expect(isYouTubeHostError(entry)).toBe(false);
+    expect(countUnexpectedLiveErrors(unexpected, false)).toBe(unexpected.length - 1);
+  });
+
   it('separates only browser-generated report-only YouTube inline-image policy messages', () => {
     const { isYouTubeHostError, countUnexpectedLiveErrors } = liveRenderingModule;
     const text =

@@ -12,6 +12,7 @@ export type FirefoxLog = {
   level: string;
   text: string;
   type: string;
+  timestamp?: number;
   source?: { realm: string; context?: string };
   scriptOrigin?: string;
 };
@@ -51,6 +52,9 @@ export function readFirefoxLog(params: Record<string, unknown>): FirefoxLog {
     level: String(params.level ?? 'unknown'),
     text: String(params.text ?? ''),
     type: String(params.type ?? 'unknown'),
+    ...(typeof params.timestamp === 'number' && Number.isFinite(params.timestamp)
+      ? { timestamp: params.timestamp }
+      : {}),
     ...(source ? { source } : {}),
     ...(scriptOrigin ? { scriptOrigin } : {}),
   };
@@ -691,10 +695,12 @@ export function combineFirefoxCloseFailures(shutdownError: unknown, cleanupError
 export function buildFirefoxLaunchArguments({
   profileDir,
   headless = false,
+  browserConsole = false,
   platform = process.platform,
 }: {
   profileDir: string;
   headless?: boolean;
+  browserConsole?: boolean;
   platform?: NodeJS.Platform;
 }) {
   if (typeof profileDir !== 'string' || profileDir.length === 0) {
@@ -702,6 +708,7 @@ export function buildFirefoxLaunchArguments({
   }
   return [
     ...(headless ? ['--headless'] : []),
+    ...(browserConsole ? ['-jsconsole'] : []),
     ...(platform === 'win32' ? ['--wait-for-browser'] : []),
     '--new-instance',
     '--no-remote',
@@ -889,6 +896,8 @@ function connectWebSocket(endpoint: string) {
 export class FirefoxBidiSession {
   pageErrors: FirefoxLog[] = [];
   pageLogs: FirefoxLog[] = [];
+  observedLogs: FirefoxLog[] = [];
+  omittedLogCount = 0;
   browserName = 'Firefox';
   browserVersion = 'unknown';
   platformName = 'unknown';
@@ -1165,9 +1174,11 @@ export class FirefoxBidiSession {
   async subscribeLogs() {
     if (this.#logSubscribed) return;
     this.#on('log.entryAdded', (params) => {
-      if (this.pageLogs.length >= 500) this.pageLogs.shift();
+      // The retained total bounds each phase too; overflow is a qualification failure.
       const entry = readFirefoxLog(params);
-      this.pageLogs.push(entry);
+      if (this.pageLogs.length < 2000) this.pageLogs.push(entry);
+      if (this.observedLogs.length < 2000) this.observedLogs.push(entry);
+      else this.omittedLogCount++;
       if (entry.level === 'error') this.pageErrors.push(entry);
     });
     await this.command('session.subscribe', { events: ['log.entryAdded'] });
@@ -1352,10 +1363,12 @@ export async function launchFirefoxBidi({
   root,
   executablePath,
   headless = false,
+  browserConsole = false,
 }: {
   root: string;
   executablePath: string;
   headless?: boolean;
+  browserConsole?: boolean;
 }) {
   if (typeof root !== 'string' || root.length === 0) {
     throw new TypeError('root must be a non-empty string');
@@ -1371,11 +1384,15 @@ export async function launchFirefoxBidi({
   const profileDir = await mkdtemp(join(taskRoot, PROFILE_PREFIX));
   assertOwnedProfile(taskRoot, profileDir);
   const ownership: FirefoxOwnership = { executablePath, profileDir, spawnedAt: Date.now() };
-  const child = spawn(executablePath, buildFirefoxLaunchArguments({ profileDir, headless }), {
-    env: buildFirefoxLaunchEnvironment(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: headless,
-  });
+  const child = spawn(
+    executablePath,
+    buildFirefoxLaunchArguments({ profileDir, headless, browserConsole }),
+    {
+      env: buildFirefoxLaunchEnvironment(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: headless,
+    }
+  );
   let output = '';
   const captureOutput = (chunk: Buffer) => {
     output = `${output}${chunk.toString('utf8')}`.slice(-32_768);

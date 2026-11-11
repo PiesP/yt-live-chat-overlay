@@ -18,10 +18,20 @@ const {
   normalizeLiveUrls,
   requireFirefoxPublicCoverage,
   resolveSystemFirefoxExecutable,
-  runFirefoxInstallation,
+  runFirefoxInstallation: runFirefoxInstallationWithConsole,
   publicTranslationProbeExpression,
   selectPublicSeekTarget,
 } = firefoxInstallModule;
+
+const runFirefoxInstallation: typeof runFirefoxInstallationWithConsole = (options, dependencies) =>
+  runFirefoxInstallationWithConsole(options, {
+    observeConsole: async () => ({
+      bindCandidate: async () => {},
+      capture: async () => {},
+      finish: async () => ({ status: 'passed' }),
+    }),
+    ...dependencies,
+  });
 const {
   FirefoxBidiCommandTimeout,
   FirefoxBidiSession,
@@ -310,6 +320,39 @@ it('forwards a bounded page-evaluation timeout to the BiDi command', async () =>
     expect.objectContaining({ target: { context: session.context } }),
     123
   );
+});
+
+it('retains bounded attributed page evidence across per-page log resets', async () => {
+  const { session, respond } = createBidiSession(() => undefined);
+  vi.spyOn(session, 'command').mockResolvedValue({});
+  await session.subscribeLogs();
+  respond({
+    method: 'log.entryAdded',
+    params: {
+      level: 'error',
+      type: 'javascript',
+      text: 'application failed',
+      timestamp: 123,
+      source: { realm: 'page-realm', context: 'page-context' },
+    },
+  });
+  await Promise.resolve();
+  for (let i = 0; i < 501; i++)
+    respond({ method: 'log.entryAdded', params: { level: 'info', text: 'entry' } });
+  await Promise.resolve();
+  expect(liveRenderingModule.countUnexpectedLiveErrors(session.pageLogs, false)).toBe(1);
+  session.clearPageLogs();
+  expect(session.pageLogs).toEqual([]);
+  expect(session.observedLogs[0]).toMatchObject({
+    timestamp: 123,
+    text: 'application failed',
+    source: { realm: 'page-realm', context: 'page-context' },
+  });
+  for (let i = 0; i < 2000; i++)
+    respond({ method: 'log.entryAdded', params: { level: 'info', text: 'entry' } });
+  await Promise.resolve();
+  expect(session.observedLogs).toHaveLength(2000);
+  expect(session.omittedLogCount).toBe(502);
 });
 
 function createBidiSession(onSend: (message: { id: number; method: string }) => void) {
@@ -1103,11 +1146,13 @@ describe('Windows Firefox installation profile', () => {
     expect(
       buildFirefoxLaunchArguments({
         headless: true,
+        browserConsole: true,
         platform: 'linux',
         profileDir: '/tmp/.firefox-install-profile-c',
       })
     ).toEqual([
       '--headless',
+      '-jsconsole',
       '--new-instance',
       '--no-remote',
       '--profile',
@@ -1219,6 +1264,7 @@ describe('Windows Firefox installation profile', () => {
     );
 
     expect(launch).toHaveBeenCalledWith({
+      browserConsole: true,
       executablePath: '/test/firefox.exe',
       headless: false,
       root,
@@ -2040,6 +2086,36 @@ describe('Windows Firefox installation profile', () => {
       freshDocumentCanvasIsolation: 'passed',
       spaRetirement: { status: 'unverified', reason: 'full-document-navigation' },
     });
+  });
+
+  it('finishes failed console observation and preserves owned cleanup', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({ failStartup: true });
+    const finish = vi.fn(async () => ({ endedUtc: 'closed-failure-window' }));
+    await expect(
+      runFirefoxInstallation(
+        { executablePath: '/test/firefox.exe', output, root },
+        {
+          launch: async () => session,
+          observeConsole: async () => ({
+            bindCandidate: async () => {},
+            capture: async () => {
+              throw new Error('candidate console error');
+            },
+            finish,
+          }),
+        }
+      )
+    ).rejects.toThrow();
+    expect(finish).toHaveBeenCalledOnce();
+    const result = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(result.status).toBe('failed');
+    expect(result.observations.diagnostics.consoleObservation.endedUtc).toBe(
+      'closed-failure-window'
+    );
+    expect(calls.slice(-3)).toEqual(['stop-mock', 'uninstall', 'close']);
   });
 
   it('retains a flat failure screenshot and still uninstalls and closes', async () => {

@@ -8,6 +8,7 @@ export interface LiveDiagnosticEntry {
   type?: string;
   text: string;
   url?: string;
+  scriptOrigin?: string;
 }
 
 export type PublicCanvasFrame = {
@@ -448,10 +449,25 @@ export function isYouTubeReportOnlyImagePolicy(entry: LiveDiagnosticEntry): bool
   );
 }
 
+/** The candidate-free Firefox trace tied this exact native diagnostic to a Google ad redirect. */
+function isFirefoxGoogleAdRedirectError(entry: LiveDiagnosticEntry): boolean {
+  if (
+    entry.level !== 'error' ||
+    entry.type !== 'javascript' ||
+    entry.url !== undefined ||
+    entry.scriptOrigin !== undefined
+  )
+    return false;
+  return /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https:\/\/www\.google\.com\/pagead\/1p-user-list\/[0-9]+\/ \(Reason: (?:CORS header ‘Access-Control-Allow-Origin’ missing\)\. Status code: 302|CORS request did not succeed\)\. Status code: \(null\))\.$/u.test(
+    entry.text
+  );
+}
+
 /** These native YouTube policy reports, media, ad, and site-module requests are outside the overlay. */
 export function isYouTubeHostError(entry: LiveDiagnosticEntry): boolean {
   if ((entry.level ?? entry.type) !== 'error') return false;
   if (isYouTubeReportOnlyImagePolicy(entry)) return true;
+  if (isFirefoxGoogleAdRedirectError(entry)) return true;
   const text = entry.text;
   if (
     /^Failed to load .https:\/\/www\.youtube\.com\/s\/_\/ytmainappweb\/_\/js\//.test(text) &&
