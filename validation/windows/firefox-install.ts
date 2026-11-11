@@ -6,7 +6,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
 
 import { FirefoxBidiCommandTimeout, launchFirefoxBidi } from './firefox-bidi.ts';
-import type { FirefoxBidiTimeoutProbe } from './firefox-bidi.ts';
+import type { FirefoxBidiTimeoutProbe, FirefoxLog } from './firefox-bidi.ts';
 import {
   countUnexpectedLiveErrors,
   isYouTubeHostError,
@@ -20,7 +20,6 @@ import { admitNativePublicAd } from './native-ad-skip.ts';
 
 export { selectPublicSeekTarget };
 
-type FirefoxLog = { level: string; text: string; type: string };
 type FirefoxSession = {
   browserName: string;
   browserVersion: string;
@@ -429,6 +428,13 @@ export function categorizeErrors(logs: FirefoxLog[]) {
   return Object.fromEntries(
     Object.entries(categories).sort(([left], [right]) => left.localeCompare(right))
   );
+}
+
+function firefoxErrorSamples(logs: FirefoxLog[]) {
+  return logs
+    .filter(({ level, text }) => level === 'error' || /worker/i.test(text))
+    .slice(0, 20)
+    .map((entry) => ({ ...entry, text: redactDiagnosticText(entry.text) }));
 }
 
 export function requireFirefoxPublicCoverage(observations: PublicObservation[]) {
@@ -1328,10 +1334,7 @@ async function runLivePhase(session: FirefoxSession, liveEntries: LiveEntry[], o
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
         failure: describeFailure(error),
-        diagnostics: session.pageLogs
-          .filter(({ level, text }) => level === 'error' || /worker/i.test(text))
-          .slice(0, 20)
-          .map(({ level, type, text }) => ({ level, type, text: redactDiagnosticText(text) })),
+        diagnostics: firefoxErrorSamples(session.pageLogs),
       });
       if (unresponsive) {
         for (let skipped = index + 1; skipped < liveEntries.length; skipped++) {
@@ -1492,10 +1495,7 @@ export async function runFirefoxInstallation(
       channelUnresponsive = probe?.unresponsive === true;
     }
     if (!checks.deterministicErrorsAbsent && session)
-      diagnostics.errorLogs = session.pageLogs
-        .filter((entry) => entry.level === 'error' || /worker/i.test(entry.text))
-        .slice(0, 20)
-        .map((entry) => ({ level: entry.level, text: entry.text.slice(0, 1000) }));
+      diagnostics.errorLogs = firefoxErrorSamples(session.pageLogs);
     if (session && !channelUnresponsive) {
       await writeFailureScreenshot(session, output, 'firefox-extension-failure.png');
     } else if (session) {
