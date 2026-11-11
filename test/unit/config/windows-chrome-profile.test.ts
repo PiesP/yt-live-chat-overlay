@@ -1338,7 +1338,7 @@ describe('installed Chrome acceptance outcomes', () => {
       liveRenderingModule;
     const prefix =
       'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
-    const target = 'https://www.google.com/pagead/1p-user-list/962985656/';
+    const target = 'https://www.google.com/pagead/1p-user-list/962985656/?test=one&trace=two';
     const missingHeader = {
       level: 'error',
       type: 'javascript',
@@ -1369,9 +1369,18 @@ describe('installed Chrome acceptance outcomes', () => {
       { ...missingHeader, text: missingHeader.text.replace('/962985656/', '/962985656/extra/') },
       {
         ...missingHeader,
+        text: missingHeader.text.replace('/962985656/', '/962985656/../962985657/'),
+      },
+      {
+        ...missingHeader,
         text: missingHeader.text.replace('www.google.com', 'www.google.com.attacker.test'),
       },
       { ...missingHeader, text: missingHeader.text.replace('https://', 'http://') },
+      { ...missingHeader, text: missingHeader.text.replace('?test=', '#fragment?test=') },
+      {
+        ...missingHeader,
+        text: missingHeader.text.replace('https://www.google.com', 'https://user@www.google.com'),
+      },
       {
         ...missingHeader,
         text: missingHeader.text.replace(
@@ -1401,6 +1410,7 @@ describe('installed Chrome acceptance outcomes', () => {
       { ...requestFailed, timestamp: 1101 },
       { ...requestFailed, timestamp: 999 },
       { ...requestFailed, text: requestFailed.text.replace('/962985656/', '/962985657/') },
+      { ...requestFailed, text: requestFailed.text.replace('trace=two', 'trace=three') },
     ];
     for (const entry of unpaired) {
       expect(countUnexpectedLiveErrors([missingHeader, entry], false)).toBe(1);

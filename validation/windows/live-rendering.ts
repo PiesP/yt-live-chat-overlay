@@ -464,7 +464,7 @@ export function isYouTubeReportOnlyImagePolicy(entry: LiveDiagnosticEntry): bool
 /** The candidate-free Firefox trace tied this exact native diagnostic to a Google ad redirect. */
 function matchFirefoxGoogleAdRedirectError(
   entry: LiveDiagnosticEntry
-): { kind: 'missing-header' | 'request-failed'; destinationId: string } | null {
+): { kind: 'missing-header' | 'request-failed'; destinationUrl: string } | null {
   if (
     entry.level !== 'error' ||
     entry.type !== 'javascript' ||
@@ -473,29 +473,51 @@ function matchFirefoxGoogleAdRedirectError(
   )
     return null;
   const header =
-    /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https:\/\/www\.google\.com\/pagead\/1p-user-list\/([0-9]+)\/ \(Reason: CORS header ‘Access-Control-Allow-Origin’ missing\)\. Status code: 302\.$/u.exec(
+    /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at (\S+) \(Reason: CORS header ‘Access-Control-Allow-Origin’ missing\)\. Status code: 302\.$/u.exec(
       entry.text
     );
-  if (header?.[1]) return { kind: 'missing-header', destinationId: header[1] };
   const failed =
-    /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https:\/\/www\.google\.com\/pagead\/1p-user-list\/([0-9]+)\/ \(Reason: CORS request did not succeed\)\. Status code: \(null\)\.$/u.exec(
+    /^Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at (\S+) \(Reason: CORS request did not succeed\)\. Status code: \(null\)\.$/u.exec(
       entry.text
     );
-  return failed?.[1] ? { kind: 'request-failed', destinationId: failed[1] } : null;
+  const target = header?.[1] ?? failed?.[1];
+  const targetPath = target?.split('?', 1)[0];
+  if (
+    !target ||
+    !targetPath ||
+    !/^https:\/\/www\.google\.com\/pagead\/1p-user-list\/[0-9]+\/$/u.test(targetPath) ||
+    target.includes('#')
+  )
+    return null;
+  try {
+    const url = new URL(target);
+    if (
+      url.origin !== 'https://www.google.com' ||
+      url.username ||
+      url.password ||
+      !/^\/pagead\/1p-user-list\/[0-9]+\/$/u.test(url.pathname)
+    )
+      return null;
+    return { kind: header ? 'missing-header' : 'request-failed', destinationUrl: url.href };
+  } catch {
+    return null;
+  }
 }
 
 function firefoxGoogleAdRedirectHeaders(
   entries: LiveDiagnosticEntry[]
-): { entry: LiveDiagnosticEntry; destinationId: string }[] {
+): { entry: LiveDiagnosticEntry; destinationUrl: string }[] {
   return entries.flatMap((entry) => {
     const match = matchFirefoxGoogleAdRedirectError(entry);
-    return match?.kind === 'missing-header' ? [{ entry, destinationId: match.destinationId }] : [];
+    return match?.kind === 'missing-header'
+      ? [{ entry, destinationUrl: match.destinationUrl }]
+      : [];
   });
 }
 
 function isPairedFirefoxGoogleAdRedirectFailure(
   entry: LiveDiagnosticEntry,
-  headers: { entry: LiveDiagnosticEntry; destinationId: string }[]
+  headers: { entry: LiveDiagnosticEntry; destinationUrl: string }[]
 ): boolean {
   const match = matchFirefoxGoogleAdRedirectError(entry);
   const source = entry.source;
@@ -508,10 +530,10 @@ function isPairedFirefoxGoogleAdRedirectFailure(
     !Number.isFinite(timestamp)
   )
     return false;
-  return headers.some(({ entry: header, destinationId }) => {
+  return headers.some(({ entry: header, destinationUrl }) => {
     const delta = timestamp - (header.timestamp ?? NaN);
     return (
-      destinationId === match.destinationId &&
+      destinationUrl === match.destinationUrl &&
       header.source?.realm === source.realm &&
       header.source.context === source.context &&
       delta > 0 &&

@@ -896,8 +896,11 @@ A narrowly recognized Firefox native Google advertising redirect report is
 based on a candidate-free Windows trace, not on an assumption that all CORS
 errors are harmless. The missing-ACAO 302 diagnostic is limited to the numeric
 `https://www.google.com/pagead/1p-user-list/<id>/` endpoint. Its null-status
-companion is recognized only in the same page cohort, realm and context within
-100 ms after that 302 diagnostic. Standalone null-status failures, including
+companion is recognized only for the same full destination URL (including its
+query), page cohort, realm and context within 100 ms after that 302 diagnostic.
+The classifier parses the URL before redaction; stored text removes query values.
+When those views disagree, retain nonsecret URL structure and the raw classifier
+outcome in a separate diagnostic before changing a rule. Standalone null-status failures, including
 possible DNS/TLS failures, application console lookalikes and other destinations
 remain unexpected. Classified entries remain in the bounded, redacted run
 evidence; the separate private candidate-free trace preserves its original
