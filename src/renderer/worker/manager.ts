@@ -230,6 +230,7 @@ export class RenderWorkerManager {
   private latestWorkerPendingDepth = 0;
   private minimumWorkerPendingPriority: number | null = null;
   private currentEpoch = 0;
+  private lastWorkerClearAckEpoch = 0;
   private lastWorkerActiveMessageIds = new Set<string>();
   private lastWorkerPendingMessageIds = new Set<string>();
   private readonly deps: WorkerManagerDeps;
@@ -1462,6 +1463,7 @@ export class RenderWorkerManager {
 
   private applyClearStateAck(epoch: number): void {
     if (epoch !== this.currentEpoch) return;
+    this.lastWorkerClearAckEpoch = epoch;
     this.latestWorkerPendingDepth = 0;
     this.minimumWorkerPendingPriority = null;
     this._queueDepth = 0;
@@ -1484,6 +1486,7 @@ export class RenderWorkerManager {
   }
 
   private resetWorkerStats(): void {
+    this.lastWorkerClearAckEpoch = 0;
     this._activeMessageCount = 0;
     this._queueDepth = 0;
     this._laneUtilization = 0;
@@ -1601,8 +1604,11 @@ export class RenderWorkerManager {
         continue;
       }
       if (this.sentMessages.get(id) !== retained) continue;
-      const wasActive = this.lastWorkerActiveMessageIds.has(id);
-      const wasPending = this.lastWorkerPendingMessageIds.has(id);
+      // The Worker posts the clear acknowledgement before stats from the new
+      // epoch. Earlier stats can describe a different placement with the same ID.
+      const hasEpochStats = retained.epoch === this.lastWorkerClearAckEpoch;
+      const wasActive = hasEpochStats && this.lastWorkerActiveMessageIds.has(id);
+      const wasPending = hasEpochStats && this.lastWorkerPendingMessageIds.has(id);
       const isUnacknowledged = retained.batchSequence > this.lastWorkerProcessedBatchSequence;
       if (!wasActive && !wasPending && !isUnacknowledged) {
         this.sentMessages.delete(id);
