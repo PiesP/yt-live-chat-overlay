@@ -180,10 +180,10 @@ Failed, non-cancelled E2E jobs upload `test-results/` and `playwright-report/`
 through the existing diagnostics artifact with seven-day retention. Open the
 failed attempt's trace from that report; a retry is separate evidence.
 
-The native Firefox fixture uses the public `puppeteer-core` 25.16.0 API with a
+The native Firefox fixture uses the public `puppeteer-core` 25.18.1 API with a
 version-pinned pnpm patch. The patch defers loading the unused BiDi-over-CDP
-mapper; its scoped dependency override removes `chromium-bidi` and the vulnerable
-Zod 3 dependency (GHSA-mrhx-c7xc-m3w5). Native Firefox supplies its own BiDi
+mapper. Its scoped override excludes `chromium-bidi@157.0.8090-0`, which the
+configured no-downgrade trust policy rejects. Native Firefox supplies its own BiDi
 endpoint, while Chromium fixtures use Playwright. This package shape supports
 that Firefox path only: Puppeteer's CDP mapper and internal type imports are not
 supported. The patch does not change the fixture's protocol or cleanup logic,

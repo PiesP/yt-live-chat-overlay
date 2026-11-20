@@ -27,7 +27,7 @@ describe('postcss-url scoped minimatch override', () => {
       filter(pattern: string): (path: string) => boolean;
     };
     const version = postcssUrlRequire('minimatch/package.json') as { version: string };
-    expect(version.version).toBe('11.0.1');
+    expect(version.version).toBe('11.0.9');
     expect(minimatch.filter('**/*.svg')('test-results/example/icon.svg')).toBe(true);
     expect(minimatch.filter('**/*.svg')('test-results/example/icon.png')).toBe(false);
 
