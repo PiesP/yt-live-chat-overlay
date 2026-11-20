@@ -116,6 +116,11 @@ whether it was already counted. The confirmed presentation total is therefore a
 lower bound after uncertain recovery. Both counters reset with the existing
 session metrics; they do not retain an unbounded history of message IDs.
 
+After a clear, Worker fallback uses active and pending IDs for the new epoch
+once the Worker acknowledges that clear. The Worker posts the acknowledgement
+before the new epoch's stats. Late stats can still advance cumulative counters
+and the batch watermark for the Worker instance.
+
 Vertical geometry uses the saved `fontSize` in logical pixels for measurement,
 regular drawing, prewarming, lane creation and reflow in both renderers.
 Resizing/fullscreen changes capacity and paid-card width without resizing text.
