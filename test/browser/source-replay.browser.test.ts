@@ -7,7 +7,10 @@ import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { createLogger } from '@util/logging';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+
+import { observeTrace, type ReplayTransition } from '../unit/chat/replay-admission-model';
 
 const bootstrapMocks = vi.hoisted(() => ({ refreshBootstrap: vi.fn() }));
 
@@ -77,14 +80,52 @@ function makeMessageWithEstimatedBytes(bytes: number): ChatMessage {
   return message;
 }
 
-/**
- * Tests for ReplayChatSource seek+prefetch behavior.
- *
- * Regression guards for the Phase 3 fix: startPrefetch should only be
- * called when the seek fetch succeeds. The cooperative loop (lines 185-254)
- * already guards prefetch seeding behind mainPollSucceeded (line 202-204).
- * These tests verify the basic lifecycle and health snapshot contract.
- */
+function deferredEndpoint() {
+  const response = Promise.withResolvers<Response>();
+  const started = Promise.withResolvers<AbortSignal>();
+  const fetchResponse: typeof fetch = (_url, options) => {
+    if (!options?.signal) throw new Error('Replay request is missing its signal');
+    started.resolve(options.signal);
+    return response.promise;
+  };
+  return { response, signal: started.promise, fetchResponse };
+}
+
+function endpointResponse(
+  continuationKind: 'liveChatReplayContinuationData' | 'playerSeekContinuationData',
+  actions: unknown[] = []
+): Response {
+  return new Response(
+    JSON.stringify({
+      continuationContents: {
+        liveChatContinuation: {
+          actions,
+          continuations: [{ [continuationKind]: { continuation: 'next' } }],
+        },
+      },
+    })
+  );
+}
+
+function preseedReplay(source: ReplayChatSource): void {
+  source.setInitialBootstrap({
+    videoId: 'video-id',
+    isReplay: true,
+    clientContext: {},
+    clientNameHeader: '1',
+    ytcfg: {},
+    initialContinuation: { continuation: 'initial' },
+  });
+}
+
+function installReplayVideo(): HTMLVideoElement {
+  const video = document.createElement('video');
+  video.className = 'html5-main-video';
+  Object.defineProperty(video, 'paused', { value: false });
+  video.currentTime = 1;
+  document.body.append(video);
+  return video;
+}
 
 describe('ReplayChatSource', () => {
   let source: ReplayChatSource;
@@ -95,6 +136,7 @@ describe('ReplayChatSource', () => {
   });
 
   afterEach(() => {
+    source.stop();
     document.body.replaceChildren();
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -1077,71 +1119,156 @@ describe('ReplayChatSource', () => {
     expect(internals.replayContinuation).toEqual({ continuation: 'current-next' });
   });
 
-  it.each(['success', 'error'] as const)(
-    'aborts a stopped replay body and ignores its late %s after a new session starts',
-    async (lateResult) => {
-      const bootstrap = {
-        initialContinuation: { continuation: 'initial' },
-        isReplay: true,
-      } as ChatBootstrapData;
-      let resolveOld!: (payload: LiveChatPayload) => void;
-      let rejectOld!: (error: Error) => void;
-      const requestSignals: AbortSignal[] = [];
-      vi.spyOn(sessionOf(source), 'getPlaybackSnapshot').mockReturnValue({
-        offsetMs: 1000,
-        paused: false,
-      });
-      const request = vi
-        .spyOn(sessionOf(source), 'requestPayload')
-        .mockImplementation((...args) => {
-          requestSignals.push(args.at(-1) as AbortSignal);
-          if (requestSignals.length === 1) {
-            return new Promise<LiveChatPayload>((resolve, reject) => {
-              resolveOld = resolve;
-              rejectOld = reject;
-            });
-          }
-          return Promise.resolve({
-            actions: [makeReplayAction('current-session', 1000)],
-            continuations: [{ liveChatReplayContinuationData: { continuation: 'current-next' } }],
-          });
-        });
+  it.each([
+    { firstAbort: 'stop', oldSettlement: 'old-success' },
+    { firstAbort: 'stop', oldSettlement: 'old-failure' },
+    { firstAbort: 'stop', oldSettlement: 'old-abort' },
+    { firstAbort: 'deadline', oldSettlement: 'old-abort' },
+  ] as const)(
+    'keeps the original $firstAbort reason until $oldSettlement and admits only the new session',
+    async ({ firstAbort, oldSettlement }) => {
+      vi.useFakeTimers();
+      installReplayVideo();
+      const deadline = new AbortController();
+      const deadlineReason = new DOMException('Replay deadline', 'TimeoutError');
+      vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(deadline.signal);
+      const warn = vi.mocked(createLogger('ReplayChatSource').warn);
+      warn.mockClear();
 
-      source.setInitialBootstrap(bootstrap);
-      const stoppedStart = source.start(vi.fn());
-      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      const old = deferredEndpoint();
+      const replacement = deferredEndpoint();
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockImplementationOnce(old.fetchResponse)
+        .mockImplementationOnce(replacement.fetchResponse);
+      vi.stubGlobal('fetch', fetchMock);
+      preseedReplay(source);
+      const retiredCallback = vi.fn();
+      const oldStart = source.start(retiredCallback);
+      const oldSignal = await old.signal;
+      const pending: ReplayTransition[] = [];
+
+      if (firstAbort === 'deadline') {
+        deadline.abort(deadlineReason);
+        pending.push('deadline');
+      }
       source.stop();
-      expect(requestSignals[0]?.aborted).toBe(true);
+      pending.push('stop');
+      const reasonAtStop: unknown = oldSignal.reason;
+      if (firstAbort === 'stop') {
+        deadline.abort(deadlineReason);
+        pending.push('deadline');
+      }
+      expect(oldSignal.reason).toBe(reasonAtStop);
 
-      source.setInitialBootstrap(bootstrap);
-      const received: string[] = [];
-      const currentStart = source.start((messages) => {
-        received.push(
-          ...(Array.isArray(messages) ? messages : [messages]).flatMap((message) =>
-            message.id ? [message.id] : []
-          )
-        );
+      preseedReplay(source);
+      const replacementCallback = vi.fn();
+      const replacementStart = source.start(replacementCallback);
+      pending.push('start');
+
+      const waiting = observeTrace(pending, 'session');
+      expect(waiting.queue.map(({ id }) => id)).toEqual(['old', 'replacement']);
+      expect(oldSignal.reason).toMatchObject({
+        name: waiting.firstAbort === 'deadline' ? 'TimeoutError' : 'AbortError',
       });
-      expect(request).toHaveBeenCalledOnce();
-      if (lateResult === 'success') {
-        resolveOld({
-          actions: [makeReplayAction('stopped-session', 1000)],
-          continuations: [{ liveChatReplayContinuationData: { continuation: 'stopped-next' } }],
-        });
+      if (waiting.firstAbort === 'deadline') expect(oldSignal.reason).toBe(deadlineReason);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      if (oldSettlement === 'old-success') {
+        old.response.resolve(
+          endpointResponse('liveChatReplayContinuationData', [makeReplayAction('old', 1_000)])
+        );
       } else {
-        rejectOld(new Error('late body failure'));
+        old.response.reject(
+          oldSettlement === 'old-abort' ? reasonAtStop : new Error('Late transport failure')
+        );
       }
 
-      await expect(stoppedStart).resolves.toBe('retryable');
-      await expect(currentStart).resolves.toBe('started');
-      expect(request).toHaveBeenCalledTimes(2);
-      expect(requestSignals[1]?.aborted).toBe(false);
-      expect(received).toEqual(['current-session']);
-      expect(source.getLatestMessages(2).map((message) => message.id)).not.toContain(
-        'stopped-session'
+      await expect(oldStart).resolves.toBe('retryable');
+      const replacementSignal = await replacement.signal;
+      expect(replacementSignal.aborted).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(retiredCallback).not.toHaveBeenCalled();
+      expect(source.getLatestMessages(2)).toEqual([]);
+
+      replacement.response.resolve(
+        endpointResponse('liveChatReplayContinuationData', [makeReplayAction('replacement', 1_000)])
       );
-      source.stop();
-      expect(requestSignals[1]?.aborted).toBe(true);
+      await expect(replacementStart).resolves.toBe('started');
+      const finished = observeTrace(
+        [...pending, oldSettlement, 'begin-replacement', 'replacement-success'],
+        'session'
+      );
+      expect(source.getLatestMessages(2).map((message) => message.id)).toEqual(finished.displayed);
+      expect(replacementCallback).toHaveBeenCalledExactlyOnceWith(
+        [expect.objectContaining({ id: 'replacement' })],
+        false
+      );
+      const deadlineDiagnostics = warn.mock.calls.filter(
+        ([key]) => key === 'chat.replay.fetch-timeout'
+      );
+      expect(deadlineDiagnostics).toHaveLength(finished.oldOutcome === 'deadline' ? 1 : 0);
+    }
+  );
+
+  it.each(['old-success', 'old-failure'] as const)(
+    'rejects stale $0 and starts the replacement seek only after transport settlement',
+    async (oldSettlement) => {
+      vi.useFakeTimers();
+      const video = installReplayVideo();
+      const old = deferredEndpoint();
+      const replacement = deferredEndpoint();
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(endpointResponse('playerSeekContinuationData'))
+        .mockResolvedValueOnce(endpointResponse('playerSeekContinuationData'))
+        .mockImplementationOnce(old.fetchResponse)
+        .mockImplementationOnce(replacement.fetchResponse);
+      vi.stubGlobal('fetch', fetchMock);
+      preseedReplay(source);
+      const callback = vi.fn();
+      await expect(source.start(callback)).resolves.toBe('started');
+      // Allow the first display/network ticks to run at the already-seeded offset.
+      await vi.advanceTimersByTimeAsync(0);
+
+      video.currentTime = 2;
+      video.dispatchEvent(new Event('seeked'));
+      const oldSignal = await old.signal;
+      video.currentTime = 3;
+      video.dispatchEvent(new Event('seeked'));
+
+      const waiting = observeTrace(['seek'], 'seek');
+      expect(waiting.active).toBe('old');
+      expect(oldSignal.reason).toMatchObject({ name: 'AbortError' });
+      expect(waiting.firstAbort).toBe('seek');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      if (oldSettlement === 'old-success') {
+        old.response.resolve(
+          endpointResponse('playerSeekContinuationData', [makeReplayAction('old', 2_000)])
+        );
+      } else {
+        old.response.reject(new Error('Late seek transport failure'));
+      }
+
+      const replacementSignal = await replacement.signal;
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(replacementSignal.aborted).toBe(false);
+      expect(callback).not.toHaveBeenCalled();
+      expect(source.getLatestMessages(2)).toEqual([]);
+
+      replacement.response.resolve(
+        endpointResponse('playerSeekContinuationData', [makeReplayAction('replacement', 3_000)])
+      );
+      const finished = observeTrace(
+        ['seek', oldSettlement, 'begin-replacement', 'replacement-success'],
+        'seek'
+      );
+      await vi.waitFor(() => expect(callback).toHaveBeenCalledOnce());
+      expect(source.getLatestMessages(2).map((message) => message.id)).toEqual(finished.displayed);
+      expect(source.getHealthSnapshot().isInBackoff).toBe(false);
     }
   );
 

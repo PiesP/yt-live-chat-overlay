@@ -6,6 +6,8 @@ import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
+import { observeTrace } from './chat/replay-admission-model';
+
 const mocks = vi.hoisted(() => ({
   refreshBootstrap: vi.fn(),
   resolveBootstrap: vi.fn(),
@@ -70,5 +72,54 @@ describe('ChatSession bootstrap refresh', () => {
     await expect(oldStart).resolves.toBe('retryable');
     expect(context.getBootstrap()).toBe(replacement);
     session.stop();
+  });
+});
+
+describe('ChatSession poll-owner retirement', () => {
+  it('keeps the replacement observer alive after an old loop actually completes', async () => {
+    const oldRun = Promise.withResolvers<void>();
+    const replacementRun = Promise.withResolvers<void>();
+    const run = vi
+      .fn<(signal?: AbortSignal) => Promise<void>>()
+      .mockReturnValueOnce(oldRun.promise)
+      .mockReturnValueOnce(replacementRun.promise);
+    const session = new ChatSession(
+      () => DEFAULT_SETTINGS,
+      () => ({
+        scheduling: 'poll-loop',
+        reset: () => {},
+        seed: async () => true,
+        run,
+      })
+    );
+    const bootstrap: ChatBootstrapData = {
+      videoId: 'video',
+      isReplay: false,
+      clientContext: {},
+      clientNameHeader: '1',
+      ytcfg: {},
+      initialContinuation: { continuation: 'initial' },
+    };
+
+    try {
+      session.setInitialBootstrap(bootstrap);
+      await expect(session.start(vi.fn())).resolves.toBe('started');
+      expect(session.getHealthSnapshot().observerAlive).toBe(true);
+
+      session.setInitialBootstrap(bootstrap);
+      await expect(session.start(vi.fn())).resolves.toBe('started');
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(run.mock.calls[0]?.[0]?.aborted).toBe(true);
+      expect(run.mock.calls[1]?.[0]?.aborted).toBe(false);
+
+      oldRun.resolve();
+      await oldRun.promise;
+      const finished = observeTrace(['stop', 'start', 'old-success', 'old-loop-finish'], 'session');
+      expect(session.getHealthSnapshot().observerAlive).toBe(finished.observer === 1);
+    } finally {
+      session.stop();
+      oldRun.resolve();
+      replacementRun.resolve();
+    }
   });
 });
