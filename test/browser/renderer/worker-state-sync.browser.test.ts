@@ -1910,6 +1910,81 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it.each([
+    { order: 'cached old stats', trackDrops: true },
+    { order: 'delayed old stats after a superseded clear acknowledgement', trackDrops: true },
+    { order: 'current stats after the matching clear acknowledgement', trackDrops: false },
+  ] as const)('attributes same-ID Worker recovery with $order', async ({ order, trackDrops }) => {
+    const { manager, observability, worker } = initializedManager();
+    const id = 'same-id';
+    const old: ChatMessage = {
+      id,
+      text: 'previous placement',
+      content: [{ type: 'text', content: 'previous placement' }],
+      timestamp: 1,
+      kind: 'text',
+      authorType: 'normal',
+    };
+    const current: ChatMessage = {
+      ...old,
+      text: 'new placement',
+      content: [{ type: 'text', content: 'new placement' }],
+      timestamp: 2,
+    };
+    const oldStats: WorkerStatsMessage = {
+      type: 'stats',
+      activeMessages: 1,
+      pendingQueueDepth: 0,
+      processedBatchSequence: 1,
+      totalRendered: 1,
+      totalPresented: 1,
+      totalDrops: 1,
+      laneUtilization: 0.5,
+      activeMessageIds: [id],
+      pendingMessageIds: [],
+    };
+
+    try {
+      const supersededClear =
+        order === 'delayed old stats after a superseded clear acknowledgement';
+      if (supersededClear) manager.clearState();
+      expect(manager.sendToWorker(old, id, true)).toBe(true);
+      await flushMicrotasks();
+      if (order === 'cached old stats') worker.emitMessage(oldStats);
+
+      manager.clearState();
+      expect(manager.isCurrentMessage(id, old)).toBe(false);
+      expect(manager.sendToWorker(current, id, true)).toBe(true);
+      await flushMicrotasks();
+
+      if (supersededClear) worker.emitMessage({ type: 'clearStateAck', epoch: 1 });
+      if (order !== 'cached old stats') worker.emitMessage(oldStats);
+      const observesCurrentPlacement =
+        order === 'current stats after the matching clear acknowledgement';
+      if (observesCurrentPlacement) {
+        worker.emitMessage({ type: 'clearStateAck', epoch: 1 });
+        worker.emitMessage({
+          ...oldStats,
+          processedBatchSequence: 2,
+          totalRendered: 2,
+          totalPresented: 2,
+        });
+      }
+
+      const drawDeltas = observesCurrentPlacement ? [[1], [1]] : [[1]];
+      expect(observability.onMessagesRendered.mock.calls).toEqual(drawDeltas);
+      expect(observability.onMessagesPresented.mock.calls).toEqual(drawDeltas);
+      expect(observability.onMessagesDropped.mock.calls).toEqual([[1]]);
+      manager.setActive(false);
+      await expect(manager.snapshotMessages(0)).resolves.toEqual([
+        { message: current, trackDrops, presentationAccounting: 'unknown' },
+      ]);
+    } finally {
+      manager.destroy();
+      worker.acknowledgeDestroy();
+    }
+  });
+
   it('preserves drop tracking only for pending and unacknowledged live work', async () => {
     const { manager, worker } = initializedManager();
     const makeChatMessage = (id: string) => ({
