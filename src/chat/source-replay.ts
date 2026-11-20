@@ -39,7 +39,7 @@ const REPLAY_TOTAL_FAILURE_LIMIT = 15; // 3 backoff cycles before re-initializat
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
 const REPLAY_PREFETCH_MIN_INTERVAL_MS = 250;
-const RAF_FLUSH_BATCH_SIZE = 5;
+const REPLAY_FLUSH_BATCH_SIZE = 5;
 const REPLAY_PREFETCH_TARGET_HORIZON_MS = 30_000;
 const REPLAY_PREFETCH_RESUME_HORIZON_MS = 12_000;
 // Stop one maximum-sized extracted page before ReplayBuffer's 3,000-message
@@ -717,9 +717,8 @@ class ReplayChatDriver implements ScheduledChatSessionDriver {
   /**
    * Flush messages whose video time has been reached.
    *
-   * Emits at most RAF_FLUSH_BATCH_SIZE (5) messages per frame to prevent
-   * visual clumping — same-timestamp messages spread naturally across
-   * multiple frames (~16ms each) for a smooth stream.
+   * Each flush delivers at most five due messages. The display timer can
+   * drain the remaining messages on subsequent ticks.
    */
   private flushReplayBuffer(playback = this.session.getPlaybackSnapshot()): void {
     if (!this.session.canDeliver || this.session.paused) return;
@@ -727,7 +726,7 @@ class ReplayChatDriver implements ScheduledChatSessionDriver {
     // loop passes its current snapshot to avoid a second DOM lookup per tick.
     if (!playback || playback.paused) return;
 
-    const batch = this.replayBuffer.flushUpTo(playback.offsetMs, RAF_FLUSH_BATCH_SIZE);
+    const batch = this.replayBuffer.flushUpTo(playback.offsetMs, REPLAY_FLUSH_BATCH_SIZE);
     this.reportLateDrops();
 
     if (batch.length === 0) return;
@@ -869,7 +868,7 @@ class ReplayChatDriver implements ScheduledChatSessionDriver {
     return this.replayTotalFailuresSinceSuccess >= REPLAY_TOTAL_FAILURE_LIMIT;
   }
 
-  // ── Poll methods (fetch + backoff only — flush is handled by rAF) ───────
+  // ── Poll methods (fetch and backoff) ───────
 
   private async pollPlayerSeekReplay(
     playback: PlaybackSnapshot,
@@ -884,7 +883,6 @@ class ReplayChatDriver implements ScheduledChatSessionDriver {
     }
 
     const fetched = await this.fetchReplayPlayerSeek(playback.offsetMs, signal);
-    // Flush is handled by the rAF loop — no explicit flush call here.
 
     if (fetched) {
       return true;
