@@ -84,7 +84,7 @@
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "playwright": "1.65.1",
-    "puppeteer-core": "25.16.0",
+    "puppeteer-core": "25.18.1",
     "vite": "catalog:",
     "vite-plugin-monkey": "^8.1.1",
     "vite-plus": "catalog:",
