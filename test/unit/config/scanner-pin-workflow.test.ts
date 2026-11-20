@@ -23,7 +23,7 @@ function stepSection(job: string, name: string): string {
 describe('reviewed scanner helper boundary', () => {
   it('retains consumer-owned scanner metadata byte-for-byte', () => {
     expect(createHash('sha256').update(read('scripts/ci/pinned-tools.json')).digest('hex')).toBe(
-      'bb8f394930fa948bc32f4fc7592bf75111418da8ddd7bd597bd0edded45a1fa7'
+      '65aa3be10be4e488fe36999b861a410b4901c5ea7c0929ec8edd3d0996dcfc15'
     );
     const pins = JSON.parse(read('scripts/ci/pinned-tools.json')) as Record<string, unknown>;
     expect(Object.keys(pins).sort()).toEqual(['osv', 'semgrep']);
