@@ -1123,6 +1123,7 @@ describe('ReplayChatSource', () => {
     { firstAbort: 'stop', oldSettlement: 'old-success' },
     { firstAbort: 'stop', oldSettlement: 'old-failure' },
     { firstAbort: 'stop', oldSettlement: 'old-abort' },
+    { firstAbort: 'deadline', oldSettlement: 'old-failure' },
     { firstAbort: 'deadline', oldSettlement: 'old-abort' },
   ] as const)(
     'keeps the original $firstAbort reason until $oldSettlement and admits only the new session',
