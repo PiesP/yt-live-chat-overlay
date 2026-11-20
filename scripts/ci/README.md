@@ -26,7 +26,7 @@ after an earlier failure.
 
 The workflow pins consumer data at
 `8386b9806993bff97d7a629e56c0d030a8b9e263` and provider code at
-`4ab0442d8d2e3cf640767b499b6444c92f6479b5`, independently by full SHA.
+`4a5b22d012896fda0541b54104288da8d4a1bd75`, independently by full SHA.
 Both paths run after the selected Node setup, and no scanner code or pin data
 comes from a candidate PR checkout. The provider snapshots in
 `test/fixtures/scanner-provider/` are test-only copies from the reviewed Action

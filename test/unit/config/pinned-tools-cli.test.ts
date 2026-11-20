@@ -34,7 +34,7 @@ const providerFiles = [
   [
     'automation/security/scanner-pins.ts',
     'scanner-pins.ts.txt',
-    '4975feec038d3969dc38fcd1de73afba04cb84e8cd8e176de9ed8a4a81f7b7a9',
+    '4faf0995672138f00731e459555dc81ff33d8dd4b7f16bad38f68219db5e80f6',
   ],
 ] as const;
 const roots: string[] = [];
@@ -86,7 +86,7 @@ if (file === 'gh') {
   } else if (scenario === 'manifest-fail') {
     process.exit(7);
   } else {
-    process.stdout.write('Docker-Content-Digest: ' + (scenario === 'digest-mismatch' ? 'sha256:' + '0'.repeat(64) : pins.osv.image.split('@')[1]) + '\\r\\n');
+    process.stdout.write('Content-Type: application/vnd.oci.image.index.v1+json\\r\\nDocker-Content-Digest: ' + (scenario === 'digest-mismatch' ? 'sha256:' + '0'.repeat(64) : pins.osv.image.split('@')[1]) + '\\r\\n');
   }
 }
 `
