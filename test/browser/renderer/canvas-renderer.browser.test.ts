@@ -8,6 +8,7 @@ import { ImageFetchManager } from '@media/image-fetch-manager';
 import { LruMap } from '@piesp/browser-core/util';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
+import { drawAuthorSection, getSafeTextHeight } from '@renderer/canvas/shared';
 import { type CanvasMessage, GRADIENT_CACHE_MAX } from '@renderer/constants';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import {
@@ -393,6 +394,41 @@ describe('Backlog control across visual resets', () => {
       state.chatSource = null;
       manager.destroy();
     }
+  });
+});
+
+describe('Canvas author height', () => {
+  it.each([undefined, 0, 12, 240])('measures only missing bounds at width %s', (width) => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (!ctx) throw new Error('Missing 2D context');
+    ctx.font = 'normal 18px sans-serif';
+    const fallbackHeight = getSafeTextHeight(ctx.measureText('Mg'), 18);
+    const measure = vi.spyOn(ctx, 'measureText');
+    const cache = { get: () => undefined, set: () => {} };
+    const draw = (bounds?: { height: number; above: number }) =>
+      drawAuthorSection(
+        ctx,
+        { author: 'مرحبا 👩‍💻' },
+        0,
+        6,
+        '#fff',
+        width,
+        18,
+        'normal',
+        'sans-serif',
+        0,
+        0,
+        cache,
+        () => false,
+        cache,
+        () => 'normal 18px sans-serif',
+        bounds
+      );
+
+    expect(draw({ height: 31, above: 3 })).toBe(37);
+    expect(measure).not.toHaveBeenCalledWith('Mg');
+    expect(draw()).toBe(6 + fallbackHeight);
+    expect(measure.mock.calls.filter(([text]) => text === 'Mg')).toHaveLength(1);
   });
 });
 
