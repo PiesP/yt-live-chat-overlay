@@ -1353,6 +1353,9 @@ export class WorkerRenderer {
       return true;
     }
 
+    if (existing.kind === 'superchat' || existing.kind === 'membership') {
+      releasePaidCardPlan(existing);
+    }
     existing.text = msg.text;
     if (msg.canonicalText !== undefined) existing.canonicalText = msg.canonicalText;
     else delete existing.canonicalText;

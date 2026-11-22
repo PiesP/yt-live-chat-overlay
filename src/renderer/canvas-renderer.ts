@@ -103,7 +103,7 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
-import { releasePaidCardPlans } from '@renderer/layout/paid-card-plan';
+import { releasePaidCardPlan, releasePaidCardPlans } from '@renderer/layout/paid-card-plan';
 import {
   getRegularRowHeight,
   getRowSlotCount,
@@ -1011,6 +1011,9 @@ export class CanvasRenderer implements RuntimeRenderer {
 
     this.messageActivator.cancelTranslation(active);
     this.cancelReplacementTranslation(active);
+    if (active.message.kind === 'superchat' || active.message.kind === 'membership') {
+      releasePaidCardPlan(active);
+    }
     active.message = message;
     active.renderMessage = message;
     active.ghostText = getDisplayText(message.content);
