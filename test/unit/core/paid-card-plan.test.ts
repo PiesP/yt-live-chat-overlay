@@ -12,7 +12,8 @@ import {
 } from '@renderer/layout/paid-card-plan';
 import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
 import { clearTextMeasurementCaches } from '@renderer/text-measure';
-import { describe, expect, it } from 'vite-plus/test';
+import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 const measure = (text: string): number => Array.from(text).length * 10;
 const measurement = { width: measure, height: (_font: string, size: number) => size };
@@ -95,6 +96,39 @@ describe('production paid-card plan', () => {
     releasePaidCardPlans([first.activeCard, second.activeCard]);
     expect(plan(first)).not.toBe(rebuilt);
     expect(plan(second)).not.toBe(other);
+  });
+
+  it('refreshes paid rows when page-defined typefaces can change the selected family', () => {
+    const faces = new Set<{ family: string }>();
+    const activeCard = {};
+    const content = [
+      { type: 'text', content: 'Typefaces can resolve after the first paint' },
+    ] as const;
+    const input = { activeCard, content, fontFamily: 'Delayed, sans-serif' };
+    vi.stubGlobal('fonts', faces);
+    try {
+      const initial = plan(input).body;
+      expect(plan(input).body).toBe(initial);
+      const late = { family: 'Delayed' };
+      faces.add(late);
+      const fresh = plan(input).body;
+      expect(fresh).not.toBe(initial);
+      expect(plan(input).body).not.toBe(fresh);
+      faces.delete(late);
+      const afterRemoval = plan(input).body;
+      expect(afterRemoval).not.toBe(initial);
+      expect(plan(input).body).toBe(afterRemoval);
+      // Default system faces can still be reused on pages with unrelated fonts.
+      faces.add(late);
+      const system = { ...input, fontFamily: DEFAULT_FONT_FAMILY };
+      const generic = plan(system).body;
+      expect(plan(system).body).toBe(generic);
+      faces.clear();
+      faces.add({ family: '"-apple-system"' });
+      expect(plan(system).body).not.toBe(generic);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('reserves the amount first and contains the 240/24/220+24 overflow fixture', () => {
