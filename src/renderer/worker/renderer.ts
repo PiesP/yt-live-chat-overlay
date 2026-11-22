@@ -114,7 +114,11 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
-import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
+import {
+  preparePaidCardPlan,
+  releasePaidCardPlan,
+  releasePaidCardPlans,
+} from '@renderer/layout/paid-card-plan';
 import {
   getRegularContentBounds,
   getRegularRowHeight,
@@ -301,6 +305,7 @@ export function renderPaidCardWorker(
   const padV = card.padding.vertical;
   const textX = x + padH;
   const plan = preparePaidCardPlan({
+    activeCard: message,
     kind: message.kind === 'superchat' ? 'superchat' : 'membership',
     width: w,
     fontSize,
@@ -1348,6 +1353,9 @@ export class WorkerRenderer {
       return true;
     }
 
+    if (existing.kind === 'superchat' || existing.kind === 'membership') {
+      releasePaidCardPlan(existing);
+    }
     existing.text = msg.text;
     if (msg.canonicalText !== undefined) existing.canonicalText = msg.canonicalText;
     else delete existing.canonicalText;
@@ -1526,6 +1534,7 @@ export class WorkerRenderer {
   }
 
   private handleDestroy(): void {
+    releasePaidCardPlans(this.activeMessages);
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -1569,6 +1578,7 @@ export class WorkerRenderer {
    * preserving decoded-image and text-bitmap caches.
    */
   private handleClearState(epoch = this.currentEpoch): void {
+    releasePaidCardPlans(this.activeMessages);
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -2103,6 +2113,7 @@ export class WorkerRenderer {
       if (elapsed >= msg.duration) {
         this.messageById.delete(msg.id);
         this.releaseQueuedAssetsForOwner(msg.id);
+        releasePaidCardPlan(msg);
         this.expiredMessagesScratch.push(msg);
         continue;
       }

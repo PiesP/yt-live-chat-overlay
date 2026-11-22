@@ -4,9 +4,16 @@
 import type { ChatMessage } from '@app-types';
 import { toSharedContentSegments } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, resolveCardBorderAlpha } from '@renderer/card-config';
-import { preparePaidCardPlan, type PaidCardPlanInput } from '@renderer/layout/paid-card-plan';
+import {
+  preparePaidCardPlan,
+  releasePaidCardPlan,
+  releasePaidCardPlans,
+  type PaidCardPlanInput,
+} from '@renderer/layout/paid-card-plan';
 import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
-import { describe, expect, it } from 'vite-plus/test';
+import { clearTextMeasurementCaches } from '@renderer/text-measure';
+import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 const measure = (text: string): number => Array.from(text).length * 10;
 const measurement = { width: measure, height: (_font: string, size: number) => size };
@@ -49,6 +56,81 @@ function plan(overrides: Partial<PaidCardPlanInput> = {}) {
 }
 
 describe('production paid-card plan', () => {
+  it('reuses only the current active geometry and remeasures after a font reset', () => {
+    const activeCard = {};
+    const content = [{ type: 'text', content: 'دين 👩‍💻' }] as const;
+    const input = { activeCard, content, translatedText: '새 번역' };
+    const initial = plan(input);
+    expect(plan(input)).toBe(initial);
+    expect(plan({ ...input, activeCard: {} })).not.toBe(initial);
+    for (const change of [
+      { width: 210 },
+      { translatedText: '새 번역!' },
+      { content: [...content] },
+      { showAuthor: false },
+      { fontFamily: 'serif' },
+      { outlineWidthPx: 2 },
+      { sticker: true },
+      { amount: '¥8,000' },
+      { maxBodyLines: 1 },
+    ]) {
+      const beforeChange = plan(input);
+      const revised = plan({ ...input, ...change });
+      expect(revised).not.toBe(beforeChange);
+      expect(revised).toEqual(plan({ ...input, ...change, activeCard: undefined }));
+    }
+    const priorFont = plan(input);
+    clearTextMeasurementCaches();
+    expect(plan(input)).not.toBe(priorFont);
+  });
+
+  it('releases expired and cleared plans while draw state is still reachable', () => {
+    const first = { activeCard: {}, content: [] };
+    const second = { activeCard: {}, content: [] };
+    const initial = plan(first);
+    const other = plan(second);
+    releasePaidCardPlan(first.activeCard);
+    const rebuilt = plan(first);
+    expect(rebuilt).not.toBe(initial);
+    expect(plan(second)).toBe(other);
+    releasePaidCardPlans([first.activeCard, second.activeCard]);
+    expect(plan(first)).not.toBe(rebuilt);
+    expect(plan(second)).not.toBe(other);
+  });
+
+  it('refreshes paid rows when page-defined typefaces can change the selected family', () => {
+    const faces = new Set<{ family: string }>();
+    const activeCard = {};
+    const content = [
+      { type: 'text', content: 'Typefaces can resolve after the first paint' },
+    ] as const;
+    const input = { activeCard, content, fontFamily: 'Delayed, sans-serif' };
+    vi.stubGlobal('fonts', faces);
+    try {
+      const initial = plan(input).body;
+      expect(plan(input).body).toBe(initial);
+      const late = { family: 'Delayed' };
+      faces.add(late);
+      const fresh = plan(input).body;
+      expect(fresh).not.toBe(initial);
+      expect(plan(input).body).not.toBe(fresh);
+      faces.delete(late);
+      const afterRemoval = plan(input).body;
+      expect(afterRemoval).not.toBe(initial);
+      expect(plan(input).body).toBe(afterRemoval);
+      // Default system faces can still be reused on pages with unrelated fonts.
+      faces.add(late);
+      const system = { ...input, fontFamily: DEFAULT_FONT_FAMILY };
+      const generic = plan(system).body;
+      expect(plan(system).body).toBe(generic);
+      faces.clear();
+      faces.add({ family: '"-apple-system"' });
+      expect(plan(system).body).not.toBe(generic);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('reserves the amount first and contains the 240/24/220+24 overflow fixture', () => {
     const result = plan({ amount: 'X'.repeat(22) });
     expect(result.amountWidth).toBe(192);

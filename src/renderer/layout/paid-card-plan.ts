@@ -10,10 +10,35 @@ import {
 } from '@renderer/canvas/shared';
 import { TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@renderer/constants';
 import { getAuthorPhotoSlotWidth, getAuthorRowHeight } from '@renderer/layout/card-layout';
-import { getFontString, measureTextHeight } from '@renderer/text-measure';
-import { rendererLayout, spacing } from '@util/design-tokens';
+import {
+  getFontString,
+  getTextMeasurementGeneration,
+  measureTextHeight,
+} from '@renderer/text-measure';
+import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@util/design-tokens';
+
+// A document or Worker can register a new face after the first draw without changing
+// the CSS family string or the renderer's settings generation. Keep those draws live.
+function canRetainPaidFont(fontFamily: string): boolean {
+  const faces =
+    typeof document === 'undefined'
+      ? (globalThis as { fonts?: FontFaceSet }).fonts
+      : document.fonts;
+  if (!faces?.size) return true;
+  if (fontFamily !== DEFAULT_FONT_FAMILY) return false;
+  // The default begins with system-ui. Only its named -apple-system fallback
+  // could resolve to a registered face. An escaped CSS spelling is ambiguous.
+  for (const face of faces) {
+    const family = face.family.trim().toLowerCase();
+    if (family.includes('\\') || family.replace(/^["']|["']$/g, '') === '-apple-system') {
+      return false;
+    }
+  }
+  return true;
+}
 
 export interface PaidCardPlanInput {
+  activeCard?: object | undefined;
   kind: 'superchat' | 'membership';
   width: number;
   fontSize: number;
@@ -59,8 +84,65 @@ export interface PaidCardPlan {
   compactHeader: boolean;
 }
 
+// Drawing owns one plan per live card. Estimation runs without an active owner.
+// Exclude per-call measurement closures; the context and font generation identify
+// the measurement backend for each renderer.
+type LayoutInputs = Omit<PaidCardPlanInput, 'activeCard' | 'measure' | 'measureHeight'>;
+const retainedPlans = new WeakMap<
+  object,
+  {
+    inputs: LayoutInputs;
+    generation: number;
+    plan: PaidCardPlan;
+  }
+>();
+
+/** Release plans even when the renderer keeps the expired draw state in scratch storage. */
+export function releasePaidCardPlan(activeCard: object): void {
+  retainedPlans.delete(activeCard);
+}
+
+export function releasePaidCardPlans(activeCards: readonly object[]): void {
+  for (const activeCard of activeCards) releasePaidCardPlan(activeCard);
+}
+
+function sameLayoutInputs(a: LayoutInputs, b: LayoutInputs): boolean {
+  return (
+    a.kind === b.kind &&
+    a.width === b.width &&
+    a.fontSize === b.fontSize &&
+    a.fontWeight === b.fontWeight &&
+    a.fontFamily === b.fontFamily &&
+    a.paddingH === b.paddingH &&
+    a.paddingV === b.paddingV &&
+    a.author === b.author &&
+    a.authorPhotoUrl === b.authorPhotoUrl &&
+    a.showAuthor === b.showAuthor &&
+    a.amount === b.amount &&
+    a.showAmount === b.showAmount &&
+    a.membershipHeader === b.membershipHeader &&
+    a.content === b.content &&
+    a.translatedText === b.translatedText &&
+    a.maxBodyLines === b.maxBodyLines &&
+    a.outlineWidthPx === b.outlineWidthPx &&
+    a.wide === b.wide &&
+    a.sticker === b.sticker &&
+    a.context === b.context
+  );
+}
+
 /** Single measured row plan for estimation and both Canvas renderers. */
 export function preparePaidCardPlan(input: PaidCardPlanInput): PaidCardPlan {
+  const retain = !!input.activeCard && canRetainPaidFont(input.fontFamily);
+  const retained = input.activeCard && retainedPlans.get(input.activeCard);
+  if (
+    retain &&
+    retained &&
+    retained.generation === getTextMeasurementGeneration() &&
+    sameLayoutInputs(retained.inputs, input)
+  )
+    return retained.plan;
+
   const innerWidth = Math.max(1, input.width - input.paddingH * 2);
   const authorVisible = input.showAuthor && !!input.author;
   const authorFontSize = Math.round(input.fontSize * rendererLayout.authorFontScale);
@@ -181,5 +263,9 @@ export function preparePaidCardPlan(input: PaidCardPlanInput): PaidCardPlan {
     cursor += plan.stickerSize;
   }
   plan.height = cursor + input.paddingV;
+  if (input.activeCard && retain) {
+    const { activeCard, measure: _measure, measureHeight: _measureHeight, ...inputs } = input;
+    retainedPlans.set(activeCard, { inputs, generation: getTextMeasurementGeneration(), plan });
+  } else if (input.activeCard && retained) releasePaidCardPlan(input.activeCard);
   return plan;
 }

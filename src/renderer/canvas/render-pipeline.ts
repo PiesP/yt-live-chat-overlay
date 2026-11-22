@@ -37,6 +37,7 @@ import {
 import { getRegularCardInsets, hasRegularBackground } from '@renderer/layout/card-layout';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { messageXAtElapsed, resolveEffectiveMotionMode } from '@renderer/layout/message-schedule';
+import { releasePaidCardPlan } from '@renderer/layout/paid-card-plan';
 import { getRegularContentBounds } from '@renderer/layout/row-geometry';
 import { getMessagePriority } from '@renderer/message-priority';
 import { accessiblePresentationText, isPresentableFrame } from '@renderer/presentation';
@@ -217,6 +218,7 @@ export function cleanupAndBucketStage(
 
     // Expired: message has exceeded its display duration
     if (elapsed >= msg.duration) {
+      releasePaidCardPlan(msg);
       ctx.expiredMessagesScratch.push(msg);
       ctx.messageActivator.releaseMessage(msg);
       anyRemoved = true;
@@ -484,7 +486,8 @@ export function drawStage(
                 msg.translatedText !== msg.message.text
                 ? msg.translatedText
                 : undefined,
-              ctx.isReducedMotionActive
+              ctx.isReducedMotionActive,
+              msg
             );
           } finally {
             renderCtx.restore();
