@@ -114,7 +114,11 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
-import { preparePaidCardPlan } from '@renderer/layout/paid-card-plan';
+import {
+  preparePaidCardPlan,
+  releasePaidCardPlan,
+  releasePaidCardPlans,
+} from '@renderer/layout/paid-card-plan';
 import {
   getRegularContentBounds,
   getRegularRowHeight,
@@ -1527,6 +1531,7 @@ export class WorkerRenderer {
   }
 
   private handleDestroy(): void {
+    releasePaidCardPlans(this.activeMessages);
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -1570,6 +1575,7 @@ export class WorkerRenderer {
    * preserving decoded-image and text-bitmap caches.
    */
   private handleClearState(epoch = this.currentEpoch): void {
+    releasePaidCardPlans(this.activeMessages);
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -2104,6 +2110,7 @@ export class WorkerRenderer {
       if (elapsed >= msg.duration) {
         this.messageById.delete(msg.id);
         this.releaseQueuedAssetsForOwner(msg.id);
+        releasePaidCardPlan(msg);
         this.expiredMessagesScratch.push(msg);
         continue;
       }

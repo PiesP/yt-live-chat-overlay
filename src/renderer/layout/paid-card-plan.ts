@@ -77,6 +77,15 @@ const retainedPlans = new WeakMap<
   }
 >();
 
+/** Release plans even when the renderer keeps the expired draw state in scratch storage. */
+export function releasePaidCardPlan(activeCard: object): void {
+  retainedPlans.delete(activeCard);
+}
+
+export function releasePaidCardPlans(activeCards: readonly object[]): void {
+  for (const activeCard of activeCards) releasePaidCardPlan(activeCard);
+}
+
 function sameLayoutInputs(a: LayoutInputs, b: LayoutInputs): boolean {
   return (
     a.kind === b.kind &&

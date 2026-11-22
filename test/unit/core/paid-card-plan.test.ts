@@ -4,7 +4,12 @@
 import type { ChatMessage } from '@app-types';
 import { toSharedContentSegments } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, resolveCardBorderAlpha } from '@renderer/card-config';
-import { preparePaidCardPlan, type PaidCardPlanInput } from '@renderer/layout/paid-card-plan';
+import {
+  preparePaidCardPlan,
+  releasePaidCardPlan,
+  releasePaidCardPlans,
+  type PaidCardPlanInput,
+} from '@renderer/layout/paid-card-plan';
 import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
 import { clearTextMeasurementCaches } from '@renderer/text-measure';
 import { describe, expect, it } from 'vite-plus/test';
@@ -76,6 +81,20 @@ describe('production paid-card plan', () => {
     const priorFont = plan(input);
     clearTextMeasurementCaches();
     expect(plan(input)).not.toBe(priorFont);
+  });
+
+  it('releases expired and cleared plans while draw state is still reachable', () => {
+    const first = { activeCard: {}, content: [] };
+    const second = { activeCard: {}, content: [] };
+    const initial = plan(first);
+    const other = plan(second);
+    releasePaidCardPlan(first.activeCard);
+    const rebuilt = plan(first);
+    expect(rebuilt).not.toBe(initial);
+    expect(plan(second)).toBe(other);
+    releasePaidCardPlans([first.activeCard, second.activeCard]);
+    expect(plan(first)).not.toBe(rebuilt);
+    expect(plan(second)).not.toBe(other);
   });
 
   it('reserves the amount first and contains the 240/24/220+24 overflow fixture', () => {

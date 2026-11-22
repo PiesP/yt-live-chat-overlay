@@ -103,6 +103,7 @@ import {
   motionPlansCollide,
   resolveEffectiveMotionMode,
 } from '@renderer/layout/message-schedule';
+import { releasePaidCardPlans } from '@renderer/layout/paid-card-plan';
 import {
   getRegularRowHeight,
   getRowSlotCount,
@@ -1269,6 +1270,7 @@ export class CanvasRenderer implements RuntimeRenderer {
 
   /** Clear all active messages (used by overlay refresh). */
   clearActiveMessages(): void {
+    releasePaidCardPlans(this.activeMessages);
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.entryPacing.clear();
@@ -2630,6 +2632,7 @@ export class CanvasRenderer implements RuntimeRenderer {
   }
 
   private resetState(): void {
+    releasePaidCardPlans(this.activeMessages);
     this.recoveredPresentationAccounting = new WeakMap();
     this.cancelAllTranslationOwners();
     this.entryPacing.clear();
@@ -2730,6 +2733,7 @@ export class CanvasRenderer implements RuntimeRenderer {
   }
 
   private destroyResources(): void {
+    releasePaidCardPlans(this.activeMessages);
     this.cancelAllTranslationOwners();
     this._destroyed = true;
     this.stopRenderLoop();
@@ -2935,6 +2939,7 @@ export class CanvasRenderer implements RuntimeRenderer {
         this.fallbackRecoveryFailed = false;
         this.observability.setFrameTimingAvailable(true);
         const fallbackIngress = this.drainFallbackIngress();
+        releasePaidCardPlans(this.activeMessages);
 
         this.activeMessages.length = 0;
         this.activeMessagesByLane.clear();
