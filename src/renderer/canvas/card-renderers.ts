@@ -281,7 +281,8 @@ export function renderPaidCard(
   getFontFn: (fontSize: number) => string,
   gradientCache: GradientCache,
   translatedText?: string | null,
-  reducedMotion = false
+  reducedMotion = false,
+  activeCard?: object
 ): void {
   const fontSize = settings.fontSize;
   const w = msgWidth;
@@ -331,6 +332,7 @@ export function renderPaidCard(
       ? config.authorSection.show(message, settings)
       : config.authorSection.show;
   const plan = preparePaidCardPlan({
+    activeCard,
     kind: message.kind === 'superchat' ? 'superchat' : 'membership',
     width: w,
     fontSize,

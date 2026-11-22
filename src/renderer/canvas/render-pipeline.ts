@@ -484,7 +484,8 @@ export function drawStage(
                 msg.translatedText !== msg.message.text
                 ? msg.translatedText
                 : undefined,
-              ctx.isReducedMotionActive
+              ctx.isReducedMotionActive,
+              msg
             );
           } finally {
             renderCtx.restore();

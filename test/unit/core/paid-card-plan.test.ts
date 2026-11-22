@@ -6,6 +6,7 @@ import { toSharedContentSegments } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, resolveCardBorderAlpha } from '@renderer/card-config';
 import { preparePaidCardPlan, type PaidCardPlanInput } from '@renderer/layout/paid-card-plan';
 import { estimateMessageDimensions, estimateTranslatedMessageDimensions } from '@renderer/shared';
+import { clearTextMeasurementCaches } from '@renderer/text-measure';
 import { describe, expect, it } from 'vite-plus/test';
 
 const measure = (text: string): number => Array.from(text).length * 10;
@@ -49,6 +50,34 @@ function plan(overrides: Partial<PaidCardPlanInput> = {}) {
 }
 
 describe('production paid-card plan', () => {
+  it('reuses only the current active geometry and remeasures after a font reset', () => {
+    const activeCard = {};
+    const content = [{ type: 'text', content: 'دين 👩‍💻' }] as const;
+    const input = { activeCard, content, translatedText: '새 번역' };
+    const initial = plan(input);
+    expect(plan(input)).toBe(initial);
+    expect(plan({ ...input, activeCard: {} })).not.toBe(initial);
+    for (const change of [
+      { width: 210 },
+      { translatedText: '새 번역!' },
+      { content: [...content] },
+      { showAuthor: false },
+      { fontFamily: 'serif' },
+      { outlineWidthPx: 2 },
+      { sticker: true },
+      { amount: '¥8,000' },
+      { maxBodyLines: 1 },
+    ]) {
+      const beforeChange = plan(input);
+      const revised = plan({ ...input, ...change });
+      expect(revised).not.toBe(beforeChange);
+      expect(revised).toEqual(plan({ ...input, ...change, activeCard: undefined }));
+    }
+    const priorFont = plan(input);
+    clearTextMeasurementCaches();
+    expect(plan(input)).not.toBe(priorFont);
+  });
+
   it('reserves the amount first and contains the 240/24/220+24 overflow fixture', () => {
     const result = plan({ amount: 'X'.repeat(22) });
     expect(result.amountWidth).toBe(192);

@@ -10,10 +10,15 @@ import {
 } from '@renderer/canvas/shared';
 import { TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@renderer/constants';
 import { getAuthorPhotoSlotWidth, getAuthorRowHeight } from '@renderer/layout/card-layout';
-import { getFontString, measureTextHeight } from '@renderer/text-measure';
+import {
+  getFontString,
+  getTextMeasurementGeneration,
+  measureTextHeight,
+} from '@renderer/text-measure';
 import { rendererLayout, spacing } from '@util/design-tokens';
 
 export interface PaidCardPlanInput {
+  activeCard?: object | undefined;
   kind: 'superchat' | 'membership';
   width: number;
   fontSize: number;
@@ -59,8 +64,54 @@ export interface PaidCardPlan {
   compactHeader: boolean;
 }
 
+// Drawing owns one plan per live card. Estimation runs without an active owner.
+// Exclude per-call measurement closures; the context and font generation identify
+// the measurement backend for each renderer.
+type LayoutInputs = Omit<PaidCardPlanInput, 'activeCard' | 'measure' | 'measureHeight'>;
+const retainedPlans = new WeakMap<
+  object,
+  {
+    inputs: LayoutInputs;
+    generation: number;
+    plan: PaidCardPlan;
+  }
+>();
+
+function sameLayoutInputs(a: LayoutInputs, b: LayoutInputs): boolean {
+  return (
+    a.kind === b.kind &&
+    a.width === b.width &&
+    a.fontSize === b.fontSize &&
+    a.fontWeight === b.fontWeight &&
+    a.fontFamily === b.fontFamily &&
+    a.paddingH === b.paddingH &&
+    a.paddingV === b.paddingV &&
+    a.author === b.author &&
+    a.authorPhotoUrl === b.authorPhotoUrl &&
+    a.showAuthor === b.showAuthor &&
+    a.amount === b.amount &&
+    a.showAmount === b.showAmount &&
+    a.membershipHeader === b.membershipHeader &&
+    a.content === b.content &&
+    a.translatedText === b.translatedText &&
+    a.maxBodyLines === b.maxBodyLines &&
+    a.outlineWidthPx === b.outlineWidthPx &&
+    a.wide === b.wide &&
+    a.sticker === b.sticker &&
+    a.context === b.context
+  );
+}
+
 /** Single measured row plan for estimation and both Canvas renderers. */
 export function preparePaidCardPlan(input: PaidCardPlanInput): PaidCardPlan {
+  const retained = input.activeCard && retainedPlans.get(input.activeCard);
+  if (
+    retained &&
+    retained.generation === getTextMeasurementGeneration() &&
+    sameLayoutInputs(retained.inputs, input)
+  )
+    return retained.plan;
+
   const innerWidth = Math.max(1, input.width - input.paddingH * 2);
   const authorVisible = input.showAuthor && !!input.author;
   const authorFontSize = Math.round(input.fontSize * rendererLayout.authorFontScale);
@@ -181,5 +232,9 @@ export function preparePaidCardPlan(input: PaidCardPlanInput): PaidCardPlan {
     cursor += plan.stickerSize;
   }
   plan.height = cursor + input.paddingV;
+  if (input.activeCard) {
+    const { activeCard, measure: _measure, measureHeight: _measureHeight, ...inputs } = input;
+    retainedPlans.set(activeCard, { inputs, generation: getTextMeasurementGeneration(), plan });
+  }
   return plan;
 }

@@ -301,6 +301,7 @@ export function renderPaidCardWorker(
   const padV = card.padding.vertical;
   const textX = x + padH;
   const plan = preparePaidCardPlan({
+    activeCard: message,
     kind: message.kind === 'superchat' ? 'superchat' : 'membership',
     width: w,
     fontSize,
