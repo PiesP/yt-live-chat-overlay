@@ -2004,7 +2004,15 @@ function cardPlanFunctionName(source: string): string | null {
     /function ([A-Za-z_$][\w$]*)\(e\)\{let t=Math\.max\(1,e\.width-e\.paddingH\*2\),n=e\.showAuthor/u.exec(
       source
     );
-  const name = source.includes('preparePaidCardPlan({') ? 'preparePaidCardPlan' : minified?.[1];
+  // An active-card lookup can precede the layout arithmetic. Identify its
+  // draw-site call by the live card and kind carried in the argument.
+  const activeDraw =
+    /([A-Za-z_$][\w$]*)\(\{activeCard:[A-Za-z_$][\w$]*,kind:[A-Za-z_$][\w$]*\.kind===`superchat`/u.exec(
+      source
+    );
+  const name = source.includes('preparePaidCardPlan({')
+    ? 'preparePaidCardPlan'
+    : (activeDraw?.[1] ?? minified?.[1]);
   if (!name) return null;
   const call = `${name}({`;
   const count = source.split(call).length - 1;
