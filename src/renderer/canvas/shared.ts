@@ -1371,10 +1371,8 @@ export function drawAuthorSection<T>(
 
   const nameFont = getFontString(authorFontSize, fontWeight as FontWeight, fontFamily);
   ctx.font = nameFont;
-  // Measure text height directly from the context (compatible with both
-  // CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D).
-  const nameMetrics = ctx.measureText('Mg');
-  const nameHeight = regularNameBounds?.height ?? getSafeTextHeight(nameMetrics, authorFontSize);
+  const nameHeight =
+    regularNameBounds?.height ?? getSafeTextHeight(ctx.measureText('Mg'), authorFontSize);
   const sectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   // Author photo (if available and valid)
