@@ -12,6 +12,11 @@ import {
 import { arch, platform } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
+import {
+  assertDistributionNotice,
+  assertNoticeFile,
+  NOTICE_FILES,
+} from '../../tooling/vite/distribution-notices.ts';
 import { assertFirefoxDataConsent } from '../check/firefox-manifest.ts';
 import { sha256, verifiedFootprint } from './footprint.ts';
 
@@ -112,6 +117,10 @@ function zipDirectory(sourceDirectory: string, outputFile: string): string {
     cwd: sourceDirectory,
     stdio: 'inherit',
   });
+  for (const file of NOTICE_FILES) {
+    const contents = execFileSync('unzip', ['-p', outputFile, file]);
+    assertNoticeFile(contents, file, basename(outputFile));
+  }
   return outputFile;
 }
 
@@ -157,10 +166,17 @@ export function prepareRelease(): void {
   const measured = verifiedFootprint(releaseCommit, version, expectedCommit !== undefined);
   const changes = changelogEntry(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version);
 
+  assertDistributionNotice(readFileSync(join(distDir, userscriptFile), 'utf8'), userscriptFile);
+  for (const directory of ['dist-extension', 'dist-extension-firefox']) {
+    for (const file of NOTICE_FILES) {
+      assertNoticeFile(readFileSync(join(root, directory, file)), file, directory);
+    }
+  }
   rmSync(bundleDir, { force: true, recursive: true });
   mkdirSync(releaseDir, { recursive: true });
   cpSync(distDir, join(bundleDir, 'dist'), { recursive: true });
   copyFileSync(join(distDir, userscriptFile), join(releaseDir, userscriptFile));
+  assertDistributionNotice(readFileSync(join(releaseDir, userscriptFile), 'utf8'), userscriptFile);
   copyFileSync(join(distDir, userscriptMetadataFile), join(releaseDir, userscriptMetadataFile));
 
   const archives = [
