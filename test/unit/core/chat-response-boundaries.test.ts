@@ -119,6 +119,23 @@ describe('UTF-8 accounting and the no-body compatibility path', () => {
     ).resolves.toBe('');
   });
 
+  it('preserves string order and the final decoder flush across many tiny chunks', async () => {
+    const payload = `\uFEFF${'가😀abc'.repeat(300)}`;
+    const bytes = new TextEncoder().encode(payload);
+    const withTruncatedEnd = new Uint8Array(bytes.byteLength + 2);
+    withTruncatedEnd.set(bytes);
+    withTruncatedEnd.set([0xe2, 0x82], bytes.byteLength);
+    const chunks = Array.from(withTruncatedEnd, (_, index) =>
+      withTruncatedEnd.subarray(index, index + 1)
+    );
+    const response = streamedResponse(chunks);
+
+    await expect(readBoundedChatResponseText(response, withTruncatedEnd.byteLength)).resolves.toBe(
+      payload.slice(1) + '�'
+    );
+    expect(response.body?.locked).toBe(false);
+  });
+
   it('rejects an overflowing chunk before handing it to the decoder', async () => {
     const chunks = [new Uint8Array([0x41]), new Uint8Array([0x42]), new Uint8Array([0x43])];
     const decode = vi.spyOn(TextDecoder.prototype, 'decode');
