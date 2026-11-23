@@ -39,6 +39,17 @@ function fixtureRoot(): string {
   return directory;
 }
 
+function copyNoticeInputs(directory: string): void {
+  mkdirSync(join(directory, 'tooling/vite'), { recursive: true });
+  for (const file of [
+    'LICENSE',
+    'THIRD_PARTY_NOTICES.txt',
+    'tooling/vite/distribution-notices.ts',
+  ]) {
+    copyFileSync(join(root, file), join(directory, file));
+  }
+}
+
 function runCli(
   script: string,
   args: string[],
@@ -195,6 +206,7 @@ describe('Node script boundaries', () => {
     expect(i18n.stdout).toContain('All 6 locales match');
 
     const directory = fixtureRoot();
+    copyNoticeInputs(directory);
     mkdirSync(join(directory, 'scripts/check'), { recursive: true });
     copyFileSync(
       join(root, 'scripts/check/firefox-manifest.ts'),
@@ -222,6 +234,7 @@ describe('Node script boundaries', () => {
 
   it('rejects an invalid direct release request before creating a bundle', () => {
     const directory = fixtureRoot();
+    copyNoticeInputs(directory);
     mkdirSync(join(directory, 'scripts/check'), { recursive: true });
     copyFileSync(
       join(root, 'scripts/check/firefox-manifest.ts'),

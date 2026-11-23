@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { type ConfigEnv, mergeConfig, type UserConfig } from 'vite';
 import { lazyPlugins } from 'vite-plus';
 
-import { BIDI_LICENSE_BANNER } from '../bidi-license.ts';
+import { DISTRIBUTION_NOTICE_BANNER } from '../distribution-notices.ts';
 import { basePreset } from '../presets/base.ts';
 import { userscriptPreset } from '../presets/userscript.ts';
 
@@ -73,7 +73,7 @@ export function createUserscriptConfig({ mode }: ConfigEnv): UserConfig {
       }) ?? [],
     build: {
       sourcemap: isDev ? 'inline' : false,
-      rollupOptions: { output: { banner: BIDI_LICENSE_BANNER } },
+      rollupOptions: { output: { banner: DISTRIBUTION_NOTICE_BANNER } },
     },
     define: {
       __DEV__: JSON.stringify(isDev),

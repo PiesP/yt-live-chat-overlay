@@ -1,5 +1,7 @@
 * text=auto
 .node-version text eol=lf
+/LICENSE text eol=lf
+/THIRD_PARTY_NOTICES.txt text eol=lf
 *.sh text eol=lf
 .githooks/* text eol=lf
 

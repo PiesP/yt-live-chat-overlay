@@ -23,6 +23,8 @@ const receiptPath = join(root, 'test-results', 'distribution-footprint.json');
 const targets = ['dist', 'dist-extension', 'dist-extension-firefox'] as const;
 const buildConfigs = [
   '.node-version',
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.txt',
   'package.json',
   'pnpm-workspace.yaml',
   'vite.config.ts',

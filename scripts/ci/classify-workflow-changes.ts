@@ -61,6 +61,8 @@ export function classifyWorkflowChanges(
       );
     } else if (path.startsWith('src/')) {
       mark('quality', 'unit', 'e2e', 'build', 'semgrep', 'codeql_javascript');
+    } else if (path === 'LICENSE' || path === 'THIRD_PARTY_NOTICES.txt') {
+      mark('unit', 'build', 'semgrep');
     } else if (path.startsWith('extension/icons/')) {
       mark('e2e', 'build');
     } else if (path.startsWith('extension/') && path.endsWith('.ts')) {
@@ -120,7 +122,6 @@ export function classifyWorkflowChanges(
         'CHANGELOG.md',
         'CODE_OF_CONDUCT.md',
         'CONTRIBUTING.md',
-        'LICENSE',
         'SUPPORT.md',
         'extension/README.md',
         '.github/pull_request_template.md',

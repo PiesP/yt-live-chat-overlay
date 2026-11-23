@@ -13,7 +13,15 @@ import {
 import { join, resolve } from 'node:path';
 
 import { MAX_PACKAGED_WORKER_BYTES } from '../../extension/worker-source-limit.ts';
+import {
+  assertDistributionNotice,
+  assertNoticeFile,
+  DISTRIBUTION_NOTICE_BANNER,
+  NOTICE_FILES,
+} from '../../tooling/vite/distribution-notices.ts';
 import { assertFirefoxDataConsent } from './firefox-manifest.ts';
+
+export { assertDistributionNotice };
 
 interface ExtensionManifest {
   content_scripts?: Array<{ js?: string[]; world?: string }>;
@@ -23,13 +31,6 @@ interface ExtensionManifest {
 }
 
 const root = resolve(import.meta.dirname, '..', '..');
-const BIDI_LICENSE_MARKERS = [
-  'bidi-js',
-  'Copyright (c) 2021 Jason Johnston',
-  'Permission is hereby granted, free of charge',
-  'THE SOFTWARE IS PROVIDED "AS IS"',
-] as const;
-
 function assertExists(base: string, relativePath: string): void {
   if (!existsSync(join(base, relativePath))) {
     throw new Error(`Missing artifact: ${base}/${relativePath}`);
@@ -47,15 +48,6 @@ function assertGlobHasMatch(base: string, pattern: string): void {
   const entries = readdirSync(join(base, directory), { withFileTypes: true });
   if (!entries.some((entry) => entry.isFile() && regex.test(entry.name))) {
     throw new Error(`No artifact matches ${base}/${pattern}`);
-  }
-}
-
-function assertBidiLicense(relativePath: string): void {
-  const source = readFileSync(join(root, relativePath), 'utf8');
-  for (const marker of BIDI_LICENSE_MARKERS) {
-    if (!source.includes(marker)) {
-      throw new Error(`${relativePath} is missing the bundled bidi-js MIT license notice.`);
-    }
   }
 }
 
@@ -90,16 +82,6 @@ export function assertPackagedWorkerSource(file: string): number {
   return size;
 }
 
-function stripExpectedBidiBanner(source: string, relativePath: string): string {
-  const trimmed = source.trimStart();
-  if (!relativePath.endsWith('/page-script.js')) return trimmed;
-  const banner = trimmed.match(/^\/\*![\s\S]*?\*\//u)?.[0];
-  if (!banner || BIDI_LICENSE_MARKERS.some((marker) => !banner.includes(marker))) {
-    throw new Error(`${relativePath} must place the complete bidi-js license before its IIFE.`);
-  }
-  return trimmed.slice(banner.length).trimStart();
-}
-
 function checkExtension(relativeDirectory: string): void {
   const directory = join(root, relativeDirectory);
   const manifestPath = join(directory, 'manifest.json');
@@ -122,9 +104,20 @@ function checkExtension(relativeDirectory: string): void {
     else assertExists(directory, resource);
   }
 
+  for (const file of NOTICE_FILES) {
+    assertNoticeFile(readFileSync(join(directory, file)), file, relativeDirectory);
+  }
   for (const script of ['content-script.js', 'page-script.js']) {
     const source = readFileSync(join(directory, script), 'utf8');
-    const executableSource = stripExpectedBidiBanner(source, `${relativeDirectory}/${script}`);
+    let executableSource = source.trimStart();
+    if (script === 'page-script.js') {
+      if (!executableSource.startsWith(DISTRIBUTION_NOTICE_BANNER)) {
+        throw new Error(
+          `${relativeDirectory}/${script} must place the distribution notices before its IIFE.`
+        );
+      }
+      executableSource = executableSource.slice(DISTRIBUTION_NOTICE_BANNER.length).trimStart();
+    }
     if (
       !executableSource.startsWith('(function(') ||
       /^\s*(?:import|export)\s/m.test(executableSource)
@@ -183,21 +176,15 @@ export function checkArtifacts(args: readonly string[] = process.argv): void {
         'Production userscript metadata must remain the first bytes of the artifact.'
       );
     }
-    assertBidiLicense('dist/yt-live-chat-overlay.user.js');
+    assertDistributionNotice(userscript, 'dist/yt-live-chat-overlay.user.js');
   }
   checkExtension('dist-extension');
   checkExtension('dist-extension-firefox');
   checkFirefoxContract();
-  for (const artifact of [
-    'dist-extension/page-script.js',
-    'dist-extension/workers/renderer.js',
-    'dist-extension-firefox/page-script.js',
-    'dist-extension-firefox/workers/renderer.js',
-  ]) {
-    assertBidiLicense(artifact);
-  }
   for (const directory of ['dist-extension', 'dist-extension-firefox']) {
-    assertPackagedWorkerSource(join(root, directory, 'workers/renderer.js'));
+    const worker = join(directory, 'workers/renderer.js');
+    assertPackagedWorkerSource(join(root, worker));
+    assertDistributionNotice(readFileSync(join(root, worker), 'utf8'), worker);
   }
   console.log('Build artifact references are valid.');
 }

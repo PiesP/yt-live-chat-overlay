@@ -125,4 +125,11 @@ safety, entry ordering, reflow capacity, and Worker recovery.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+Project code is available under the [MIT License](./LICENSE). The
+[third-party notices](./THIRD_PARTY_NOTICES.txt) cover browser-core, bidi-js and
+the Unicode data used by the renderer.
+
+Recipients of the [v0.47.0 GitHub release](https://github.com/PiesP/yt-live-chat-overlay/releases/tag/v0.47.0)
+can use these notices with the Chrome and Firefox ZIPs and the standalone
+userscript. That release included the bidi-js MIT notice and omitted the
+Unicode data notice. The project MIT text also applies to the userscript.

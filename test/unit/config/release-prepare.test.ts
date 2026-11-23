@@ -18,6 +18,8 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
+import { DISTRIBUTION_NOTICE_BANNER } from '../../../tooling/vite/distribution-notices';
+
 const root = resolve(import.meta.dirname, '../../..');
 const temporaryRoots: string[] = [];
 
@@ -51,6 +53,16 @@ function createReleaseFixture(): string {
   writeFileSync(join(fixtureRoot, 'pnpm-workspace.yaml'), 'runtimeOnFail: ignore\n');
   mkdirSync(join(fixtureRoot, 'tooling', 'vite'), { recursive: true });
   writeFileSync(join(fixtureRoot, 'tooling', 'vite', 'config.ts'), 'export {};\n');
+  copyFileSync(
+    join(root, 'tooling', 'vite', 'distribution-notices.ts'),
+    join(fixtureRoot, 'tooling', 'vite', 'distribution-notices.ts')
+  );
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
+    copyFileSync(join(root, name), join(fixtureRoot, name));
+    for (const directory of ['dist-extension', 'dist-extension-firefox']) {
+      copyFileSync(join(root, name), join(fixtureRoot, directory, name));
+    }
+  }
   for (const name of [
     'vite.config.ts',
     'vite.config.extension.ts',
@@ -74,7 +86,7 @@ function createReleaseFixture(): string {
   );
   writeFileSync(
     join(fixtureRoot, 'dist', 'yt-live-chat-overlay.user.js'),
-    '// ==UserScript==\n// @version 1.2.3\n// ==/UserScript==\n'
+    `// ==UserScript==\n// @version 1.2.3\n// ==/UserScript==\n${DISTRIBUTION_NOTICE_BANNER}\n`
   );
   writeFileSync(
     join(fixtureRoot, 'dist', 'yt-live-chat-overlay.meta.js'),
@@ -224,6 +236,16 @@ describe('release preparation artifact versions', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Prepared release-bundle/ for v1.2.3');
     const releaseDirectory = join(fixtureRoot, 'release-bundle', 'release');
+    const script = readFileSync(join(releaseDirectory, 'yt-live-chat-overlay.user.js'), 'utf8');
+    expect(script).toContain(DISTRIBUTION_NOTICE_BANNER);
+    for (const browser of ['chrome', 'firefox']) {
+      const archive = join(releaseDirectory, `yt-live-chat-overlay-${browser}.zip`);
+      for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
+        expect(execFileSync('unzip', ['-p', archive, name])).toEqual(
+          readFileSync(join(root, name))
+        );
+      }
+    }
     const zippedManifest = execFileSync(
       'unzip',
       ['-p', join(releaseDirectory, 'yt-live-chat-overlay-firefox.zip'), 'manifest.json'],
@@ -266,6 +288,28 @@ describe('release preparation artifact versions', () => {
     expect(notes).toContain('/compare/v1.2.2...v1.2.3');
     expect(notes).toContain('does not update automatically');
     expect(notes).toContain('removed when Firefox restarts');
+  });
+
+  it.each([
+    ['dist/yt-live-chat-overlay.user.js', 'Unicode, Inc.'],
+    ['dist-extension/LICENSE', '2026 PiesP'],
+    ['dist-extension-firefox/THIRD_PARTY_NOTICES.txt', 'Jason Johnston'],
+  ])('rejects an incomplete notice in %s and preserves the previous bundle', (file, holder) => {
+    const fixtureRoot = createReleaseFixture();
+    const target = join(fixtureRoot, file);
+    const original = readFileSync(target, 'utf8');
+    expect(original).toContain(holder);
+    writeFileSync(target, original.replaceAll(holder, ''));
+    const bundle = join(fixtureRoot, 'release-bundle');
+    mkdirSync(bundle);
+    writeFileSync(join(bundle, 'previous.txt'), 'previous release bundle');
+
+    const result = runPrepare(fixtureRoot);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(file.split('/').at(-1)!);
+    expect(readdirSync(bundle)).toEqual(['previous.txt']);
+    expect(readFileSync(join(bundle, 'previous.txt'), 'utf8')).toBe('previous release bundle');
   });
 
   it('rejects a source SHA mismatch before writing a release bundle', () => {

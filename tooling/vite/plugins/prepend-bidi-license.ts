@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite';
 
-import { BIDI_LICENSE_BANNER } from '../bidi-license.ts';
+import { DISTRIBUTION_NOTICE_BANNER } from '../distribution-notices.ts';
 
 interface SourceMapPayload {
   mappings: string;
@@ -27,7 +27,7 @@ export function prependBannerWithSourceMap(
   };
 }
 
-/** Retain the bidi-js MIT notice in the separately emitted renderer Worker. */
+/** Retain the distribution notices in the separately emitted renderer Worker. */
 export function prependBidiWorkerLicensePlugin(): Plugin {
   let expectsSourceMap = false;
   return {
@@ -50,7 +50,7 @@ export function prependBidiWorkerLicensePlugin(): Plugin {
         const prepended = prependBannerWithSourceMap(
           worker.code,
           sourceMapText,
-          BIDI_LICENSE_BANNER
+          DISTRIBUTION_NOTICE_BANNER
         );
         worker.code = prepended.code;
         sourceMap.source = prepended.sourceMapText;
@@ -58,7 +58,7 @@ export function prependBidiWorkerLicensePlugin(): Plugin {
         if (expectsSourceMap) {
           this.error(`Renderer Worker source map is missing: ${sourceMapFileName}`);
         }
-        worker.code = `${BIDI_LICENSE_BANNER}\n${worker.code}`;
+        worker.code = `${DISTRIBUTION_NOTICE_BANNER}\n${worker.code}`;
       }
     },
   };
