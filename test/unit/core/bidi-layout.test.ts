@@ -54,6 +54,29 @@ describe('Canvas bidi inline layout', () => {
     ]);
   });
 
+  it('measures adjacent RTL pieces separately in logical grapheme order', () => {
+    const first = 'א\u05B7ב';
+    const second = 'ג\u05B0ד';
+    const measure = vi.fn(measureText);
+
+    expect(
+      resolveVisualInlinePieces(
+        [
+          { type: 'text', text: first },
+          { type: 'text', text: second },
+        ],
+        measure
+      )
+    ).toEqual([
+      { type: 'text', text: second, direction: 'rtl', width: 30 },
+      { type: 'text', text: first, direction: 'rtl', width: 30 },
+    ]);
+    expect(measure.mock.calls).toEqual([
+      [second, 'rtl'],
+      [first, 'rtl'],
+    ]);
+  });
+
   it.each([
     ['مرحبا English 123', 'rtl'],
     ['… — 123 مرحبا', 'rtl'],

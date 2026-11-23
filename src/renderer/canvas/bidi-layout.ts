@@ -39,15 +39,12 @@ export type VisualInlinePiece<T> = VisualInlineTextPiece | VisualInlineObjectPie
 
 interface TextToken {
   readonly type: 'text';
-  readonly logicalIndex: number;
   readonly pieceIndex: number;
   readonly grapheme: string;
 }
 
 interface ObjectToken<T> {
   readonly type: 'object';
-  readonly logicalIndex: number;
-  readonly pieceIndex: number;
   readonly value: T;
   readonly width: number;
 }
@@ -117,7 +114,7 @@ const RESOLVER_ONLY_BIDI_CONTROLS = new Set([
 ]);
 
 /**
- * bidi-js 1.0.3 indexes UTF-16 code units. Collapse each grapheme to one BMP
+ * bidi-js indexes UTF-16 code units. Collapse each grapheme to one BMP
  * resolver character with the same bidi class so UAX ordering cannot split an
  * astral or ZWJ grapheme. Actual text is retained separately for native shaping.
  */
@@ -146,15 +143,13 @@ function tokenizeLines<T>(lines: readonly LogicalInlineLine<T>[]): {
   let pieceIndex = 0;
   const appendPiece = (piece: LogicalInlinePiece<T>): void => {
     if (piece.type === 'object') {
-      const logicalIndex = tokens.length;
-      tokens.push({ ...piece, logicalIndex, pieceIndex });
+      tokens.push({ ...piece });
       resolverCharacters.push(OBJECT_REPLACEMENT_CHARACTER);
       pieceIndex++;
       return;
     }
     for (const grapheme of splitGraphemeClusters(piece.text)) {
-      const logicalIndex = tokens.length;
-      tokens.push({ type: 'text', logicalIndex, pieceIndex, grapheme });
+      tokens.push({ type: 'text', pieceIndex, grapheme });
       resolverCharacters.push(toResolverCharacter(grapheme));
     }
     pieceIndex++;
@@ -162,8 +157,7 @@ function tokenizeLines<T>(lines: readonly LogicalInlineLine<T>[]): {
   for (const [lineIndex, line] of lines.entries()) {
     if (lineIndex > 0 && line.separatorBefore) {
       for (const grapheme of splitGraphemeClusters(line.separatorBefore)) {
-        const logicalIndex = tokens.length;
-        tokens.push({ type: 'text', logicalIndex, pieceIndex, grapheme });
+        tokens.push({ type: 'text', pieceIndex, grapheme });
         resolverCharacters.push(toResolverCharacter(grapheme));
       }
       pieceIndex++;
@@ -373,8 +367,7 @@ function buildVisualPieces<T>(
     const level = levels[logicalIndex] ?? 0;
     const direction: TextDirection = (level & 1) === 1 ? 'rtl' : 'ltr';
     const logicalStep = direction === 'rtl' ? -1 : 1;
-    const run: TextToken[] = [token];
-    let previousLogicalIndex = logicalIndex;
+    let lastLogicalIndex = logicalIndex;
     visualIndex++;
     while (visualIndex < visualIndices.length) {
       const nextLogicalIndex = visualIndices[visualIndex];
@@ -384,20 +377,25 @@ function buildVisualPieces<T>(
         nextToken?.type !== 'text' ||
         nextToken.pieceIndex !== token.pieceIndex ||
         (levels[nextLogicalIndex] ?? 0) !== level ||
-        nextLogicalIndex !== previousLogicalIndex + logicalStep
+        nextLogicalIndex !== lastLogicalIndex + logicalStep
       ) {
         break;
       }
-      run.push(nextToken);
-      previousLogicalIndex = nextLogicalIndex;
+      lastLogicalIndex = nextLogicalIndex;
       visualIndex++;
     }
 
-    run.sort((left, right) => left.logicalIndex - right.logicalIndex);
-    const text = run
-      .map(({ grapheme }) => grapheme)
-      .filter((grapheme) => !isBidiFormattingControl(grapheme))
-      .join('');
+    // This run is contiguous in either direction. Canvas shapes its original
+    // graphemes in logical order, even when the run itself is placed right to left.
+    const start = Math.min(logicalIndex, lastLogicalIndex);
+    const end = Math.max(logicalIndex, lastLogicalIndex);
+    let text = '';
+    for (let index = start; index <= end; index++) {
+      const entry = tokens[index];
+      if (entry?.type === 'text' && !isBidiFormattingControl(entry.grapheme)) {
+        text += entry.grapheme;
+      }
+    }
     if (text) {
       result.push({ type: 'text', text, direction, width: measureText(text, direction) });
     }
