@@ -39,7 +39,7 @@ import {
   yieldIfOverBudgetAsync,
 } from '@piesp/browser-core/util';
 import { BacklogHysteresis } from '@renderer/backlog-hysteresis';
-import { resetBidiLayoutCaches } from '@renderer/canvas/bidi-layout';
+import { ActiveBidiRunPlanCache, resetBidiLayoutCaches } from '@renderer/canvas/bidi-layout';
 import {
   applyDevicePixelRatio,
   disconnectObserver,
@@ -372,6 +372,7 @@ export class CanvasRenderer implements RuntimeRenderer {
     text: string,
     direction: CanvasDirection = 'ltr'
   ): number => measureTextWidth(text, this.boundGetFont(this.settings.fontSize), direction);
+  private readonly activeBidiPlans = new ActiveBidiRunPlanCache();
   private readonly regularRenderConfig: RegularMessageRenderConfig = {
     showAuthor: true,
     fontSize: 1,
@@ -735,6 +736,7 @@ export class CanvasRenderer implements RuntimeRenderer {
         this.settings.exitPaddingPx
       );
       if (previous.endTime <= now) {
+        this.activeBidiPlans.delete(message.message.id);
         expiredAtReflow.push(message);
         return [];
       }
@@ -1014,6 +1016,7 @@ export class CanvasRenderer implements RuntimeRenderer {
     if (active.message.kind === 'superchat' || active.message.kind === 'membership') {
       releasePaidCardPlan(active);
     }
+    this.activeBidiPlans.delete(id);
     active.message = message;
     active.renderMessage = message;
     active.ghostText = getDisplayText(message.content);
@@ -1274,6 +1277,7 @@ export class CanvasRenderer implements RuntimeRenderer {
   /** Clear all active messages (used by overlay refresh). */
   clearActiveMessages(): void {
     releasePaidCardPlans(this.activeMessages);
+    this.activeBidiPlans.clear();
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.entryPacing.clear();
@@ -1558,6 +1562,7 @@ export class CanvasRenderer implements RuntimeRenderer {
       boundGetFont: this.boundGetFont,
       boundMeasureTextWidth: this.boundMeasureTextWidth,
       regularRenderConfig: this.regularRenderConfig,
+      activeBidiPlans: this.activeBidiPlans,
       activeMessages: this.activeMessages,
       activeMessagesByLane: this.activeMessagesByLane,
       farOpacityBuckets: this.farOpacityBuckets,
@@ -2636,6 +2641,7 @@ export class CanvasRenderer implements RuntimeRenderer {
 
   private resetState(): void {
     releasePaidCardPlans(this.activeMessages);
+    this.activeBidiPlans.clear();
     this.recoveredPresentationAccounting = new WeakMap();
     this.cancelAllTranslationOwners();
     this.entryPacing.clear();
@@ -2737,6 +2743,7 @@ export class CanvasRenderer implements RuntimeRenderer {
 
   private destroyResources(): void {
     releasePaidCardPlans(this.activeMessages);
+    this.activeBidiPlans.clear();
     this.cancelAllTranslationOwners();
     this._destroyed = true;
     this.stopRenderLoop();
@@ -2943,6 +2950,7 @@ export class CanvasRenderer implements RuntimeRenderer {
         this.observability.setFrameTimingAvailable(true);
         const fallbackIngress = this.drainFallbackIngress();
         releasePaidCardPlans(this.activeMessages);
+        this.activeBidiPlans.clear();
 
         this.activeMessages.length = 0;
         this.activeMessagesByLane.clear();

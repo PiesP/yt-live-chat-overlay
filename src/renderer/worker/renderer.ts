@@ -39,6 +39,7 @@ import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limi
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
 import {
+  ActiveBidiRunPlanCache,
   resetBidiLayoutCaches,
   resolveTextDirection,
   type TextDirection,
@@ -631,6 +632,7 @@ export class WorkerRenderer {
     this.nearOpacityBuckets,
   ];
   private readonly expiredMessagesScratch: ActiveMessage[] = [];
+  private readonly activeBidiPlans = new ActiveBidiRunPlanCache();
   private readonly regularRenderConfig: RegularMessageRenderConfig = {
     showAuthor: true,
     fontSize: 1,
@@ -1356,6 +1358,7 @@ export class WorkerRenderer {
     if (existing.kind === 'superchat' || existing.kind === 'membership') {
       releasePaidCardPlan(existing);
     }
+    this.activeBidiPlans.delete(msg.id);
     existing.text = msg.text;
     if (msg.canonicalText !== undefined) existing.canonicalText = msg.canonicalText;
     else delete existing.canonicalText;
@@ -1535,6 +1538,7 @@ export class WorkerRenderer {
 
   private handleDestroy(): void {
     releasePaidCardPlans(this.activeMessages);
+    this.activeBidiPlans.clear();
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -1579,6 +1583,7 @@ export class WorkerRenderer {
    */
   private handleClearState(epoch = this.currentEpoch): void {
     releasePaidCardPlans(this.activeMessages);
+    this.activeBidiPlans.clear();
     this.entryPacing.clear();
     this.drainCursors.clear();
     this.drainResumePriority = undefined;
@@ -1654,6 +1659,7 @@ export class WorkerRenderer {
     const candidates = this.activeMessages.flatMap((message) => {
       const previous = previousMotionPlan(message, mode, this.logicalWidth, config.exitPaddingPx);
       if (previous.endTime <= now) {
+        this.activeBidiPlans.delete(message.id);
         expiredAtReflow.push(message);
         return [];
       }
@@ -2114,6 +2120,7 @@ export class WorkerRenderer {
         this.messageById.delete(msg.id);
         this.releaseQueuedAssetsForOwner(msg.id);
         releasePaidCardPlan(msg);
+        this.activeBidiPlans.delete(msg.id);
         this.expiredMessagesScratch.push(msg);
         continue;
       }
@@ -2315,7 +2322,8 @@ export class WorkerRenderer {
                 getFont,
                 this.boundMeasureTextCached,
                 overrideText,
-                msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
+                msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined,
+                this.activeBidiPlans
               );
             }
             if (

@@ -14,6 +14,7 @@ import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
 import {
   resolveTextDirection,
   resolveVisualInlineLines,
+  type ActiveBidiRunPlanCache,
   resolveVisualInlinePieces,
   type TextDirection,
   type VisualInlinePiece,
@@ -1143,7 +1144,7 @@ export function warmTextBitmapCache(
  * @param emojiCache      Emoji image cache (stores CanvasImageSource)
  * @param getFontFn       Function to resolve font string from fontSize
  * @param measureTextFn   Function to measure single-line text width (cached in worker, measureTextWidth in main)
- * @param getEmojiImg     Function to retrieve a ready emoji image from cache by URL (returns null if not ready)
+ * @param isValidEmoji   Checks whether the current emoji cache entry is ready to draw.
  */
 function renderContentSegments(
   ctx: AnyCanvasContext,
@@ -1160,7 +1161,9 @@ function renderContentSegments(
   emojiCache: ImageCacheLike,
   isValidEmoji: (image: unknown) => boolean,
   letterSpacing = '0px',
-  textAbove = 0
+  textAbove = 0,
+  activeBidiPlans?: ActiveBidiRunPlanCache,
+  messageId?: string
 ): void {
   let cursorX = startX;
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
@@ -1174,19 +1177,21 @@ function renderContentSegments(
     ctx
   ).height;
   const emojiY = y - textAbove + Math.round((textHeight - emojiSize) / 2);
-  const visualPieces = resolveVisualInlinePieces(
-    segments.map((segment) =>
-      segment.type === 'text'
-        ? { type: 'text' as const, text: segment.content ?? '' }
-        : {
-            type: 'object' as const,
-            value: segment,
-            width: measureEmojiAdvanceWidth(segment, emojiSize, measureTextFn, letterSpacing),
-          }
-    ),
-    (text, direction) =>
-      measureTextAdvanceWidth(text, (value) => measureTextFn(value, direction), letterSpacing)
+  const logicalPieces = segments.map((segment) =>
+    segment.type === 'text'
+      ? { type: 'text' as const, text: segment.content ?? '' }
+      : {
+          type: 'object' as const,
+          value: segment,
+          width: measureEmojiAdvanceWidth(segment, emojiSize, measureTextFn, letterSpacing),
+        }
   );
+  const measure = (text: string, direction: TextDirection): number =>
+    measureTextAdvanceWidth(text, (value) => measureTextFn(value, direction), letterSpacing);
+  const visualPieces =
+    activeBidiPlans && messageId
+      ? activeBidiPlans.resolve(messageId, logicalPieces, measure)
+      : resolveVisualInlinePieces(logicalPieces, measure);
 
   for (const piece of visualPieces) {
     if (piece.type === 'text') {
@@ -1451,6 +1456,7 @@ export function drawAuthorSection<T>(
 
 /** Minimal message shape consumed by renderRegularMessage. */
 export interface RegularMessageLike {
+  id?: string;
   author?: string;
   authorPhotoUrl?: string;
   content: readonly SharedContentSegment[];
@@ -1496,7 +1502,8 @@ export function renderRegularMessage(
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string, direction?: TextDirection) => number,
   overrideText?: string | null,
-  letterSpacing = '0px'
+  letterSpacing = '0px',
+  activeBidiPlans?: ActiveBidiRunPlanCache
 ): void {
   const {
     showAuthor,
@@ -1512,6 +1519,9 @@ export function renderRegularMessage(
   } = config;
   renderRegularMessageBackground(ctx, x, y, messageWidth, messageHeight, backgroundColor);
   const fixedMode = config.mode === 'top' || config.mode === 'bottom';
+  if (message.id && (fixedMode || overrideText || message.content.length === 0)) {
+    activeBidiPlans?.delete(message.id);
+  }
   if (fixedMode) {
     ctx.save();
     ctx.beginPath();
@@ -1618,7 +1628,9 @@ export function renderRegularMessage(
       emojiCache,
       isValidEmoji,
       letterSpacing,
-      textAbove
+      textAbove,
+      activeBidiPlans,
+      message.id
     );
   } else if (message.text.length > 0) {
     renderSegment(

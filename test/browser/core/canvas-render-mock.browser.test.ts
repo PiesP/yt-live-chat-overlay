@@ -7,8 +7,10 @@
  * Uses controlled Canvas operations alongside real Chromium pixel checks.
  */
 
+import { ActiveBidiRunPlanCache } from '@renderer/canvas/bidi-layout';
 import {
   type AnyCanvasContext,
+  type RegularMessageLike,
   buildWrappedLines,
   drawRoundRect,
   renderRegularMessage,
@@ -700,6 +702,73 @@ describe('renderRegularMessage mixed content layout', () => {
     },
   };
   const noAuthorPhotos = new Map<string, CanvasImageSource>();
+
+  it('matches uncached pixels with live font, emoji readiness and same-ID edits', () => {
+    const activePlans = new ActiveBidiRunPlanCache();
+    const image = createCanvas(24, 24);
+    const imageCtx = image.getContext('2d')!;
+    imageCtx.fillStyle = '#e32b76';
+    imageCtx.fillRect(0, 0, 24, 24);
+    const images = new Map<string, CanvasImageSource>();
+    const message: RegularMessageLike = {
+      id: 'same',
+      text: 'مرحبا Hello 🙂 world بكم',
+      content: [
+        { type: 'text', content: 'مرحبا Hello ' },
+        { type: 'emoji', emojiUrl: 'emoji://owned', emojiFallbackText: ':)' },
+        { type: 'text', content: ' world بكم' },
+      ],
+    };
+
+    function draw(fontSize: number, letterSpacing: string, plans?: ActiveBidiRunPlanCache) {
+      const canvas = createCanvas(600, 70);
+      const ctx = canvas.getContext('2d')!;
+      const measureContext = createCanvas(1, 1).getContext('2d')!;
+      const font = `bold ${fontSize}px system-ui`;
+      measureContext.font = font;
+      renderRegularMessage(
+        ctx,
+        message,
+        startX,
+        10,
+        { ...config, fontSize },
+        textBitmapCache,
+        images,
+        (candidate) => candidate === image,
+        noAuthorPhotos,
+        () => false,
+        () => font,
+        (text, direction) => {
+          measureContext.direction = direction ?? 'ltr';
+          return measureContext.measureText(text).width;
+        },
+        undefined,
+        letterSpacing,
+        plans
+      );
+      return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    }
+
+    const shown = draw(32, '0px', activePlans);
+    expect(shown).toEqual(draw(32, '0px'));
+    const retained = activePlans.getUsage();
+    expect(retained.entries).toBe(1);
+
+    images.set('emoji://owned', image);
+    const updated = draw(40, '1px', activePlans);
+    expect(updated).toEqual(draw(40, '1px'));
+    expect(updated).not.toEqual(shown);
+    expect(activePlans.getUsage()).toEqual(retained);
+
+    message.content = [
+      { type: 'text', content: 'שלום ' },
+      { type: 'emoji', emojiUrl: 'emoji://owned' },
+      { type: 'text', content: ' edited' },
+    ];
+    const edited = draw(32, '0px', activePlans);
+    expect(edited).toEqual(draw(32, '0px'));
+    expect(edited).not.toEqual(shown);
+  });
 
   it('places a loaded emoji after the rendered letter-spaced text extent', () => {
     const { ctx } = createMockContext();

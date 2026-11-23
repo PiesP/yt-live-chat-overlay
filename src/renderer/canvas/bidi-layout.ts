@@ -254,24 +254,37 @@ export function resolveVisualInlineLines<T>(
 ): VisualInlinePiece<T>[][] {
   const visibleLines = lines.slice(0, Math.max(0, lineLimit));
   if (!requiresBidiResolution(lines)) {
-    return visibleLines.map(({ pieces }) =>
-      pieces.flatMap((piece): VisualInlinePiece<T>[] => {
-        if (piece.type === 'object') return [piece];
-        return piece.text
-          ? [
-              {
-                type: 'text',
-                text: piece.text,
-                direction: 'ltr',
-                width: measureText(piece.text, 'ltr'),
-              },
-            ]
-          : [];
-      })
-    );
+    return visibleLines.map(({ pieces }) => resolveLeftToRightPieces(pieces, measureText));
   }
+  return resolveBidiLines(lines, visibleLines.length, measureText);
+}
+
+function resolveLeftToRightPieces<T>(
+  pieces: readonly LogicalInlinePiece<T>[],
+  measureText: (text: string, direction: TextDirection) => number
+): VisualInlinePiece<T>[] {
+  return pieces.flatMap((piece): VisualInlinePiece<T>[] => {
+    if (piece.type === 'object') return [piece];
+    return piece.text
+      ? [
+          {
+            type: 'text',
+            text: piece.text,
+            direction: 'ltr',
+            width: measureText(piece.text, 'ltr'),
+          },
+        ]
+      : [];
+  });
+}
+
+function resolveBidiLines<T>(
+  lines: readonly LogicalInlineLine<T>[],
+  visibleCount: number,
+  measureText: (text: string, direction: TextDirection) => number
+): VisualInlinePiece<T>[][] {
   const { resolverText, tokens, lineRanges } = tokenizeLines(lines);
-  const resolvedRanges = lineRanges.slice(0, visibleLines.length);
+  const resolvedRanges = lineRanges.slice(0, visibleCount);
   if (tokens.length === 0) return resolvedRanges.map(() => []);
   const planKey = `${resolverText}\u0000${resolvedRanges.map(([start, end]) => `${start}:${end}`).join(',')}`;
   let plan = planCache.get(planKey);
@@ -289,6 +302,101 @@ export function resolveVisualInlineLines<T>(
   return plan.lineVisualIndices.map((visualIndices) =>
     buildVisualPieces(tokens, levels, visualIndices, measureText)
   );
+}
+
+const ACTIVE_PLAN_BYTES = 128 * 1024;
+const ACTIVE_PLAN_MAX_ENTRIES = 256;
+
+type ActiveBidiRun =
+  | Omit<VisualInlineTextPiece, 'width'>
+  | { readonly type: 'object'; readonly index: number };
+
+interface ActiveBidiRunPlan {
+  readonly input: readonly (string | null)[];
+  readonly runs: readonly ActiveBidiRun[];
+}
+
+function buildActiveBidiRunPlan<T>(pieces: readonly LogicalInlinePiece<T>[]): ActiveBidiRunPlan {
+  // The paragraph resolver needs object placeholders. Its values here are
+  // logical slots, independent of the current segment payload or measurements.
+  const logicalPieces = pieces.map((piece, index): LogicalInlinePiece<number> =>
+    piece.type === 'text' ? piece : { type: 'object', value: index, width: 0 }
+  );
+  const [visualPieces = []] = resolveBidiLines([{ pieces: logicalPieces }], 1, () => 0);
+  return {
+    input: pieces.map((piece) => (piece.type === 'text' ? piece.text : null)),
+    runs: visualPieces.map((piece): ActiveBidiRun =>
+      piece.type === 'text'
+        ? { type: 'text', text: piece.text, direction: piece.direction }
+        : { type: 'object', index: piece.value }
+    ),
+  };
+}
+
+/** One bounded set of detached run plans per scrolling-message renderer. */
+export class ActiveBidiRunPlanCache {
+  readonly #cache = new ResizableByteLimitedCache<ActiveBidiRunPlan>(
+    ACTIVE_PLAN_BYTES,
+    (plan) =>
+      64 +
+      plan.input.reduce((bytes, text) => bytes + 24 + (text?.length ?? 0) * 2, 0) +
+      plan.runs.reduce(
+        (bytes, run) => bytes + 48 + (run.type === 'text' ? run.text.length * 2 : 0),
+        0
+      ),
+    undefined,
+    ACTIVE_PLAN_MAX_ENTRIES
+  );
+
+  resolve<T>(
+    id: string,
+    pieces: readonly LogicalInlinePiece<T>[],
+    measureText: (text: string, direction: TextDirection) => number
+  ): VisualInlinePiece<T>[] {
+    let plan = this.#cache.get(id);
+    if (
+      !plan ||
+      plan.input.length !== pieces.length ||
+      !pieces.every(
+        (piece, index) => plan?.input[index] === (piece.type === 'text' ? piece.text : null)
+      )
+    ) {
+      if (plan) this.delete(id);
+      if (!piecesRequireBidiResolution(pieces))
+        return resolveLeftToRightPieces(pieces, measureText);
+      plan = buildActiveBidiRunPlan(pieces);
+      this.#cache.set(id, plan);
+    }
+
+    const result: VisualInlinePiece<T>[] = [];
+    for (const run of plan.runs) {
+      if (run.type === 'text') {
+        result.push({ ...run, width: measureText(run.text, run.direction) });
+      } else {
+        const piece = pieces[run.index];
+        if (piece?.type === 'object') result.push(piece);
+      }
+    }
+    return result;
+  }
+
+  delete(id: string | undefined): void {
+    if (id) this.#cache.delete(id);
+  }
+
+  clear(): void {
+    this.#cache.clear();
+  }
+
+  /** @internal Retained logical size for renderer validation. */
+  getUsage(): { entries: number; bytes: number; maxEntries: number; maxBytes: number } {
+    return {
+      entries: this.#cache.size,
+      bytes: this.#cache.currentBytes,
+      maxEntries: ACTIVE_PLAN_MAX_ENTRIES,
+      maxBytes: this.#cache.maxBytes,
+    };
+  }
 }
 
 function requiresBidiResolution<T>(lines: readonly LogicalInlineLine<T>[]): boolean {
