@@ -6,8 +6,8 @@
  *
  * Stores messages sorted by videoOffsetMs and deduplicated by message ID.
  * Single inserts use binary search followed by an O(n) array insertion;
- * pages are sorted and merged in bulk. Flush emits due messages in bounded
- * batches to prevent visual clumping.
+ * ordered pages can append directly and overlapping pages merge in bulk.
+ * Flush emits due messages in bounded batches to prevent visual clumping.
  */
 
 import type { ChatMessage } from '@app-types';
@@ -87,12 +87,14 @@ export class ReplayBuffer {
    * Bulk-insert pre-parsed chat events.
    *
    * Events whose offsetMs falls below `minimumOffsetMs` are skipped.
-   * Returns the highest offsetMs seen across all inserted events.
+   * Returns the highest offsetMs seen before cutoff and deduplication.
    */
   appendEvents(events: ChatEvent[], minimumOffsetMs = 0): number {
     let highestOffsetMs = -1;
     const incoming: BufferedReplayMessage[] = [];
     const incomingIds = new Set<string>();
+    let previousOffsetMs = Number.NEGATIVE_INFINITY;
+    let ordered = true;
 
     for (const event of events) {
       const offsetMs = event.message.videoOffsetMs ?? event.offsetMs;
@@ -104,6 +106,8 @@ export class ReplayBuffer {
       const id = event.message.id;
       if (id && (this.seenIds.has(id) || incomingIds.has(id))) continue;
       if (id) incomingIds.add(id);
+      if (offsetMs < previousOffsetMs) ordered = false;
+      previousOffsetMs = offsetMs;
       incoming.push({
         message: event.message,
         offsetMs,
@@ -111,38 +115,23 @@ export class ReplayBuffer {
       });
     }
 
-    if (incoming.length === 0) return highestOffsetMs;
+    if (!ordered) incoming.sort((left, right) => left.offsetMs - right.offsetMs);
+    const first = incoming[0];
+    if (!first) return highestOffsetMs;
 
-    // Continuation pages are usually monotonic, while overlapping pages may
-    // contain a short earlier prefix. Sort once and merge the page with the
-    // active suffix instead of splicing every event into the middle.
-    incoming.sort((left, right) => left.offsetMs - right.offsetMs);
-    const active = this.buffer.slice(this.bufferOffset);
-    const merged: BufferedReplayMessage[] = [];
-    let activeIndex = 0;
-    let incomingIndex = 0;
-    while (activeIndex < active.length && incomingIndex < incoming.length) {
-      const activeItem = active[activeIndex];
-      const incomingItem = incoming[incomingIndex];
-      if (!activeItem || !incomingItem) break;
-      if (activeItem.offsetMs <= incomingItem.offsetMs) {
-        merged.push(activeItem);
-        activeIndex += 1;
-      } else {
-        merged.push(incomingItem);
-        incomingIndex += 1;
-      }
+    const tail = this.isEmpty ? undefined : this.buffer.at(-1);
+    if (!tail || tail.offsetMs <= first.offsetMs) {
+      this.compactConsumedPrefix(0);
+      for (const item of incoming) this.buffer.push(item);
+    } else {
+      this.mergePage(incoming);
     }
-    merged.push(...active.slice(activeIndex), ...incoming.slice(incomingIndex));
 
-    this.buffer = merged;
-    this.bufferOffset = 0;
     for (const item of incoming) {
       this.activeEstimatedBytes += item.estimatedBytes;
       if (item.message.id) this.seenIds.add(item.message.id);
     }
     this.trimToCapacity();
-
     return highestOffsetMs;
   }
 
@@ -273,6 +262,27 @@ export class ReplayBuffer {
     this.seenIds.clear();
     this.activeEstimatedBytes = 0;
     return messages;
+  }
+
+  private mergePage(incoming: BufferedReplayMessage[]): void {
+    const merged: BufferedReplayMessage[] = [];
+    let activeIndex = this.bufferOffset;
+    let incomingIndex = 0;
+    while (activeIndex < this.buffer.length && incomingIndex < incoming.length) {
+      const activeItem = this.buffer[activeIndex];
+      const incomingItem = incoming[incomingIndex];
+      if (!activeItem || !incomingItem) break;
+      if (activeItem.offsetMs <= incomingItem.offsetMs) {
+        merged.push(activeItem);
+        activeIndex += 1;
+      } else {
+        merged.push(incomingItem);
+        incomingIndex += 1;
+      }
+    }
+    merged.push(...this.buffer.slice(activeIndex), ...incoming.slice(incomingIndex));
+    this.buffer = merged;
+    this.bufferOffset = 0;
   }
 
   /**

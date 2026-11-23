@@ -235,12 +235,47 @@ describe('ReplayBuffer', () => {
   });
 
   describe('appendEvents()', () => {
-    it('inserts events in bulk', () => {
-      buf.insert(makeMsg('a', 1000), 1000);
-      buf.insert(makeMsg('b', 2000), 2000);
-      buf.insert(makeMsg('c', 3000), 3000);
-      const result = buf.flushUpTo(3000, 10);
-      expect(result).toHaveLength(3);
+    it('appends an ordered page to the active backing and preserves equal-time order', () => {
+      const internals = buf as unknown as { buffer: unknown[] };
+      const existing = makeMsg('existing', 1000);
+      const sameTime = makeMsg('same-time', 1000);
+      const later = makeMsg('later', 1500);
+      buf.insert(existing, 1000);
+      const backing = internals.buffer;
+
+      expect(buf.appendEvents([{ message: sameTime }, { message: later }])).toBe(1500);
+
+      expect(internals.buffer).toBe(backing);
+      expect(buf.drainAll()).toEqual([existing, sameTime, later]);
+    });
+
+    it('drops a consumed prefix on accepted append below the flush compaction threshold', () => {
+      const internals = buf as unknown as {
+        buffer: { message: ChatMessage }[];
+        bufferOffset: number;
+      };
+      const consumed = makeMsg('repeatable', 1000);
+      const active = makeMsg('active', 1200);
+      const reinserted = makeMsg('repeatable', 1500);
+      buf.appendEvents([{ message: consumed }, { message: active }]);
+      expect(buf.flushUpTo(1000, 1)).toEqual([consumed]);
+      expect(internals.bufferOffset).toBe(1);
+
+      const fullyFiltered = [
+        { message: makeMsg('old', 800) },
+        { message: makeMsg('active', 2000) },
+      ];
+      expect(buf.appendEvents(fullyFiltered, 1000)).toBe(2000);
+      expect(internals.bufferOffset).toBe(1);
+
+      const expected = new ReplayBuffer();
+      expected.insert(active, 1200);
+      expected.insert(reinserted, 1500);
+      expect(buf.appendEvents([{ message: reinserted }])).toBe(1500);
+      expect(internals.bufferOffset).toBe(0);
+      expect(internals.buffer.map(({ message }) => message)).toEqual([active, reinserted]);
+      expect(buf.estimatedByteSize).toBe(expected.estimatedByteSize);
+      expect(buf.aheadHorizonMs(1200)).toBe(300);
     });
 
     it('returns highest offsetMs from bulk', () => {
@@ -281,16 +316,42 @@ describe('ReplayBuffer', () => {
         { message: makeMsg('a', 1000), offsetMs: 1000 },
         { message: makeMsg('c', 3000), offsetMs: 3000 },
       ] as ChatEvent[];
+      const firstAnonymous = makeMsg('', 3000);
+      const secondAnonymous = makeMsg('', 3000);
+      const earlier = makeMsg('b', 2000);
+      const last = makeMsg('d', 3000);
       const overlappingPage = [
-        { message: makeMsg('b', 2000), offsetMs: 2000 },
-        { message: makeMsg('c', 3000), offsetMs: 3000 },
-        { message: makeMsg('d', 3000), offsetMs: 3000 },
-      ] as ChatEvent[];
+        { message: firstAnonymous },
+        { message: earlier },
+        { message: makeMsg('c', 1000) },
+        { message: secondAnonymous },
+        { message: last },
+      ];
 
       buf.appendEvents(firstPage);
       buf.appendEvents(overlappingPage);
 
-      expect(buf.drainAll().map((message) => message.id)).toEqual(['a', 'b', 'c', 'd']);
+      const result = buf.drainAll();
+      expect(result.map((message) => message.id)).toEqual(['a', 'b', 'c', '', '', 'd']);
+      expect(result[3]).toBe(firstAnonymous);
+      expect(result[4]).toBe(secondAnonymous);
+    });
+
+    it('applies the byte budget to ordered continuation pages', () => {
+      const messages = Array.from({ length: 100 }, (_, offsetMs) => ({
+        ...makeMsg(`large-${offsetMs}`, offsetMs),
+        text: 'x'.repeat(100_000),
+      }));
+      const expected = new ReplayBuffer();
+      for (const [offsetMs, message] of messages.entries()) {
+        expected.insert(message, offsetMs);
+      }
+
+      expect(buf.appendEvents(messages.map((message) => ({ message })))).toBe(99);
+      expect(buf.estimatedByteSize).toBeLessThanOrEqual(8 * 1024 * 1024);
+      expect(buf.estimatedByteSize).toBe(expected.estimatedByteSize);
+      expect(buf.messageCount).toBeLessThan(messages.length);
+      expect(buf.drainAll()).toEqual(expected.drainAll());
     });
   });
 
