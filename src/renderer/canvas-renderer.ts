@@ -2333,10 +2333,8 @@ export class CanvasRenderer implements RuntimeRenderer {
   // ── Backlog pause ────────────────────────────────────────────────────
 
   /**
-   * Prefetch images and trigger translation for a message destined for the
-   * worker renderer.  Shared by addMessage, replayMessage, and
-   * flushVideoMessages so replayed and video-unpaused messages receive
-   * the same pre-processing as live messages.
+   * Sample the source language and request translation when the dispatcher
+   * sends a message to the worker renderer.
    */
   private prefetchAndTranslateForWorker(message: ChatMessage, msgId: string): void {
     this.collectSourceLanguageSample(message);

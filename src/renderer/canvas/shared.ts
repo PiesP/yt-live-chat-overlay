@@ -4,9 +4,6 @@
 /**
  * Shared Canvas 2D rendering functions usable from both main thread
  * (CanvasRenderingContext2D) and Web Worker (OffscreenCanvasRenderingContext2D).
- *
- * Eliminates ~300+ lines of code duplication between canvas-rendering-shared.ts
- * and renderer-worker.ts.
  */
 
 import type { DanmakuMode, FontWeight } from '@app-types';
@@ -93,8 +90,7 @@ export function canCacheTextBitmap(
 }
 
 /**
- * Unified content segment type that both ContentSegment (@app-types)
- * and WorkerContentSegment (renderer-worker.ts) structurally satisfy.
+ * Content segment fields used by both the main and worker renderers.
  */
 export interface SharedContentSegment {
   type: 'text' | 'emoji';
@@ -227,8 +223,7 @@ export function splitGraphemeClusters(text: string): string[] {
 
 /**
  * Measure the horizontal advance used by a separately rendered text segment.
- * Canvas TextMetrics excludes `letterSpacing`, so account for the gaps between
- * grapheme clusters explicitly before positioning the next segment.
+ * Add the configured spacing between grapheme clusters to the supplied base width.
  */
 export function measureTextAdvanceWidth(
   text: string,
@@ -851,11 +846,7 @@ function cacheTextBitmap(
   const bbWidth = Number.isFinite(rawBbWidth) ? rawBbWidth : 0;
   const measuredWidth = Number.isFinite(metrics.width) ? metrics.width : 0;
   const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(measuredWidth);
-  // Canvas2D measureText() does NOT account for letterSpacing, wordSpacing,
-  // or textRendering — it measures based on font + text content only.
-  // When letterSpacing > 0, the actual rendered text is wider by
-  // (graphemeCount - 1) × letterSpacingPx.  Add this contribution to
-  // prevent the rightmost character from being clipped by the bitmap edge.
+  // Reserve extra bitmap width for positive letter spacing between code points.
   const lsPx = parseFloat(letterSpacing) || 0;
   const lsExtraWidth = lsPx > 0 ? Math.ceil(Math.max(0, [...text].length - 1) * lsPx) : 0;
   const bitmapPadding =
@@ -1057,12 +1048,8 @@ export function renderSegment(
 /**
  * Pre-render text bitmaps before they enter the render loop.
  *
- * When called during drainQueue (outside the draw hot path), this populates
- * the bitmap cache for all text segments in a message so that renderSegment
- * always gets a cache hit during the per-frame draw stage.  Eliminates the
- * synchronous OffscreenCanvas fillText/strokeText cost from the render loop
- * — especially impactful during chat bursts where dozens of unique texts
- * arrive simultaneously.
+ * Queue draining warms eligible text segments so a later draw can reuse
+ * the bitmap while it remains cached.
  *
  * @param segments        Content segments, or a plain string for override-text modes
  * @param textBitmapCache The same cache used by renderSegment
@@ -1329,10 +1316,7 @@ function isCanvasImageSource(value: unknown): value is CanvasImageSource {
 
 /**
  * Draw author photo + name section. Returns the Y offset after the section.
- *
- * This is the SSOT for author rendering — used by both main-thread renderers
- * (canvas-rendering-shared.ts, canvas-card-renderers.ts) and the Web Worker
- * (renderer-worker.ts).
+ * Shared by the main and worker renderers.
  *
  * @param ctx          Any canvas context (CanvasRenderingContext2D or OffscreenCanvasRenderingContext2D)
  * @param message      Minimal message with optional author name and photo URL
