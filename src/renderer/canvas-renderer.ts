@@ -2808,6 +2808,8 @@ export class CanvasRenderer implements RuntimeRenderer {
     const startTime = saved.startEpochMs - performance.timeOrigin + shift;
     const fadeStartTime = saved.fadeStartEpochMs - performance.timeOrigin + shift;
     if (frozenNow - startTime >= saved.durationMs) return true;
+    // The Worker owned the image cache used by this active message.
+    this.imageFetchManager.prefetchImages(entry.message);
     const motion = motionPlanFromMessage(
       {
         startTime,
