@@ -2,7 +2,9 @@
 // Copyright (c) 2026 PiesP
 
 import {
+  ActiveBidiRunPlanCache,
   getBidiLayoutCacheUsage,
+  type LogicalInlinePiece,
   resetBidiLayoutCaches,
   resolveTextDirection,
   resolveVisualInlineLines,
@@ -51,6 +53,29 @@ describe('Canvas bidi inline layout', () => {
       { type: 'text', text: ' بكم', direction: 'rtl', width: 40 },
       { type: 'object', value: emoji, width: 24 },
       { type: 'text', text: 'مرحبا ', direction: 'rtl', width: 60 },
+    ]);
+  });
+
+  it('measures adjacent RTL pieces separately in logical grapheme order', () => {
+    const first = 'א\u05B7ב';
+    const second = 'ג\u05B0ד';
+    const measure = vi.fn(measureText);
+
+    expect(
+      resolveVisualInlinePieces(
+        [
+          { type: 'text', text: first },
+          { type: 'text', text: second },
+        ],
+        measure
+      )
+    ).toEqual([
+      { type: 'text', text: second, direction: 'rtl', width: 30 },
+      { type: 'text', text: first, direction: 'rtl', width: 30 },
+    ]);
+    expect(measure.mock.calls).toEqual([
+      [second, 'rtl'],
+      [first, 'rtl'],
     ]);
   });
 
@@ -179,6 +204,82 @@ describe('Canvas bidi inline layout', () => {
     expect(getBidiLayoutCacheUsage()).toEqual({
       direction: { entries: 0, bytes: 0, maxBytes: 64 * 1024 },
       plan: { entries: 0, bytes: 0, maxBytes: 256 * 1024 },
+    });
+  });
+});
+
+describe('active scrolling bidi run plans', () => {
+  afterEach(resetBidiLayoutCaches);
+
+  it('reuses exact original text while reading current measurements and emoji slots', () => {
+    const cache = new ActiveBidiRunPlanCache();
+    const first: LogicalInlinePiece<string>[] = [
+      { type: 'text', text: 'مرحبا \u2066Hello ' },
+      { type: 'object', value: 'loading', width: 24 },
+      { type: 'text', text: ' World\u2069 بكم' },
+    ];
+    expect(cache.resolve('same', first, measureText)).toEqual(
+      resolveVisualInlinePieces(first, measureText)
+    );
+    const originalUsage = cache.getUsage();
+    expect(originalUsage.entries).toBe(1);
+
+    first[1] = { type: 'object', value: 'ready', width: 52 };
+    const wider = (text: string): number => measureText(text) * 2;
+    const changed = cache.resolve('same', first, wider);
+    expect(changed).toEqual(resolveVisualInlinePieces(first, wider));
+    expect(changed).toContainEqual(first[1]);
+    expect(cache.getUsage()).toEqual(originalUsage);
+  });
+
+  it('rejects stale text and kind/slot ordering after a same-ID in-place edit', () => {
+    const cache = new ActiveBidiRunPlanCache();
+    const content: LogicalInlinePiece<string>[] = [
+      { type: 'text', text: 'א literal \uFFFC ' },
+      { type: 'object', value: 'emoji', width: 24 },
+      { type: 'text', text: ' ب' },
+    ];
+    const original = cache.resolve('same', content, measureText);
+    content[0] = { type: 'text', text: 'ב literal \uFFFC ' };
+    expect(cache.resolve('same', content, measureText)).not.toEqual(original);
+    expect(cache.resolve('same', content, measureText)).toEqual(
+      resolveVisualInlinePieces(content, measureText)
+    );
+    content[1] = { type: 'text', text: '\uFFFC' };
+    content[2] = { type: 'object', value: 'moved', width: 50 };
+    expect(cache.resolve('same', content, measureText)).toEqual(
+      resolveVisualInlinePieces(content, measureText)
+    );
+    content[0] = { type: 'text', text: 'LTR ' };
+    expect(cache.resolve('same', content, measureText)).toEqual(
+      resolveVisualInlinePieces(content, measureText)
+    );
+    expect(cache.getUsage()).toMatchObject({ entries: 0, bytes: 0 });
+  });
+
+  it('bounds estimated retained bytes and entries independently per renderer', () => {
+    const first = new ActiveBidiRunPlanCache();
+    const second = new ActiveBidiRunPlanCache();
+    const small = [{ type: 'text', text: 'א' }] as const;
+    for (let i = 0; i < 400; i++) first.resolve(String(i), small, measureText);
+    expect(first.getUsage()).toMatchObject({ entries: 256, maxEntries: 256 });
+    expect(first.getUsage().bytes).toBeLessThanOrEqual(first.getUsage().maxBytes);
+    expect(second.getUsage()).toMatchObject({ entries: 0, bytes: 0 });
+
+    const oversized = [{ type: 'text', text: 'ב'.repeat(33_000) }] as const;
+    expect(second.resolve('large', oversized, measureText)).toEqual(
+      resolveVisualInlinePieces(oversized, measureText)
+    );
+    expect(second.getUsage()).toMatchObject({ entries: 0, bytes: 0 });
+
+    first.delete('399');
+    expect(first.getUsage().entries).toBe(255);
+    first.clear();
+    expect(first.getUsage()).toEqual({
+      entries: 0,
+      bytes: 0,
+      maxEntries: 256,
+      maxBytes: 128 * 1024,
     });
   });
 });

@@ -3,6 +3,7 @@
 
 import type { ChatMessage } from '@app-types';
 import { LruMap } from '@piesp/browser-core/util';
+import { ActiveBidiRunPlanCache } from '@renderer/canvas/bidi-layout';
 import {
   type CanvasRenderContext,
   cleanupAndBucketStage,
@@ -40,11 +41,14 @@ describe('scrolling motion on the main Canvas path', () => {
       midOpacityBuckets: Array.from({ length: 32 }, () => []),
       nearOpacityBuckets: Array.from({ length: 32 }, () => []),
     });
+    ctx.activeBidiPlans.resolve('hidden', [{ type: 'text', text: 'שלום' }], () => 10);
+    expect(ctx.activeBidiPlans.getUsage().entries).toBe(1);
     cleanupAndBucketStage(ctx, 500, { width: 640, height: 360 }, 'scroll');
     expect(ctx.midOpacityBuckets.every((bucket) => bucket.length === 0)).toBe(true);
     expect(releaseMessage).not.toHaveBeenCalled();
     cleanupAndBucketStage(ctx, 1000, { width: 640, height: 360 }, 'scroll');
     expect(releaseMessage).toHaveBeenCalledWith(message);
+    expect(ctx.activeBidiPlans.getUsage()).toMatchObject({ entries: 0, bytes: 0 });
   });
   it.each([
     ['scroll', false, 0],
@@ -171,6 +175,7 @@ function makeDrainCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderCon
     boundGetFont: () => '',
     boundMeasureTextWidth: () => 0,
     regularRenderConfig: {} as CanvasRenderContext['regularRenderConfig'],
+    activeBidiPlans: new ActiveBidiRunPlanCache(),
     activeMessages: [],
     activeMessagesByLane: new Map(),
     farOpacityBuckets: [],
@@ -568,7 +573,8 @@ describe('drawStage', () => {
       expect.any(Function),
       expect.any(Function),
       undefined,
-      undefined
+      undefined,
+      ctx.activeBidiPlans
     );
   });
 
@@ -724,6 +730,7 @@ function makeCompactCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderC
     boundGetFont: () => '',
     boundMeasureTextWidth: () => 0,
     regularRenderConfig: {} as CanvasRenderContext['regularRenderConfig'],
+    activeBidiPlans: new ActiveBidiRunPlanCache(),
     farOpacityBuckets: [],
     midOpacityBuckets: [],
     nearOpacityBuckets: [],

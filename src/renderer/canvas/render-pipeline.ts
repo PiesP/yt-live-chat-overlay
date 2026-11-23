@@ -12,6 +12,7 @@
 
 import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import type { LruMap, ResizableByteLimitedCache } from '@piesp/browser-core/util';
+import type { ActiveBidiRunPlanCache } from '@renderer/canvas/bidi-layout';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import {
   COMPACTION_THRESHOLD_RATIO,
@@ -73,6 +74,7 @@ export interface CanvasRenderContext {
   boundGetFont: (fontSize: number) => string;
   boundMeasureTextWidth: (text: string, direction?: CanvasDirection) => number;
   regularRenderConfig: RegularMessageRenderConfig;
+  activeBidiPlans: ActiveBidiRunPlanCache;
 
   /** Mutable reference — pipeline stages push/compact this array. */
   activeMessages: CanvasMessage[];
@@ -219,6 +221,7 @@ export function cleanupAndBucketStage(
     // Expired: message has exceeded its display duration
     if (elapsed >= msg.duration) {
       releasePaidCardPlan(msg);
+      ctx.activeBidiPlans.delete(msg.message.id);
       ctx.expiredMessagesScratch.push(msg);
       ctx.messageActivator.releaseMessage(msg);
       anyRemoved = true;
@@ -451,7 +454,8 @@ export function drawStage(
             ctx.boundGetFont,
             ctx.boundMeasureTextWidth,
             isReplace ? msg.translatedText : undefined,
-            msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
+            msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined,
+            ctx.activeBidiPlans
           );
         } else {
           const cardConfig =

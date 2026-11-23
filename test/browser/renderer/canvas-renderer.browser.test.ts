@@ -2461,10 +2461,26 @@ describe('CanvasRenderer', () => {
       vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
       const rendered = vi.spyOn(renderer.observability, 'onMessageRendered');
       const presented = vi.spyOn(renderer.observability, 'onMessagesPresented');
+      const prefetch = vi
+        .spyOn(ImageFetchManager.prototype, 'prefetchImages')
+        .mockImplementation(() => {});
       const origin = performance.timeOrigin;
       vi.spyOn(internals.workerManager, 'snapshotMessages').mockResolvedValue([
-        ...[0, 2000].map((start, laneIndex): WorkerRecoveryMessage => ({
-          message: { ...makeMessage(`active-${laneIndex}`, 'active'), isBacklog: backlog },
+        ...[0, 2000, -10000].map((start, laneIndex): WorkerRecoveryMessage => ({
+          message: {
+            ...makeMessage(`active-${laneIndex}`, 'active'),
+            content: [
+              { type: 'text', content: 'active' },
+              {
+                type: 'emoji',
+                emoji: {
+                  url: `https://yt3.ggpht.com/recovery-${laneIndex}.png`,
+                  alt: ':recovery:',
+                },
+              },
+            ],
+            isBacklog: backlog,
+          },
           trackDrops: false,
           activeMotion: {
             id: `active-${laneIndex}`,
@@ -2495,6 +2511,11 @@ describe('CanvasRenderer', () => {
       await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
       expect(internals.activeMessages).toHaveLength(2);
       expect(internals.pendingQueue.toArray().map((m) => m.id)).toEqual(['pending-only']);
+      expect(prefetch.mock.calls.map(([message]) => message.id).sort()).toEqual([
+        'active-0',
+        'active-1',
+        'pending-only',
+      ]);
       const [visible, future] = internals.activeMessages;
       expect(visible?.wasPresented).toBe(true);
       expect(future?.wasPresented).toBe(false);

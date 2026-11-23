@@ -100,7 +100,11 @@ vi.spyOn(performance, 'now').mockReturnValue(10000);
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
-import { getBidiLayoutCacheUsage, resolveTextDirection } from '@renderer/canvas/bidi-layout';
+import {
+  type ActiveBidiRunPlanCache,
+  getBidiLayoutCacheUsage,
+  resolveTextDirection,
+} from '@renderer/canvas/bidi-layout';
 import type { CardConfigWorker } from '@renderer/card-config';
 import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 import { motionPlanFromMessage, motionPlansCollide } from '@renderer/layout/message-schedule';
@@ -1041,6 +1045,21 @@ describe('Worker message protocol', () => {
     renderer.handleMessage(makeEvent({ type: 'clearState' }));
 
     expect(getBidiLayoutCacheUsage().direction.entries).toBe(0);
+  });
+
+  it('drops active bidi plans on clear and destroy', () => {
+    const renderer = initializeRenderer();
+    const { activeBidiPlans } = renderer as unknown as { activeBidiPlans: ActiveBidiRunPlanCache };
+    const content = [{ type: 'text', text: 'שלום Hello' }] as const;
+
+    activeBidiPlans.resolve('owned', content, () => 10);
+    expect(activeBidiPlans.getUsage().entries).toBe(1);
+    renderer.handleMessage(makeEvent({ type: 'clearState' }));
+    expect(activeBidiPlans.getUsage()).toMatchObject({ entries: 0, bytes: 0 });
+
+    activeBidiPlans.resolve('owned', content, () => 10);
+    renderer.handleMessage(makeEvent({ type: 'destroy' }));
+    expect(activeBidiPlans.getUsage()).toMatchObject({ entries: 0, bytes: 0 });
   });
 
   it('rejects a translation that would exceed the message aggregate budget', () => {
