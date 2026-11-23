@@ -15,13 +15,8 @@ const FAILED_EMOJI_FETCH_CAP = 500;
 const FAILED_EMOJI_FETCH_EVICT_COUNT = 250;
 
 /**
- * ImageFetchManager — handles all image/emoji/sticker loading and caching.
- *
- * Extracted from CanvasRenderer to separate the image loading concern from
- * the render loop and message lifecycle. Manages three byte-limited caches
- * (emoji, author photo, sticker), tracks in-flight fetches with deduplication,
- * handles failed fetch retry windows, and optionally pre-converts loaded
- * images to ImageBitmaps for off-main-thread worker transfer.
+ * Loads emoji, author photos and stickers for the main renderer. Tracks
+ * in-flight requests, retry windows and a byte-limited cache for each image type.
  */
 export class ImageFetchManager {
   private static readonly log = createLogger('ImageFetchManager');
@@ -384,7 +379,7 @@ export class ImageFetchManager {
     this.imageLoading.clear();
     this.uncacheableImageUrlsByCache.clear();
 
-    // Clear image caches to release cached ImageBitmap/HTMLImageElement references.
+    // Release the cached image elements.
     this.emojiCache.clear();
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
