@@ -118,7 +118,9 @@ async function readBoundedResponseTextWithError(
   }
 
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  let firstChunk: Uint8Array | undefined;
+  let decoder: TextDecoder | undefined;
+  let text = '';
   let totalBytes = 0;
   try {
     while (true) {
@@ -140,20 +142,25 @@ async function readBoundedResponseTextWithError(
         }
         throw error;
       }
-      chunks.push(value);
       totalBytes = nextTotal;
+      if (decoder) {
+        text += decoder.decode(value, { stream: true });
+      } else if (firstChunk) {
+        decoder = new TextDecoder();
+        text = decoder.decode(firstChunk, { stream: true });
+        firstChunk = undefined;
+        text += decoder.decode(value, { stream: true });
+      } else {
+        // Pass through a one-chunk response without copying its view.
+        firstChunk = value;
+      }
     }
   } finally {
     reader.releaseLock();
   }
 
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+  if (decoder) return text + decoder.decode();
+  return firstChunk ? new TextDecoder().decode(firstChunk) : '';
 }
 
 /** Read one live-chat response with the product's default chat-body limit. */
