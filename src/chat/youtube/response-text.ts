@@ -79,7 +79,41 @@ function cancelBody(response: Response, error: ResponseSizeError): void {
   }
 }
 
-/** Read a response as UTF-8 while enforcing a byte limit before materialization. */
+const DECODED_PARTS_PER_BATCH = 256;
+
+class StreamingResponseText {
+  readonly #decoder = new TextDecoder();
+  readonly #parts: string[] = [];
+  readonly #batches: string[] = [];
+
+  #append(part: string): void {
+    if (part.length === 0) return;
+    this.#parts.push(part);
+    // Bound fragment bookkeeping even for one-byte chunks. Each nonempty part
+    // accounts for at least one admitted byte.
+    if (this.#parts.length === DECODED_PARTS_PER_BATCH) {
+      this.#batches.push(this.#parts.join(''));
+      this.#parts.length = 0;
+    }
+  }
+
+  push(chunk: Uint8Array): void {
+    this.#append(this.#decoder.decode(chunk, { stream: true }));
+  }
+
+  finish(): string {
+    this.#append(this.#decoder.decode());
+    const tail = this.#parts.join('');
+    if (this.#batches.length === 0) return tail;
+    if (tail.length > 0) this.#batches.push(tail);
+    return this.#batches.join('');
+  }
+}
+
+/**
+ * Read UTF-8 and check each streamed chunk against the byte limit before
+ * decoding. A bodyless response must materialize text before this check.
+ */
 export async function readBoundedResponseText(
   response: Response,
   maxBytes: number,
@@ -118,7 +152,8 @@ async function readBoundedResponseTextWithError(
   }
 
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  let firstChunk: Uint8Array | undefined;
+  let streamed: StreamingResponseText | undefined;
   let totalBytes = 0;
   try {
     while (true) {
@@ -140,20 +175,25 @@ async function readBoundedResponseTextWithError(
         }
         throw error;
       }
-      chunks.push(value);
       totalBytes = nextTotal;
+      if (streamed) {
+        streamed.push(value);
+      } else if (firstChunk) {
+        streamed = new StreamingResponseText();
+        streamed.push(firstChunk);
+        firstChunk = undefined;
+        streamed.push(value);
+      } else {
+        // Pass through a one-chunk response without copying its view.
+        firstChunk = value;
+      }
     }
   } finally {
     reader.releaseLock();
   }
 
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+  if (streamed) return streamed.finish();
+  return firstChunk ? new TextDecoder().decode(firstChunk) : '';
 }
 
 /** Read one live-chat response with the product's default chat-body limit. */

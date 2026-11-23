@@ -67,24 +67,110 @@ describe.each([
 describe('UTF-8 accounting and the no-body compatibility path', () => {
   const text = '가😀';
 
-  it('preserves split multibyte sequences and ignores empty stream chunks', async () => {
-    const bytes = new TextEncoder().encode(text);
-    const response = new Response(
+  function streamedResponse(chunks: Uint8Array<ArrayBuffer>[]): Response {
+    return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(bytes.slice(0, 1));
-          controller.enqueue(new Uint8Array());
-          controller.enqueue(bytes.slice(1, 5));
-          controller.enqueue(bytes.slice(5));
+          for (const chunk of chunks) controller.enqueue(chunk);
           controller.close();
         },
       })
     );
+  }
+
+  it('preserves split multibyte sequences and ignores empty stream chunks', async () => {
+    const bytes = new TextEncoder().encode(text);
+    const response = streamedResponse([
+      bytes.subarray(0, 1),
+      new Uint8Array(),
+      bytes.subarray(1, 5),
+      bytes.subarray(5),
+    ]);
     await expect(readBoundedChatResponseText(response, 7)).resolves.toBe(text);
     await expect(readBoundedChatResponseText(new Response(text), 6)).rejects.toMatchObject({
       observedBytes: 7,
       maxBytes: 6,
     });
+  });
+
+  it('decodes only the exact view of a single nonempty chunk', async () => {
+    const bytes = new TextEncoder().encode('x가😀x').subarray(1, -1);
+    const decode = vi.spyOn(TextDecoder.prototype, 'decode');
+    try {
+      const response = streamedResponse([new Uint8Array(), bytes, new Uint8Array()]);
+      await expect(readBoundedChatResponseText(response, bytes.byteLength)).resolves.toBe(text);
+      expect(decode.mock.calls).toHaveLength(1);
+      expect(decode.mock.calls[0]?.[0]).toBe(bytes);
+      expect(response.body?.locked).toBe(false);
+    } finally {
+      decode.mockRestore();
+    }
+  });
+
+  it('matches one-shot decoding of a split BOM and malformed final UTF-8', async () => {
+    const chunks = [
+      new Uint8Array([0xef]),
+      new Uint8Array([0xbb, 0xbf, 0x41, 0xf0]),
+      new Uint8Array([0x9f, 0x98, 0x80, 0xff, 0xe2, 0x82]),
+    ];
+    await expect(readBoundedChatResponseText(streamedResponse(chunks), 11)).resolves.toBe('A😀��');
+    await expect(
+      readBoundedChatResponseText(streamedResponse([new Uint8Array()]), 1)
+    ).resolves.toBe('');
+  });
+
+  it('preserves string order and the final decoder flush across many tiny chunks', async () => {
+    const payload = `\uFEFF${'가😀abc'.repeat(300)}`;
+    const bytes = new TextEncoder().encode(payload);
+    const withTruncatedEnd = new Uint8Array(bytes.byteLength + 2);
+    withTruncatedEnd.set(bytes);
+    withTruncatedEnd.set([0xe2, 0x82], bytes.byteLength);
+    const chunks = Array.from(withTruncatedEnd, (_, index) =>
+      withTruncatedEnd.subarray(index, index + 1)
+    );
+    const response = streamedResponse(chunks);
+
+    await expect(readBoundedChatResponseText(response, withTruncatedEnd.byteLength)).resolves.toBe(
+      payload.slice(1) + '�'
+    );
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it('rejects an overflowing chunk before handing it to the decoder', async () => {
+    const chunks = [new Uint8Array([0x41]), new Uint8Array([0x42]), new Uint8Array([0x43])];
+    const decode = vi.spyOn(TextDecoder.prototype, 'decode');
+    try {
+      const response = streamedResponse(chunks);
+      await expect(readBoundedChatResponseText(response, 2)).rejects.toMatchObject({
+        observedBytes: 3,
+        maxBytes: 2,
+        responseLabel: 'Chat response',
+      });
+      expect(decode.mock.calls).toEqual([
+        [chunks[0], { stream: true }],
+        [chunks[1], { stream: true }],
+      ]);
+      expect(response.body?.locked).toBe(false);
+    } finally {
+      decode.mockRestore();
+    }
+  });
+
+  it('preserves the identity of a stream read failure and unlocks the body', async () => {
+    const failure = new Error('body failed');
+    let reads = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (reads++ < 2) {
+          controller.enqueue(new Uint8Array([0x41]));
+        } else {
+          controller.error(failure);
+        }
+      },
+    });
+    const response = new Response(stream);
+    await expect(readBoundedChatResponseText(response, 2)).rejects.toBe(failure);
+    expect(stream.locked).toBe(false);
   });
 
   it('checks UTF-8 bytes only after text materializes without a body', async () => {
