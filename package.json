@@ -80,7 +80,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.14.1",
     "@playwright/test": "^1.65.1",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.11",
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "playwright": "1.65.1",
